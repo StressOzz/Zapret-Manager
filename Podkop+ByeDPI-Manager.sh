@@ -57,7 +57,7 @@ curl_install() {
     command -v curl >/dev/null 2>&1 || {
 		clear 
 		echo -e ""
-        echo -e "${CYAN}Устанавливаем${NC} curl ${CYAN}для загрузки информации с ${NC}GitHub"
+        echo -e "${CYAN}Устанавливаем${NC} ${WHITE}curl ${CYAN}для загрузки информации с ${WHITE}GitHub${NC}"
 		echo -e ""
         opkg update >/dev/null 2>&1
         opkg install curl >/dev/null 2>&1
@@ -461,6 +461,7 @@ EOF
 	y|Y)
 		echo -e ""
         echo -e "${GREEN}Перезагрузка роутера...${NC}"
+        sleep 1
         reboot
         ;;
     *) 
@@ -574,12 +575,13 @@ fi
 	echo -e ""
     echo -e "${CYAN}1) ${GREEN}Установить / обновить ${NC}ByeDPI"
     echo -e "${CYAN}2) ${GREEN}Удалить ${NC}ByeDPI"
-    echo -e "${CYAN}3) ${GREEN}Интегрировать ${NC}ByeDPI ${GREEN}в ${NC}Podkop${NC}"
+    echo -e "${CYAN}3) ${GREEN}Интегрировать ${NC}ByeDPI ${GREEN}в ${NC}Podkop"
     echo -e "${CYAN}4) ${GREEN}Изменить текущую стратегию ${NC}ByeDPI"
     echo -e "${CYAN}5) ${GREEN}Установить / обновить ${NC}Podkop"
 	echo -e "${CYAN}6) ${GREEN}Удалить ${NC}Podkop"
-	echo -e "${CYAN}7) ${GREEN}Установить ${NC}ByeDPI ${GREEN}+ ${NC}Podkop ${GREEN}+ ${NC}Интеграция${NC}"
-	echo -e "${CYAN}8) ${GREEN}Выход (Enter)${NC}"
+	echo -e "${CYAN}7) ${GREEN}Установить ${NC}ByeDPI ${GREEN}+ ${NC}Podkop ${GREEN}+ ${NC}Интеграция"
+	echo -e "${CYAN}8) ${RED}Перезагрузить устройство${NC}"
+	echo -e "${CYAN}9) ${GREEN}Выход (Enter)${NC}"
 	echo -e ""
     echo -ne "${YELLOW}Выберите пункт:${NC} "
     read choice
@@ -592,6 +594,13 @@ fi
         5) install_podkop ;;
 		6) uninstall_podkop ;;
 		7) full_install_integration ;;
+		8) 
+		echo -e ""
+		echo -e "${RED}Перезагрузка${NC}"
+		echo -e ""
+        sleep 1
+        reboot
+		;;
         *) exit 0 ;;
     esac
 }
