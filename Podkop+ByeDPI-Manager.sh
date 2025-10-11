@@ -281,7 +281,8 @@ pkg_list_update || {
     if command -v curl >/dev/null 2>&1; then
         check_response=$(curl -s "$REPO")
         if echo "$check_response" | grep -q 'API rate limit '; then
-            msg "Превышен лимит запросов GitHub. Повторите позже."
+			echo ""
+            echo -e "${RED}Превышен лимит запросов GitHub. Повторите позже.${NC}"
 			echo ""
             read -p "Нажмите Enter..." dummy
             return
