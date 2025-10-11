@@ -19,32 +19,6 @@ DGRAY='\033[38;5;236m'
 WORKDIR="/tmp/byedpi"
 
 # ==========================================
-# Запуск ByeDPI
-# ==========================================
-start_byedpi() {
-echo -e "${GREEN}Запуск ${NC}ByeDPI${GREEN}...${NC}"
-    /etc/init.d/byedpi enable >/dev/null 2>&1
-    /etc/init.d/byedpi start >/dev/null 2>&1
-}
-
-# ==========================================
-# Запуск Podkop
-# ==========================================
-
-start_podkop_full() {
-    echo -e "${GREEN}Запуск ${NC}Podkop${GREEN}...${NC}"
-    podkop enable >/dev/null 2>&1
-    echo -e "${GREEN}Применяем конфигурацию...${NC}"
-    podkop reload >/dev/null 2>&1
-    echo -e "${GREEN}Перезапускаем сервис...${NC}"
-    podkop restart >/dev/null 2>&1
-    echo -e "${GREEN}Обновляем списки...${NC}"
-    podkop list_update >/dev/null 2>&1
-echo -e ""
-    echo -e "Podkop ${GREEN}готов к работе.${NC}"
-}
-
-# ==========================================
 # Функция проверки и установки curl
 # ==========================================
 curl_install() {
@@ -153,7 +127,7 @@ install_update() {
     }
 
     echo -e ""
-	echo -e "${GREEN}Скачиваем пакет: ${NC}${WHITE}$LATEST_FILE${NC}"
+	echo -e "${GREEN}Скачиваем ${NC}${WHITE}$LATEST_FILE${NC}"
     mkdir -p "$WORKDIR"
     cd "$WORKDIR" || return
     curl -L -s -o "$LATEST_FILE" "$LATEST_URL" || {
@@ -327,7 +301,7 @@ pkg_list_update || {
     for url in $urls; do
         filename=$(basename "$url")
         filepath="$DOWNLOAD_DIR/$filename"
-        msg "Скачиваем" "$filename..."
+        msg "Скачиваем" "$filename"
         if wget -q -O "$filepath" "$url" >/dev/null 2>&1 && [ -s "$filepath" ]; then
             download_success=1
         else
@@ -442,8 +416,19 @@ config main 'main'
 	list community_lists 'hodca'
 EOF
 
-    start_byedpi
-	start_podkop_full
+    echo -e "${GREEN}Запуск ${NC}ByeDPI${GREEN}...${NC}"
+    /etc/init.d/byedpi enable >/dev/null 2>&1
+    /etc/init.d/byedpi start >/dev/null 2>&1
+	echo -e "${GREEN}Запуск ${NC}Podkop${GREEN}...${NC}"
+    podkop enable >/dev/null 2>&1
+    echo -e "${GREEN}Применяем конфигурацию...${NC}"
+    podkop reload >/dev/null 2>&1
+    echo -e "${GREEN}Перезапускаем сервис...${NC}"
+    podkop restart >/dev/null 2>&1
+    echo -e "${GREEN}Обновляем списки...${NC}"
+    podkop list_update >/dev/null 2>&1
+	echo -e ""
+    echo -e "Podkop ${GREEN}готов к работе.${NC}"
 	echo -e ""
     echo -e "ByeDPI ${GREEN}интегрирован в ${NC}Podkop${GREEN}.${NC}"
 	echo -e ""
