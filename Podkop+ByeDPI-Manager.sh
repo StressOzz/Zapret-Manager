@@ -396,9 +396,9 @@ integration_byedpi_podkop() {
         read -p "Нажмите Enter..." dummy
         return
     fi
-	echo -e "Отключаем локальный DNS..."
+	echo -e "${GREEN}Отключаем локальный DNS...${NC}"
 	echo -e ""
-	echo -e "Перезапускаем dnsmasq..${NC}"
+	echo -e "${GREEN}Перезапускаем dnsmasq...${NC}"
 	echo -e ""
     uci set dhcp.@dnsmasq[0].localuse='0'
     uci commit dhcp
@@ -494,7 +494,8 @@ fix_strategy() {
             echo -e "${GREEN}Стратегия не изменена.${NC}"
         else
             sed -i "s|option cmd_opts .*| option cmd_opts '$NEW_STRATEGY'|" /etc/config/byedpi
-            start_byedpi
+			/etc/init.d/byedpi enable >/dev/null 2>&1
+			/etc/init.d/byedpi start >/dev/null 2>&1
             echo -e "${GREEN}Стратегия изменена на:${NC} ${WHITE}$NEW_STRATEGY${NC}"
         fi
     else
