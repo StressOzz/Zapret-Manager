@@ -22,7 +22,7 @@ WORKDIR="/tmp/byedpi"
 # Запуск ByeDPI
 # ==========================================
 start_byedpi() {
-echo -e "${GREEN}Запуск ByeDPI...${NC}"
+echo -e "${GREEN}Запуск ${NC}ByeDPI${GREEN}...${NC}"
 echo -e ""
     /etc/init.d/byedpi enable >/dev/null 2>&1
     /etc/init.d/byedpi start >/dev/null 2>&1
@@ -33,21 +33,16 @@ echo -e ""
 # ==========================================
 
 start_podkop_full() {
-    echo -e "${GREEN}Запуск Podkop...${NC}"
-echo -e ""
-    echo -e "${GREEN}Включаем автозапуск...${NC}"
+    echo -e "${GREEN}Запуск ${NC}Podkop${GREEN}...${NC}"
     podkop enable >/dev/null 2>&1
-echo -e ""
     echo -e "${GREEN}Применяем конфигурацию...${NC}"
     podkop reload >/dev/null 2>&1
-echo -e ""
     echo -e "${GREEN}Перезапускаем сервис...${NC}"
     podkop restart >/dev/null 2>&1
-echo -e ""
     echo -e "${GREEN}Обновляем списки...${NC}"
     podkop list_update >/dev/null 2>&1
 echo -e ""
-    echo -e "${GREEN}Podkop готов к работе.${NC}"
+    echo -e "Podkop ${GREEN}готов к работе.${NC}"
 }
 
 # ==========================================
@@ -396,15 +391,14 @@ integration_byedpi_podkop() {
         read -p "Нажмите Enter..." dummy
         return
     fi
-	echo -e "${GREEN}Отключаем локальный DNS...${NC}"
-	echo -e ""
-	echo -e "${GREEN}Перезапускаем dnsmasq...${NC}"
-	echo -e ""
-    uci set dhcp.@dnsmasq[0].localuse='0'
+	echo -e "${GREEN}Отключаем локальный ${NC}DNS${GREEN}...${NC}"
+	uci set dhcp.@dnsmasq[0].localuse='0'
     uci commit dhcp
+	echo -e "${GREEN}Перезапускаем ${NC}dnsmasq${GREEN}...${NC}"
 	/etc/init.d/dnsmasq restart >/dev/null 2>&1
 
     # Меняем стратегию ByeDPI на интеграционную
+	echo -e "${GREEN}Меняем стратегию ${NC}ByeDPI${GREEN} на рабочую...${NC}"
     if [ -f /etc/config/byedpi ]; then
         sed -i "s|option cmd_opts .*| option cmd_opts '-o2 --auto=t,r,a,s -d2'|" /etc/config/byedpi
     fi
@@ -452,7 +446,7 @@ EOF
     start_byedpi
 	start_podkop_full
 	echo -e ""
-    echo -e "${GREEN}ByeDPI интегрирован в Podkop.${NC}"
+    echo -e "ByeDPI ${GREEN}интегрирован в ${NC}Podkop${GREEN}.${NC}"
 	echo -e ""
     echo -ne "Нужно ${RED}обязательно${NC} перезагрузить роутер. Перезагрузить сейчас? [y/N]: "
 	echo -e ""
