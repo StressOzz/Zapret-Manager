@@ -233,7 +233,7 @@ install_podkop() {
     # Проверка системы
     MODEL=$(cat /tmp/sysinfo/model 2>/dev/null || echo "не определено")
     AVAILABLE_SPACE=$(df /overlay | awk 'NR==2 {print $4}')
-    REQUIRED_SPACE=19380
+    REQUIRED_SPACE=26000
 	
 [ "$AVAILABLE_SPACE" -lt "$REQUIRED_SPACE" ] && { 
     msg "Недостаточно свободного места"
