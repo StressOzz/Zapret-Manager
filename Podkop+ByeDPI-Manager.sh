@@ -136,14 +136,13 @@ install_update() {
         return
     }
 
-    echo -e ""
-	echo -e "${GREEN}Устанавливаем пакет...${NC}"
+	echo -e "${GREEN}Устанавливаем${NC} ${WHITE}$LATEST_FILE${NC}"
     opkg install --force-reinstall "$LATEST_FILE" >/dev/null 2>&1
     rm -rf "$WORKDIR"
 	echo -e ""
 	/etc/init.d/byedpi enable >/dev/null 2>&1
     /etc/init.d/byedpi start >/dev/null 2>&1
-    echo -e "${GREEN}ByeDPI успешно установлен!${NC}"
+    echo -e "ByeDPI ${GREEN}успешно установлен!${NC}"
 	echo -e ""
     read -p "Нажмите Enter..." dummy
 }
@@ -342,7 +341,7 @@ pkg_list_update || {
     # Очистка
     rm -rf "$DOWNLOAD_DIR"
 
-    echo -e "${GREEN}Podkop успешно установлен / обновлён!${NC}"
+    echo -e "Podkop ${GREEN}успешно установлен / обновлён!${NC}"
     echo -e ""
     read -p "Нажмите Enter..." dummy
 }
