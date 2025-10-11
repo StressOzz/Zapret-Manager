@@ -22,7 +22,7 @@ WORKDIR="/tmp/byedpi"
 # Запуск ByeDPI
 # ==========================================
 start_byedpi() {
-echo -e "Запуск ByeDPI..."
+echo -e "${GREEN}Запуск ByeDPI...${NC}"
 echo -e ""
     /etc/init.d/byedpi enable >/dev/null 2>&1
     /etc/init.d/byedpi start >/dev/null 2>&1
@@ -33,21 +33,21 @@ echo -e ""
 # ==========================================
 
 start_podkop_full() {
-    echo -e "Запуск Podkop..."
+    echo -e "${GREEN}Запуск Podkop...${NC}"
 echo -e ""
-    echo -e "Включаем автозапуск..."
+    echo -e "${GREEN}Включаем автозапуск...${NC}"
     podkop enable >/dev/null 2>&1
 echo -e ""
-    echo -e "Применяем конфигурацию..."
+    echo -e "${GREEN}Применяем конфигурацию...${NC}"
     podkop reload >/dev/null 2>&1
 echo -e ""
-    echo -e "Перезапускаем сервис..."
+    echo -e "${GREEN}Перезапускаем сервис...${NC}"
     podkop restart >/dev/null 2>&1
 echo -e ""
-    echo -e "Обновляем списки..."
+    echo -e "${GREEN}Обновляем списки...${NC}"
     podkop list_update >/dev/null 2>&1
 echo -e ""
-    echo -e "Podkop готов к работе."
+    echo -e "${GREEN}Podkop готов к работе.${NC}"
 }
 
 # ==========================================
@@ -485,12 +485,12 @@ fix_strategy() {
         CURRENT_STRATEGY=$(grep "option cmd_opts" /etc/config/byedpi | sed -E "s/.*'(.+)'/\1/")
         [ -z "$CURRENT_STRATEGY" ] && CURRENT_STRATEGY="(не задана)"
         echo -e ""
-        echo -e "${CYAN}Текущая стратегия:${NC} ${WHITE}$CURRENT_STRATEGY${NC}"
+        echo -e "${GREEN}Текущая стратегия:${NC} ${WHITE}$CURRENT_STRATEGY${NC}"
         echo -e ""
-        read -p "Введите новую стратегию (Enter — оставить текущую): " NEW_STRATEGY
+        read -p "${YELLOW}Введите новую стратегию (Enter — оставить текущую):${NC} " NEW_STRATEGY
         echo -e ""
         if [ -z "$NEW_STRATEGY" ]; then
-            echo -e "${YELLOW}Стратегия не изменена. Оставлена текущая:${NC} ${WHITE}$CURRENT_STRATEGY${NC}"
+            echo -e "${GREEN}Стратегия не изменена.{NC}"
         else
             sed -i "s|option cmd_opts .*| option cmd_opts '$NEW_STRATEGY'|" /etc/config/byedpi
             start_byedpi
