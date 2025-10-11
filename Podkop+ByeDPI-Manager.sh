@@ -581,7 +581,7 @@ fi
     echo -e "${CYAN}5) ${GREEN}Установить / обновить ${NC}Podkop"
 	echo -e "${CYAN}6) ${GREEN}Удалить ${NC}Podkop"
 	echo -e "${CYAN}7) ${GREEN}Установить ${NC}ByeDPI ${GREEN}+ ${NC}Podkop ${GREEN}+ ${NC}Интеграция"
-	echo -e "${CYAN}8) ${RED}Перезагрузить устройство${NC}"
+	echo -e "${CYAN}8) ${GREEN}Перезагрузить устройство${NC}"
 	echo -e "${CYAN}9) ${GREEN}Выход (Enter)${NC}"
 	echo -e ""
     echo -ne "${YELLOW}Выберите пункт:${NC} "
