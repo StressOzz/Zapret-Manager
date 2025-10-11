@@ -473,12 +473,12 @@ read -p "Нажмите Enter..." dummy
 }
 
 # ==========================================
-# Измениние стратегии ByeDPI
+# Изменение стратегии ByeDPI
 # ==========================================
 fix_strategy() {
     clear
     echo -e ""
-    echo -e "${MAGENTA}Измениние стратегии ByeDPI${NC}"
+    echo -e "${MAGENTA}Изменение стратегии ByeDPI${NC}"
 
     if [ -f /etc/config/byedpi ]; then
         # Получаем текущую стратегию
@@ -491,7 +491,7 @@ fix_strategy() {
 		read NEW_STRATEGY
         echo -e ""
         if [ -z "$NEW_STRATEGY" ]; then
-            echo -e "${GREEN}Стратегия не изменена.{NC}"
+            echo -e "${GREEN}Стратегия не изменена.${NC}"
         else
             sed -i "s|option cmd_opts .*| option cmd_opts '$NEW_STRATEGY'|" /etc/config/byedpi
             start_byedpi
