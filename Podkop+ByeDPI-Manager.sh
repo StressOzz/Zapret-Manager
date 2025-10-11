@@ -487,7 +487,8 @@ fix_strategy() {
         echo -e ""
         echo -e "${GREEN}Текущая стратегия:${NC} ${WHITE}$CURRENT_STRATEGY${NC}"
         echo -e ""
-        read -p "${YELLOW}Введите новую стратегию (Enter — оставить текущую):${NC} " NEW_STRATEGY
+        echo -ne "${YELLOW}Введите новую стратегию (Enter — оставить текущую):${NC} "
+		read NEW_STRATEGY
         echo -e ""
         if [ -z "$NEW_STRATEGY" ]; then
             echo -e "${GREEN}Стратегия не изменена.{NC}"
