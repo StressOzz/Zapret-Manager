@@ -23,7 +23,6 @@ WORKDIR="/tmp/byedpi"
 # ==========================================
 start_byedpi() {
 echo -e "${GREEN}Запуск ${NC}ByeDPI${GREEN}...${NC}"
-echo -e ""
     /etc/init.d/byedpi enable >/dev/null 2>&1
     /etc/init.d/byedpi start >/dev/null 2>&1
 }
