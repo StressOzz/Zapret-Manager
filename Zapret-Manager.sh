@@ -206,7 +206,7 @@ fix_default() {
 enable_discord_calls() {
     clear
     echo -e ""
-    echo -e "${MAGENTA}Включаем Discord, звонки TG и WA${NC}"
+    echo -e "${MAGENTA}Включаем Discord и звонки в TG и WA${NC}"
     echo -e ""
 
     # Проверка, установлен ли Zapret
@@ -239,11 +239,12 @@ enable_discord_calls() {
     # ==========================================
     # Предлагаем выбор скрипта для установки
     # ==========================================
-    echo -e "${CYAN}1) ${GREEN}Установить скрипт ${NC}50-quic4all$"
+    echo -e "${CYAN}1) ${GREEN}Установить скрипт ${NC}50-quic4all"
     echo -e "${CYAN}2) ${GREEN}Установить скрипт ${NC}50-stun4all"
     echo -e "${CYAN}3) ${GREEN}Выход в главное меню (Enter)${NC}"
 	echo -e ""
-    read -p "${YELLOW}Выберите пункт:${NC} " choice
+    echo -ne "${YELLOW}Выберите пункт:${NC} "
+	read choice
 
     case "$choice" in
         1)
@@ -373,7 +374,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v3.0${NC}"
+	echo -e "                                  ${DGRAY}v3.1${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
