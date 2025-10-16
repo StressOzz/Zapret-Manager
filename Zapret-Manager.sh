@@ -239,9 +239,10 @@ enable_discord_calls() {
     # ==========================================
     # Предлагаем выбор скрипта для установки
     # ==========================================
-    echo "${CYAN}1) ${GREEN}Установить скрипт ${NC}50-quic4all$"
-    echo "${CYAN}2) ${GREEN}Установить скрипт ${NC}50-stun4all"
-    echo "${CYAN}3) ${GREEN}Выход в главное меню (Enter)${NC}"
+    echo -e "${CYAN}1) ${GREEN}Установить скрипт ${NC}50-quic4all$"
+    echo -e "${CYAN}2) ${GREEN}Установить скрипт ${NC}50-stun4all"
+    echo -e "${CYAN}3) ${GREEN}Выход в главное меню (Enter)${NC}"
+	echo -e ""
     read -p "${YELLOW}Выберите пункт:${NC} " choice
 
     case "$choice" in
@@ -268,17 +269,20 @@ enable_discord_calls() {
     # ==========================================
     if [ "$CURRENT_SCRIPT" = "$SELECTED" ]; then
 	echo -e ""
-        echo -e "${BLUE}Выбранный скрипт уже установлен.${NC}"
+        echo -e "${RED}Выбранный скрипт уже установлен !${NC}"
     else
         mkdir -p "$CUSTOM_DIR"
         if curl -fsSLo "$CUSTOM_DIR/50-script.sh" "$URL"; then
 		echo -e ""
-            echo -e "${GREEN}Скрипт ${NC}$SELECTED${GREEN} успешно установлен !${NC}"
+            echo -e "${GREEN}🔴 ${CYAN}Скрипт ${NC}$SELECTED${CYAN}успешно установлен !${NC}"
+			echo -e ""
+			echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены !${NC}"
+			
         else
 		echo -e ""
             echo -e "${RED}Ошибка при скачивании скрипта !${NC}"
 			echo -e ""
-            read -p "Нажмите Enter для продолжения.." dummy
+            read -p "Нажмите Enter для продолжения..." dummy
             return
         fi
     fi
@@ -302,7 +306,7 @@ enable_discord_calls() {
     /etc/init.d/zapret restart >/dev/null 2>&1
 
     echo -e ""
-    read -p "Нажмите Enter для продолжения.." dummy
+    read -p "Нажмите Enter для продолжения..." dummy
 }
 
 # ==========================================
@@ -369,7 +373,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v2.9${NC}"
+	echo -e "                                  ${DGRAY}v3.0${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
