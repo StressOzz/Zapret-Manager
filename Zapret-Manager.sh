@@ -327,10 +327,6 @@ done
 }
 
 # ==========================================
-# Включение Discord и звонков в TG и WA
-# ==========================================
-
-# ==========================================
 # Полное удаление Zapret
 # ==========================================
 uninstall_zapret() {
@@ -394,7 +390,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v3.1${NC}"
+	echo -e "                                  ${DGRAY}v2.2${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
@@ -427,8 +423,7 @@ show_menu() {
     echo -e "${CYAN}4) ${GREEN}Остановить ${NC}Zapret"
     echo -e "${CYAN}5) ${GREEN}Запустить ${NC}Zapret"
     echo -e "${CYAN}6) ${GREEN}Удалить ${NC}Zapret"
-	echo -e "${CYAN}7) ${GREEN}Включить ${NC}Discord${GREEN} и звонки в ${NC}TG${GREEN} и ${NC}WA ${RED}(test)${NC}"
-    echo -e "${CYAN}8) ${GREEN}Выход (Enter)${NC}"
+    echo -e "${CYAN}7) ${GREEN}Выход (Enter)${NC}"
     echo -e ""
     echo -ne "${YELLOW}Выберите пункт:${NC} "
     read choice
@@ -442,7 +437,6 @@ show_menu() {
             echo -e ""
             # Проверка скрипта восстановления и его запуск
             if [ -f /opt/zapret/restore-def-cfg.sh ]; then
-			 	rm -f /opt/zapret/init.d/openwrt/custom.d/50-script.sh 2>/dev/null
                 [ -f /etc/init.d/zapret ] && /etc/init.d/zapret stop >/dev/null 2>&1
                 chmod +x /opt/zapret/restore-def-cfg.sh
                 /opt/zapret/restore-def-cfg.sh
@@ -497,7 +491,6 @@ show_menu() {
             read -p "Нажмите Enter для продолжения..." dummy
             ;;
         6) uninstall_zapret ;;  # Полное удаление Zapret
-		7) enable_discord_calls ;;
         *) exit 0 ;;  # Выход по Enter или любой другой невалидной опции
     esac
 }
