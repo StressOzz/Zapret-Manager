@@ -276,9 +276,11 @@ enable_discord_calls() {
         if curl -fsSLo "$CUSTOM_DIR/50-script.sh" "$URL"; then
 		echo -e ""
             echo -e "${GREEN}🔴 ${CYAN}Скрипт ${NC}$SELECTED${CYAN} успешно установлен !${NC}"
+		chmod +x /opt/zapret/sync_config.sh
+        /opt/zapret/sync_config.sh
+        /etc/init.d/zapret restart >/dev/null 2>&1
 			echo -e ""
 			echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены !${NC}"
-			
         else
 		echo -e ""
             echo -e "${RED}Ошибка при скачивании скрипта !${NC}"
@@ -303,9 +305,9 @@ enable_discord_calls() {
     # ==========================================
     # Синхронизация и перезапуск Zapret
     # ==========================================
-    [ -x /opt/zapret/sync_config.sh ] && /opt/zapret/sync_config.sh
-    /etc/init.d/zapret restart >/dev/null 2>&1
-
+        chmod +x /opt/zapret/sync_config.sh
+        /opt/zapret/sync_config.sh
+        /etc/init.d/zapret restart >/dev/null 2>&1
     echo -e ""
     read -p "Нажмите Enter для продолжения..." dummy
 }
@@ -374,7 +376,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v3.1${NC}"
+	echo -e "                                  ${DGRAY}v3.2${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
