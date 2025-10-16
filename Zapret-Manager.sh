@@ -185,6 +185,11 @@ sed -i \
     -e '/--dpi-desync-fooling=badsum/d' \
     -e '/--new/d' \
     /etc/config/zapret
+
+	chmod +x /opt/zapret/sync_config.sh
+	/opt/zapret/sync_config.sh
+	/etc/init.d/zapret restart >/dev/null 2>&1
+
     echo -e ""
     echo -e "${BLUE}🔴 ${GREEN}Стратегия по умолчанию изменена !${NC}"
     echo -e ""
@@ -313,7 +318,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v2.5${NC}"
+	echo -e "                                  ${DGRAY}v2.6${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
