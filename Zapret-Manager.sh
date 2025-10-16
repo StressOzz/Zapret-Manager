@@ -337,7 +337,7 @@ enable_discord_calls() {
 
     CONFIG_FILE="/opt/zapret/config"
 
-# Проверка, установлен ли Zapret
+    # Проверка, установлен ли Zapret
     if [ ! -f /etc/init.d/zapret ]; then
         echo -e "${RED}Zapret не установлен! Нечего включать.${NC}"
         echo -e ""
@@ -345,36 +345,42 @@ enable_discord_calls() {
         return
     fi
 
-# Добавляем параметры в NFQWS_OPT (если ещё не добавлены)
-    if grep -q '^NFQWS_OPT=".*--filter-udp=50000-50099' "$CONFIG_FILE"; then
-        echo -e "${YELLOW}Параметры для Discord уже добавлены в NFQWS_OPT.${NC}"
-    else
+    # Добавляем параметры в NFQWS_OPT (если ещё не добавлены)
+    if ! grep -q -- '--filter-udp=50000-50099' "$CONFIG_FILE"; then
         sed -i '/^NFQWS_OPT="/ s/"$/ --new --filter-udp=50000-50099 --filter-l7=discord,stun --dpi-desync=fake"/' "$CONFIG_FILE"
     fi
 
-# Обновляем или добавляем NFQWS_PORTS_UDP
+    # Обновляем или добавляем NFQWS_PORTS_UDP
     if grep -q '^NFQWS_PORTS_UDP=' "$CONFIG_FILE"; then
         sed -i 's|^NFQWS_PORTS_UDP=.*|NFQWS_PORTS_UDP="443,50000-50099"|' "$CONFIG_FILE"
     else
         echo 'NFQWS_PORTS_UDP="443,50000-50099"' >> "$CONFIG_FILE"
     fi
-	
-# Создаём папку, если нет
+
+    # Создаём папку, если нет
     mkdir -p /opt/zapret/init.d/openwrt/custom.d/
 
     # Скачиваем и перезаписываем файл 50-script.sh
     curl -s -L "https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-quic4all" \
         -o /opt/zapret/init.d/openwrt/custom.d/50-script.sh
 
-# Перезапуск Zapret
- 		echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены !${NC}"
-		chmod +x /opt/zapret/sync_config.sh
-        /opt/zapret/sync_config.sh
-        /etc/init.d/zapret restart >/dev/null 2>&1
+    # Проверка успешного скачивания
+    if [ ! -s /opt/zapret/init.d/openwrt/custom.d/50-script.sh ]; then
+        echo -e "${RED}Не удалось скачать 50-script.sh${NC}"
+    else
+        chmod +x /opt/zapret/init.d/openwrt/custom.d/50-script.sh
+    fi
 
+    # Перезапуск Zapret
+    chmod +x /opt/zapret/sync_config.sh
+    /opt/zapret/sync_config.sh
+    /etc/init.d/zapret restart >/dev/null 2>&1
+
+    echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены!${NC}"
     echo -e ""
     read -p "Нажмите Enter для продолжения..." dummy
 }
+
 
 # ==========================================
 # Полное удаление Zapret
@@ -440,7 +446,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v2.7${NC}"
+	echo -e "                                  ${DGRAY}v2.8${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
