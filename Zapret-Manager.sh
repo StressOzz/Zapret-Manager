@@ -329,7 +329,7 @@ done
 # ==========================================
 # Включение Discord и звонков в TG и WA
 # ==========================================
-enable_discord_calls() {
+enable_discord_calls {
     clear
     echo -e ""
     echo -e "${MAGENTA}Включаем Discord, звонки TG и WA${NC}"
@@ -439,7 +439,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v3.0${NC}"
+	echo -e "                                  ${DGRAY}v3.1${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
