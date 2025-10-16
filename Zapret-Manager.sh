@@ -275,7 +275,7 @@ enable_discord_calls() {
         mkdir -p "$CUSTOM_DIR"
         if curl -fsSLo "$CUSTOM_DIR/50-script.sh" "$URL"; then
 		echo -e ""
-            echo -e "${GREEN}🔴 ${CYAN}Скрипт ${NC}$SELECTED${CYAN}успешно установлен !${NC}"
+            echo -e "${GREEN}🔴 ${CYAN}Скрипт ${NC}$SELECTED${CYAN} успешно установлен !${NC}"
 			echo -e ""
 			echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены !${NC}"
 			
