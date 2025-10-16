@@ -16,11 +16,6 @@ sh <(wget -O - https://raw.githubusercontent.com/StressOzz/OpenWRT-Scrypt/main/I
 sh <(wget -O - https://raw.githubusercontent.com/StressOzz/OpenWRT-Scrypt/main/Zapret-Manager.sh)
 ```
 ---
-## Установка, обновление и удаление ByeDPI и Podkop, а так же интеграция ByeDPI в Podkop.
-```
-sh <(wget -O - https://raw.githubusercontent.com/StressOzz/OpenWRT-Scrypt/main/Podkop+ByeDPI-Manager.sh)
-```
----
 ### Примечание
 
 Рекомендуется перезагрузить роутер:
@@ -31,9 +26,5 @@ reboot
 
 ### Благодарности:
 
-- Podkop by ITDog (https://github.com/itdoginfo/)
-- ByeDPI by hufrea (https://github.com/hufrea/)
-- ByeDPI-OpenWrt by DPITrickster (https://github.com/DPITrickster/)
-- Zapret by bol-van (https://github.com/bol-van/)
 - Zapret-OpenWrt by remittor (https://github.com/remittor)
 
