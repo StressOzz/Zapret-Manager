@@ -471,6 +471,7 @@ show_menu() {
             echo -e ""
             # Проверка скрипта восстановления и его запуск
             if [ -f /opt/zapret/restore-def-cfg.sh ]; then
+				rm -f /opt/zapret/init.d/openwrt/custom.d/50-script.sh
                 [ -f /etc/init.d/zapret ] && /etc/init.d/zapret stop >/dev/null 2>&1
                 chmod +x /opt/zapret/restore-def-cfg.sh
                 /opt/zapret/restore-def-cfg.sh
