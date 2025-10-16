@@ -329,51 +329,6 @@ done
 # ==========================================
 # Включение Discord и звонков в TG и WA
 # ==========================================
-enable_discord_calls {
-    clear
-    echo -e ""
-    echo -e "${MAGENTA}Включаем Discord, звонки TG и WA${NC}"
-    echo -e ""
-
-    CONFIG_FILE="/opt/zapret/config"
-
-    # Проверка, установлен ли Zapret
-    if [ ! -f /etc/init.d/zapret ]; then
-        echo -e "${RED}Zapret не установлен! Нечего включать.${NC}"
-        echo -e ""
-        read -p "Нажмите Enter для продолжения..." dummy
-        return
-    fi
-
-CONFIG_FILE="/etc/config/zapret"
-
-# Проверка и добавление UDP-портов
-grep -q "50000-50099" "$CONFIG_FILE"
-if [ $? -ne 0 ]; then
-    # Меняем строку с портами, добавляем 50000-50099
-    sed -i "s|^\s*option NFQWS_PORTS_UDP\s*'.*'|option NFQWS_PORTS_UDP '443,50000-50099'|" "$CONFIG_FILE"
-fi
-
-# Проверка и добавление параметров в конце
-grep -q -- '--filter-l7=discord,stun' "$CONFIG_FILE"
-if [ $? -ne 0 ]; then
-    # Удаляем последнюю кавычку один раз (если есть)
-    sed -i '$s/\'$'\''$//' "$CONFIG_FILE"
-    
-    # Добавляем новые строки перед последней кавычкой
-    printf -- "--new\n--filter-udp=50000-50099\n--filter-l7=discord,stun\n--dpi-desync=fake\n'\n" >> "$CONFIG_FILE"
-fi
-
-    # Перезапуск Zapret
-    chmod +x /opt/zapret/sync_config.sh
-    /opt/zapret/sync_config.sh
-    /etc/init.d/zapret restart >/dev/null 2>&1
-
-    echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены!${NC}"
-    echo -e ""
-    read -p "Нажмите Enter для продолжения..." dummy
-}
-
 
 # ==========================================
 # Полное удаление Zapret
