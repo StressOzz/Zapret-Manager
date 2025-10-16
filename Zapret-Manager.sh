@@ -345,31 +345,20 @@ enable_discord_calls() {
         return
     fi
 
-    # Добавляем параметры в NFQWS_OPT (если ещё не добавлены)
-    if ! grep -q -- '--filter-udp=50000-50099' "$CONFIG_FILE"; then
-        sed -i '/^NFQWS_OPT="/ s/"$/ --new --filter-udp=50000-50099 --filter-l7=discord,stun --dpi-desync=fake"/' "$CONFIG_FILE"
-    fi
+CONFIG_FILE="/etc/config/zapret"
 
-    # Обновляем или добавляем NFQWS_PORTS_UDP
-    if grep -q '^NFQWS_PORTS_UDP=' "$CONFIG_FILE"; then
-        sed -i 's|^NFQWS_PORTS_UDP=.*|NFQWS_PORTS_UDP="443,50000-50099"|' "$CONFIG_FILE"
-    else
-        echo 'NFQWS_PORTS_UDP="443,50000-50099"' >> "$CONFIG_FILE"
-    fi
+# Проверка и добавление UDP-портов
+if ! grep -q "50000-50099" "$CONFIG_FILE"; then
+    sed -i "s|^\s*option NFQWS_PORTS_UDP\s*'.*'|option NFQWS_PORTS_UDP '443,50000-50099'|" "$CONFIG_FILE"
+fi
 
-    # Создаём папку, если нет
-    mkdir -p /opt/zapret/init.d/openwrt/custom.d/
-
-    # Скачиваем и перезаписываем файл 50-script.sh
-    curl -s -L "https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-quic4all" \
-        -o /opt/zapret/init.d/openwrt/custom.d/50-script.sh
-
-    # Проверка успешного скачивания
-    if [ ! -s /opt/zapret/init.d/openwrt/custom.d/50-script.sh ]; then
-        echo -e "${RED}Не удалось скачать 50-script.sh${NC}"
-    else
-        chmod +x /opt/zapret/init.d/openwrt/custom.d/50-script.sh
-    fi
+# Проверка и добавление параметров в конце
+if ! grep -q -- '--filter-l7=discord,stun' "$CONFIG_FILE"; then
+    # Удаляем последнюю кавычку, если есть
+    sed -i '$s/\'$'\''$//' "$CONFIG_FILE"
+    # Добавляем новые строки в столбик
+    printf -- "--new\n--filter-udp=50000-50099\n--filter-l7=discord,stun\n--dpi-desync=fake\n'\n" >> "$CONFIG_FILE"
+fi
 
     # Перезапуск Zapret
     chmod +x /opt/zapret/sync_config.sh
@@ -446,7 +435,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v2.8${NC}"
+	echo -e "                                  ${DGRAY}v2.9${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
