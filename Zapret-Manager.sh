@@ -169,167 +169,31 @@ install_update() {
 }
 
 # ==========================================
-# Установка конкретной версии Zapret
+# Чиним дефолтную стратегию
 # ==========================================
-install_update_specific() {
-    SPEC_URL="$1"
-    SPEC_FILE="$2"
-    SPEC_VER="$3"
-
+fix_default() {
     clear
     echo -e ""
-    if [ "$INSTALLED_VER" != "не найдена" ]; then
-        echo -e "${MAGENTA}Начинаем установку ZAPRET${NC}"
-        ACTION="update"
-    else
-        echo -e "${MAGENTA}Начинаем установку ZAPRET${NC}"
-        ACTION="install"
-    fi
-    echo -e ""
-    get_versions
-
-    TARGET_URL="$SPEC_URL"
-    TARGET_FILE="$SPEC_FILE"
-    TARGET_VER="$SPEC_VER"
-
-    [ "$USED_ARCH" = "нет пакета для вашей архитектуры" ] && {
-        echo -e "${RED}Нет доступного пакета для вашей архитектуры: ${NC}$LOCAL_ARCH"
-        echo -e ""
-        read -p "Нажмите Enter для продолжения..." dummy
-        return
-    }
-
-    if [ "$INSTALLED_VER" = "$TARGET_VER" ]; then
-        echo -e "${BLUE}🔴 ${GREEN}Эта версия уже установлена !${NC}"
-        echo -e ""
-        read -p "Нажмите Enter для продолжения..." dummy
-        return
-    fi
-
-    if [ -f /etc/init.d/zapret ]; then
-        echo -e "${GREEN}🔴 ${CYAN}Останавливаем сервис ${NC}zapret"
-        /etc/init.d/zapret stop >/dev/null 2>&1
-        PIDS=$(pgrep -f /opt/zapret)
-        if [ -n "$PIDS" ]; then
-            echo -e "${GREEN}🔴 ${CYAN}Убиваем все процессы ${NC}zapret"
-            for pid in $PIDS; do kill -9 "$pid" >/dev/null 2>&1; done
-        fi
-    fi
-
-    mkdir -p "$WORKDIR" && cd "$WORKDIR" || return
-    echo -e "${GREEN}🔴 ${CYAN}Скачиваем архив ${NC}$TARGET_FILE"
-    wget -q "$TARGET_URL" -O "$TARGET_FILE" || { echo -e "${RED}Не удалось скачать ${NC}$TARGET_FILE"; read -p "Нажмите Enter для продолжения..." dummy; return; }
-
-    command -v unzip >/dev/null 2>&1 || { 
-        echo -e "${GREEN}🔴 ${CYAN}Устанавливаем${NC} unzip ${CYAN}для распаковки архива${NC}"
-        opkg update >/dev/null 2>&1
-        opkg install unzip >/dev/null 2>&1
-    }
-
-    echo -e "${GREEN}🔴 ${CYAN}Распаковываем архив${NC}"
-    unzip -o "$TARGET_FILE" >/dev/null
-
-    PIDS=$(pgrep -f /opt/zapret)
-    if [ -n "$PIDS" ]; then
-        echo -e "${GREEN}🔴 ${CYAN}Убиваем все процессы ${NC}zapret"
-        for pid in $PIDS; do kill -9 "$pid" >/dev/null 2>&1; done
-    fi
-
-    for PKG in zapret_*.ipk luci-app-zapret_*.ipk; do
-        [ -f "$PKG" ] && {
-            echo -e "${GREEN}🔴 ${CYAN}Устанавливаем пакет ${NC}$PKG"
-            opkg install --force-reinstall "$PKG" >/dev/null 2>&1
-        }
-    done
-
-    echo -e "${GREEN}🔴 ${CYAN}Удаляем временные файлы и пакеты${NC}"
-    cd /
-    rm -rf "$WORKDIR"
-    rm -f /tmp/*.ipk /tmp/*.zip /tmp/*zapret* 2>/dev/null
-
-    [ -f /etc/init.d/zapret ] && {
-        echo -e "${GREEN}🔴 ${CYAN}Перезапуск службы ${NC}zapret"
-        chmod +x /opt/zapret/sync_config.sh
-        /opt/zapret/sync_config.sh
-        /etc/init.d/zapret restart >/dev/null 2>&1
-    }
-
-    echo -e ""
-    echo -e "${BLUE}🔴 ${GREEN}Zapret успешно установлен версия $TARGET_VER!${NC}"
-    echo -e ""
-    read -p "Нажмите Enter для продолжения..." dummy
-}
-
-# ==========================================
-# Выбор и установка конкретной версии
-# ==========================================
-choose_version() {
-    clear
-    echo -e ""
-    echo -e "${MAGENTA}Последние 10 версий Zapret${NC}"
+    echo -e "${MAGENTA}Пробуем починить дефолтную стратегию${NC}"
     echo -e ""
 
-    LOCAL_ARCH=$(awk -F\' '/DISTRIB_ARCH/ {print $2}' /etc/openwrt_release)
-    [ -z "$LOCAL_ARCH" ] && LOCAL_ARCH=$(opkg print-architecture | grep -v "noarch" | sort -k3 -n | tail -n1 | awk '{print $2}')
-
-    RELEASES=$(curl -s https://api.github.com/repos/remittor/zapret-openwrt/releases \
-        | grep '"tag_name"' | grep -Eo '[0-9]+\.[0-9]+[0-9]*' | head -n 10)
-
-    if [ -z "$RELEASES" ]; then
-        echo -e "${RED}Не удалось получить список версий${NC}"
-        echo -e ""
-        read -p "Нажмите Enter для продолжения..." dummy
-        return
-    fi
-
-i=1
-echo "$RELEASES" | while read ver; do
-    LABEL=""
-    COLOR="$NC"
-
-# Проверяем последнюю версию
-if [ "$ver" = "$LATEST_VER" ]; then
-    LABEL="${LABEL}последняя"
-    COLOR="$GREEN"
-fi
-
-# Проверяем установленную версию
-if [ "$ver" = "$INSTALLED_VER" ]; then
-    [ -n "$LABEL" ] && LABEL="${LABEL} / "
-    LABEL="${LABEL}установленная"
-
-    # Если версия и последняя, и установленная — оставляем зелёный
-    if [ "$ver" = "$LATEST_VER" ]; then
-        COLOR="$GREEN"
-    else
-        COLOR="$CYAN"
-    fi
-fi
-    echo -e "${GREEN}$i) ${COLOR}$ver $LABEL${NC}"
-    i=$((i+1))
-done
-
+sed -i \
+    -e 's/fake,//g' \
+    -e '/--filter-tcp=80 /d' \
+    -e '/--dpi-desync=fakedsplit/d' \
+    -e '/--dpi-desync-autottl=2/d' \
+    -e '/--dpi-desync-fooling=badsum/d' \
+    -e '/--new/d' \
+    /etc/config/zapret
     echo -e ""
-    echo -n "Введите номер пункта для установки (или Enter для выхода в меню): "
-    read num
-    [ -z "$num" ] && return
-
-    SELECTED=$(echo "$RELEASES" | sed -n "${num}p")
-    [ -z "$SELECTED" ] && { echo -e "${RED}Неверный номер${NC}"; sleep 2; return; }
-
-    TARGET_URL=$(curl -s https://api.github.com/repos/remittor/zapret-openwrt/releases \
-        | grep browser_download_url | grep "$SELECTED" | grep "$LOCAL_ARCH.zip" | cut -d'"' -f4)
-    [ -z "$TARGET_URL" ] && { echo -e "${RED}Не найден пакет для вашей архитектуры${NC}"; read -p "Enter..." dummy; return; }
-    TARGET_FILE=$(basename "$TARGET_URL")
-    TARGET_VER="$SELECTED"
-
-    install_update_specific "$TARGET_URL" "$TARGET_FILE" "$TARGET_VER"
+    echo -e "${BLUE}🔴 ${GREEN}Стратегия по умолчанию изменена !${NC}"
+    echo -e ""
+	read -p "Нажмите Enter для продолжения..." dummy
 }
 
 # ==========================================
 # Включение Discord и звонков в TG и WA
 # ==========================================
-
 enable_discord_calls() {
     clear
     echo -e ""
@@ -338,7 +202,7 @@ enable_discord_calls() {
 
     # Проверка, установлен ли Zapret
     if [ ! -f /etc/init.d/zapret ]; then
-        echo -e "${RED}Zapret не установлен!${NC}"
+        echo -e "${RED}Zapret не установлен !${NC}"
         echo -e ""
         read -p "Нажмите Enter для продолжения..." dummy
         return
@@ -429,7 +293,7 @@ uninstall_zapret() {
     done
 
     echo -e ""
-    echo -e "${BLUE}🔴 ${GREEN}Zapret полностью удалён!${NC}"
+    echo -e "${BLUE}🔴 ${GREEN}Zapret полностью удалён !${NC}"
     echo -e ""
     read -p "Нажмите Enter для продолжения..." dummy
 }
@@ -449,7 +313,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v2.4${NC}"
+	echo -e "                                  ${DGRAY}v2.5${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
@@ -477,7 +341,7 @@ show_menu() {
 
     # Вывод пунктов меню
     echo -e "${CYAN}1) ${GREEN}Установить последнюю версию${NC}"
-    echo -e "${CYAN}2) ${GREEN}Меню выбора версии для установки${NC}"
+    echo -e "${CYAN}2) ${GREEN}Поченить деволтную стратегию${NC}"
     echo -e "${CYAN}3) ${GREEN}Вернуть настройки по умолчанию${NC}"
     echo -e "${CYAN}4) ${GREEN}Остановить ${NC}Zapret"
     echo -e "${CYAN}5) ${GREEN}Запустить ${NC}Zapret"
@@ -489,7 +353,7 @@ show_menu() {
     read choice
     case "$choice" in
         1) install_update "latest" ;;  # Установка/обновление до последней версии
-        2) choose_version ;;
+        2) fix_default ;;
         3)
             clear
             echo -e ""
