@@ -348,15 +348,19 @@ enable_discord_calls() {
 CONFIG_FILE="/etc/config/zapret"
 
 # Проверка и добавление UDP-портов
-if ! grep -q "50000-50099" "$CONFIG_FILE"; then
+grep -q "50000-50099" "$CONFIG_FILE"
+if [ $? -ne 0 ]; then
+    # Меняем строку с портами, добавляем 50000-50099
     sed -i "s|^\s*option NFQWS_PORTS_UDP\s*'.*'|option NFQWS_PORTS_UDP '443,50000-50099'|" "$CONFIG_FILE"
 fi
 
 # Проверка и добавление параметров в конце
-if ! grep -q -- '--filter-l7=discord,stun' "$CONFIG_FILE"; then
-    # Удаляем последнюю кавычку, если есть
+grep -q -- '--filter-l7=discord,stun' "$CONFIG_FILE"
+if [ $? -ne 0 ]; then
+    # Удаляем последнюю кавычку один раз (если есть)
     sed -i '$s/\'$'\''$//' "$CONFIG_FILE"
-    # Добавляем новые строки в столбик
+    
+    # Добавляем новые строки перед последней кавычкой
     printf -- "--new\n--filter-udp=50000-50099\n--filter-l7=discord,stun\n--dpi-desync=fake\n'\n" >> "$CONFIG_FILE"
 fi
 
@@ -435,7 +439,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v2.9${NC}"
+	echo -e "                                  ${DGRAY}v3.0${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
