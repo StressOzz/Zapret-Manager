@@ -369,9 +369,9 @@ enable_discord_calls() {
     mkdir -p /opt/zapret/init.d/openwrt/custom.d/
     if curl -fsSLo /opt/zapret/init.d/openwrt/custom.d/50-script.sh \
         https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-quic4all; then
-        echo -e "${GREEN}🔴 ${CYAN}Файл успешно создан/обновлён:${NC} 50-script.sh"
+        echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены !${NC}"
     else
-        echo -e "${RED}Ошибка при скачивании скрипта!${NC}"
+        echo -e "${RED}Ошибка при скачивании скрипта !${NC}"
     fi
 
     # ==========================================
@@ -482,7 +482,7 @@ show_menu() {
     echo -e "${CYAN}4) ${GREEN}Остановить ${NC}Zapret"
     echo -e "${CYAN}5) ${GREEN}Запустить ${NC}Zapret"
     echo -e "${CYAN}6) ${GREEN}Удалить ${NC}Zapret"
-	echo -e "${CYAN}7) ${GREEN}Включить ${NC}Discord${GREEN} и звонки в ${NC}TG${GREEN} и ${NC}WA"
+	echo -e "${CYAN}7) ${GREEN}Включить ${NC}Discord${GREEN} и звонки в ${NC}TG${GREEN} и ${NC}WA ${RED}(test)${NC}"
     echo -e "${CYAN}8) ${GREEN}Выход (Enter)${NC}"
     echo -e ""
     echo -ne "${YELLOW}Выберите пункт:${NC} "
