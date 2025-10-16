@@ -221,30 +221,28 @@ enable_discord_calls() {
     # Проверяем текущий установленный кастомный скрипт
     # ==========================================
     CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"
-    CURRENT_SCRIPT=""
+    CURRENT_SCRIPT="не установлен"
     if [ -f "$CUSTOM_DIR/50-script.sh" ]; then
-        FIRST_LINE=$(head -n 1 "$CUSTOM_DIR/50-script.sh")
-        if echo "$FIRST_LINE" | grep -q "quic"; then
+        FIRST_LINE=$(sed -n '1p' "$CUSTOM_DIR/50-script.sh")  # первая строка
+        if echo "$FIRST_LINE" | grep -q "QUIC"; then
             CURRENT_SCRIPT="50-quic4all"
         elif echo "$FIRST_LINE" | grep -q "stun"; then
             CURRENT_SCRIPT="50-stun4all"
         else
             CURRENT_SCRIPT="неизвестный"
         fi
-    else
-        CURRENT_SCRIPT="не установлен"
     fi
-    echo -e "Текущий установленный кастомный скрипт: ${GREEN}$CURRENT_SCRIPT${NC}"
+
+    echo -e "${YELLOW}Текущий установленный скрипт:${NC} $CURRENT_SCRIPT"
     echo -e ""
 
     # ==========================================
     # Предлагаем выбор скрипта для установки
     # ==========================================
-    echo "Выберите скрипт для установки:"
-    echo "1) 50-quic4all"
-    echo "2) 50-stun4all"
-    echo "3) Выход в главное меню (Enter)"
-    read -p "Введите номер (1/2/3): " choice
+    echo "${CYAN}1) ${GREEN}Установить скрипт ${NC}50-quic4all$"
+    echo "${CYAN}2) ${GREEN}Установить скрипт ${NC}50-stun4all"
+    echo "${CYAN}3) ${GREEN}Выход в главное меню (Enter)${NC}"
+    read -p "${YELLOW}Выберите пункт:${NC} " choice
 
     case "$choice" in
         1)
@@ -256,27 +254,31 @@ enable_discord_calls() {
             URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-stun4all"
             ;;
         3|"")
-            echo -e "${BLUE}Выход в главное меню...${NC}"
-            read -p "Нажмите Enter для продолжения..." dummy
+            # Выход в главное меню
             return
             ;;
         *)
-            echo -e "${RED}Неверный выбор!${NC}"
-            read -p "Нажмите Enter для выхода в главное меню..." dummy
+            # Любой другой ввод — просто выход
             return
             ;;
     esac
 
+    # ==========================================
     # Если выбранный уже установлен, не скачиваем
+    # ==========================================
     if [ "$CURRENT_SCRIPT" = "$SELECTED" ]; then
+	echo -e ""
         echo -e "${BLUE}Выбранный скрипт уже установлен.${NC}"
     else
         mkdir -p "$CUSTOM_DIR"
         if curl -fsSLo "$CUSTOM_DIR/50-script.sh" "$URL"; then
-            echo -e "${GREEN}Скрипт $SELECTED успешно установлен!${NC}"
+		echo -e ""
+            echo -e "${GREEN}Скрипт ${NC}$SELECTED${GREEN} успешно установлен !${NC}"
         else
-            echo -e "${RED}Ошибка при скачивании скрипта!${NC}"
-            read -p "Нажмите Enter для выхода в главное меню..." dummy
+		echo -e ""
+            echo -e "${RED}Ошибка при скачивании скрипта !${NC}"
+			echo -e ""
+            read -p "Нажмите Enter для продолжения.." dummy
             return
         fi
     fi
@@ -300,9 +302,8 @@ enable_discord_calls() {
     /etc/init.d/zapret restart >/dev/null 2>&1
 
     echo -e ""
-    read -p "Нажмите Enter для выхода в главное меню..." dummy
+    read -p "Нажмите Enter для продолжения.." dummy
 }
-
 
 # ==========================================
 # Полное удаление Zapret
@@ -368,7 +369,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v2.8${NC}"
+	echo -e "                                  ${DGRAY}v2.9${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
