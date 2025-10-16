@@ -335,35 +335,50 @@ enable_discord_calls() {
     echo -e "${MAGENTA}Включаем Discord, звонки TG и WA${NC}"
     echo -e ""
 
+    CONFIG_FILE="/opt/zapret/config"
+
     # Проверка, установлен ли Zapret
     if [ ! -f /etc/init.d/zapret ]; then
-        echo -e "${RED}Zapret не установлен!${NC}"
+        echo -e "${RED}Zapret не установлен! Нечего включать.${NC}"
         echo -e ""
         read -p "Нажмите Enter для продолжения..." dummy
         return
     fi
 
-    # Создаём папку, если нет
-    mkdir -p /opt/zapret/init.d/openwrt/custom.d/
-
-    # Скачиваем и перезаписываем файл 50-script.sh
-    curl -s -L "https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-stun4all" \
-        -o /opt/zapret/init.d/openwrt/custom.d/50-script.sh
-
-    if [ -f /opt/zapret/init.d/openwrt/custom.d/50-script.sh ]; then
-        echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены !${NC}"
-		chmod +x /opt/zapret/sync_config.sh
-        /opt/zapret/sync_config.sh
-        /etc/init.d/zapret restart >/dev/null 2>&1
-    else
-        echo -e "${RED}Ошибка при создании файла!${NC}"
+    # Проверяем наличие файла config
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo -e "${RED}Файл конфигурации ${CONFIG_FILE} не найден!${NC}"
+        echo -e ""
+        read -p "Нажмите Enter для продолжения..." dummy
+        return
     fi
+
+    # Добавляем параметры в NFQWS_OPT (если ещё не добавлены)
+    if grep -q '^NFQWS_OPT=".*--filter-udp=50000-50099' "$CONFIG_FILE"; then
+        echo -e "${YELLOW}Параметры для Discord уже добавлены в NFQWS_OPT.${NC}"
+    else
+        sed -i '/^NFQWS_OPT="/ s/"$/ --new --filter-udp=50000-50099 --filter-l7=discord,stun --dpi-desync=fake"/' "$CONFIG_FILE"
+        echo -e "${GREEN}Добавлены параметры в NFQWS_OPT.${NC}"
+    fi
+
+    # Обновляем или добавляем NFQWS_PORTS_UDP
+    if grep -q '^NFQWS_PORTS_UDP=' "$CONFIG_FILE"; then
+        sed -i 's|^NFQWS_PORTS_UDP=.*|NFQWS_PORTS_UDP="443,50000-50099"|' "$CONFIG_FILE"
+        echo -e "${GREEN}Обновлена строка NFQWS_PORTS_UDP.${NC}"
+    else
+        echo 'NFQWS_PORTS_UDP="443,50000-50099"' >> "$CONFIG_FILE"
+        echo -e "${GREEN}Добавлена строка NFQWS_PORTS_UDP.${NC}"
+    fi
+
+    # Перезапуск Zapret
+    echo -e ""
+    echo -e "${CYAN}Перезапускаем службу Zapret...${NC}"
+    /etc/init.d/zapret restart >/dev/null 2>&1
+    echo -e "${GREEN}Zapret успешно перезапущен!${NC}"
 
     echo -e ""
     read -p "Нажмите Enter для продолжения..." dummy
 }
-
-
 
 # ==========================================
 # Полное удаление Zapret
@@ -429,7 +444,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v2.4${NC}"
+	echo -e "                                  ${DGRAY}v2.5${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
