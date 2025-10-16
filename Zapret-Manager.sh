@@ -351,7 +351,7 @@ enable_discord_calls() {
         -o /opt/zapret/init.d/openwrt/custom.d/50-script.sh
 
     if [ -f /opt/zapret/init.d/openwrt/custom.d/50-script.sh ]; then
-        echo -e "${GREEN}🔴 ${CYAN}Звонки и Discord включены !${NC}"
+        echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены !${NC}"
 		chmod +x /opt/zapret/sync_config.sh
         /opt/zapret/sync_config.sh
         /etc/init.d/zapret restart >/dev/null 2>&1
