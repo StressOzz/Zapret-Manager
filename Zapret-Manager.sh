@@ -213,48 +213,94 @@ enable_discord_calls() {
     if [ ! -f /etc/init.d/zapret ]; then
         echo -e "${RED}Zapret не установлен !${NC}"
         echo -e ""
-        read -p "Нажмите Enter для продолжения..." dummy
+        read -p "Нажмите Enter для выхода в главное меню..." dummy
         return
     fi
 
     # ==========================================
-    # Добавляем блок параметров, если его нет
+    # Проверяем текущий установленный кастомный скрипт
+    # ==========================================
+    CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"
+    CURRENT_SCRIPT=""
+    if [ -f "$CUSTOM_DIR/50-script.sh" ]; then
+        FIRST_LINE=$(head -n 1 "$CUSTOM_DIR/50-script.sh")
+        if echo "$FIRST_LINE" | grep -q "quic"; then
+            CURRENT_SCRIPT="50-quic4all"
+        elif echo "$FIRST_LINE" | grep -q "stun"; then
+            CURRENT_SCRIPT="50-stun4all"
+        else
+            CURRENT_SCRIPT="неизвестный"
+        fi
+    else
+        CURRENT_SCRIPT="не установлен"
+    fi
+    echo -e "Текущий установленный кастомный скрипт: ${GREEN}$CURRENT_SCRIPT${NC}"
+    echo -e ""
+
+    # ==========================================
+    # Предлагаем выбор скрипта для установки
+    # ==========================================
+    echo "Выберите скрипт для установки:"
+    echo "1) 50-quic4all"
+    echo "2) 50-stun4all"
+    echo "3) Выход в главное меню (Enter)"
+    read -p "Введите номер (1/2/3): " choice
+
+    case "$choice" in
+        1)
+            SELECTED="50-quic4all"
+            URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-quic4all"
+            ;;
+        2)
+            SELECTED="50-stun4all"
+            URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-stun4all"
+            ;;
+        3|"")
+            echo -e "${BLUE}Выход в главное меню...${NC}"
+            read -p "Нажмите Enter для продолжения..." dummy
+            return
+            ;;
+        *)
+            echo -e "${RED}Неверный выбор!${NC}"
+            read -p "Нажмите Enter для выхода в главное меню..." dummy
+            return
+            ;;
+    esac
+
+    # Если выбранный уже установлен, не скачиваем
+    if [ "$CURRENT_SCRIPT" = "$SELECTED" ]; then
+        echo -e "${BLUE}Выбранный скрипт уже установлен.${NC}"
+    else
+        mkdir -p "$CUSTOM_DIR"
+        if curl -fsSLo "$CUSTOM_DIR/50-script.sh" "$URL"; then
+            echo -e "${GREEN}Скрипт $SELECTED успешно установлен!${NC}"
+        else
+            echo -e "${RED}Ошибка при скачивании скрипта!${NC}"
+            read -p "Нажмите Enter для выхода в главное меню..." dummy
+            return
+        fi
+    fi
+
+    # ==========================================
+    # Добавляем блок UDP, если его нет
     # ==========================================
     if ! grep -q -- "--filter-udp=50000-50099" /etc/config/zapret; then
-        # Добавляем диапазон UDP, если его нет
         if ! grep -q '50000-50099' /etc/config/zapret; then
             sed -i "s/option NFQWS_PORTS_UDP '443'/option NFQWS_PORTS_UDP '443,50000-50099'/" /etc/config/zapret
         fi
-
-        # Убираем лишние строки с только одной кавычкой
         sed -i "/^'$/d" /etc/config/zapret
-
-        # Добавляем блок в столбик
         printf -- '--new\n--filter-udp=50000-50099\n--filter-l7=discord,stun\n--dpi-desync=fake\n' >> /etc/config/zapret
-
-        # Добавляем одинарную кавычку в конце
         echo "'" >> /etc/config/zapret
     fi
 
     # ==========================================
-    # Скачиваем/обновляем кастомный скрипт
-    # ==========================================
-    mkdir -p /opt/zapret/init.d/openwrt/custom.d/
-    if curl -fsSLo /opt/zapret/init.d/openwrt/custom.d/50-script.sh \
-        https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-quic4all; then
-        echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены !${NC}"
-    else
-        echo -e "${RED}Ошибка при скачивании скрипта !${NC}"
-    fi
-
-    # ==========================================
-    # Синхронизация конфигурации и перезапуск Zapret
+    # Синхронизация и перезапуск Zapret
     # ==========================================
     [ -x /opt/zapret/sync_config.sh ] && /opt/zapret/sync_config.sh
     /etc/init.d/zapret restart >/dev/null 2>&1
 
     echo -e ""
-    read -p "Нажмите Enter для продолжения..." dummy
+    read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 
 
@@ -322,7 +368,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v2.7${NC}"
+	echo -e "                                  ${DGRAY}v2.8${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
