@@ -177,6 +177,14 @@ fix_default() {
     echo -e "${MAGENTA}Редактируем дефолтную стратегию${NC}"
     echo -e ""
 
+# Проверка, установлен ли Zapret
+    if [ ! -f /etc/init.d/zapret ]; then
+        echo -e "${RED}Zapret не установлен !${NC}"
+        echo -e ""
+        read -p "Нажмите Enter для продолжения..." dummy
+        return
+    fi
+
 # Убираем все вхождения fake,
 	sed -i 's/fake,//g' /etc/config/zapret
 
