@@ -347,7 +347,7 @@ enable_discord_calls() {
     mkdir -p /opt/zapret/init.d/openwrt/custom.d/
 
     # Скачиваем и перезаписываем файл 50-script.sh
-    curl -s -L "https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-quic4all" \
+    curl -s -L "https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-stun4all" \
         -o /opt/zapret/init.d/openwrt/custom.d/50-script.sh
 
     if [ -f /opt/zapret/init.d/openwrt/custom.d/50-script.sh ]; then
