@@ -177,14 +177,11 @@ fix_default() {
     echo -e "${MAGENTA}Редактируем дефолтную стратегию${NC}"
     echo -e ""
 
-sed -i \
-    -e 's/fake,//g' \
-    -e '/--filter-tcp=80 /d' \
-    -e '/--dpi-desync=fakedsplit/d' \
-    -e '/--dpi-desync-autottl=2/d' \
-    -e '/--dpi-desync-fooling=badsum/d' \
-    -e '/--new/d' \
-    /etc/config/zapret
+# Убираем все вхождения fake,
+	sed -i 's/fake,//g' /etc/config/zapret
+
+# Удаляем конкретный блок строк
+	sed -i '/--filter-tcp=80 <HOSTLIST>/,/--new/d' /etc/config/zapret
 
 	chmod +x /opt/zapret/sync_config.sh
 	/opt/zapret/sync_config.sh
@@ -317,7 +314,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v2.6${NC}"
+	echo -e "                                  ${DGRAY}v2.7${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
@@ -345,7 +342,7 @@ show_menu() {
 
     # Вывод пунктов меню
     echo -e "${CYAN}1) ${GREEN}Установить последнюю версию${NC}"
-    echo -e "${CYAN}2) ${GREEN}Поченить деволтную стратегию${NC}"
+    echo -e "${CYAN}2) ${GREEN}Починить дефолтную стратегию${NC}"
     echo -e "${CYAN}3) ${GREEN}Вернуть настройки по умолчанию${NC}"
     echo -e "${CYAN}4) ${GREEN}Остановить ${NC}Zapret"
     echo -e "${CYAN}5) ${GREEN}Запустить ${NC}Zapret"
