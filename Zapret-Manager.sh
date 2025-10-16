@@ -327,6 +327,42 @@ done
 }
 
 # ==========================================
+# Включение Discord и звонков в TG и WA
+# ==========================================
+enable_discord_calls() {
+    clear
+    echo -e ""
+    echo -e "${MAGENTA}Включаем Discord, звонки TG и WA${NC}"
+    echo -e ""
+
+    # Проверка, установлен ли Zapret
+    if [ ! -f /etc/init.d/zapret ]; then
+        echo -e "${RED}Zapret не установлен!${NC}"
+        echo -e ""
+        read -p "Нажмите Enter для продолжения..." dummy
+        return
+    fi
+
+    # Создаём папку, если нет
+    mkdir -p /opt/zapret/init.d/openwrt/custom.d/
+
+    # Скачиваем и перезаписываем файл 50-script.sh
+    curl -s -L "https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-quic4all" \
+        -o /opt/zapret/init.d/openwrt/custom.d/50-script.sh
+
+    if [ -f /opt/zapret/init.d/openwrt/custom.d/50-script.sh ]; then
+        echo -e "${GREEN}🔴 ${CYAN}Звонки и Discord включены !${NC}"
+    else
+        echo -e "${RED}Ошибка при создании файла!${NC}"
+    fi
+
+    echo -e ""
+    read -p "Нажмите Enter для продолжения..." dummy
+}
+
+
+
+# ==========================================
 # Полное удаление Zapret
 # ==========================================
 uninstall_zapret() {
@@ -390,7 +426,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v2.2${NC}"
+	echo -e "                                  ${DGRAY}v2.3${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
@@ -423,7 +459,8 @@ show_menu() {
     echo -e "${CYAN}4) ${GREEN}Остановить ${NC}Zapret"
     echo -e "${CYAN}5) ${GREEN}Запустить ${NC}Zapret"
     echo -e "${CYAN}6) ${GREEN}Удалить ${NC}Zapret"
-    echo -e "${CYAN}7) ${GREEN}Выход (Enter)${NC}"
+	echo -e "${CYAN}7) ${GREEN}Включить ${NC}Discord${GREEN} и звонки в ${NC}TG${GREEN} и ${NC}WA"
+    echo -e "${CYAN}8) ${GREEN}Выход (Enter)${NC}"
     echo -e ""
     echo -ne "${YELLOW}Выберите пункт:${NC} "
     read choice
@@ -491,6 +528,7 @@ show_menu() {
             read -p "Нажмите Enter для продолжения..." dummy
             ;;
         6) uninstall_zapret ;;  # Полное удаление Zapret
+		7) enable_discord_calls ;;
         *) exit 0 ;;  # Выход по Enter или любой другой невалидной опции
     esac
 }
