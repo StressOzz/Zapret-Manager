@@ -444,7 +444,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v2.5${NC}"
+	echo -e "                                  ${DGRAY}v2.6${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
@@ -492,6 +492,7 @@ show_menu() {
             echo -e ""
             # Проверка скрипта восстановления и его запуск
             if [ -f /opt/zapret/restore-def-cfg.sh ]; then
+			 	rm -f /opt/zapret/init.d/openwrt/custom.d/50-script.sh 2>/dev/null
                 [ -f /etc/init.d/zapret ] && /etc/init.d/zapret stop >/dev/null 2>&1
                 chmod +x /opt/zapret/restore-def-cfg.sh
                 /opt/zapret/restore-def-cfg.sh
