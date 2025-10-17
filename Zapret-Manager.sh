@@ -76,10 +76,10 @@ install_update() {
     clear
     echo -e ""
     if [ "$INSTALLED_VER" != "не найдена" ]; then
-        echo -e "${MAGENTA}Начинаем установку ZAPRET${NC}"
+        echo -e "${MAGENTA}Устанваливаем ZAPRET${NC}"
         ACTION="update"
     else
-        echo -e "${MAGENTA}Начинаем установку ZAPRET${NC}"
+        echo -e "${MAGENTA}Устанваливаем ZAPRET${NC}"
         ACTION="install"
     fi
     echo -e ""
@@ -318,7 +318,7 @@ enable_discord_calls() {
 uninstall_zapret() {
     clear
     echo -e ""
-    echo -e "${MAGENTA}Начинаем удаление ZAPRET${NC}"
+    echo -e "${MAGENTA}Удаляем ZAPRET${NC}"
     echo -e ""
 
     [ -f /etc/init.d/zapret ] && {
@@ -420,7 +420,7 @@ show_menu() {
         3)
             clear
             echo -e ""
-            echo -e "${MAGENTA}Возврат к настройкам по умолчанию${NC}"
+            echo -e "${MAGENTA}Возвращаем настройки по умолчанию${NC}"
             echo -e ""
             # Проверка скрипта восстановления и его запуск
             if [ -f /opt/zapret/restore-def-cfg.sh ]; then
@@ -442,7 +442,7 @@ show_menu() {
         4)
             clear
             echo -e ""
-            echo -e "${MAGENTA}Остановка Zapret${NC}"
+            echo -e "${MAGENTA}Останавливаем Zapret${NC}"
             echo -e ""
             # Остановка службы через init.d и убийство процессов
             if [ -f /etc/init.d/zapret ]; then
@@ -464,7 +464,7 @@ show_menu() {
         5)
             clear
             echo -e ""
-            echo -e "${MAGENTA}Запуск Zapret${NC}"
+            echo -e "${MAGENTA}Запускаем Zapret${NC}"
             echo -e ""
             # Запуск службы через init.d
             if [ -f /etc/init.d/zapret ]; then
