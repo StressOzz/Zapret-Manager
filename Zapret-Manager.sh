@@ -374,7 +374,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v2.6${NC}"
+	echo -e "                                  ${DGRAY}v2.1${NC}"
 
     # Определяем актуальная/устарела
 if [ "$INSTALLED_VER" = "$LATEST_VER" ] && [ "$LATEST_VER" != "не найдена" ]; then
@@ -382,7 +382,7 @@ if [ "$INSTALLED_VER" = "$LATEST_VER" ] && [ "$LATEST_VER" != "не найден
     INSTALLED_DISPLAY="$INSTALLED_VER (актуальная)"
 elif [ "$LATEST_VER" = "не найдена" ]; then
     INST_COLOR=$CYAN
-    INSTALLED_DISPLAY="$INSTALLED_VER (нет данных на GitHub)"
+    INSTALLED_DISPLAY="$INSTALLED_VER"
 elif [ "$INSTALLED_VER" != "не найдена" ]; then
     INST_COLOR=$RED
     INSTALLED_DISPLAY="$INSTALLED_VER (устарела)"
@@ -399,6 +399,7 @@ fi
     echo -e "${YELLOW}Последняя версия на GitHub: ${CYAN}$LATEST_VER${NC}"
     echo -e ""
 	echo -e "${YELLOW}Архитектура устройства:${NC} $LOCAL_ARCH"
+	
     # Выводим статус службы zapret, если он известен
     [ -n "$ZAPRET_STATUS" ] && echo -e "\n${YELLOW}Статус Zapret: ${NC}$ZAPRET_STATUS"
 
@@ -417,7 +418,7 @@ fi
 # Если скрипт найден, выводим строку
 	if [ -n "$CURRENT_SCRIPT" ]; then
     echo ""
-    echo -e "${YELLOW}Установлен скрипт: ${NC}$CURRENT_SCRIPT"
+    echo -e "${NC}${YELLOW}Установлен скрипт: ${NC}$CURRENT_SCRIPT"
 	fi
 
     echo -e ""
