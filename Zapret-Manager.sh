@@ -174,7 +174,7 @@ install_update() {
 fix_default() {
     clear
     echo -e ""
-    echo -e "${MAGENTA}Редактируем дефолтную стратегию${NC}"
+    echo -e "${MAGENTA}Редактируем стратегию по умолчанию${NC}"
     echo -e ""
 
 # Проверка, установлен ли Zapret
