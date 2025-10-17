@@ -374,7 +374,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v3.5${NC}"
+	echo -e "                                  ${DGRAY}v2.5${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
@@ -397,6 +397,24 @@ show_menu() {
 	echo -e "${YELLOW}Архитектура устройства:${NC} $LOCAL_ARCH"
     # Выводим статус службы zapret, если он известен
     [ -n "$ZAPRET_STATUS" ] && echo -e "\n${YELLOW}Статус Zapret: ${NC}$ZAPRET_STATUS"
+
+	# Проверяем, установлен ли кастомный скрипт
+CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"
+CURRENT_SCRIPT=""
+if [ -f "$CUSTOM_DIR/50-script.sh" ]; then
+    FIRST_LINE=$(sed -n '1p' "$CUSTOM_DIR/50-script.sh")
+    if echo "$FIRST_LINE" | grep -q "QUIC"; then
+        CURRENT_SCRIPT="50-quic4all"
+    elif echo "$FIRST_LINE" | grep -q "stun"; then
+        CURRENT_SCRIPT="50-stun4all"
+    fi
+fi
+
+# Если скрипт найден, выводим строку
+	if [ -n "$CURRENT_SCRIPT" ]; then
+    echo ""
+    echo -e "${YELLOW}Установлен скрипт: ${NC}$CURRENT_SCRIPT"
+	fi
 
     echo -e ""
 
