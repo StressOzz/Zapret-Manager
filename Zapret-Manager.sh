@@ -256,12 +256,14 @@ enable_discord_calls() {
             ;;
         3|"")
             echo -e ""
-            echo -e "${GREEN}Выходим в главное меню${NC}"
+            echo -e "${GREEN}Выходим в главное меню...${NC}"
+			sleep 1
             return
             ;;
         *)
             echo -e ""
-            echo -e "${GREEN}Выходим в главное меню${NC}"
+            echo -e "${GREEN}Выходим в главное меню...${NC}"
+			sleep 1
             return
             ;;
     esac
@@ -270,6 +272,8 @@ enable_discord_calls() {
     if [ "$CURRENT_SCRIPT" = "$SELECTED" ]; then
         echo -e ""
         echo -e "${RED}Выбранный скрипт уже установлен !${NC}"
+		echo -e ""
+		read -p "Нажмите Enter для выхода в главное меню..." dummy
         return
     fi
 
@@ -370,7 +374,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v3.3${NC}"
+	echo -e "                                  ${DGRAY}v3.4${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
