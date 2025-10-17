@@ -239,8 +239,8 @@ enable_discord_calls() {
     # ==========================================
     # Предлагаем выбор скрипта для установки
     # ==========================================
-    echo -e "${CYAN}1) ${GREEN}Установить скрипт ${NC}50-quic4all"
-    echo -e "${CYAN}2) ${GREEN}Установить скрипт ${NC}50-stun4all"
+    echo -e "${CYAN}1) ${GREEN}Установить скрипт ${NC}50-stun4all"
+    echo -e "${CYAN}2) ${GREEN}Установить скрипт ${NC}50-quic4all"
     echo -e "${CYAN}3) ${GREEN}Выход в главное меню (Enter)${NC}"
 	echo -e ""
     echo -ne "${YELLOW}Выберите пункт:${NC} "
@@ -249,11 +249,11 @@ enable_discord_calls() {
     case "$choice" in
         1)
             SELECTED="50-quic4all"
-            URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-quic4all"
+            URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-stun4all"
             ;;
         2)
             SELECTED="50-stun4all"
-            URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-stun4all"
+            URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-quic4all"
             ;;
         3|"")
             # Выход в главное меню
@@ -404,7 +404,7 @@ show_menu() {
 
     # Вывод пунктов меню
     echo -e "${CYAN}1) ${GREEN}Установить последнюю версию${NC}"
-    echo -e "${CYAN}2) ${GREEN}Починить дефолтную стратегию${NC}"
+    echo -e "${CYAN}2) ${GREEN}Оптимизировать стратегию по умолчанию${NC}"
     echo -e "${CYAN}3) ${GREEN}Вернуть настройки по умолчанию${NC}"
     echo -e "${CYAN}4) ${GREEN}Остановить ${NC}Zapret"
     echo -e "${CYAN}5) ${GREEN}Запустить ${NC}Zapret"
