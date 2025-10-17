@@ -374,19 +374,23 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v2.5${NC}"
+	echo -e "                                  ${DGRAY}v2.6${NC}"
 
-    # Определяем цвет для отображения версии (актуальная/устарела)
-    [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
+    # Определяем актуальная/устарела
+if [ "$INSTALLED_VER" = "$LATEST_VER" ] && [ "$LATEST_VER" != "не найдена" ]; then
+    INST_COLOR=$GREEN
+    INSTALLED_DISPLAY="$INSTALLED_VER (актуальная)"
+elif [ "$LATEST_VER" = "не найдена" ]; then
+    INST_COLOR=$CYAN
+    INSTALLED_DISPLAY="$INSTALLED_VER (нет данных на GitHub)"
+elif [ "$INSTALLED_VER" != "не найдена" ]; then
+    INST_COLOR=$RED
+    INSTALLED_DISPLAY="$INSTALLED_VER (устарела)"
+else
+    INST_COLOR=$RED
+    INSTALLED_DISPLAY="$INSTALLED_VER"
+fi
 
-    # Настройка текста для меню в зависимости от версии
-    if [ "$INSTALLED_VER" = "$LATEST_VER" ]; then
-        INSTALLED_DISPLAY="$INSTALLED_VER (актуальная)"
-    elif [ "$INSTALLED_VER" != "не найдена" ]; then
-        INSTALLED_DISPLAY="$INSTALLED_VER (устарела)"
-    else
-        INSTALLED_DISPLAY="$INSTALLED_VER"
-    fi
 
     # Вывод информации о версиях и архитектуре
     echo -e ""
