@@ -70,7 +70,7 @@ get_versions() {
 }
 
 # ==========================================
-# Установка или обновление Zapret (обычная)
+# Установка Zapret
 # ==========================================
 install_update() {
     clear
@@ -99,14 +99,14 @@ install_update() {
     [ "$USED_ARCH" = "нет пакета для вашей архитектуры" ] && {
         echo -e "${RED}Нет доступного пакета для вашей архитектуры: ${NC}$LOCAL_ARCH"
         echo -e ""
-        read -p "Нажмите Enter для продолжения..." dummy
+        read -p "Нажмите Enter для выхода в главное меню..." dummy
         return
     }
 
     if [ "$INSTALLED_VER" = "$TARGET_VER" ]; then
         echo -e "${BLUE}🔴 ${GREEN}Эта версия уже установлена !${NC}"
         echo -e ""
-        read -p "Нажмите Enter для продолжения..." dummy
+        read -p "Нажмите Enter для выхода в главное меню..." dummy
         return
     fi
 
@@ -122,7 +122,11 @@ install_update() {
 
     mkdir -p "$WORKDIR" && cd "$WORKDIR" || return
     echo -e "${GREEN}🔴 ${CYAN}Скачиваем архив ${NC}$TARGET_FILE"
-    wget -q "$TARGET_URL" -O "$TARGET_FILE" || { echo -e "${RED}Не удалось скачать ${NC}$TARGET_FILE"; read -p "Нажмите Enter для продолжения..." dummy; return; }
+    wget -q "$TARGET_URL" -O "$TARGET_FILE" || {
+    echo -e "${RED}Не удалось скачать ${NC}$TARGET_FILE"
+    read -p "Нажмите Enter для выхода в главное меню..." dummy
+    return
+}
 
     command -v unzip >/dev/null 2>&1 || { 
         echo -e "${GREEN}🔴 ${CYAN}Устанавливаем${NC} unzip ${CYAN}для распаковки архива${NC}"
@@ -165,7 +169,7 @@ install_update() {
         echo -e "${BLUE}🔴 ${GREEN}Zapret успешно установлен !${NC}"
     fi
     echo -e ""
-    read -p "Нажмите Enter для продолжения..." dummy
+    read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 
 # ==========================================
@@ -181,7 +185,7 @@ fix_default() {
     if [ ! -f /etc/init.d/zapret ]; then
         echo -e "${RED}Zapret не установлен !${NC}"
         echo -e ""
-        read -p "Нажмите Enter для продолжения..." dummy
+        read -p "Нажмите Enter для выхода в главное меню..." dummy
         return
     fi
 
@@ -197,7 +201,7 @@ fix_default() {
 
     echo -e "${BLUE}🔴 ${GREEN}Стратегия по умолчанию отредактирована !${NC}"
     echo -e ""
-	read -p "Нажмите Enter для продолжения..." dummy
+	read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 
 # ==========================================
@@ -209,7 +213,7 @@ enable_discord_calls() {
     echo -e "${MAGENTA}Включаем Discord и звонки в TG и WA${NC}"
     echo -e ""
 
-    # Проверка, установлен ли Zapret
+    # Проверка установки zapret
     if [ ! -f /etc/init.d/zapret ]; then
         echo -e "${RED}Zapret не установлен !${NC}"
         echo -e ""
@@ -217,16 +221,15 @@ enable_discord_calls() {
         return
     fi
 
-    # ==========================================
-    # Проверяем текущий установленный кастомный скрипт
-    # ==========================================
     CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"
     CURRENT_SCRIPT="не установлен"
+
+    # Определяем текущий скрипт
     if [ -f "$CUSTOM_DIR/50-script.sh" ]; then
-        FIRST_LINE=$(sed -n '1p' "$CUSTOM_DIR/50-script.sh")  # первая строка
+        FIRST_LINE=$(sed -n '1p' "$CUSTOM_DIR/50-script.sh")
         if echo "$FIRST_LINE" | grep -q "QUIC"; then
             CURRENT_SCRIPT="50-quic4all"
-        elif echo "$FIRST_LINE" | grep -q "stun"; then
+        elif echo "$FIRST_LINE" | grep -qi "stun"; then
             CURRENT_SCRIPT="50-stun4all"
         else
             CURRENT_SCRIPT="неизвестный"
@@ -235,81 +238,72 @@ enable_discord_calls() {
 
     echo -e "${YELLOW}Текущий установленный скрипт:${NC} $CURRENT_SCRIPT"
     echo -e ""
-
-    # ==========================================
-    # Предлагаем выбор скрипта для установки
-    # ==========================================
     echo -e "${CYAN}1) ${GREEN}Установить скрипт ${NC}50-stun4all"
     echo -e "${CYAN}2) ${GREEN}Установить скрипт ${NC}50-quic4all"
     echo -e "${CYAN}3) ${GREEN}Выход в главное меню (Enter)${NC}"
-	echo -e ""
+    echo -e ""
     echo -ne "${YELLOW}Выберите пункт:${NC} "
-	read choice
+    read choice
 
     case "$choice" in
         1)
-            SELECTED="50-quic4all"
+            SELECTED="50-stun4all"
             URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-stun4all"
             ;;
         2)
-            SELECTED="50-stun4all"
+            SELECTED="50-quic4all"
             URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-quic4all"
             ;;
         3|"")
-            # Выход в главное меню
+            echo -e ""
+            echo -e "${GREEN}Выходим в главное меню${NC}"
             return
             ;;
         *)
-            # Любой другой ввод — просто выход
+            echo -e ""
+            echo -e "${GREEN}Выходим в главное меню${NC}"
             return
             ;;
     esac
 
-    # ==========================================
-    # Если выбранный уже установлен, не скачиваем
-    # ==========================================
+    # Проверка на уже установленный скрипт
     if [ "$CURRENT_SCRIPT" = "$SELECTED" ]; then
-	echo -e ""
+        echo -e ""
         echo -e "${RED}Выбранный скрипт уже установлен !${NC}"
-    else
-        mkdir -p "$CUSTOM_DIR"
-        if curl -fsSLo "$CUSTOM_DIR/50-script.sh" "$URL"; then
-		echo -e ""
-            echo -e "${GREEN}🔴 ${CYAN}Скрипт ${NC}$SELECTED${CYAN} успешно установлен !${NC}"
-		chmod +x /opt/zapret/sync_config.sh
-        /opt/zapret/sync_config.sh
-        /etc/init.d/zapret restart >/dev/null 2>&1
-			echo -e ""
-			echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены !${NC}"
-        else
-		echo -e ""
-            echo -e "${RED}Ошибка при скачивании скрипта !${NC}"
-			echo -e ""
-            read -p "Нажмите Enter для продолжения..." dummy
-            return
-        fi
+        return
     fi
 
-    # ==========================================
-    # Добавляем блок UDP, если его нет
-    # ==========================================
+    # Скачивание и установка нового
+    mkdir -p "$CUSTOM_DIR"
+    if curl -fsSLo "$CUSTOM_DIR/50-script.sh" "$URL"; then
+        echo -e ""
+        echo -e "${GREEN}🔴 ${CYAN}Скрипт ${NC}$SELECTED${CYAN} успешно установлен !${NC}"
+    else
+        echo -e ""
+        echo -e "${RED}Ошибка при скачивании скрипта !${NC}"
+        echo -e ""
+        read -p "Нажмите Enter для выхода в главное меню..." dummy
+        return
+    fi
+
+    # Добавляем блок UDP если нужно
     if ! grep -q -- "--filter-udp=50000-50099" /etc/config/zapret; then
         if ! grep -q '50000-50099' /etc/config/zapret; then
             sed -i "s/option NFQWS_PORTS_UDP '443'/option NFQWS_PORTS_UDP '443,50000-50099'/" /etc/config/zapret
         fi
-        sed -i "/^'$/d" /etc/config/zapret
         printf -- '--new\n--filter-udp=50000-50099\n--filter-l7=discord,stun\n--dpi-desync=fake\n' >> /etc/config/zapret
         echo "'" >> /etc/config/zapret
     fi
 
-    # ==========================================
-    # Синхронизация и перезапуск Zapret
-    # ==========================================
-        chmod +x /opt/zapret/sync_config.sh
-        /opt/zapret/sync_config.sh
-        /etc/init.d/zapret restart >/dev/null 2>&1
+    # Синхронизация и перезапуск zapret
+    chmod +x /opt/zapret/sync_config.sh
+    /opt/zapret/sync_config.sh
+    /etc/init.d/zapret restart >/dev/null 2>&1
+
     echo -e ""
-    read -p "Нажмите Enter для продолжения..." dummy
+    echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены !${NC}"
+    echo -e ""
+    read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 
 # ==========================================
@@ -358,7 +352,7 @@ uninstall_zapret() {
     echo -e ""
     echo -e "${BLUE}🔴 ${GREEN}Zapret полностью удалён !${NC}"
     echo -e ""
-    read -p "Нажмите Enter для продолжения..." dummy
+    read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 
 # ==========================================
@@ -376,7 +370,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v3.2${NC}"
+	echo -e "                                  ${DGRAY}v3.3${NC}"
 
     # Определяем цвет для отображения версии (актуальная/устарела)
     [ "$INSTALLED_VER" = "$LATEST_VER" ] && INST_COLOR=$GREEN || INST_COLOR=$RED
@@ -436,7 +430,7 @@ show_menu() {
                 echo -e "${RED}Zapret не установлен !${NC}"
             fi
             echo -e ""
-            read -p "Нажмите Enter для продолжения..." dummy
+            read -p "Нажмите Enter для выхода в главное меню..." dummy
             show_menu
             ;;          
         4)
@@ -459,7 +453,7 @@ show_menu() {
                 echo -e "${RED}Zapret не установлен !${NC}"
             fi
             echo -e ""
-            read -p "Нажмите Enter для продолжения..." dummy
+            read -p "Нажмите Enter для выхода в главное меню..." dummy
             ;;
         5)
             clear
@@ -476,7 +470,7 @@ show_menu() {
                 echo -e "${RED}Zapret не установлен !${NC}"
             fi
             echo -e ""
-            read -p "Нажмите Enter для продолжения..." dummy
+            read -p "Нажмите Enter для выхода в главное меню..." dummy
             ;;
         6) uninstall_zapret ;;  # Полное удаление Zapret
 		7) enable_discord_calls ;;
