@@ -193,7 +193,7 @@ local NO_PAUSE=$1
 # Проверка, установлен ли Zapret
     if [ ! -f /etc/init.d/zapret ]; then
         echo -e "${RED}Zapret не установлен !${NC}"
-        echo -e ""
+        [ "$NO_PAUSE" != "1" ] && echo -e ""
         [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
         return
     fi
@@ -327,6 +327,112 @@ enable_discord_calls() {
     [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 
+# ==========================================
+# Zapret под ключ
+# ==========================================
+zapret_key(){
+		clear
+    	get_versions
+
+    if [ "$LIMIT_REACHED" -eq 1 ]; then
+        echo -e ""
+        echo -e "${RED}Достигнут лимит GitHub API. Подождите 15 минут.${NC}"
+        echo -e ""
+        read -p "Нажмите Enter для выхода в главное меню..." dummy
+    else
+        uninstall_zapret "1"
+        install_update "1"
+        fix_default "1"
+        echo -e ""
+        echo -e "${MAGENTA}Включаем Discord и звонки в TG и WA${NC}"
+        echo -e ""
+        enable_discord_calls "1"
+
+        if [ -f /etc/init.d/zapret ]; then
+            echo -e "Zapret ${GREEN}установлен и настроен !${NC}"
+        else
+            echo -e "Zapret ${RED}не установлен !${NC}"
+        fi
+
+        echo -e ""
+        read -p "Нажмите Enter для выхода в главное меню..." dummy
+    fi
+}
+
+# ==========================================
+# Вернуть настройки по умолчанию
+# ==========================================
+comeback_def () {
+            clear
+            echo -e ""
+            echo -e "${MAGENTA}Возвращаем настройки по умолчанию${NC}"
+            echo -e ""
+            # Проверка скрипта восстановления и его запуск
+            if [ -f /opt/zapret/restore-def-cfg.sh ]; then
+				rm -f /opt/zapret/init.d/openwrt/custom.d/50-script.sh
+                [ -f /etc/init.d/zapret ] && /etc/init.d/zapret stop >/dev/null 2>&1
+                chmod +x /opt/zapret/restore-def-cfg.sh
+                /opt/zapret/restore-def-cfg.sh
+                chmod +x /opt/zapret/sync_config.sh
+                /opt/zapret/sync_config.sh
+                [ -f /etc/init.d/zapret ] && /etc/init.d/zapret restart >/dev/null 2>&1
+                echo -e "${BLUE}🔴 ${GREEN}Настройки возвращены, сервис перезапущен !${NC}"
+            else
+                echo -e "${RED}Zapret не установлен !${NC}"
+            fi
+            echo -e ""
+            read -p "Нажмите Enter для выхода в главное меню..." dummy
+            show_menu
+}
+# ==========================================
+# Остановить Zapret
+# ==========================================
+stop_zapret() {
+			clear
+            echo -e ""
+            echo -e "${MAGENTA}Останавливаем Zapret${NC}"
+            echo -e ""
+            # Остановка службы через init.d и убийство процессов
+            if [ -f /etc/init.d/zapret ]; then
+                echo -e "${GREEN}🔴 ${CYAN}Останавливаем сервис ${NC}Zapret"
+                /etc/init.d/zapret stop >/dev/null 2>&1
+                PIDS=$(pgrep -f /opt/zapret)
+                if [ -n "$PIDS" ]; then
+                    echo -e "${GREEN}🔴 ${CYAN}Убиваем все процессы ${NC}Zapret"
+                    for pid in $PIDS; do kill -9 "$pid" >/dev/null 2>&1; done
+                fi
+                echo -e ""
+                echo -e "${BLUE}🔴 ${GREEN}Zapret остановлен !${NC}"
+            else
+                echo -e "${RED}Zapret не установлен !${NC}"
+            fi
+            echo -e ""
+            read -p "Нажмите Enter для выхода в главное меню..." dummy
+}
+
+# ==========================================
+# Запустить Zapret
+# ==========================================
+start_zapret() {
+			clear
+            echo -e ""
+            echo -e "${MAGENTA}Запускаем Zapret${NC}"
+            echo -e ""
+            # Запуск службы через init.d
+            if [ -f /etc/init.d/zapret ]; then
+                echo -e "${GREEN}🔴 ${CYAN}Запускаем сервис ${NC}Zapret"
+                /etc/init.d/zapret start >/dev/null 2>&1
+		chmod +x /opt/zapret/sync_config.sh
+		/opt/zapret/sync_config.sh
+		/etc/init.d/zapret restart >/dev/null 2>&1
+                echo -e ""
+                echo -e "${BLUE}🔴 ${GREEN}Zapret запущен !${NC}"
+            else
+                echo -e "${RED}Zapret не установлен !${NC}"
+            fi
+            echo -e ""
+            read -p "Нажмите Enter для выхода в главное меню..." dummy
+}
 
 # ==========================================
 # Полное удаление Zapret
@@ -389,7 +495,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v2.7${NC}"
+	echo -e "                                  ${DGRAY}v2.8${NC}"
 
     # Определяем актуальная/устарела
 if [ "$LIMIT_REACHED" -eq 1 ]; then
@@ -451,91 +557,15 @@ fi
     echo -ne "${YELLOW}Выберите пункт:${NC} "
     read choice
     case "$choice" in
-        1) install_update ;;  # Установка/обновление до последней версии
+        1) install_update ;;
         2) fix_default ;;
-        3)
-            clear
-            echo -e ""
-            echo -e "${MAGENTA}Возвращаем настройки по умолчанию${NC}"
-            echo -e ""
-            # Проверка скрипта восстановления и его запуск
-            if [ -f /opt/zapret/restore-def-cfg.sh ]; then
-				rm -f /opt/zapret/init.d/openwrt/custom.d/50-script.sh
-                [ -f /etc/init.d/zapret ] && /etc/init.d/zapret stop >/dev/null 2>&1
-                chmod +x /opt/zapret/restore-def-cfg.sh
-                /opt/zapret/restore-def-cfg.sh
-                chmod +x /opt/zapret/sync_config.sh
-                /opt/zapret/sync_config.sh
-                [ -f /etc/init.d/zapret ] && /etc/init.d/zapret restart >/dev/null 2>&1
-                echo -e "${BLUE}🔴 ${GREEN}Настройки возвращены, сервис перезапущен !${NC}"
-            else
-                echo -e "${RED}Zapret не установлен !${NC}"
-            fi
-            echo -e ""
-            read -p "Нажмите Enter для выхода в главное меню..." dummy
-            show_menu
-            ;;          
-        4)
-            clear
-            echo -e ""
-            echo -e "${MAGENTA}Останавливаем Zapret${NC}"
-            echo -e ""
-            # Остановка службы через init.d и убийство процессов
-            if [ -f /etc/init.d/zapret ]; then
-                echo -e "${GREEN}🔴 ${CYAN}Останавливаем сервис ${NC}Zapret"
-                /etc/init.d/zapret stop >/dev/null 2>&1
-                PIDS=$(pgrep -f /opt/zapret)
-                if [ -n "$PIDS" ]; then
-                    echo -e "${GREEN}🔴 ${CYAN}Убиваем все процессы ${NC}Zapret"
-                    for pid in $PIDS; do kill -9 "$pid" >/dev/null 2>&1; done
-                fi
-                echo -e ""
-                echo -e "${BLUE}🔴 ${GREEN}Zapret остановлен !${NC}"
-            else
-                echo -e "${RED}Zapret не установлен !${NC}"
-            fi
-            echo -e ""
-            read -p "Нажмите Enter для выхода в главное меню..." dummy
-            ;;
-        5)
-            clear
-            echo -e ""
-            echo -e "${MAGENTA}Запускаем Zapret${NC}"
-            echo -e ""
-            # Запуск службы через init.d
-            if [ -f /etc/init.d/zapret ]; then
-                echo -e "${GREEN}🔴 ${CYAN}Запускаем сервис ${NC}Zapret"
-                /etc/init.d/zapret start >/dev/null 2>&1
-		chmod +x /opt/zapret/sync_config.sh
-		/opt/zapret/sync_config.sh
-		/etc/init.d/zapret restart >/dev/null 2>&1
-                echo -e ""
-                echo -e "${BLUE}🔴 ${GREEN}Zapret запущен !${NC}"
-            else
-                echo -e "${RED}Zapret не установлен !${NC}"
-            fi
-            echo -e ""
-            read -p "Нажмите Enter для выхода в главное меню..." dummy
-            ;;
-        6) uninstall_zapret ;;  # Полное удаление Zapret
+        3) comeback_def ;;
+        4) stop_zapret ;;
+        5) start_zapret ;;
+        6) uninstall_zapret ;;
 		7) enable_discord_calls ;;
-		8) 
-		uninstall_zapret "1"
-		install_update "1"
-		fix_default "1"
-		echo -e ""
-		echo -e "${MAGENTA}Включаем Discord и звонки в TG и WA${NC}"
-		echo -e ""
-		enable_discord_calls "1"
-		if [ -f /etc/init.d/zapret ]; then
-    	echo -e "Zapret ${GREEN}установлен и настроен !${NC}"
-		else
-    	echo -e "Zapret ${RED}не установлен !${NC}"
-		fi
-		echo -e ""
-        read -p "Нажмите Enter для выхода в главное меню..." dummy
-		;;
-        *) exit 0 ;;  # Выход по Enter или любой другой невалидной опции
+		8) zapret_key ;;
+        *) exit 0 ;;
     esac
 }
 
