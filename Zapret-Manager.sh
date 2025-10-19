@@ -29,7 +29,7 @@ get_versions() {
 
     command -v curl >/dev/null 2>&1 || {
         clear
-        echo -e ""
+        
         echo -e "${MAGENTA}ZAPRET on remittor Manager by StressOzz${NC}"
         echo -e ""
         echo -e "${GREEN}🔴 ${CYAN}Устанавливаем${NC} curl ${CYAN}для загрузки информации с ${NC}GitHub"
@@ -84,7 +84,6 @@ get_versions() {
 install_update() {
     local NO_PAUSE=$1
     [ "$NO_PAUSE" != "1" ] && clear
-    [ "$NO_PAUSE" != "1" ] && echo -e ""
 
     echo -e "${MAGENTA}Устанавливаем ZAPRET${NC}"
     echo -e ""
@@ -185,7 +184,7 @@ install_update() {
 fix_default() {
 local NO_PAUSE=$1
     [ "$NO_PAUSE" != "1" ] && clear
-    [ "$NO_PAUSE" != "1" ] && echo -e ""
+	
     echo -e "${MAGENTA}Редактируем стратегию по умолчанию${NC}"
     echo -e ""
 
@@ -221,7 +220,7 @@ local NO_PAUSE=$1
 enable_discord_calls() {
     local NO_PAUSE=$1
     [ "$NO_PAUSE" != "1" ] && clear
-    [ "$NO_PAUSE" != "1" ] && echo -e ""
+
     [ "$NO_PAUSE" != "1" ] && echo -e "${MAGENTA}Меню настройки Discord и звонков в TG/WA${NC}"
     [ "$NO_PAUSE" != "1" ] && echo -e ""
 
@@ -331,8 +330,9 @@ enable_discord_calls() {
 # ==========================================
 zapret_key(){
 	clear
-	echo -e ""
+
     echo -e "${MAGENTA}Удаление, установка и настройка Zapret${NC}"
+	echo -e ""
     get_versions
 
     if [ "$LIMIT_REACHED" -eq 1 ]; then
@@ -365,7 +365,7 @@ zapret_key(){
 # ==========================================
 comeback_def () {
             clear
-            echo -e ""
+
             echo -e "${MAGENTA}Возвращаем настройки по умолчанию${NC}"
             echo -e ""
             # Проверка скрипта восстановления и его запуск
@@ -390,7 +390,7 @@ comeback_def () {
 # ==========================================
 stop_zapret() {
 			clear
-            echo -e ""
+
             echo -e "${MAGENTA}Останавливаем Zapret${NC}"
             echo -e ""
             # Остановка службы через init.d и убийство процессов
@@ -416,7 +416,7 @@ stop_zapret() {
 # ==========================================
 start_zapret() {
 			clear
-            echo -e ""
+
             echo -e "${MAGENTA}Запускаем Zapret${NC}"
             echo -e ""
             # Запуск службы через init.d
@@ -441,7 +441,7 @@ start_zapret() {
 uninstall_zapret() {
 local NO_PAUSE=$1
 	[ "$NO_PAUSE" != "1" ] && clear
-    echo -e ""
+
     echo -e "${MAGENTA}Удаляем ZAPRET${NC}"
     echo -e ""
 
@@ -492,11 +492,11 @@ check_flow_offloading() {
     local FLOW_STATE=$(uci get firewall.@defaults[0].flow_offloading 2>/dev/null)
     local HW_FLOW_STATE=$(uci get firewall.@defaults[0].flow_offloading_hw 2>/dev/null)
     if [ "$FLOW_STATE" = "1" ] || [ "$HW_FLOW_STATE" = "1" ]; then
-FLOW_WARNING="${RED}=======================================================\n\
-ВНИМАНИЕ: включено ускорение пакетов (Flow Offloading)!\n\
-Для корректной работы Zapret, рекомендуется отключить:\n\
-LuCI → Network → Firewall → Flow offloading type → None\n\
-=======================================================${NC}"
+FLOW_WARNING="${RED}===============!!! ${MAGENTA}ВНИМАНИЕ${RED} !!!===============\n\
+Включено ускорение пакетов (Flow Offloading) !\n\
+  Для работы Zapret рекомендуется отключить !\n\
+${GREEN}          Нажмите ${NC}9 ${GREEN}для отключения !\n\
+${RED}==============================================${NC}"
     else
         FLOW_WARNING=""
     fi
@@ -507,11 +507,11 @@ LuCI → Network → Firewall → Flow offloading type → None\n\
 # ==========================================
 show_menu() {
     clear
-	echo -e ""
+
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v3.0${NC}"
+	echo -e "                                  ${DGRAY}v3.1${NC}"
 
 	get_versions
 	check_flow_offloading
@@ -572,6 +572,9 @@ fi
     echo -e "${CYAN}6) ${GREEN}Удалить ${NC}Zapret"
 	echo -e "${CYAN}7) ${GREEN}Меню настройки ${NC}Discord${GREEN} и звонков в ${NC}TG${GREEN}/${NC}WA"
 	echo -e "${CYAN}8) ${GREEN}Удалить / Установить / Настроить${NC} Zapret"
+if [ -n "$FLOW_WARNING" ]; then
+    echo -e "${CYAN}9) ${RED}Отключить Flow Offloading${NC}"
+fi
     echo -e "${CYAN}0) ${GREEN}Выход (Enter)${NC}"
     echo -e ""
     echo -ne "${YELLOW}Выберите пункт:${NC} "
@@ -585,6 +588,18 @@ fi
         6) uninstall_zapret ;;
 		7) enable_discord_calls ;;
 		8) zapret_key ;;
+		9)
+		if [ -n "$FLOW_WARNING" ]; then
+            uci set firewall.@defaults[0].flow_offloading='0'
+            uci set firewall.@defaults[0].flow_offloading_hw='0'
+            uci commit firewall
+            /etc/init.d/firewall restart
+			echo -e ""
+            echo -e "${BLUE}🔴 ${GREEN}Flow Offloading отключён !${NC}"
+			echo -e ""
+            sleep 3
+        fi
+		;;
         *) exit 0 ;;
     esac
 }
