@@ -17,7 +17,6 @@ DGRAY="\033[38;5;236m"
 
 # Рабочая директория для скачивания и распаковки
 WORKDIR="/tmp/zapret-update"
-
 # ==========================================
 # Функция получения информации о версиях, архитектуре и статусе
 # ==========================================
@@ -487,17 +486,36 @@ local NO_PAUSE=$1
 }
 
 # ==========================================
+# Проверка Flow Offloading (программного и аппаратного)
+# ==========================================
+check_flow_offloading() {
+    local FLOW_STATE=$(uci get firewall.@defaults[0].flow_offloading 2>/dev/null)
+    local HW_FLOW_STATE=$(uci get firewall.@defaults[0].flow_offloading_hw 2>/dev/null)
+    if [ "$FLOW_STATE" = "1" ] || [ "$HW_FLOW_STATE" = "1" ]; then
+FLOW_WARNING="${RED}=======================================================\n\
+ВНИМАНИЕ: включено ускорение пакетов (Flow Offloading)!\n\
+Для корректной работы Zapret, рекомендуется отключить:\n\
+LuCI → Network → Firewall → Flow offloading type → None\n\
+=======================================================${NC}"
+    else
+        FLOW_WARNING=""
+    fi
+}
+
+# ==========================================
 # Главное меню
 # ==========================================
 show_menu() {
-    get_versions
-    
     clear
 	echo -e ""
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v2.9${NC}"
+	echo -e "                                  ${DGRAY}v3.0${NC}"
+
+	get_versions
+	check_flow_offloading
+[ -n "$FLOW_WARNING" ] && echo -e "$FLOW_WARNING"
 
     # Определяем актуальная/устарела
 if [ "$LIMIT_REACHED" -eq 1 ]; then
