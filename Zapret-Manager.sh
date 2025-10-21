@@ -150,7 +150,7 @@ install_update() {
         /etc/init.d/zapret restart >/dev/null 2>&1
     fi
 
-    echo -e "\n${BLUE}🔴 ${GREEN}Zapret успешно установлен !${NC}\n"
+    echo -e "\n${BLUE}🔴 ${GREEN}Zapret установлен !${NC}\n"
     [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 # ==========================================
@@ -417,7 +417,7 @@ uninstall_zapret() {
     local NO_PAUSE=$1
     [ "$NO_PAUSE" != "1" ] && clear
 
-    echo -e "${MAGENTA}Удаляем ZAPRET полностью${NC}"
+    echo -e "${MAGENTA}Удаляем ZAPRET${NC}"
     echo -e ""
 
     # Остановка службы
@@ -467,7 +467,7 @@ echo -e "${GREEN}🔴 ${CYAN}Удаляем ${NC}zapret${CYAN} из ${NC}init.d"
     [ -f /etc/init.d/zapret ] && rm -f /etc/init.d/zapret
 
     echo -e ""
-    echo -e "${BLUE}🔴 ${GREEN}Zapret полностью удалён !${NC}"
+    echo -e "${BLUE}🔴 ${GREEN}Zapret удалён !${NC}"
     echo -e ""
     [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
