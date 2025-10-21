@@ -95,6 +95,9 @@ install_update() {
         return
     fi
 
+        echo -e "${GREEN}🔴 ${CYAN}Обновляем список пакетов${NC}"
+        opkg update >/dev/null 2>&1
+
     # Остановка сервиса и старых процессов
     if [ -f /etc/init.d/zapret ]; then
         echo -e "${GREEN}🔴 ${CYAN}Останавливаем сервис ${NC}zapret"
@@ -118,7 +121,6 @@ install_update() {
 
     command -v unzip >/dev/null 2>&1 || {
         echo -e "${GREEN}🔴 ${CYAN}Устанавливаем${NC} unzip ${CYAN}для распаковки архива${NC}"
-        opkg update >/dev/null 2>&1
         opkg install unzip >/dev/null 2>&1
     }
 
@@ -412,45 +414,57 @@ start_zapret() {
 # Полное удаление Zapret
 # ==========================================
 uninstall_zapret() {
-local NO_PAUSE=$1
-	[ "$NO_PAUSE" != "1" ] && clear
+    local NO_PAUSE=$1
+    [ "$NO_PAUSE" != "1" ] && clear
 
-    echo -e "${MAGENTA}Удаляем ZAPRET${NC}"
+    echo -e "${MAGENTA}Удаляем ZAPRET полностью${NC}"
     echo -e ""
 
-    [ -f /etc/init.d/zapret ] && {
-        echo -e "${GREEN}🔴 ${CYAN}Останавливаем сервис ${NC}zapret"
-        /etc/init.d/zapret stop >/dev/null 2>&1
-    }
+    # Остановка службы
+echo -e "${GREEN}🔴 ${CYAN}Останавливаем сервис ${NC}zapret"
+    [ -f /etc/init.d/zapret ] && /etc/init.d/zapret stop >/dev/null 2>&1
 
+    # Убиваем все процессы
+echo -e "${GREEN}🔴 ${CYAN}Убиваем все процессы ${NC}zapret"
     PIDS=$(pgrep -f /opt/zapret)
-    if [ -n "$PIDS" ]; then
-        echo -e "${GREEN}🔴 ${CYAN}Убиваем все процессы ${NC}zapret"
-        for pid in $PIDS; do kill -9 "$pid" >/dev/null 2>&1; done
-    fi
+    [ -n "$PIDS" ] && for pid in $PIDS; do kill -9 "$pid" >/dev/null 2>&1; done
 
-    echo -e "${GREEN}🔴 ${CYAN}Удаляем пакеты${NC} zapret ${CYAN}и ${NC}luci-app-zapret"
-    opkg remove --force-removal-of-dependent-packages zapret luci-app-zapret >/dev/null 2>&1
+    # Удаляем пакеты с автозависимостями
+ echo -e "${GREEN}🔴 ${CYAN}Удаляем пакеты${NC} zapret ${CYAN}и ${NC}luci-app-zapret"
+    opkg --force-removal-of-dependent-packages --autoremove remove zapret luci-app-zapret >/dev/null 2>&1
+ 
+    # Удаляем конфиги, рабочие папки и кастомные скрипты
+echo -e "${GREEN}🔴 ${CYAN}Удаляем конфигурации и рабочие папки${NC}"
+    for path in /opt/zapret /etc/config/zapret /etc/firewall.zapret; do
+        [ -e "$path" ] && rm -rf "$path"
+    done
 
-    echo -e "${GREEN}🔴 ${CYAN}Удаляем конфигурации и рабочие папки${NC}"
-    for path in /opt/zapret /etc/config/zapret /etc/firewall.zapret; do [ -e "$path" ] && rm -rf "$path"; done
-
+    # Очищаем crontab от любых записей Zapret
+echo -e "${GREEN}🔴 ${CYAN}Очищаем${NC} crontab ${CYAN}задания${NC}"
     if crontab -l >/dev/null 2>&1; then
         crontab -l | grep -v -i "zapret" | crontab -
-        echo -e "${GREEN}🔴 ${CYAN}Очищаем${NC} crontab ${CYAN}задания${NC}"
     fi
 
-    echo -e "${GREEN}🔴 ${CYAN}Удаляем${NC} ipset"
-    for set in $(ipset list -n 2>/dev/null | grep -i zapret); do ipset destroy "$set" >/dev/null 2>&1; done
+    # Удаляем ipset
+echo -e "${GREEN}🔴 ${CYAN}Удаляем${NC} ipset"
+    for set in $(ipset list -n 2>/dev/null | grep -i zapret); do
+        ipset destroy "$set" >/dev/null 2>&1
+    done
 
-    echo -e "${GREEN}🔴 ${CYAN}Удаляем временные файлы${NC}"
-    rm -f /tmp/*zapret* /var/run/*zapret* 2>/dev/null
-
-    echo -e "${GREEN}🔴 ${CYAN}Удаляем цепочки и таблицы${NC} nftables"
+    # Удаляем все цепочки и таблицы nftables, связанные с Zapret
+echo -e "${GREEN}🔴 ${CYAN}Удаляем цепочки и таблицы${NC} nftables"
     for table in $(nft list tables 2>/dev/null | awk '{print $2}'); do
         chains=$(nft list table "$table" 2>/dev/null | grep zapret)
         [ -n "$chains" ] && nft delete table "$table" >/dev/null 2>&1
     done
+
+    # Удаляем все временные файлы и остатки
+echo -e "${GREEN}🔴 ${CYAN}Удаляем временные файлы${NC}"
+    rm -f /tmp/*zapret* /var/run/*zapret* /tmp/*.ipk /tmp/*.zip 2>/dev/null
+
+    # Проверяем и удаляем init.d скрипт, если остался
+echo -e "${GREEN}🔴 ${CYAN}Удаляем ${NC}zapret${CYAN} из ${NC}init.d"
+    [ -f /etc/init.d/zapret ] && rm -f /etc/init.d/zapret
 
     echo -e ""
     echo -e "${BLUE}🔴 ${GREEN}Zapret полностью удалён !${NC}"
