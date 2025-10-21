@@ -30,15 +30,12 @@ get_versions() {
 
     command -v curl >/dev/null 2>&1 || {
         clear
-        
-        echo -e "${MAGENTA}ZAPRET on remittor Manager by StressOzz${NC}"
-        echo -e ""
+        echo -e "${MAGENTA}ZAPRET on remittor Manager by StressOzz${NC}\n"
         echo -e "${GREEN}🔴 ${CYAN}Устанавливаем${NC} curl ${CYAN}для загрузки информации с ${NC}GitHub"
         opkg update >/dev/null 2>&1
         opkg install curl >/dev/null 2>&1
     }
 
-    # ===== Проверка лимита GitHub API =====
     LIMIT_REACHED=0
     LIMIT_CHECK=$(curl -s "https://api.github.com/repos/remittor/zapret-openwrt/releases/latest")
     if echo "$LIMIT_CHECK" | grep -q 'API rate limit exceeded'; then
@@ -47,8 +44,7 @@ get_versions() {
     else
         LATEST_URL=$(echo "$LIMIT_CHECK" | grep browser_download_url | grep "$LOCAL_ARCH.zip" | cut -d '"' -f 4)
         if [ -n "$LATEST_URL" ] && echo "$LATEST_URL" | grep -q '\.zip$'; then
-            LATEST_FILE=$(basename "$LATEST_URL")
-            LATEST_VER=$(echo "$LATEST_FILE" | sed -E 's/.*zapret_v([0-9]+\.[0-9]+)_.*\.zip/\1/')
+            LATEST_VER=$(basename "$LATEST_URL" | sed -E 's/.*zapret_v([0-9]+\.[0-9]+)_.*\.zip/\1/')
             USED_ARCH="$LOCAL_ARCH"
         else
             LATEST_VER="не найдена"
@@ -56,7 +52,6 @@ get_versions() {
         fi
     fi
 
-    # Статус службы
     if [ -f /etc/init.d/zapret ]; then
         if /etc/init.d/zapret status 2>/dev/null | grep -qi "running"; then
             ZAPRET_STATUS="${GREEN}запущен${NC}"
@@ -75,74 +70,65 @@ install_update() {
     local NO_PAUSE=$1
     [ "$NO_PAUSE" != "1" ] && clear
 
-    echo -e "${MAGENTA}Устанавливаем ZAPRET${NC}"
-    echo -e ""
+    echo -e "${MAGENTA}Устанавливаем ZAPRET${NC}\n"
 
     get_versions
 
     # Проверка лимита API
     if [ "$LIMIT_REACHED" -eq 1 ]; then
-        echo -e "$LATEST_VER"  # Покажет предупреждение
-        echo -e ""
+        echo -e "$LATEST_VER\n"
         [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
         return
     fi
 
-    # Всегда последняя версия
-    TARGET_URL="$LATEST_URL"
-    TARGET_FILE="$LATEST_FILE"
-    TARGET_VER="$LATEST_VER"
-
-    [ "$USED_ARCH" = "нет пакета для вашей архитектуры" ] && {
-        echo -e "${RED}Нет доступного пакета для вашей архитектуры: ${NC}$LOCAL_ARCH"
-        echo -e ""
-        read -p "Нажмите Enter для выхода в главное меню..." dummy
-        return
-    }
-
-    if [ "$INSTALLED_VER" = "$TARGET_VER" ]; then
-        echo -e "${BLUE}🔴 ${GREEN}Последняя версия уже установлена !${NC}"
-        echo -e ""
+    # Проверка доступности пакета
+    if [ "$USED_ARCH" = "нет пакета для вашей архитектуры" ]; then
+        echo -e "${RED}Нет доступного пакета для вашей архитектуры: ${NC}$LOCAL_ARCH\n"
         [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
         return
     fi
 
+    # Проверка уже установленной версии
+    if [ "$INSTALLED_VER" = "$LATEST_VER" ]; then
+        echo -e "${BLUE}🔴 ${GREEN}Последняя версия уже установлена !${NC}\n"
+        [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
+        return
+    fi
+
+    # Остановка сервиса и старых процессов
     if [ -f /etc/init.d/zapret ]; then
         echo -e "${GREEN}🔴 ${CYAN}Останавливаем сервис ${NC}zapret"
         /etc/init.d/zapret stop >/dev/null 2>&1
         PIDS=$(pgrep -f /opt/zapret)
-        if [ -n "$PIDS" ]; then
-            echo -e "${GREEN}🔴 ${CYAN}Убиваем все процессы ${NC}zapret"
-            for pid in $PIDS; do kill -9 "$pid" >/dev/null 2>&1; done
-        fi
+        [ -n "$PIDS" ] && for pid in $PIDS; do kill -9 "$pid" >/dev/null 2>&1; done
     fi
 
+    # Подготовка временной директории
     mkdir -p "$WORKDIR"
     rm -f "$WORKDIR"/* 2>/dev/null
     cd "$WORKDIR" || return
 
-    echo -e "${GREEN}🔴 ${CYAN}Скачиваем архив ${NC}$TARGET_FILE"
-    wget -q "$TARGET_URL" -O "$TARGET_FILE" || {
-        echo -e "${RED}Не удалось скачать ${NC}$TARGET_FILE"
+    FILE_NAME=$(basename "$LATEST_URL")
+    echo -e "${GREEN}🔴 ${CYAN}Скачиваем архив ${NC}$FILE_NAME"
+    wget -q "$LATEST_URL" -O "$FILE_NAME" || {
+        echo -e "${RED}Не удалось скачать ${NC}$FILE_NAME"
         [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
         return
     }
 
-    command -v unzip >/dev/null 2>&1 || { 
+    command -v unzip >/dev/null 2>&1 || {
         echo -e "${GREEN}🔴 ${CYAN}Устанавливаем${NC} unzip ${CYAN}для распаковки архива${NC}"
         opkg update >/dev/null 2>&1
         opkg install unzip >/dev/null 2>&1
     }
 
     echo -e "${GREEN}🔴 ${CYAN}Распаковываем архив${NC}"
-    unzip -o "$TARGET_FILE" >/dev/null
+    unzip -o "$FILE_NAME" >/dev/null
 
     PIDS=$(pgrep -f /opt/zapret)
-    if [ -n "$PIDS" ]; then
-        echo -e "${GREEN}🔴 ${CYAN}Убиваем все процессы ${NC}zapret"
-        for pid in $PIDS; do kill -9 "$pid" >/dev/null 2>&1; done
-    fi
+    [ -n "$PIDS" ] && for pid in $PIDS; do kill -9 "$pid" >/dev/null 2>&1; done
 
+    # Установка пакетов
     for PKG in zapret_*.ipk luci-app-zapret_*.ipk; do
         [ -f "$PKG" ] && {
             echo -e "${GREEN}🔴 ${CYAN}Устанавливаем пакет ${NC}$PKG"
@@ -150,24 +136,21 @@ install_update() {
         }
     done
 
+    # Очистка
     echo -e "${GREEN}🔴 ${CYAN}Удаляем временные файлы и пакеты${NC}"
     cd /
-    rm -rf "$WORKDIR"
-    rm -f /tmp/*.ipk /tmp/*.zip /tmp/*zapret* 2>/dev/null
+    rm -rf "$WORKDIR" /tmp/*.ipk /tmp/*.zip /tmp/*zapret* 2>/dev/null
 
-    [ -f /etc/init.d/zapret ] && {
-        echo -e "${GREEN}🔴 ${CYAN}Перезапуск службы ${NC}zapret"
+    # Перезапуск службы
+    if [ -f /etc/init.d/zapret ]; then
         chmod +x /opt/zapret/sync_config.sh
         /opt/zapret/sync_config.sh
         /etc/init.d/zapret restart >/dev/null 2>&1
-    }
+    fi
 
-    echo -e ""
-    echo -e "${BLUE}🔴 ${GREEN}Zapret успешно установлен !${NC}"
-    echo -e ""
+    echo -e "\n${BLUE}🔴 ${GREEN}Zapret успешно установлен !${NC}\n"
     [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
-
 # ==========================================
 # Чиним дефолтную стратегию
 # ==========================================
@@ -501,10 +484,10 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v3.1${NC}"
+	echo -e "                                  ${DGRAY}v3.2${NC}"
 
-	get_versions
-	
+    get_versions
+
 	check_flow_offloading
 [ -n "$FLOW_WARNING" ] && echo -e "$FLOW_WARNING"
 
