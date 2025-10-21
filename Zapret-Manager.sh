@@ -489,25 +489,19 @@ ${RED}==============================================${NC}"
         FLOW_WARNING=""
     fi
 }
-# ==========================================
-# Банер
-# ==========================================
-baner() {
-	clear
-	echo -e "╔════════════════════════════════════╗"
-	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
-	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v3.2${NC}"
-}
-
 
 # ==========================================
 # Главное меню
 # ==========================================
 show_menu() {
-baner
-    get_versions
-baner	
+
+	get_versions
+	
+	echo -e "╔════════════════════════════════════╗"
+	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
+	echo -e "╚════════════════════════════════════╝"
+	echo -e "                                  ${DGRAY}v3.3${NC}"
+
 	check_flow_offloading
 [ -n "$FLOW_WARNING" ] && echo -e "$FLOW_WARNING"
 
