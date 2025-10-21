@@ -17,6 +17,7 @@ DGRAY="\033[38;5;236m"
 
 # Рабочая директория для скачивания и распаковки
 WORKDIR="/tmp/zapret-update"
+
 # ==========================================
 # Функция получения информации о версиях, архитектуре и статусе
 # ==========================================
@@ -55,16 +56,6 @@ get_versions() {
         fi
     fi
 
-    # Предыдущая версия
-    PREV_URL=$(curl -s https://api.github.com/repos/remittor/zapret-openwrt/releases \
-        | grep browser_download_url | grep "$LOCAL_ARCH.zip" | sed -n '2p' | cut -d '"' -f 4)
-    if [ -n "$PREV_URL" ] && echo "$PREV_URL" | grep -q '\.zip$'; then
-        PREV_FILE=$(basename "$PREV_URL")
-        PREV_VER=$(echo "$PREV_FILE" | sed -E 's/.*zapret_v([0-9]+\.[0-9]+)_.*\.zip/\1/')
-    else
-        PREV_VER="не найдена"
-    fi
-
     # Статус службы
     if [ -f /etc/init.d/zapret ]; then
         if /etc/init.d/zapret status 2>/dev/null | grep -qi "running"; then
@@ -76,7 +67,6 @@ get_versions() {
         ZAPRET_STATUS=""
     fi
 }
-
 
 # ==========================================
 # Установка Zapret
@@ -514,6 +504,7 @@ show_menu() {
 	echo -e "                                  ${DGRAY}v3.1${NC}"
 
 	get_versions
+	
 	check_flow_offloading
 [ -n "$FLOW_WARNING" ] && echo -e "$FLOW_WARNING"
 
