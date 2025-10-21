@@ -34,7 +34,6 @@ get_versions() {
         echo -e "${GREEN}🔴 ${CYAN}Устанавливаем${NC} curl ${CYAN}для загрузки информации с ${NC}GitHub"
         opkg update >/dev/null 2>&1
         opkg install curl >/dev/null 2>&1
-		clear
     }
 
     LIMIT_REACHED=0
@@ -496,6 +495,8 @@ ${RED}==============================================${NC}"
 show_menu() {
 
 	get_versions
+	
+	clear
 	
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
