@@ -182,22 +182,18 @@ sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" /etc/config/zapret
 cat <<'EOF' >> /etc/config/zapret
 	option NFQWS_OPT '
 --filter-tcp=443
---hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
---dpi-desync=multidisorder
---dpi-desync-split-pos=1,midsld
---dpi-desync-repeats=4
---dpi-desync-fooling=badsum
---dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
---new
---filter-tcp=443
 --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
---dpi-desync=fake
---dpi-desync-fake-tls-mod=none
---dpi-desync-repeats=6
+--dpi-desync=fake,multidisorder
+--dpi-desync-split-seqovl=681
+--dpi-desync-split-pos=1
 --dpi-desync-fooling=badseq
---dpi-desync-badseq-increment=2
+--dpi-desync-badseq-increment=10000000
+--dpi-desync-repeats=2
+--dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/quic_initial_www_google_com.bin
+--dpi-desync-fake-tls-mod=rnd,dupsid,sni=fonts.google.com
 --new
 --filter-udp=443
+--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
 --dpi-desync=fake
 --dpi-desync-repeats=4
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
