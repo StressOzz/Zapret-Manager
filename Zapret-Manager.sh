@@ -138,17 +138,21 @@ install_update() {
         }
     done
 
+[ "$NO_PAUSE" = "1" ] && { /etc/init.d/zapret stop >/dev/null 2>&1 || pkill -9 -f /opt/zapret >/dev/null 2>&1; }
+
     # Очистка
     echo -e "${GREEN}🔴 ${CYAN}Удаляем временные файлы и пакеты${NC}"
     cd /
     rm -rf "$WORKDIR" /tmp/*.ipk /tmp/*.zip /tmp/*zapret* 2>/dev/null
 
     # Перезапуск службы
+[ "$NO_PAUSE" != "1" ] && {
     if [ -f /etc/init.d/zapret ]; then
         chmod +x /opt/zapret/sync_config.sh
         /opt/zapret/sync_config.sh
         /etc/init.d/zapret restart >/dev/null 2>&1
     fi
+}
 
     echo -e "\n${BLUE}🔴 ${GREEN}Zapret установлен !${NC}\n"
     [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
@@ -208,9 +212,9 @@ nalog.ru
 EOF
 
 # Применяем конфиг
-    chmod +x /opt/zapret/sync_config.sh
-    /opt/zapret/sync_config.sh
-    /etc/init.d/zapret restart >/dev/null 2>&1
+    [ "$NO_PAUSE" != "1" ] && chmod +x /opt/zapret/sync_config.sh
+    [ "$NO_PAUSE" != "1" ] && /opt/zapret/sync_config.sh
+    [ "$NO_PAUSE" != "1" ] && /etc/init.d/zapret restart >/dev/null 2>&1
 
     echo -e "${BLUE}🔴 ${GREEN}Стратегия по умолчанию отредактирована!${NC}"
     [ "$NO_PAUSE" != "1" ] && echo -e ""
@@ -529,7 +533,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v3.3${NC}"
+	echo -e "                                  ${DGRAY}v3.4${NC}"
 
 	check_flow_offloading
 [ -n "$FLOW_WARNING" ] && echo -e "$FLOW_WARNING"
