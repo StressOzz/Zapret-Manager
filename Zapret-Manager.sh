@@ -159,34 +159,62 @@ install_update() {
 fix_default() {
 local NO_PAUSE=$1
     [ "$NO_PAUSE" != "1" ] && clear
-	
+
     echo -e "${MAGENTA}Редактируем стратегию по умолчанию${NC}"
     echo -e ""
 
 # Проверка, установлен ли Zapret
     if [ ! -f /etc/init.d/zapret ]; then
-        echo -e "${RED}Zapret не установлен !${NC}"
+        echo -e "${RED}Zapret не установлен!${NC}"
         [ "$NO_PAUSE" != "1" ] && echo -e ""
         [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
         return
     fi
 
-# Убираем все вхождения fake,
-	sed -i 's/fake,//g' /etc/config/zapret
+# Удаляем строку и всё, что идёт ниже строки с option NFQWS_OPT '
+sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" /etc/config/zapret
 
-# Удаляем конкретный блок строк
-	sed -i '/--filter-tcp=80 <HOSTLIST>/,/--new/d' /etc/config/zapret
-	
-# Все --dpi-desync-repeats=11 заменены на 6
-	sed -i 's/--dpi-desync-repeats=11/--dpi-desync-repeats=6/g' /etc/config/zapret
+# Вставляем новый блок сразу после строки option NFQWS_OPT '
+cat <<'EOF' >> /etc/config/zapret
+	option NFQWS_OPT '
+--filter-tcp=443
+--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
+--dpi-desync=multidisorder
+--dpi-desync-split-pos=1,midsld
+--dpi-desync-repeats=4
+--dpi-desync-fooling=badsum
+--dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
+--new
+--filter-tcp=443
+--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
+--dpi-desync=fake
+--dpi-desync-fake-tls-mod=none
+--dpi-desync-repeats=6
+--dpi-desync-fooling=badseq
+--dpi-desync-badseq-increment=2
+--new
+--filter-udp=443
+--dpi-desync=fake
+--dpi-desync-repeats=4
+--dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
+'
+EOF
 
-	chmod +x /opt/zapret/sync_config.sh
-	/opt/zapret/sync_config.sh
-	/etc/init.d/zapret restart >/dev/null 2>&1
+# Перезаписываем файл исключений
+    mkdir -p /opt/zapret/ipset
+    cat <<EOF >/opt/zapret/ipset/zapret-hosts-user-exclude.txt
+gosuslugi.ru
+nalog.ru
+EOF
 
-    echo -e "${BLUE}🔴 ${GREEN}Стратегия по умолчанию отредактирована !${NC}"
-    [ "$NO_PAUSE" != "1" ] &&echo -e ""
-	[ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
+# Применяем конфиг
+    chmod +x /opt/zapret/sync_config.sh
+    /opt/zapret/sync_config.sh
+    /etc/init.d/zapret restart >/dev/null 2>&1
+
+    echo -e "${BLUE}🔴 ${GREEN}Стратегия по умолчанию отредактирована!${NC}"
+    [ "$NO_PAUSE" != "1" ] && echo -e ""
+    [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 
 # ==========================================
