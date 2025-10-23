@@ -1,3 +1,6 @@
+> [!WARNING]
+> После 22.10.2025 многие стратегие поломались.
+
 <h1 align="center"> Инструкция по настройке Zapret от remittor при помощи Zapret Manager</h1>
 
 > [!IMPORTANT]
