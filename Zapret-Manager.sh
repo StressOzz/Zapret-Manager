@@ -203,7 +203,6 @@ EOF
     mkdir -p /opt/zapret/ipset
     cat <<EOF >/opt/zapret/ipset/zapret-hosts-user-exclude.txt
 gosuslugi.ru
-nalog.ru
 EOF
 
 # Применяем конфиг
