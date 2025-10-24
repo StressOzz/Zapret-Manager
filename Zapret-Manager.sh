@@ -193,7 +193,6 @@ cat <<'EOF' >> /etc/config/zapret
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=fonts.google.com
 --new
 --filter-udp=443
---hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
 --dpi-desync=fake
 --dpi-desync-repeats=4
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
@@ -313,13 +312,13 @@ enable_discord_calls() {
             return
         fi
     fi
-
-    if ! grep -q -- "--filter-udp=50000-50099" /etc/config/zapret; then
-        sed -i "s/option NFQWS_PORTS_UDP '443'/option NFQWS_PORTS_UDP '443,50000-50099'/" /etc/config/zapret
-        sed -i "/^'$/d" /etc/config/zapret
-        printf -- '--new\n--filter-udp=50000-50099\n--filter-l7=discord,stun\n--dpi-desync=fake\n' >> /etc/config/zapret
-        echo "'" >> /etc/config/zapret
-    fi
+#  Пока отключил добавление портов 50000–50099 — обработка звонков выполняется внутри скрипта
+#   if ! grep -q -- "--filter-udp=50000-50099" /etc/config/zapret; then
+#       sed -i "s/option NFQWS_PORTS_UDP '443'/option NFQWS_PORTS_UDP '443,50000-50099'/" /etc/config/zapret
+#       sed -i "/^'$/d" /etc/config/zapret
+#       printf -- '--new\n--filter-udp=50000-50099\n--filter-l7=discord,stun\n--dpi-desync=fake\n' >> /etc/config/zapret
+#       echo "'" >> /etc/config/zapret
+#   fi
 
 	echo -e ""
 		chmod +x /opt/zapret/sync_config.sh
