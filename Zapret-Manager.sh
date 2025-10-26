@@ -203,6 +203,44 @@ EOF
     mkdir -p /opt/zapret/ipset
     cat <<EOF >/opt/zapret/ipset/zapret-hosts-user-exclude.txt
 gosuslugi.ru
+api.steampowered.com
+cdn.akamai.steamstatic.com
+cdn.cloudflare.steamstatic.com
+checkout.steampowered.com
+client-download.steampowered.com
+community.cloudflare.steamstatic.com
+cs.steampowered.com
+help.steampowered.com
+login.steampowered.com
+media.steampowered.com
+partner.steampowered.com
+s.team
+steam.tv
+steambroadcast.akamaized.net
+steambroadcast.com
+steamcdn-a.akamaihd.net
+steamcdn-a.akamaihd.net
+steamchat.com
+steam-chat.com
+steamcommunity.akamaized.net
+steamcommunity.com
+steamcommunity-a.akamaihd.net
+steamcontent.com
+steamdeck.com
+steamdeckcdn.akamaized.net
+steamdeckusercontent.com
+steamgames.com
+steampowered.com
+steamserver.net
+steamstat.us
+steamstatic.akamaized.net
+steamstatic.com
+steamusercontent.com
+steamuserimages-a.akamaihd.net
+store.cloudflare.steamstatic.com
+store.steampowered.com
+support.steampowered.com
+workshop.steampowered.com
 EOF
 
 # Применяем конфиг
