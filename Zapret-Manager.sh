@@ -243,6 +243,29 @@ support.steampowered.com
 workshop.steampowered.com
 EOF
 
+	cat >> /opt/zapret/ipset/zapret-hosts-google.txt <<'EOF'
+cdn.youtube.com
+fonts.googleapis.com
+fonts.gstatic.com
+ggpht.com
+googleapis.com
+googleusercontent.com
+i.ytimg.com
+i9.ytimg.com
+kids.youtube.com
+m.youtube.com
+manifest.googlevideo.com
+music.youtube.com
+nhacmp3youtube.com
+returnyoutubedislikeapi.com
+s.ytimg.com
+signaler-pa.youtube.com
+studio.youtube.com
+tv.youtube.com
+yt3.googleusercontent.com
+yting.com
+EOF
+
 # Применяем конфиг
     [ "$NO_PAUSE" != "1" ] && chmod +x /opt/zapret/sync_config.sh
     [ "$NO_PAUSE" != "1" ] && /opt/zapret/sync_config.sh
