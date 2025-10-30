@@ -344,7 +344,7 @@ enable_discord_calls() {
                 ;;
             *)
                 echo -e ""
-                echo -e "${GREEN}Выходим в главное меню...${NC}"
+                echo -e "Выходим в главное меню..."
                 sleep 1
                 show_menu
                 return
@@ -385,6 +385,62 @@ enable_discord_calls() {
 		/opt/zapret/sync_config.sh
 		/etc/init.d/zapret restart >/dev/null 2>&1
     [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
+}
+
+
+# ==========================================
+# FIX Battlefield REDSEC
+# ==========================================
+fix_REDSEC() {
+clear
+	echo -e "${MAGENTA}Настраиваем стратегию для игры Battlefield REDSEC${NC}\n"
+	
+    CONF="/etc/config/zapret"
+    if [ ! -f /etc/init.d/zapret ]; then
+        echo -e "${RED}Zapret не установлен!${NC}"
+		echo -e ""
+		read -p "Нажмите Enter для выхода в главное меню..." dummy
+        return
+	fi
+
+    if grep -q "option NFQWS_PORTS_UDP.*20000-22000" /etc/config/zapret; then
+        echo -e "${RED}Стратегия уже изменена !${NC}"
+		echo -e ""
+        read -p "Нажмите Enter для выхода в главное меню..." dummy
+        return
+    fi
+
+	echo -e "${GREEN}🔴 ${CYAN}Добавляем в стратегию блок для игры${NC}"
+	
+    last_line=$(grep -n "'" "$CONF" | tail -n1 | cut -d: -f1)
+    if [ -n "$last_line" ]; then
+        sed -i "${last_line},\$d" "$CONF"
+    fi
+
+    cat <<'EOF' >> "$CONF"
+--new
+--filter-udp=20000-22000
+--dpi-desync=fake
+--dpi-desync-cutoff=d2
+--dpi-desync-any-protocol
+--dpi-desync-fake-unknown-udp=/opt/zapret/files/fake/quic_initial_www_google_com.bin
+'
+EOF
+
+sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,20000-22000'/" /etc/config/zapret
+
+echo -e "${GREEN}🔴 ${CYAN}Применяем настройки${NC}"
+
+		chmod +x /opt/zapret/sync_config.sh
+		/opt/zapret/sync_config.sh
+		/etc/init.d/zapret restart >/dev/null 2>&1
+		
+echo -e ""
+echo -e "${BLUE}🔴 ${GREEN}Zapret ${GREEN}настроен для игры ${NC}Battlefield REDSEC !"
+
+        echo -e ""
+        read -p "Нажмите Enter для выхода в главное меню..." dummy
+
 }
 
 # ==========================================
@@ -577,6 +633,22 @@ ${RED}==============================================${NC}"
 }
 
 # ==========================================
+# Запустить/Остановить Zapret
+# ==========================================
+startstop_zpr() {
+    clear
+
+    # Проверяем, запущен ли Zapret
+    if pgrep -f /opt/zapret >/dev/null 2>&1; then
+        # Если запущен — вызываем stop_zapret
+        stop_zapret
+    else
+        # Если не запущен — вызываем start_zapret
+        start_zapret
+    fi
+}
+
+# ==========================================
 # Главное меню
 # ==========================================
 show_menu() {
@@ -588,7 +660,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v3.4${NC}"
+	echo -e "                                  ${DGRAY}v4.0${NC}"
 
 	check_flow_offloading
 [ -n "$FLOW_WARNING" ] && echo -e "$FLOW_WARNING"
@@ -643,9 +715,9 @@ fi
     echo -e "${CYAN}1) ${GREEN}Установить последнюю версию${NC}"
     echo -e "${CYAN}2) ${GREEN}Оптимизировать стратегию по умолчанию${NC}"
     echo -e "${CYAN}3) ${GREEN}Вернуть настройки по умолчанию${NC}"
-    echo -e "${CYAN}4) ${GREEN}Остановить ${NC}Zapret"
-    echo -e "${CYAN}5) ${GREEN}Запустить ${NC}Zapret"
-    echo -e "${CYAN}6) ${GREEN}Удалить ${NC}Zapret"
+    echo -e "${CYAN}4) ${GREEN}Остановить / Запустить ${NC}Zapret"
+    echo -e "${CYAN}5) ${GREEN}Удалить ${NC}Zapret"
+    echo -e "${CYAN}6) ${GREEN}Поченить ${NC}Battlefield REDSEC"
 	echo -e "${CYAN}7) ${GREEN}Меню настройки ${NC}Discord${GREEN} и звонков в ${NC}TG${GREEN}/${NC}WA"
 	echo -e "${CYAN}8) ${GREEN}Удалить / Установить / Настроить${NC} Zapret"
 if [ -n "$FLOW_WARNING" ]; then
@@ -659,9 +731,9 @@ fi
         1) install_update ;;
         2) fix_default ;;
         3) comeback_def ;;
-        4) stop_zapret ;;
-        5) start_zapret ;;
-        6) uninstall_zapret ;;
+        4) startstop_zpr ;;
+        5) uninstall_zapret;;
+        6) fix_REDSEC  ;;
 		7) enable_discord_calls ;;
 		8) zapret_key ;;
 		9)
