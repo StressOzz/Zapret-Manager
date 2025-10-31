@@ -1,6 +1,3 @@
-> [!WARNING]
-> После 22.10.2025 многие стратегие поломались.
-
 <h1 align="center"> Инструкция по настройке Zapret от remittor при помощи Zapret Manager</h1>
 
 > [!IMPORTANT]
@@ -65,6 +62,9 @@ sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Z
 >⚠️ Использовать только для полной переустановки и настройки Zapret.
 
 Станут работать многие сайты, а так же **rutor.info**, **Instagram*** на ПК и в приложении, **ntc.party**...
+
+> [!IMPORTANT]
+> Весь трафик пойдёт через Zapret !!!
 
 ---
 
