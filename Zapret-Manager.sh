@@ -521,7 +521,7 @@ comeback_def () {
 				rm -f /opt/zapret/init.d/openwrt/custom.d/50-script.sh
                 [ -f /etc/init.d/zapret ] && /etc/init.d/zapret stop >/dev/null 2>&1
 				
-echo -e "${GREEN}🔴 ${CYAN}Возвращаем настройки, стратегию и Host list к значениям по умолчанию${NC}"
+echo -e "${GREEN}🔴 ${CYAN}Возвращаем настройки, стратегию и hostlist к значениям по умолчанию${NC}"
 				echo -e ""
 				
 				IPSET_DIR="/opt/zapret/ipset"
