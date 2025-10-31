@@ -64,7 +64,7 @@ sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Z
 
 >⚠️ Использовать только для полной переустановки и настройки Zapret.
 
-Станут работать многие сайты, а так же **rutor.info**, **Instagram** (принадлежит компании Meta, признанной экстремистской и запрещённой на территории РФ) на ПК и в приложении, **ntc.party**...
+Станут работать многие сайты, а так же **rutor.info**, **Instagram*** на ПК и в приложении, **ntc.party**...
 
 ---
 
@@ -72,3 +72,5 @@ sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Z
 
 - **Zapret** by *bol-van* (https://github.com/bol-van)
 - **Zapret-OpenWrt** by *remittor* (https://github.com/remittor)
+
+*принадлежит компании Meta, признанной экстремистской и запрещённой на территории РФ
