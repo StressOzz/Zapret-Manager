@@ -166,7 +166,9 @@ local NO_PAUSE=$1
 
     echo -e "${MAGENTA}Редактируем стратегию${NC}"
     echo -e ""
-
+	echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию и редактируем ${NC}host"
+	echo -e ""
+	
 # Проверка, установлен ли Zapret
     if [ ! -f /etc/init.d/zapret ]; then
         echo -e "${RED}Zapret не установлен !${NC}"
@@ -266,6 +268,17 @@ yt3.googleusercontent.com
 yting.com
 EOF
 
+cat <<'EOF' >> /etc/hosts
+130.255.77.28 ntc.party
+57.144.222.34 instagram.com www.instagram.com
+173.245.58.219 rutor.info d.rutor.info
+193.46.255.29 rutor.info
+157.240.9.174 instagram.com www.instagram.com
+EOF
+
+/etc/init.d/dnsmasq restart >/dev/null 2>&1
+
+
 # Применяем конфиг
     [ "$NO_PAUSE" != "1" ] && chmod +x /opt/zapret/sync_config.sh
     [ "$NO_PAUSE" != "1" ] && /opt/zapret/sync_config.sh
@@ -295,16 +308,22 @@ enable_discord_calls() {
 
     CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"
     CURRENT_SCRIPT="не установлен"
-    if [ -f "$CUSTOM_DIR/50-script.sh" ]; then
-        FIRST_LINE=$(sed -n '1p' "$CUSTOM_DIR/50-script.sh")
-        if echo "$FIRST_LINE" | grep -q "QUIC"; then
-            CURRENT_SCRIPT="50-quic4all"
-        elif echo "$FIRST_LINE" | grep -q "stun"; then
-            CURRENT_SCRIPT="50-stun4all"
-        else
-            CURRENT_SCRIPT="неизвестный"
-        fi
+	
+if [ -f "$CUSTOM_DIR/50-script.sh" ]; then
+    FIRST_LINE=$(sed -n '1p' "$CUSTOM_DIR/50-script.sh")
+
+    if echo "$FIRST_LINE" | grep -q "QUIC"; then
+        CURRENT_SCRIPT="50-quic4all"
+    elif echo "$FIRST_LINE" | grep -q "stun"; then
+        CURRENT_SCRIPT="50-stun4all"
+    elif echo "$FIRST_LINE" | grep -q "discord media"; then
+        CURRENT_SCRIPT="50-discord-media"
+    elif echo "$FIRST_LINE" | grep -q "discord subnets"; then
+        CURRENT_SCRIPT="50-discord"
+    else
+        CURRENT_SCRIPT="неизвестный"
     fi
+fi
 
     [ "$NO_PAUSE" != "1" ] && echo -e "${YELLOW}Установленный скрипт:${NC} $CURRENT_SCRIPT"
     [ "$NO_PAUSE" != "1" ] && echo -e ""
@@ -313,9 +332,11 @@ enable_discord_calls() {
         SELECTED="50-stun4all"
         URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-stun4all"
     else
-        echo -e "${CYAN}1) ${GREEN}Установить скрипт ${NC}50-stun4all"
-        echo -e "${CYAN}2) ${GREEN}Установить скрипт ${NC}50-quic4all"
-        echo -e "${CYAN}3) ${GREEN}Удалить скрипт${NC}"
+        echo -e "${CYAN}1) ${GREEN}Установить скрипт ${NC}50-stun4all ${GREEN}для${NC} Discord ${GREEN}и${NC} звонков"
+        echo -e "${CYAN}2) ${GREEN}Установить скрипт ${NC}50-quic4all ${GREEN}для${NC} Discord ${GREEN}и${NC} звонков"
+		echo -e "${CYAN}3) ${GREEN}Установить скрипт ${NC}50-discord-media ${GREEN}для${NC} Discord"
+		echo -e "${CYAN}4) ${GREEN}Установить скрипт ${NC}50-discord ${GREEN}для${NC} Discord"
+        echo -e "${CYAN}5) ${GREEN}Удалить скрипт${NC}"
         echo -e "${CYAN}0) ${GREEN}Выход в главное меню (Enter)${NC}"
         echo -e ""
         echo -ne "${YELLOW}Выберите пункт:${NC} "
@@ -330,7 +351,15 @@ enable_discord_calls() {
                 SELECTED="50-quic4all"
                 URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-quic4all"
                 ;;
-            3)
+			3)
+				SELECTED="50-discord-media"
+				URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-discord-media"
+				;;
+			4)
+				SELECTED="50-discord"
+				URL="https://raw.githubusercontent.com/bol-van/zapret/v70.5/init.d/custom.d.examples.linux/50-discord"
+				;;
+            5)
                 echo -e ""
                 echo -e "${BLUE}🔴 ${GREEN}Скрипт удалён !${NC}"
                 rm -f "$CUSTOM_DIR/50-script.sh" 2>/dev/null
@@ -364,22 +393,20 @@ enable_discord_calls() {
             /opt/zapret/sync_config.sh
             /etc/init.d/zapret restart >/dev/null 2>&1
 			echo -e ""
+                    if [ "$SELECTED" = "50-quic4all" ] || [ "$SELECTED" = "50-stun4all" ]; then
             echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены !${NC}"
+        elif [ "$SELECTED" = "50-discord-media" ] || [ "$SELECTED" = "50-discord" ]; then
+            echo -e "${BLUE}🔴 ${GREEN}Discord включён !${NC}"
         else
-            echo -e "${RED}Ошибка при скачивании скрипта !${NC}"
-			echo -e ""
-            [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
-            return
+            echo -e "${BLUE}🔴 ${GREEN}Скрипт активирован !${NC}"
         fi
+    else
+        echo -e "${RED}Ошибка при скачивании скрипта !${NC}"
+        echo -e ""
+        [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
+        return
     fi
-#  Пока отключил добавление портов 50000–50099 — обработка звонков выполняется внутри скрипта
-#   if ! grep -q -- "--filter-udp=50000-50099" /etc/config/zapret; then
-#       sed -i "s/option NFQWS_PORTS_UDP '443'/option NFQWS_PORTS_UDP '443,50000-50099'/" /etc/config/zapret
-#       sed -i "/^'$/d" /etc/config/zapret
-#       printf -- '--new\n--filter-udp=50000-50099\n--filter-l7=discord,stun\n--dpi-desync=fake\n' >> /etc/config/zapret
-#       echo "'" >> /etc/config/zapret
-#   fi
-
+fi
 	echo -e ""
 		chmod +x /opt/zapret/sync_config.sh
 		/opt/zapret/sync_config.sh
@@ -387,37 +414,39 @@ enable_discord_calls() {
     [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 
-
 # ==========================================
 # FIX Battlefield REDSEC
 # ==========================================
 fix_REDSEC() {
-clear
+	local NO_PAUSE=$1
+	[ "$NO_PAUSE" != "1" ] && clear
 	echo -e "${MAGENTA}Настраиваем стратегию для игры Battlefield REDSEC${NC}\n"
 	
     CONF="/etc/config/zapret"
     if [ ! -f /etc/init.d/zapret ]; then
-        echo -e "${RED}Zapret не установлен!${NC}"
-		echo -e ""
+        echo -e "${RED}Zapret не установлен !${NC}\n"
 		read -p "Нажмите Enter для выхода в главное меню..." dummy
         return
 	fi
 
-    if grep -q "option NFQWS_PORTS_UDP.*20000-22000" /etc/config/zapret; then
-        echo -e "${RED}Стратегия уже изменена !${NC}"
+    if grep -q "option NFQWS_PORTS_UDP.*20000-22000" "$CONF" && grep -q -- "--filter-udp=20000-22000" "$CONF"; then
+        echo -e "${RED}Стратегия для Battlefield REDSEC уже применена !${NC}"
 		echo -e ""
-        read -p "Нажмите Enter для выхода в главное меню..." dummy
+		read -p "Нажмите Enter для выхода в главное меню..." dummy
         return
     fi
 
-	echo -e "${GREEN}🔴 ${CYAN}Добавляем в стратегию блок для игры${NC}"
-	
-    last_line=$(grep -n "'" "$CONF" | tail -n1 | cut -d: -f1)
-    if [ -n "$last_line" ]; then
-        sed -i "${last_line},\$d" "$CONF"
+    if ! grep -q "option NFQWS_PORTS_UDP.*20000-22000" "$CONF"; then
+        sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,20000-22000'/" "$CONF"
     fi
 
-    cat <<'EOF' >> "$CONF"
+    if ! grep -q -- "--filter-udp=20000-22000" "$CONF"; then
+        last_line=$(grep -n "^'$" "$CONF" | tail -n1 | cut -d: -f1)
+        if [ -n "$last_line" ]; then
+            sed -i "${last_line},\$d" "$CONF"
+        fi
+
+        cat <<'EOF' >> "$CONF"
 --new
 --filter-udp=20000-22000
 --dpi-desync=fake
@@ -426,22 +455,21 @@ clear
 --dpi-desync-fake-unknown-udp=/opt/zapret/files/fake/quic_initial_www_google_com.bin
 '
 EOF
+fi
 
-sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,20000-22000'/" /etc/config/zapret
-
+echo -e "${GREEN}🔴 ${CYAN}Добавляем в стратегию блок необходимый для игры${NC}"
+sleep 0.5
 echo -e "${GREEN}🔴 ${CYAN}Применяем настройки${NC}"
+        chmod +x /opt/zapret/sync_config.sh
+        /opt/zapret/sync_config.sh
+        /etc/init.d/zapret restart >/dev/null 2>&1
 
-		chmod +x /opt/zapret/sync_config.sh
-		/opt/zapret/sync_config.sh
-		/etc/init.d/zapret restart >/dev/null 2>&1
-		
-echo -e ""
-echo -e "${BLUE}🔴 ${GREEN}Zapret ${GREEN}настроен для игры ${NC}Battlefield REDSEC !"
-
-        echo -e ""
-        read -p "Нажмите Enter для выхода в главное меню..." dummy
-
+	echo -e ""
+    echo -e "${BLUE}🔴 ${GREEN}Zapret настроен для игры Battlefield REDSEC !${NC}"
+    [ "$NO_PAUSE" != "1" ] && echo -e ""
+    [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
+
 
 # ==========================================
 # Zapret под ключ
@@ -466,8 +494,10 @@ zapret_key(){
         echo -e "${MAGENTA}Включаем Discord и звонки в TG и WA${NC}"
         echo -e ""
         enable_discord_calls "1"
+		fix_REDSEC "1"
 
-        if [ -f /etc/init.d/zapret ]; then
+		if [ -f /etc/init.d/zapret ]; then
+			echo -e ""
             echo -e "${BLUE}🔴 ${GREEN}Zapret ${GREEN}установлен и настроен !${NC}"
         else
             echo -e "${RED}Zapret не установлен !${NC}"
@@ -660,7 +690,7 @@ show_menu() {
 	echo -e "╔════════════════════════════════════╗"
 	echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 	echo -e "╚════════════════════════════════════╝"
-	echo -e "                                  ${DGRAY}v4.0${NC}"
+	echo -e "                                  ${DGRAY}v4.4${NC}"
 
 	check_flow_offloading
 [ -n "$FLOW_WARNING" ] && echo -e "$FLOW_WARNING"
@@ -703,11 +733,23 @@ if [ -f "$CUSTOM_DIR/50-script.sh" ]; then
         CURRENT_SCRIPT="50-quic4all"
     elif echo "$FIRST_LINE" | grep -q "stun"; then
         CURRENT_SCRIPT="50-stun4all"
+    elif echo "$FIRST_LINE" | grep -q "discord media"; then
+        CURRENT_SCRIPT="50-discord-media"
+    elif echo "$FIRST_LINE" | grep -q "discord subnets"; then
+        CURRENT_SCRIPT="50-discord"
+    else
+        CURRENT_SCRIPT="неизвестный"
     fi
 fi
 
 # Если скрипт найден, выводим строку
 [ -n "$CURRENT_SCRIPT" ] && echo -e "\n${YELLOW}Установлен скрипт: ${NC}$CURRENT_SCRIPT"
+
+
+CONF="/etc/config/zapret"
+if grep -q "option NFQWS_PORTS_UDP.*20000-22000" "$CONF" && grep -q -- "--filter-udp=20000-22000" "$CONF"; then
+    echo -e "\n${YELLOW}Стратегия для Battlefield REDSEC: ${NC}активна${NC}"
+fi
 
     echo -e ""
 
@@ -717,7 +759,7 @@ fi
     echo -e "${CYAN}3) ${GREEN}Вернуть настройки по умолчанию${NC}"
     echo -e "${CYAN}4) ${GREEN}Остановить / Запустить ${NC}Zapret"
     echo -e "${CYAN}5) ${GREEN}Удалить ${NC}Zapret"
-    echo -e "${CYAN}6) ${GREEN}Поченить ${NC}Battlefield REDSEC"
+    echo -e "${CYAN}6) ${GREEN}Добавить в стратегию блок для ${NC}Battlefield REDSEC"
 	echo -e "${CYAN}7) ${GREEN}Меню настройки ${NC}Discord${GREEN} и звонков в ${NC}TG${GREEN}/${NC}WA"
 	echo -e "${CYAN}8) ${GREEN}Удалить / Установить / Настроить${NC} Zapret"
 if [ -n "$FLOW_WARNING" ]; then
