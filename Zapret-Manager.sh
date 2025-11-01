@@ -28,15 +28,38 @@ get_versions() {
     LOCAL_ARCH=$(awk -F\' '/DISTRIB_ARCH/ {print $2}' /etc/openwrt_release)
     [ -z "$LOCAL_ARCH" ] && LOCAL_ARCH=$(opkg print-architecture | grep -v "noarch" | sort -k3 -n | tail -n1 | awk '{print $2}')
 
-    command -v curl >/dev/null 2>&1 || {
-        clear
-        echo -e "${MAGENTA}ZAPRET on remittor Manager by StressOzz${NC}\n"
-        echo -e "${GREEN}🔴 ${CYAN}Устанавливаем${NC} curl ${CYAN}для загрузки информации с ${NC}GitHub"
+command -v curl >/dev/null 2>&1 || {
+    clear
+    echo -e "${MAGENTA}ZAPRET on remittor Manager by StressOzz${NC}\n"
+    echo -e "${GREEN}🔴 ${CYAN}Устанавливаем${NC} curl ${CYAN}для загрузки информации с ${NC}GitHub"
+    
+    local attempt=1
+    while [ $attempt -le 3 ]; do
+        echo -e "${GREEN}🔴 ${CYAN}Попытка установки ${NC}curl${CYAN} №${NC}${attempt}"
         opkg update >/dev/null 2>&1
         opkg install curl >/dev/null 2>&1
-    }
 
-    LIMIT_REACHED=0
+        if command -v curl >/dev/null 2>&1; then
+		echo -e ""
+            echo -e "${BLUE}🔴 ${GREEN}Curl успешно установлен !${NC}"
+            break
+        fi
+		echo -e ""
+        echo -e "${RED}Curl не найден после установки !${NC}"
+        attempt=$((attempt + 1))
+        sleep 2
+    done
+
+    if ! command -v curl >/dev/null 2>&1; then
+		echo -e ""
+        echo -e "${RED}Не удалось установить ${NC}curl${RED} после ${NC}3${RED} попыток !${NC}"
+		echo -e ""
+		echo -e "${YELLOW}Установите вручную, выполнив команду:${NC}opkg update && opkg install curl"
+        echo -e ""
+    fi
+}
+
+	LIMIT_REACHED=0
     LIMIT_CHECK=$(curl -s "https://api.github.com/repos/remittor/zapret-openwrt/releases/latest")
     if echo "$LIMIT_CHECK" | grep -q 'API rate limit exceeded'; then
         LATEST_VER="${RED}Достигнут лимит GitHub API. Подождите 15 минут.${NC}"
@@ -243,6 +266,38 @@ store.cloudflare.steamstatic.com
 store.steampowered.com
 support.steampowered.com
 workshop.steampowered.com
+epicgames.com
+store.epicgames.com
+accounts.epicgames.com
+account-public-service-prod03.ol.epicgames.com
+accountportal-website-prod07.ol.epicgames.com
+launcher-public-service-prod06.ol.epicgames.com
+launcherwaitingroom-public-service-prod06.ol.epicgames.com
+launcher-website-prod07.ol.epicgames.com
+tracking.epicgames.com
+catalog-public-service-prod06.ol.epicgames.com
+entitlement-public-service-prod08.ol.epicgames.com
+lightswitch-public-service-prod06.ol.epicgames.com
+friends-public-service-prod06.ol.epicgames.com
+orderprocessor-public-service-ecomprod01.ol.epicgames.com
+ut-public-service-prod10.ol.epicgames.com
+library-service.live.use1a.on.epicgames.com
+datastorage-public-service-liveegs.live.use1a.on.epicgames.com
+cdn1.unrealengine.com
+cdn2.unrealengine.com
+download.epicgames.com
+download2.epicgames.com
+download3.epicgames.com
+download4.epicgames.com
+fastly-download.epicgames.com
+static-assets-prod.epicgames.com
+store-site-backend-static.ak.epicgames.com
+store-content.ak.epicgames.com
+datarouter.ol.epicgames.com
+epicgames-download1.akamaized.net
+api.epicgames.dev
+metrics.ol.epicgames.com
+et.epicgames.com
 EOF
 
 	cat >> /opt/zapret/ipset/zapret-hosts-google.txt <<'EOF'
