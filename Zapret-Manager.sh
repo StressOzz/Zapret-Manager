@@ -530,7 +530,7 @@ read -p "Нажмите Enter для выхода в главное меню..."
 return
 fi
 # Проверка версии
-if ! [[ "$LATEST_VER" =~ 7[0-9] ]]; then
+if ! [[ "$LATEST_VER" =~ 7 ]]; then
 echo -e "${RED}Внимание! Версия для установки не найдена!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
@@ -625,15 +625,15 @@ uninstall_zapret() {
 local NO_PAUSE=$1
 [ "$NO_PAUSE" != "1" ] && clear
 echo -e "${MAGENTA}Удаляем ZAPRET${NC}\n"
-if ! [[ "$LATEST_VER" =~ 7[0-9] ]]; then
+if ! [[ "$LATEST_VER" =~ 7 ]]; then
 echo -e "${RED}Внимание! Версия для установки не найдена!${NC}\n"
 echo -e "После удаления, установка возможна только в ручном режиме!\n"
 read -p "Продолжить удаление? [y/N]: " answer
 case "$answer" in
-[yY]) ;;  # продолжаем удаление
+[yY]) echo -e "";;  # продолжаем удаление
 *) echo -e "\n${GREEN}Удаление отменено!${NC}\n"
 echo -e "Выходим в главное меню..."
-sleep 3
+sleep 2
 return;;
 esac
 fi
@@ -670,7 +670,7 @@ clear
 echo -e "╔════════════════════════════════════╗"
 echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 echo -e "╚════════════════════════════════════╝"
-echo -e "                     ${DGRAY}by StressOzz v5.1${NC}"
+echo -e "                     ${DGRAY}by StressOzz v5.2${NC}"
 # Определяем актуальная/устарела
 if [ "$LIMIT_REACHED" -eq 1 ] || [ "$LATEST_VER" = "не найдена" ]; then
 INST_COLOR=$CYAN
@@ -731,7 +731,9 @@ case "$choice" in
 6) fix_REDSEC  ;;
 7) enable_discord_calls ;;
 8) zapret_key ;;
-*) exit 0 ;;
+*) 
+echo -e ""
+exit 0 ;;
 esac
 }
 # ==========================================
