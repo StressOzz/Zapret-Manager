@@ -20,22 +20,22 @@ get_versions() {
 # --- Проверка byedpi и youtubeUnblock
 if opkg list-installed | grep -q "byedpi"; then
 clear
-echo -e "${RED}Найден установленный ${NC}ByeDPI${RED} !${NC}\n"
-echo -e "${NC}Zapret${RED} не может работать совместно с ${NC}ByeDPI${RED} !${NC}\n"
+echo -e "${RED}Найден установленный ${NC}ByeDPI${RED}!${NC}\n"
+echo -e "${NC}Zapret${RED} не может работать совместно с ${NC}ByeDPI${RED}!${NC}\n"
 read -p $'\033[1;32mУдалить \033[0mByeDPI\033[1;32m ?\033[0m [y/N] ' answer
 case "$answer" in
-[Yy]* ) opkg --force-removal-of-dependent-packages --autoremove remove byedpi >/dev/null 2>&1; echo -e "\n${BLUE}🔴 ${GREEN}ByeDPI удалён !${NC}"; sleep 3;;
-* ) echo -e "\n${RED}Скрипт остановлен ! Удалите ${NC}ByeDPI ${RED}!${NC}\n"; exit 1;;
+[Yy]* ) opkg --force-removal-of-dependent-packages --autoremove remove byedpi >/dev/null 2>&1; echo -e "\n${BLUE}🔴 ${GREEN}ByeDPI удалён!${NC}"; sleep 3;;
+* ) echo -e "\n${RED}Скрипт остановлен! Удалите ${NC}ByeDPI${RED}!${NC}\n"; exit 1;;
 esac
 fi
 if opkg list-installed | grep -q "youtubeUnblock"; then
 clear
-echo -e "${RED}Найден установленный ${NC}youtubeUnblock${RED} !${NC}\n"
-echo -e "${NC}Zapret${RED} не может работать совместно с ${NC}youtubeUnblock${RED} !${NC}\n"
+echo -e "${RED}Найден установленный ${NC}youtubeUnblock${RED}!${NC}\n"
+echo -e "${NC}Zapret${RED} не может работать совместно с ${NC}youtubeUnblock${RED}!${NC}\n"
 read -p $'\033[1;32mУдалить \033[0myoutubeUnblock\033[1;32m ?\033[0m [y/N] ' answer
 case "$answer" in
-[Yy]* ) opkg --force-removal-of-dependent-packages --autoremove remove youtubeUnblock luci-app-youtubeUnblock >/dev/null 2>&1; echo -e "\n${BLUE}🔴 ${GREEN}youtubeUnblock удалён !${NC}"; sleep 3;;
-* ) echo -e "\n${RED}Скрипт остановлен ! Удалите ${NC}youtubeUnblock ${RED}!${NC}\n"; exit 1;;
+[Yy]* ) opkg --force-removal-of-dependent-packages --autoremove remove youtubeUnblock luci-app-youtubeUnblock >/dev/null 2>&1; echo -e "\n${BLUE}🔴 ${GREEN}youtubeUnblock удалён!${NC}"; sleep 3;;
+* ) echo -e "\n${RED}Скрипт остановлен! Удалите ${NC}youtubeUnblock ${RED}!${NC}\n"; exit 1;;
 esac
 fi
 # --- Проверка Flow Offloading (программного и аппаратного)
@@ -44,7 +44,7 @@ local HW_FLOW_STATE=$(uci get firewall.@defaults[0].flow_offloading_hw 2>/dev/nu
 if [ "$FLOW_STATE" = "1" ] || [ "$HW_FLOW_STATE" = "1" ]; then
 clear
 echo -e "${RED}Включён ${NC}Flow Offloading ${RED}!${NC}\n"
-echo -e "${NC}Zapret${RED} не может работать с включённым ${NC}Flow Offloading${RED} !${NC}\n"
+echo -e "${NC}Zapret${RED} не может работать с включённым ${NC}Flow Offloading${RED}!${NC}\n"
 read -p $'\033[1;32mОтключить \033[0mFlow Offloading\033[1;32m ?\033[0m [y/N] ' answer
 case "$answer" in
 [Yy]* )
@@ -52,10 +52,10 @@ uci set firewall.@defaults[0].flow_offloading='0'
 uci set firewall.@defaults[0].flow_offloading_hw='0'
 uci commit firewall
 /etc/init.d/firewall restart
-echo -e "\n${BLUE}🔴 ${GREEN}Flow Offloading отключён !${NC}\n"
+echo -e "\n${BLUE}🔴 ${GREEN}Flow Offloading отключён!${NC}\n"
 sleep 3 ;;
 * )
-echo -e "\n${RED}Скрипт остановлен ! Отключите ${NC}Flow Offloading ${RED}!${NC}\n"
+echo -e "\n${RED}Скрипт остановлен! Отключите ${NC}Flow Offloading${RED}!${NC}\n"
 exit 1 ;;
 esac
 fi
@@ -68,7 +68,7 @@ clear
 echo -e "${MAGENTA}ZAPRET on remittor Manager by StressOzz${NC}\n"
 echo -e "${GREEN}🔴 ${CYAN}Устанавливаем${NC}$TO_INSTALL${NC}\n"
 opkg update >/dev/null 2>&1 || { 
-echo -e "${RED}Ошибка при обновлении списка пакетов !${NC}\n"; exit 1; 
+echo -e "${RED}Ошибка при обновлении списка пакетов!${NC}\n"; exit 1; 
 }
 for pkg in $TO_INSTALL; do
 pkg_installed=0
@@ -78,12 +78,12 @@ opkg install "$pkg" >/dev/null 2>&1 && { pkg_installed=1; break; }
 sleep 1
 done
 if [ $pkg_installed -eq 0 ]; then
-echo -e "${RED}Не удалось установить ${NC}$pkg${RED} после ${NC}3${RED} попыток !${NC}"
+echo -e "${RED}Не удалось установить ${NC}$pkg${RED} после ${NC}3${RED} попыток!${NC}"
 echo -e "Установите вручную: ${CYAN}opkg install $pkg${NC}\n"
 exit 1
 fi
 done
-echo -e "${BLUE}🔴 ${GREEN}Установленно !${NC}"
+echo -e "${BLUE}🔴 ${GREEN}Установленно!${NC}"
 sleep 2
 fi
 # --- Получаем текущую установленную версию zapret
@@ -96,11 +96,11 @@ LOCAL_ARCH=$(awk -F\' '/DISTRIB_ARCH/ {print $2}' /etc/openwrt_release)
 LIMIT_REACHED=0
 LIMIT_CHECK=$(curl -s -4 --connect-timeout 5 "https://api.github.com/repos/remittor/zapret-openwrt/releases/latest" 2>/dev/null)
 if [ -z "$LIMIT_CHECK" ]; then
-echo -e "api.github.com ${RED}недоступен !${NC}\nСкрипт остановлен !\n"
+echo -e "api.github.com ${RED}недоступен!${NC}\nСкрипт остановлен!\n"
 exit 1
 fi
 if echo "$LIMIT_CHECK" | grep -q 'API rate limit exceeded'; then
-LATEST_VER="${RED}Достигнут лимит GitHub API. Подождите 15 минут.${NC}"
+LATEST_VER="${RED}Достигнут лимит GitHub API! Подождите 15 минут.${NC}"
 LIMIT_REACHED=1
 else
 # --- Извлекаем номер версии из имени архива
@@ -146,14 +146,14 @@ return
 fi
 # --- Проверка уже установленной версии
 if [ "$INSTALLED_VER" = "$LATEST_VER" ]; then
-echo -e "${BLUE}🔴 ${GREEN}Последняя версия уже установлена !${NC}\n"
+echo -e "${BLUE}🔴 ${GREEN}Последняя версия уже установлена!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
 # --- Обновление списка пакетов
 echo -e "${GREEN}🔴 ${CYAN}Обновляем список пакетов${NC}"
 opkg update >/dev/null 2>&1 || { 
-echo -e "\n${RED}Ошибка при обновлении списка пакетов !${NC}\n"; exit 1; 
+echo -e "\n${RED}Ошибка при обновлении списка пакетов!${NC}\n"; exit 1; 
 }
 # --- Остановка сервиса и старых процессов Zapret
 if [ -f /etc/init.d/zapret ]; then
@@ -204,9 +204,9 @@ fi
 }
 # --- Сообщение об успешной установке или нет
 if [ -f /etc/init.d/zapret ]; then
-echo -e "\n${BLUE}🔴 ${GREEN}Zapret установлен !${NC}\n"
+echo -e "\n${BLUE}🔴 ${GREEN}Zapret установлен!${NC}\n"
 else
-echo -e "\n${RED}Zapret не был установлен ! Попробуйте ещё раз !${NC}\n"
+echo -e "\n${RED}Zapret не был установлен! Попробуйте ещё раз!${NC}\n"
 fi
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
@@ -219,7 +219,7 @@ local NO_PAUSE=$1
 echo -e "${MAGENTA}Редактируем стратегию${NC}\n"
 # Проверка, установлен ли Zapret
 if [ ! -f /etc/init.d/zapret ]; then
-echo -e "${RED}Zapret не установлен !${NC}"
+echo -e "${RED}Zapret не установлен!${NC}"
 [ "$NO_PAUSE" != "1" ] && echo -e ""
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
@@ -349,7 +349,7 @@ EOF
 [ "$NO_PAUSE" != "1" ] && chmod +x /opt/zapret/sync_config.sh
 [ "$NO_PAUSE" != "1" ] && /opt/zapret/sync_config.sh
 [ "$NO_PAUSE" != "1" ] && /etc/init.d/zapret restart >/dev/null 2>&1
-echo -e "${BLUE}🔴 ${GREEN}Стратегия отредактирована !${NC}"
+echo -e "${BLUE}🔴 ${GREEN}Стратегия отредактирована!${NC}"
 [ "$NO_PAUSE" != "1" ] && echo -e ""
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
@@ -361,7 +361,7 @@ local NO_PAUSE=$1
 [ "$NO_PAUSE" != "1" ] && clear
 [ "$NO_PAUSE" != "1" ] && echo -e "${MAGENTA}Меню настройки Discord и звонков в TG/WA${NC}\n"
 if [ ! -f /etc/init.d/zapret ]; then
-echo -e "${RED}Zapret не установлен !${NC}\n"
+echo -e "${RED}Zapret не установлен!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
@@ -408,7 +408,7 @@ URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.exa
 SELECTED="50-discord"
 URL="https://raw.githubusercontent.com/bol-van/zapret/v70.5/init.d/custom.d.examples.linux/50-discord" ;;
 5)
-echo -e "\n${BLUE}🔴 ${GREEN}Скрипт удалён !${NC}\n"
+echo -e "\n${BLUE}🔴 ${GREEN}Скрипт удалён!${NC}\n"
 rm -f "$CUSTOM_DIR/50-script.sh" 2>/dev/null
 chmod +x /opt/zapret/sync_config.sh
 /opt/zapret/sync_config.sh
@@ -418,30 +418,30 @@ show_menu
 return ;;
 *)
 echo -e "\nВыходим в главное меню..."
-sleep 1
+sleep 2
 show_menu
 return ;;
 esac
 fi
 if [ "$CURRENT_SCRIPT" = "$SELECTED" ]; then
-echo -e "\n${RED}Выбранный скрипт уже установлен !${NC}"
+echo -e "\n${RED}Выбранный скрипт уже установлен!${NC}"
 else
 mkdir -p "$CUSTOM_DIR"
 if curl -fsSLo "$CUSTOM_DIR/50-script.sh" "$URL"; then
 [ "$NO_PAUSE" != "1" ] && 
-echo -e "\n${GREEN}🔴 ${CYAN}Скрипт ${NC}$SELECTED${CYAN} успешно установлен !${NC}\n"
+echo -e "\n${GREEN}🔴 ${CYAN}Скрипт ${NC}$SELECTED${CYAN} успешно установлен!${NC}\n"
 chmod +x /opt/zapret/sync_config.sh
 /opt/zapret/sync_config.sh
 /etc/init.d/zapret restart >/dev/null 2>&1
 if [ "$SELECTED" = "50-quic4all" ] || [ "$SELECTED" = "50-stun4all" ]; then
-echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены !${NC}"
+echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены!${NC}"
 elif [ "$SELECTED" = "50-discord-media" ] || [ "$SELECTED" = "50-discord" ]; then
-echo -e "${BLUE}🔴 ${GREEN}Discord включён !${NC}"
+echo -e "${BLUE}🔴 ${GREEN}Discord включён!${NC}"
 else
-echo -e "${BLUE}🔴 ${GREEN}Скрипт активирован !${NC}"
+echo -e "${BLUE}🔴 ${GREEN}Скрипт активирован!${NC}"
 fi
 else
-echo -e "${RED}Ошибка при скачивании скрипта !${NC}\n"
+echo -e "${RED}Ошибка при скачивании скрипта!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
@@ -461,7 +461,7 @@ local NO_PAUSE=$1
 echo -e "${MAGENTA}Настраиваем стратегию для игры Battlefield REDSEC${NC}\n"
 CONF="/etc/config/zapret"
 if [ ! -f /etc/init.d/zapret ]; then
-echo -e "${RED}Zapret не установлен !${NC}\n"
+echo -e "${RED}Zapret не установлен!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
@@ -487,7 +487,7 @@ awsglobalaccelerator.com
 elb.amazonaws.com
 EOF
 if grep -q "option NFQWS_PORTS_UDP.*20000-22000" "$CONF" && grep -q -- "--filter-udp=20000-22000" "$CONF"; then
-echo -e "${RED}Стратегия для Battlefield REDSEC уже применена !${NC}\n"
+echo -e "${RED}Стратегия для Battlefield REDSEC уже применена!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
@@ -513,7 +513,7 @@ echo -e "${GREEN}🔴 ${CYAN}Добавляем в стратегию блок �
 chmod +x /opt/zapret/sync_config.sh
 /opt/zapret/sync_config.sh
 /etc/init.d/zapret restart >/dev/null 2>&1
-echo -e "\n${BLUE}🔴 ${GREEN}Zapret настроен для игры Battlefield REDSEC !${NC}\n"
+echo -e "\n${BLUE}🔴 ${GREEN}Zapret настроен для игры Battlefield REDSEC!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 # ==========================================
@@ -523,10 +523,18 @@ zapret_key(){
 clear
 echo -e "${MAGENTA}Удаление, установка и настройка Zapret${NC}\n"
 get_versions
+# Проверка лимита API
 if [ "$LIMIT_REACHED" -eq 1 ]; then
-echo -e "\n${RED}Достигнут лимит GitHub API. Подождите 15 минут.${NC}\n"
+echo -e "${RED}Достигнут лимит GitHub API! Подождите 15 минут.${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
-else
+return
+fi
+# Проверка версии
+if ! [[ "$LATEST_VER" =~ 7[0-9] ]]; then
+echo -e "${RED}Внимание! Версия для установки не найдена!${NC}\n"
+read -p "Нажмите Enter для выхода в главное меню..." dummy
+return
+fi
 uninstall_zapret "1"
 install_Zapret "1"
 fix_default "1"
@@ -534,12 +542,11 @@ echo -e "\n${MAGENTA}Включаем Discord и звонки в TG и WA${NC}\n
 enable_discord_calls "1"
 fix_REDSEC "1"
 if [ -f /etc/init.d/zapret ]; then
-echo -e "${BLUE}🔴 ${GREEN}Zapret ${GREEN}установлен и настроен !${NC}\n"
+echo -e "${BLUE}🔴 ${GREEN}Zapret ${GREEN}установлен и настроен!${NC}\n"
 else
-echo -e "${RED}Zapret не установлен !${NC}\n"
+echo -e "${RED}Zapret не установлен!${NC}\n"
 fi
 read -p "Нажмите Enter для выхода в главное меню..." dummy
-fi
 }
 # ==========================================
 # Вернуть настройки по умолчанию
@@ -564,9 +571,9 @@ chmod +x /opt/zapret/restore-def-cfg.sh
 chmod +x /opt/zapret/sync_config.sh
 /opt/zapret/sync_config.sh
 [ -f /etc/init.d/zapret ] && /etc/init.d/zapret restart >/dev/null 2>&1
-echo -e "${BLUE}🔴 ${GREEN}Настройки по умолчанию возвращены !${NC}\n"
+echo -e "${BLUE}🔴 ${GREEN}Настройки по умолчанию возвращены!${NC}\n"
 else
-echo -e "${RED}Zapret не установлен !${NC}\n"
+echo -e "${RED}Zapret не установлен!${NC}\n"
 fi
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 show_menu
@@ -586,9 +593,9 @@ if [ -n "$PIDS" ]; then
 echo -e "${GREEN}🔴 ${CYAN}Убиваем все процессы ${NC}Zapret"
 for pid in $PIDS; do kill -9 "$pid" >/dev/null 2>&1; done
 fi
-echo -e "\n${BLUE}🔴 ${GREEN}Zapret остановлен !${NC}\n"
+echo -e "\n${BLUE}🔴 ${GREEN}Zapret остановлен!${NC}\n"
 else
-echo -e "${RED}Zapret не установлен !${NC}\n"
+echo -e "${RED}Zapret не установлен!${NC}\n"
 fi
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
@@ -605,9 +612,9 @@ echo -e "${GREEN}🔴 ${CYAN}Запускаем сервис ${NC}Zapret"
 chmod +x /opt/zapret/sync_config.sh
 /opt/zapret/sync_config.sh
 /etc/init.d/zapret restart >/dev/null 2>&1
-echo -e "\n${BLUE}🔴 ${GREEN}Zapret запущен !${NC}\n"
+echo -e "\n${BLUE}🔴 ${GREEN}Zapret запущен!${NC}\n"
 else
-echo -e "${RED}Zapret не установлен !${NC}\n"
+echo -e "${RED}Zapret не установлен!${NC}\n"
 fi
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
@@ -618,6 +625,18 @@ uninstall_zapret() {
 local NO_PAUSE=$1
 [ "$NO_PAUSE" != "1" ] && clear
 echo -e "${MAGENTA}Удаляем ZAPRET${NC}\n"
+if ! [[ "$LATEST_VER" =~ 7[0-9] ]]; then
+echo -e "${RED}Внимание! Версия для установки не найдена!${NC}\n"
+echo -e "После удаления, установка возможна только в ручном режиме!\n"
+read -p "Продолжить удаление? [y/N]: " answer
+case "$answer" in
+[yY]) ;;  # продолжаем удаление
+*) echo -e "\n${GREEN}Удаление отменено!${NC}\n"
+echo -e "Выходим в главное меню..."
+sleep 3
+return;;
+esac
+fi
 echo -e "${GREEN}🔴 ${CYAN}Останавливаем сервис${NC}"
 echo -e "${GREEN}🔴 ${CYAN}Убиваем процессы${NC}"
 /etc/init.d/zapret stop >/dev/null 2>&1
@@ -628,7 +647,7 @@ echo -e "${GREEN}🔴 ${CYAN}Чистим конфиги и временные �
 rm -rf /opt/zapret /etc/config/zapret /etc/firewall.zapret /etc/init.d/zapret /tmp/*zapret* /var/run/*zapret* /tmp/*.ipk /tmp/*.zip 2>/dev/null
 crontab -l 2>/dev/null | grep -v -i "zapret" | crontab - 2>/dev/null
 nft list tables 2>/dev/null | awk '{print $2}' | grep -E '(zapret|ZAPRET)' | while read t; do [ -n "$t" ] && nft delete table "$t" 2>/dev/null; done
-echo -e "\n${BLUE}🔴 ${GREEN}Zapret полностью удалён !${NC}\n"
+echo -e "\n${BLUE}🔴 ${GREEN}Zapret полностью удалён!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 # ==========================================
