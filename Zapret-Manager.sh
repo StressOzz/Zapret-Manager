@@ -255,7 +255,20 @@ option NFQWS_OPT '
 '
 EOF
 # Проверка и перезапись файла исключений пользователей
-: > /opt/zapret/ipset/zapret-hosts-user-exclude.txt
+# Проверка и перезапись файла исключений пользователей
+sed -i \
+'/^play\.google\.com$/d; \
+/^android\.com$/d; \
+/^google-analytics\.com$/d; \
+/^googleusercontent\.com$/d; \
+/^gstatic\.com$/d; \
+/^gvt1\.com$/d; \
+/^ggpht\.com$/d; \
+/^dl\.google\.com$/d; \
+/^dl-ssl\.google\.com$/d; \
+/^android\.clients\.google\.com$/d; \
+/^gvt2\.com$/d; \
+/^gvt3\.com$/d' /opt/zapret/ipset/zapret-hosts-user-exclude.txt
 file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
 cat <<'EOF' | grep -Fxv -f "$file" >> "$file"
 gosuslugi.ru
