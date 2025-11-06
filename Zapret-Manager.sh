@@ -62,7 +62,7 @@ sleep 2 ;;
 sed -i 's/meta l4proto { tcp, udp } flow offload @ft;/meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;/' /usr/share/firewall4/templates/ruleset.uc
 fw4 restart >/dev/null 2>&1            
 sleep 2 ;;
-*) echo -e "\n${RED}Скрипт остановлен!${NC}\n"
+*) echo -e "\n${RED}Скрипт остановлен! Отключите или примените фикс!${NC}\n"
 exit 1 ;;
 esac
 fi
@@ -205,9 +205,7 @@ rm -rf "$WORKDIR" /tmp/*.ipk /tmp/*.zip /tmp/*zapret* 2>/dev/null
 # --- Перезапуск службы Zapret
 [ "$NO_PAUSE" != "1" ] && {
 if [ -f /etc/init.d/zapret ]; then
-chmod +x /opt/zapret/sync_config.sh
-/opt/zapret/sync_config.sh
-/etc/init.d/zapret restart >/dev/null 2>&1
+chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 fi
 }
 # --- Сообщение об успешной установке или нет
@@ -257,19 +255,7 @@ option NFQWS_OPT '
 '
 EOF
 # Проверка и перезапись файла исключений пользователей
-sed -i \
-'/^play\.google\.com$/d; \
-/^android\.com$/d; \
-/^google-analytics\.com$/d; \
-/^googleusercontent\.com$/d; \
-/^gstatic\.com$/d; \
-/^gvt1\.com$/d; \
-/^ggpht\.com$/d; \
-/^dl\.google\.com$/d; \
-/^dl-ssl\.google\.com$/d; \
-/^android\.clients\.google\.com$/d; \
-/^gvt2\.com$/d; \
-/^gvt3\.com$/d' /opt/zapret/ipset/zapret-hosts-user-exclude.txt
+: > /opt/zapret/ipset/zapret-hosts-user-exclude.txt
 file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
 cat <<'EOF' | grep -Fxv -f "$file" >> "$file"
 gosuslugi.ru
@@ -374,9 +360,7 @@ cat <<'EOF' | grep -Fxv -f "$file" 2>/dev/null >> "$file"
 EOF
 /etc/init.d/dnsmasq restart >/dev/null 2>&1
 # Применяем конфиг
-[ "$NO_PAUSE" != "1" ] && chmod +x /opt/zapret/sync_config.sh
-[ "$NO_PAUSE" != "1" ] && /opt/zapret/sync_config.sh
-[ "$NO_PAUSE" != "1" ] && /etc/init.d/zapret restart >/dev/null 2>&1
+[ "$NO_PAUSE" != "1" ] && { chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1; }
 echo -e "${BLUE}🔴 ${GREEN}Стратегия отредактирована!${NC}"
 [ "$NO_PAUSE" != "1" ] && echo -e ""
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
@@ -393,21 +377,14 @@ echo -e "${RED}Zapret не установлен!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
-CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"
-CURRENT_SCRIPT="не установлен"
 if [ -f "$CUSTOM_DIR/50-script.sh" ]; then
-FIRST_LINE=$(sed -n '1p' "$CUSTOM_DIR/50-script.sh")
-if echo "$FIRST_LINE" | grep -q "QUIC"; then
-CURRENT_SCRIPT="50-quic4all"
-elif echo "$FIRST_LINE" | grep -q "stun"; then
-CURRENT_SCRIPT="50-stun4all"
-elif echo "$FIRST_LINE" | grep -q "discord media"; then
-CURRENT_SCRIPT="50-discord-media"
-elif echo "$FIRST_LINE" | grep -q "discord subnets"; then
-CURRENT_SCRIPT="50-discord"
-else
-CURRENT_SCRIPT="неизвестный"
-fi
+case "$(sed -n '1p' "$CUSTOM_DIR/50-script.sh")" in
+*QUIC*) CURRENT_SCRIPT="50-quic4all" ;;
+*stun*) CURRENT_SCRIPT="50-stun4all" ;;
+*"discord media"*) CURRENT_SCRIPT="50-discord-media" ;;
+*"discord subnets"*) CURRENT_SCRIPT="50-discord" ;;
+*) CURRENT_SCRIPT="неизвестный" ;;
+esac
 fi
 [ "$NO_PAUSE" != "1" ] && echo -e "${YELLOW}Установленный скрипт:${NC} $CURRENT_SCRIPT\n"
 if [ "$NO_PAUSE" = "1" ]; then
@@ -438,9 +415,7 @@ URL="https://raw.githubusercontent.com/bol-van/zapret/v70.5/init.d/custom.d.exam
 5)
 echo -e "\n${BLUE}🔴 ${GREEN}Скрипт удалён!${NC}\n"
 rm -f "$CUSTOM_DIR/50-script.sh" 2>/dev/null
-chmod +x /opt/zapret/sync_config.sh
-/opt/zapret/sync_config.sh
-/etc/init.d/zapret restart >/dev/null 2>&1
+chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 show_menu
 return ;;
@@ -458,9 +433,7 @@ mkdir -p "$CUSTOM_DIR"
 if curl -fsSLo "$CUSTOM_DIR/50-script.sh" "$URL"; then
 [ "$NO_PAUSE" != "1" ] && 
 echo -e "\n${GREEN}🔴 ${CYAN}Скрипт ${NC}$SELECTED${CYAN} успешно установлен!${NC}\n"
-chmod +x /opt/zapret/sync_config.sh
-/opt/zapret/sync_config.sh
-/etc/init.d/zapret restart >/dev/null 2>&1
+chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 if [ "$SELECTED" = "50-quic4all" ] || [ "$SELECTED" = "50-stun4all" ]; then
 echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены!${NC}"
 elif [ "$SELECTED" = "50-discord-media" ] || [ "$SELECTED" = "50-discord" ]; then
@@ -475,9 +448,7 @@ return
 fi
 fi
 echo -e ""
-chmod +x /opt/zapret/sync_config.sh
-/opt/zapret/sync_config.sh
-/etc/init.d/zapret restart >/dev/null 2>&1
+chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 # ==========================================
@@ -538,9 +509,7 @@ cat <<'EOF' >> "$CONF"
 EOF
 fi
 echo -e "${GREEN}🔴 ${CYAN}Добавляем в стратегию блок необходимый для игры${NC}"
-chmod +x /opt/zapret/sync_config.sh
-/opt/zapret/sync_config.sh
-/etc/init.d/zapret restart >/dev/null 2>&1
+chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 echo -e "\n${BLUE}🔴 ${GREEN}Zapret настроен для игры Battlefield REDSEC!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
@@ -568,7 +537,7 @@ install_Zapret "1"
 fix_default "1"
 echo -e "\n${MAGENTA}Включаем Discord и звонки в TG и WA${NC}\n"
 enable_discord_calls "1"
-# fix_REDSEC "1" - пока убрал, т.к. BF 6 работает без Zapret
+fix_REDSEC "1"
 if [ -f /etc/init.d/zapret ]; then
 echo -e "${BLUE}🔴 ${GREEN}Zapret ${GREEN}установлен и настроен!${NC}\n"
 else
@@ -594,10 +563,7 @@ URL_BASE="https://raw.githubusercontent.com/remittor/zapret-openwrt/master/zapre
 for f in $FILES; do
 curl -fsSLo "$IPSET_DIR/$f" "$URL_BASE/$f"
 done
-chmod +x /opt/zapret/restore-def-cfg.sh
-/opt/zapret/restore-def-cfg.sh
-chmod +x /opt/zapret/sync_config.sh
-/opt/zapret/sync_config.sh
+chmod +x /opt/zapret/restore-def-cfg.sh && /opt/zapret/restore-def-cfg.sh && chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh
 [ -f /etc/init.d/zapret ] && /etc/init.d/zapret restart >/dev/null 2>&1
 echo -e "${BLUE}🔴 ${GREEN}Настройки по умолчанию возвращены!${NC}\n"
 else
@@ -637,9 +603,7 @@ echo -e "${MAGENTA}Запускаем Zapret${NC}\n"
 if [ -f /etc/init.d/zapret ]; then
 echo -e "${GREEN}🔴 ${CYAN}Запускаем сервис ${NC}Zapret"
 /etc/init.d/zapret start >/dev/null 2>&1
-chmod +x /opt/zapret/sync_config.sh
-/opt/zapret/sync_config.sh
-/etc/init.d/zapret restart >/dev/null 2>&1
+chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 echo -e "\n${BLUE}🔴 ${GREEN}Zapret запущен!${NC}\n"
 else
 echo -e "${RED}Zapret не установлен!${NC}\n"
@@ -701,17 +665,13 @@ echo -e "╚══════════════════════�
 echo -e "                     ${DGRAY}by StressOzz v5.3${NC}"
 # Определяем актуальная/устарела
 if [ "$LIMIT_REACHED" -eq 1 ] || [ "$LATEST_VER" = "не найдена" ]; then
-INST_COLOR=$CYAN
-INSTALLED_DISPLAY="$INSTALLED_VER"
+INST_COLOR=$CYAN; INSTALLED_DISPLAY="$INSTALLED_VER"
 elif [ "$INSTALLED_VER" = "$LATEST_VER" ]; then
-INST_COLOR=$GREEN
-INSTALLED_DISPLAY="$INSTALLED_VER (актуальная)"
+INST_COLOR=$GREEN; INSTALLED_DISPLAY="$INSTALLED_VER (актуальная)"
 elif [ "$INSTALLED_VER" != "не найдена" ]; then
-INST_COLOR=$RED
-INSTALLED_DISPLAY="$INSTALLED_VER (устарела)"
+INST_COLOR=$RED; INSTALLED_DISPLAY="$INSTALLED_VER (устарела)"
 else
-INST_COLOR=$RED
-INSTALLED_DISPLAY="$INSTALLED_VER"
+INST_COLOR=$RED; INSTALLED_DISPLAY="$INSTALLED_VER"
 fi
 # Вывод информации о версиях и архитектуре
 echo -e "\n${YELLOW}Установленная версия: ${INST_COLOR}$INSTALLED_DISPLAY${NC}\n"
