@@ -56,11 +56,11 @@ case "$choice" in
 uci set firewall.@defaults[0].flow_offloading='0'
 uci set firewall.@defaults[0].flow_offloading_hw='0'
 uci commit firewall
-/etc/init.d/firewall restart          
+/etc/init.d/firewall restart
 sleep 2 ;;
 2) echo -e "\n${GREEN}Фикс успешно применён!${NC}"
 sed -i 's/meta l4proto { tcp, udp } flow offload @ft;/meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;/' /usr/share/firewall4/templates/ruleset.uc
-fw4 restart >/dev/null 2>&1            
+fw4 restart >/dev/null 2>&1
 sleep 2 ;;
 *) echo -e "\n${RED}Скрипт остановлен! Отключите или примените фикс!${NC}\n"
 exit 1 ;;
@@ -230,7 +230,7 @@ echo -e "${RED}Zapret не установлен!${NC}"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
-echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию, добавляем домены в ${NC}hosts${CYAN} и редактируем ${NC}/etc/hosts\n"
+echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию, добавляем домены в ${NC}hostlist${CYAN} и редактируем ${NC}/etc/hosts\n"
 # Удаляем строку и всё, что идёт ниже строки с option NFQWS_OPT '
 sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" /etc/config/zapret
 # Вставляем новый блок сразу после строки option NFQWS_OPT '
@@ -476,27 +476,6 @@ if [ ! -f /etc/init.d/zapret ]; then
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
-file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
-cat <<'EOF' | grep -Fxv -f "$file" >> "$file"
-playstation.net
-np.playstation.net
-akadns.net
-akamai.net
-akamaiedge.net
-akamaihd.net
-edgekey.net
-edgesuite.net
-ea.com
-data.ea.com
-grpc.ea.com
-blaze.ea.com
-blazeredirector.ea.com
-ops.dice.se
-dice.se
-amazonaws.com
-awsglobalaccelerator.com
-elb.amazonaws.com
-EOF
 if grep -q "option NFQWS_PORTS_UDP.*20000-22000" "$CONF" && grep -q -- "--filter-udp=20000-22000" "$CONF"; then
 echo -e "${RED}Стратегия для Battlefield REDSEC уже применена!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
