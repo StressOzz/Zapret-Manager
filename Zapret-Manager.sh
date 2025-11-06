@@ -42,22 +42,30 @@ fi
 local FLOW_STATE=$(uci get firewall.@defaults[0].flow_offloading 2>/dev/null)
 local HW_FLOW_STATE=$(uci get firewall.@defaults[0].flow_offloading_hw 2>/dev/null)
 if [ "$FLOW_STATE" = "1" ] || [ "$HW_FLOW_STATE" = "1" ]; then
+if ! grep -q 'meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;' /usr/share/firewall4/templates/ruleset.uc; then
 clear
 echo -e "${RED}Включён ${NC}Flow Offloading ${RED}!${NC}\n"
-echo -e "${NC}Zapret${RED} не может работать с включённым ${NC}Flow Offloading${RED}!${NC}\n"
-read -p $'\033[1;32mОтключить \033[0mFlow Offloading\033[1;32m ?\033[0m [y/N] ' answer
-case "$answer" in
-[Yy]* )
+echo -e "${NC}Zapret${RED} не может работать с включённым ${NC}Flow Offloading${RED}!\n"
+echo -e "${CYAN}1) ${GREEN}Отключить ${NC}Flow Offloading"
+echo -e "${CYAN}2) ${GREEN}Применить фикс для работы ${NC}Zapret${GREEN} с включённым ${NC}Flow Offloading"
+echo -e "${CYAN}Enter) ${GREEN}Выход\n"
+echo -ne "${YELLOW}Выберите пункт:${NC} "
+read choice
+case "$choice" in
+1) echo -e "\n${GREEN}Flow Offloading успешно отключён!${NC}"
 uci set firewall.@defaults[0].flow_offloading='0'
 uci set firewall.@defaults[0].flow_offloading_hw='0'
 uci commit firewall
-/etc/init.d/firewall restart
-echo -e "\n${BLUE}🔴 ${GREEN}Flow Offloading отключён!${NC}\n"
-sleep 3 ;;
-* )
-echo -e "\n${RED}Скрипт остановлен! Отключите ${NC}Flow Offloading${RED}!${NC}\n"
+/etc/init.d/firewall restart          
+sleep 2 ;;
+2) echo -e "\n${GREEN}Фикс успешно применён!${NC}"
+sed -i 's/meta l4proto { tcp, udp } flow offload @ft;/meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;/' /usr/share/firewall4/templates/ruleset.uc
+fw4 restart >/dev/null 2>&1            
+sleep 2 ;;
+*) echo -e "\n${RED}Скрипт остановлен!${NC}\n"
 exit 1 ;;
 esac
+fi
 fi
 # --- Проверка наличия curl и unzip
 TO_INSTALL=""
@@ -411,7 +419,7 @@ echo -e "${CYAN}2) ${GREEN}Установить скрипт ${NC}50-quic4all ${
 echo -e "${CYAN}3) ${GREEN}Установить скрипт ${NC}50-discord-media ${GREEN}для${NC} Discord"
 echo -e "${CYAN}4) ${GREEN}Установить скрипт ${NC}50-discord ${GREEN}для${NC} Discord"
 echo -e "${CYAN}5) ${GREEN}Удалить скрипт${NC}"
-echo -e "${CYAN}0) ${GREEN}Выход в главное меню (Enter)${NC}\n"
+echo -e "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n"
 echo -ne "${YELLOW}Выберите пункт:${NC} "
 read choice
 case "$choice" in
@@ -560,7 +568,7 @@ install_Zapret "1"
 fix_default "1"
 echo -e "\n${MAGENTA}Включаем Discord и звонки в TG и WA${NC}\n"
 enable_discord_calls "1"
-fix_REDSEC "1"
+# fix_REDSEC "1" - пока убрал, т.к. BF 6 работает без Zapret
 if [ -f /etc/init.d/zapret ]; then
 echo -e "${BLUE}🔴 ${GREEN}Zapret ${GREEN}установлен и настроен!${NC}\n"
 else
@@ -690,7 +698,7 @@ clear
 echo -e "╔════════════════════════════════════╗"
 echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 echo -e "╚════════════════════════════════════╝"
-echo -e "                     ${DGRAY}by StressOzz v5.2${NC}"
+echo -e "                     ${DGRAY}by StressOzz v5.3${NC}"
 # Определяем актуальная/устарела
 if [ "$LIMIT_REACHED" -eq 1 ] || [ "$LATEST_VER" = "не найдена" ]; then
 INST_COLOR=$CYAN
@@ -739,7 +747,7 @@ echo -e "${CYAN}5) ${GREEN}Удалить ${NC}Zapret"
 echo -e "${CYAN}6) ${GREEN}Добавить в стратегию блок для ${NC}Battlefield REDSEC"
 echo -e "${CYAN}7) ${GREEN}Меню настройки ${NC}Discord${GREEN} и звонков в ${NC}TG${GREEN}/${NC}WA"
 echo -e "${CYAN}8) ${GREEN}Удалить / Установить / Настроить${NC} Zapret"
-echo -e "${CYAN}0) ${GREEN}Выход (Enter)${NC}\n"
+echo -e "${CYAN}Enter) ${GREEN}Выход${NC}\n"
 echo -ne "${YELLOW}Выберите пункт:${NC} "
 read choice
 case "$choice" in
