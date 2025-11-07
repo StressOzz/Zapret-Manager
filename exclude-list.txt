@@ -1,3 +1,4 @@
+######################################################################### Epicgames
 3lateral.com
 accountportal-website-prod07.ol.epicgames.com
 account-public-service-prod03.ol.epicgames.com
@@ -57,7 +58,7 @@ twinmotion.com
 unrealengine.com
 unrealtournament.com
 ut-public-service-prod10.ol.epicgames.com
-
+######################################################################### Steam
 api.steampowered.com
 cdn.akamai.steamstatic.com
 cdn.cloudflare.steamstatic.com
@@ -138,7 +139,7 @@ valvecontent.com
 valvesoftware.com
 valvesoftware.net
 workshop.steampowered.com
-
+######################################################################### OpenWRT
 archive.openwrt.org
 cdn.openwrt.org
 dev.openwrt.org
@@ -158,3 +159,4 @@ openwrt.gitlab.io
 openwrt.org
 raw.githubusercontent.com
 wiki.openwrt.org
+#########################################################################
