@@ -277,9 +277,11 @@ if ! curl -fsSL "$remote_url" -o "$tmpfile"; then
 echo -e "${RED}Не удалось загрузить список с GitHub!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 else
-grep -v '^[[:space:]]*$' "$tmpfile" | grep -v '^#' | while read -r domain; do
+while read -r domain; do
+# пропускаем пустые строки и строки с #
+[[ -z "$domain" || "$domain" == \#* ]] && continue
 grep -Fxq "$domain" "$exclude_file" || echo "$domain" >> "$exclude_file"
-done
+done < "$tmpfile"
 fi
 rm -f "$tmpfile"
 # Проверка и добавление hosts
@@ -310,14 +312,21 @@ echo -e "${RED}Zapret не установлен!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
+CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"
+CURRENT_SCRIPT="не установлен"
 if [ -f "$CUSTOM_DIR/50-script.sh" ]; then
-case "$(sed -n '1p' "$CUSTOM_DIR/50-script.sh")" in
-*QUIC*) CURRENT_SCRIPT="50-quic4all" ;;
-*stun*) CURRENT_SCRIPT="50-stun4all" ;;
-*"discord media"*) CURRENT_SCRIPT="50-discord-media" ;;
-*"discord subnets"*) CURRENT_SCRIPT="50-discord" ;;
-*) CURRENT_SCRIPT="неизвестный" ;;
-esac
+FIRST_LINE=$(sed -n '1p' "$CUSTOM_DIR/50-script.sh")
+if echo "$FIRST_LINE" | grep -q "QUIC"; then
+CURRENT_SCRIPT="50-quic4all"
+elif echo "$FIRST_LINE" | grep -q "stun"; then
+CURRENT_SCRIPT="50-stun4all"
+elif echo "$FIRST_LINE" | grep -q "discord media"; then
+CURRENT_SCRIPT="50-discord-media"
+elif echo "$FIRST_LINE" | grep -q "discord subnets"; then
+CURRENT_SCRIPT="50-discord"
+else
+CURRENT_SCRIPT="неизвестный"
+fi
 fi
 [ "$NO_PAUSE" != "1" ] && echo -e "${YELLOW}Установленный скрипт:${NC} $CURRENT_SCRIPT\n"
 if [ "$NO_PAUSE" = "1" ]; then
@@ -348,7 +357,9 @@ URL="https://raw.githubusercontent.com/bol-van/zapret/v70.5/init.d/custom.d.exam
 5)
 echo -e "\n${BLUE}🔴 ${GREEN}Скрипт удалён!${NC}\n"
 rm -f "$CUSTOM_DIR/50-script.sh" 2>/dev/null
-chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
+chmod +x /opt/zapret/sync_config.sh
+/opt/zapret/sync_config.sh
+/etc/init.d/zapret restart >/dev/null 2>&1
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 show_menu
 return ;;
@@ -366,7 +377,9 @@ mkdir -p "$CUSTOM_DIR"
 if curl -fsSLo "$CUSTOM_DIR/50-script.sh" "$URL"; then
 [ "$NO_PAUSE" != "1" ] && 
 echo -e "\n${GREEN}🔴 ${CYAN}Скрипт ${NC}$SELECTED${CYAN} успешно установлен!${NC}\n"
-chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
+chmod +x /opt/zapret/sync_config.sh
+/opt/zapret/sync_config.sh
+/etc/init.d/zapret restart >/dev/null 2>&1
 if [ "$SELECTED" = "50-quic4all" ] || [ "$SELECTED" = "50-stun4all" ]; then
 echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены!${NC}"
 elif [ "$SELECTED" = "50-discord-media" ] || [ "$SELECTED" = "50-discord" ]; then
@@ -381,7 +394,9 @@ return
 fi
 fi
 echo -e ""
-chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
+chmod +x /opt/zapret/sync_config.sh
+/opt/zapret/sync_config.sh
+/etc/init.d/zapret restart >/dev/null 2>&1
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 # ==========================================
