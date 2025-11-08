@@ -412,22 +412,22 @@ if [ ! -f /etc/init.d/zapret ]; then
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
-if grep -q "option NFQWS_PORTS_UDP.*20000-22000" "$CONF" && grep -q -- "--filter-udp=20000-22000" "$CONF"; then
+if grep -q "option NFQWS_PORTS_UDP.*9000-13000,20000-22000" "$CONF" && grep -q -- "--filter-udp=9000-13000,20000-22000" "$CONF"; then
 echo -e "${RED}Стратегия для Battlefield REDSEC уже применена!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
-if ! grep -q "option NFQWS_PORTS_UDP.*20000-22000" "$CONF"; then
-sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,20000-22000'/" "$CONF"
+if ! grep -q "option NFQWS_PORTS_UDP.*9000-13000,20000-22000" "$CONF"; then
+sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,9000-13000,20000-22000'/" "$CONF"
 fi
-if ! grep -q -- "--filter-udp=20000-22000" "$CONF"; then
+if ! grep -q -- "--filter-udp=9000-13000,20000-22000" "$CONF"; then
 last_line=$(grep -n "^'$" "$CONF" | tail -n1 | cut -d: -f1)
 if [ -n "$last_line" ]; then
 sed -i "${last_line},\$d" "$CONF"
 fi
 cat <<'EOF' >> "$CONF"
 --new
---filter-udp=20000-22000
+--filter-udp=9000-13000,20000-22000
 --dpi-desync=fake
 --dpi-desync-cutoff=d2
 --dpi-desync-any-protocol
@@ -566,6 +566,9 @@ echo -e "${GREEN}🔴 ${CYAN}Чистим конфиги и временные �
 rm -rf /opt/zapret /etc/config/zapret /etc/firewall.zapret /etc/init.d/zapret /tmp/*zapret* /var/run/*zapret* /tmp/*.ipk /tmp/*.zip 2>/dev/null
 crontab -l 2>/dev/null | grep -v -i "zapret" | crontab - 2>/dev/null
 nft list tables 2>/dev/null | awk '{print $2}' | grep -E '(zapret|ZAPRET)' | while read t; do [ -n "$t" ] && nft delete table "$t" 2>/dev/null; done
+sed -i '/130\.255\.77\.28 ntc.party/d; /57\.144\.222\.34 instagram.com www.instagram.com/d; \
+/173\.245\.58\.219 rutor.info d.rutor.info/d; /193\.46\.255\.29 rutor.info/d; \
+/157\.240\.9\.174 instagram.com www.instagram.com/d' /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1
 echo -e "\n${BLUE}🔴 ${GREEN}Zapret полностью удалён!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
@@ -589,7 +592,7 @@ clear
 echo -e "╔════════════════════════════════════╗"
 echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 echo -e "╚════════════════════════════════════╝"
-echo -e "                     ${DGRAY}by StressOzz v5.5${NC}"
+echo -e "                     ${DGRAY}by StressOzz v5.6${NC}"
 # Определяем актуальная/устарела
 if [ "$LIMIT_REACHED" -eq 1 ] || [ "$LATEST_VER" = "не найдена" ]; then
 INST_COLOR=$CYAN; INSTALLED_DISPLAY="$INSTALLED_VER"
@@ -621,7 +624,7 @@ esac
 # Если скрипт найден, выводим строку
 [ -n "$CURRENT_SCRIPT" ] && echo -e "\n${YELLOW}Установлен скрипт: ${NC}$CURRENT_SCRIPT"
 CONF="/etc/config/zapret"
-if [ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*20000-22000" "$CONF" && grep -q -- "--filter-udp=20000-22000" "$CONF"; then
+if [ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*9000-13000,20000-22000" "$CONF" && grep -q -- "--filter-udp=9000-13000,20000-22000" "$CONF"; then
 echo -e "\n${YELLOW}Стратегия для Battlefield REDSEC: ${NC}активна${NC}"
 fi
 echo -e ""
