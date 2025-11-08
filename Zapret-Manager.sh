@@ -13,6 +13,7 @@ GRAY="\033[38;5;239m"
 DGRAY="\033[38;5;236m"
 # --- Рабочая директория для скачивания и распаковки
 WORKDIR="/tmp/zapret-update"
+CONF="/etc/config/zapret"
 # ==========================================
 # Функция получения информации о версиях, архитектуре и статусе
 # ==========================================
@@ -238,14 +239,17 @@ cat <<'EOF' >> /etc/config/zapret
 option NFQWS_OPT '
 --filter-tcp=443
 --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
---dpi-desync=fake,multidisorder
---dpi-desync-split-seqovl=681
---dpi-desync-split-pos=1
---dpi-desync-fooling=badseq
---dpi-desync-badseq-increment=10000000
---dpi-desync-repeats=2
---dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
+--dpi-desync=fake,fakeddisorder
+--dpi-desync-split-pos=10,midsld
+--dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=fonts.google.com
+--dpi-desync-fake-tls=0x0F0F0F0F
+--dpi-desync-fake-tls-mod=none
+--dpi-desync-fakedsplit-pattern=/opt/zapret/files/fake/tls_clienthello_vk_com.bin
+--dpi-desync-split-seqovl=336
+--dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_gosuslugi_ru.bin
+--dpi-desync-fooling=badseq,badsum
+--dpi-desync-badseq-increment=0
 --new
 --filter-udp=443
 --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
@@ -254,37 +258,8 @@ option NFQWS_OPT '
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
 '
 EOF
-# Проверка и перезапись файла исключений пользователей
-sed -i \
-'/^play\.google\.com$/d; \
-/^android\.com$/d; \
-/^google-analytics\.com$/d; \
-/^googleusercontent\.com$/d; \
-/^gstatic\.com$/d; \
-/^gvt1\.com$/d; \
-/^ggpht\.com$/d; \
-/^dl\.google\.com$/d; \
-/^dl-ssl\.google\.com$/d; \
-/^android\.clients\.google\.com$/d; \
-/^gvt2\.com$/d; \
-/^gvt3\.com$/d' /opt/zapret/ipset/zapret-hosts-user-exclude.txt
-# Скачиваем список доменов и добавляем
-echo -e "${GREEN}🔴 ${CYAN}Добавляем домены в ${NC}hostlist${CYAN} и редактируем ${NC}/etc/hosts\n"
-local exclude_file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
-local remote_url="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/exclude-list.txt"
-tmpfile=$(mktemp)
-if ! curl -fsSL "$remote_url" -o "$tmpfile"; then
-echo -e "${RED}Не удалось загрузить список с GitHub!${NC}\n"
-read -p "Нажмите Enter для выхода в главное меню..." dummy
-else
-while read -r domain; do
-# пропускаем пустые строки и строки с #
-[[ -z "$domain" || "$domain" == \#* ]] && continue
-grep -Fxq "$domain" "$exclude_file" || echo "$domain" >> "$exclude_file"
-done < "$tmpfile"
-fi
-rm -f "$tmpfile"
-# Проверка и добавление hosts
+# Редактируем /etc/hosts
+echo -e "${GREEN}🔴 ${CYAN}Редактируем ${NC}/etc/hosts"
 file="/etc/hosts"
 cat <<'EOF' | grep -Fxv -f "$file" 2>/dev/null >> "$file"
 130.255.77.28 ntc.party
@@ -294,7 +269,25 @@ cat <<'EOF' | grep -Fxv -f "$file" 2>/dev/null >> "$file"
 157.240.9.174 instagram.com www.instagram.com
 EOF
 /etc/init.d/dnsmasq restart >/dev/null 2>&1
+# добавление исключения
+file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
+rm -f "$file"
+cat <<'EOF' > "$file"
+archive.openwrt.org
+cdn.openwrt.org
+dev.openwrt.org
+downloads.openwrt.org
+forum.openwrt.org
+fwdownloads.openwrt.org
+gh.openwrt.org
+git.openwrt.org
+lede-project.org
+lists.openwrt.org
+openwrt.org
+wiki.openwrt.org
+EOF
 # Применяем конфиг
+echo -e "${GREEN}🔴 ${CYAN}Применяем новую стратегию и настройки\n"
 [ "$NO_PAUSE" != "1" ] && { chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1; }
 echo -e "${BLUE}🔴 ${GREEN}Стратегия отредактирована!${NC}"
 [ "$NO_PAUSE" != "1" ] && echo -e ""
@@ -400,34 +393,43 @@ chmod +x /opt/zapret/sync_config.sh
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 # ==========================================
-# FIX Battlefield and Apex Legends
+# FIX GAME
 # ==========================================
 fix_REDSEC() {
 local NO_PAUSE=$1
 [ "$NO_PAUSE" != "1" ] && clear
-echo -e "${MAGENTA}Настраиваем стратегию для игр Battlefield 6 & Apex Legends${NC}\n"
-CONF="/etc/config/zapret"
+echo -e "${MAGENTA}Настраиваем стратегию для игр${NC}\n"
+
 if [ ! -f /etc/init.d/zapret ]; then
 [ "$NO_PAUSE" != "1" ] && echo -e "${RED}Zapret не установлен!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
-if grep -q "option NFQWS_PORTS_UDP.*9000-13000,20000-22000" "$CONF" && grep -q -- "--filter-udp=9000-13000,20000-22000" "$CONF"; then
-echo -e "${RED}Стратегия для Battlefield 6 & Apex Legends уже применена!${NC}\n"
+if grep -q "option NFQWS_PORTS_UDP.*1024-65535" "$CONF" && grep -q -- "--filter-udp=1024-65535" "$CONF"; then
+echo -e "${GREEN}🔴 ${CYAN}Удаляем из стратегии блок необходимый для игр${NC}"
+chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
+echo -e "\n${BLUE}🔴 ${GREEN}Блок для игр удалён!${NC}\n"
+sed -i "\|--new|d" "$CONF"
+sed -i "\|--filter-udp=1024-65535|d" "$CONF"
+sed -i "\|--dpi-desync=fake|d" "$CONF"
+sed -i "\|--dpi-desync-cutoff=d2|d" "$CONF"
+sed -i "\|--dpi-desync-any-protocol|d" "$CONF"
+sed -i "\|--dpi-desync-fake-unknown-udp=/opt/zapret/files/fake/quic_initial_www_google_com.bin|d" "$CONF"
+sed -i "s/,1024-65535'/\'/" "$CONF"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
-if ! grep -q "option NFQWS_PORTS_UDP.*9000-13000,20000-22000" "$CONF"; then
-sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,9000-13000,20000-22000'/" "$CONF"
+if ! grep -q "option NFQWS_PORTS_UDP.*1024-65535" "$CONF"; then
+sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,1024-65535'/" "$CONF"
 fi
-if ! grep -q -- "--filter-udp=9000-13000,20000-22000" "$CONF"; then
+if ! grep -q -- "--filter-udp=1024-65535" "$CONF"; then
 last_line=$(grep -n "^'$" "$CONF" | tail -n1 | cut -d: -f1)
 if [ -n "$last_line" ]; then
 sed -i "${last_line},\$d" "$CONF"
 fi
 cat <<'EOF' >> "$CONF"
 --new
---filter-udp=9000-13000,20000-22000
+--filter-udp=1024-65535
 --dpi-desync=fake
 --dpi-desync-cutoff=d2
 --dpi-desync-any-protocol
@@ -437,7 +439,7 @@ EOF
 fi
 echo -e "${GREEN}🔴 ${CYAN}Добавляем в стратегию блок необходимый для игр${NC}"
 chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
-echo -e "\n${BLUE}🔴 ${GREEN}Zapret настроен для игр Battlefield 6 & Apex Legends!${NC}\n"
+echo -e "\n${BLUE}🔴 ${GREEN}Zapret настроен для игр!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 # ==========================================
@@ -592,7 +594,7 @@ clear
 echo -e "╔════════════════════════════════════╗"
 echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 echo -e "╚════════════════════════════════════╝"
-echo -e "                     ${DGRAY}by StressOzz v5.6${NC}"
+echo -e "                     ${DGRAY}by StressOzz v6.0${NC}"
 # Определяем актуальная/устарела
 if [ "$LIMIT_REACHED" -eq 1 ] || [ "$LATEST_VER" = "не найдена" ]; then
 INST_COLOR=$CYAN; INSTALLED_DISPLAY="$INSTALLED_VER"
@@ -623,9 +625,9 @@ esac
 )
 # Если скрипт найден, выводим строку
 [ -n "$CURRENT_SCRIPT" ] && echo -e "\n${YELLOW}Установлен скрипт: ${NC}$CURRENT_SCRIPT"
-CONF="/etc/config/zapret"
-if [ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*9000-13000,20000-22000" "$CONF" && grep -q -- "--filter-udp=9000-13000,20000-22000" "$CONF"; then
-echo -e "\n${YELLOW}Стратегия для Battlefield 6 & Apex Legends: ${NC}активна${NC}"
+
+if [ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*1024-65535" "$CONF" && grep -q -- "--filter-udp=1024-65535" "$CONF"; then
+echo -e "\n${YELLOW}Стратегия для игр: ${NC}активна${NC}"
 fi
 echo -e ""
 # Вывод пунктов меню
@@ -634,7 +636,7 @@ echo -e "${CYAN}2) ${GREEN}Оптимизировать стратегию${NC}"
 echo -e "${CYAN}3) ${GREEN}Вернуть настройки по умолчанию${NC}"
 echo -e "${CYAN}4) ${GREEN}Остановить / Запустить ${NC}Zapret"
 echo -e "${CYAN}5) ${GREEN}Удалить ${NC}Zapret"
-echo -e "${CYAN}6) ${GREEN}Добавить в стратегию блок для ${NC}Battlefield 6 ${GREEN}&${NC} Apex Legends"
+echo -e "${CYAN}6) ${GREEN}Добавить / удалить в стратегию блок для игр"
 echo -e "${CYAN}7) ${GREEN}Меню настройки ${NC}Discord${GREEN} и звонков в ${NC}TG${GREEN}/${NC}WA"
 echo -e "${CYAN}8) ${GREEN}Удалить / Установить / Настроить${NC} Zapret"
 echo -e "${CYAN}Enter) ${GREEN}Выход${NC}\n"
