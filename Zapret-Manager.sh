@@ -350,9 +350,7 @@ URL="https://raw.githubusercontent.com/bol-van/zapret/v70.5/init.d/custom.d.exam
 5)
 echo -e "\n${BLUE}🔴 ${GREEN}Скрипт удалён!${NC}\n"
 rm -f "$CUSTOM_DIR/50-script.sh" 2>/dev/null
-chmod +x /opt/zapret/sync_config.sh
-/opt/zapret/sync_config.sh
-/etc/init.d/zapret restart >/dev/null 2>&1
+chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 show_menu
 return ;;
@@ -370,9 +368,7 @@ mkdir -p "$CUSTOM_DIR"
 if curl -fsSLo "$CUSTOM_DIR/50-script.sh" "$URL"; then
 [ "$NO_PAUSE" != "1" ] && 
 echo -e "\n${GREEN}🔴 ${CYAN}Скрипт ${NC}$SELECTED${CYAN} успешно установлен!${NC}\n"
-chmod +x /opt/zapret/sync_config.sh
-/opt/zapret/sync_config.sh
-/etc/init.d/zapret restart >/dev/null 2>&1
+chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 if [ "$SELECTED" = "50-quic4all" ] || [ "$SELECTED" = "50-stun4all" ]; then
 echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены!${NC}"
 elif [ "$SELECTED" = "50-discord-media" ] || [ "$SELECTED" = "50-discord" ]; then
@@ -387,9 +383,7 @@ return
 fi
 fi
 echo -e ""
-chmod +x /opt/zapret/sync_config.sh
-/opt/zapret/sync_config.sh
-/etc/init.d/zapret restart >/dev/null 2>&1
+chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 # ==========================================
@@ -399,16 +393,13 @@ fix_REDSEC() {
 local NO_PAUSE=$1
 [ "$NO_PAUSE" != "1" ] && clear
 echo -e "${MAGENTA}Настраиваем стратегию для игр${NC}\n"
-
 if [ ! -f /etc/init.d/zapret ]; then
 [ "$NO_PAUSE" != "1" ] && echo -e "${RED}Zapret не установлен!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
 if grep -q "option NFQWS_PORTS_UDP.*1024-65535" "$CONF" && grep -q -- "--filter-udp=1024-65535" "$CONF"; then
-echo -e "${GREEN}🔴 ${CYAN}Удаляем из стратегии блок необходимый для игр${NC}"
-chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
-echo -e "\n${BLUE}🔴 ${GREEN}Блок для игр удалён!${NC}\n"
+echo -e "${GREEN}🔴 ${CYAN}Удаляем из стратегии настройки для игр${NC}"
 sed -i "\|--new|d" "$CONF"
 sed -i "\|--filter-udp=1024-65535|d" "$CONF"
 sed -i "\|--dpi-desync=fake|d" "$CONF"
@@ -416,6 +407,8 @@ sed -i "\|--dpi-desync-cutoff=d2|d" "$CONF"
 sed -i "\|--dpi-desync-any-protocol|d" "$CONF"
 sed -i "\|--dpi-desync-fake-unknown-udp=/opt/zapret/files/fake/quic_initial_www_google_com.bin|d" "$CONF"
 sed -i "s/,1024-65535'/\'/" "$CONF"
+chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
+echo -e "\n${BLUE}🔴 ${GREEN}Настройки для игр удалены!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
@@ -437,9 +430,9 @@ cat <<'EOF' >> "$CONF"
 '
 EOF
 fi
-echo -e "${GREEN}🔴 ${CYAN}Добавляем в стратегию блок необходимый для игр${NC}"
+echo -e "${GREEN}🔴 ${CYAN}Добавляем в стратегию настройки для игр${NC}"
 chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
-echo -e "\n${BLUE}🔴 ${GREEN}Zapret настроен для игр!${NC}\n"
+echo -e "\n${BLUE}🔴 ${GREEN}Игровые настройки добавлены!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 # ==========================================
@@ -492,8 +485,9 @@ URL_BASE="https://raw.githubusercontent.com/remittor/zapret-openwrt/master/zapre
 for f in $FILES; do
 curl -fsSLo "$IPSET_DIR/$f" "$URL_BASE/$f"
 done
-chmod +x /opt/zapret/restore-def-cfg.sh && /opt/zapret/restore-def-cfg.sh && chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh
-[ -f /etc/init.d/zapret ] && /etc/init.d/zapret restart >/dev/null 2>&1
+chmod +x /opt/zapret/restore-def-cfg.sh && /opt/zapret/restore-def-cfg.sh
+chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh
+/etc/init.d/zapret restart >/dev/null 2>&1
 echo -e "${BLUE}🔴 ${GREEN}Настройки по умолчанию возвращены!${NC}\n"
 else
 echo -e "${RED}Zapret не установлен!${NC}\n"
@@ -636,7 +630,7 @@ echo -e "${CYAN}2) ${GREEN}Оптимизировать стратегию${NC}"
 echo -e "${CYAN}3) ${GREEN}Вернуть настройки по умолчанию${NC}"
 echo -e "${CYAN}4) ${GREEN}Остановить / Запустить ${NC}Zapret"
 echo -e "${CYAN}5) ${GREEN}Удалить ${NC}Zapret"
-echo -e "${CYAN}6) ${GREEN}Добавить / удалить в стратегию блок для игр"
+echo -e "${CYAN}6) ${GREEN}Добавить / удалить стратегию для игр"
 echo -e "${CYAN}7) ${GREEN}Меню настройки ${NC}Discord${GREEN} и звонков в ${NC}TG${GREEN}/${NC}WA"
 echo -e "${CYAN}8) ${GREEN}Удалить / Установить / Настроить${NC} Zapret"
 echo -e "${CYAN}Enter) ${GREEN}Выход${NC}\n"
