@@ -400,12 +400,12 @@ chmod +x /opt/zapret/sync_config.sh
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 # ==========================================
-# FIX Battlefield REDSEC
+# FIX Battlefield and Apex Legends
 # ==========================================
 fix_REDSEC() {
 local NO_PAUSE=$1
 [ "$NO_PAUSE" != "1" ] && clear
-echo -e "${MAGENTA}Настраиваем стратегию для игры Battlefield REDSEC${NC}\n"
+echo -e "${MAGENTA}Настраиваем стратегию для игр Battlefield 6 & Apex Legends${NC}\n"
 CONF="/etc/config/zapret"
 if [ ! -f /etc/init.d/zapret ]; then
 [ "$NO_PAUSE" != "1" ] && echo -e "${RED}Zapret не установлен!${NC}\n"
@@ -413,7 +413,7 @@ if [ ! -f /etc/init.d/zapret ]; then
 return
 fi
 if grep -q "option NFQWS_PORTS_UDP.*9000-13000,20000-22000" "$CONF" && grep -q -- "--filter-udp=9000-13000,20000-22000" "$CONF"; then
-echo -e "${RED}Стратегия для Battlefield REDSEC уже применена!${NC}\n"
+echo -e "${RED}Стратегия для Battlefield 6 & Apex Legends уже применена!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
@@ -435,9 +435,9 @@ cat <<'EOF' >> "$CONF"
 '
 EOF
 fi
-echo -e "${GREEN}🔴 ${CYAN}Добавляем в стратегию блок необходимый для игры${NC}"
+echo -e "${GREEN}🔴 ${CYAN}Добавляем в стратегию блок необходимый для игр${NC}"
 chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
-echo -e "\n${BLUE}🔴 ${GREEN}Zapret настроен для игры Battlefield REDSEC!${NC}\n"
+echo -e "\n${BLUE}🔴 ${GREEN}Zapret настроен для игр Battlefield 6 & Apex Legends!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 # ==========================================
@@ -625,7 +625,7 @@ esac
 [ -n "$CURRENT_SCRIPT" ] && echo -e "\n${YELLOW}Установлен скрипт: ${NC}$CURRENT_SCRIPT"
 CONF="/etc/config/zapret"
 if [ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*9000-13000,20000-22000" "$CONF" && grep -q -- "--filter-udp=9000-13000,20000-22000" "$CONF"; then
-echo -e "\n${YELLOW}Стратегия для Battlefield REDSEC: ${NC}активна${NC}"
+echo -e "\n${YELLOW}Стратегия для Battlefield 6 & Apex Legends: ${NC}активна${NC}"
 fi
 echo -e ""
 # Вывод пунктов меню
@@ -634,7 +634,7 @@ echo -e "${CYAN}2) ${GREEN}Оптимизировать стратегию${NC}"
 echo -e "${CYAN}3) ${GREEN}Вернуть настройки по умолчанию${NC}"
 echo -e "${CYAN}4) ${GREEN}Остановить / Запустить ${NC}Zapret"
 echo -e "${CYAN}5) ${GREEN}Удалить ${NC}Zapret"
-echo -e "${CYAN}6) ${GREEN}Добавить в стратегию блок для ${NC}Battlefield REDSEC"
+echo -e "${CYAN}6) ${GREEN}Добавить в стратегию блок для ${NC}Battlefield 6 ${GREEN}&${NC} Apex Legends"
 echo -e "${CYAN}7) ${GREEN}Меню настройки ${NC}Discord${GREEN} и звонков в ${NC}TG${GREEN}/${NC}WA"
 echo -e "${CYAN}8) ${GREEN}Удалить / Установить / Настроить${NC} Zapret"
 echo -e "${CYAN}Enter) ${GREEN}Выход${NC}\n"
