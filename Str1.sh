@@ -8,8 +8,6 @@ BLUE="\033[0;34m"
 NC="\033[0m"
 GRAY="\033[38;5;239m"
 DGRAY="\033[38;5;236m"
-WORKDIR="/tmp/zapret-update"
-CONF="/etc/config/zapret"
 # v1
 echo -e "${MAGENTA}Устанавливаем стратегию v1${NC}\n"
 echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию${NC}"
