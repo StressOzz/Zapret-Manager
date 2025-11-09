@@ -31,8 +31,8 @@ cat <<'EOF' >> /etc/config/zapret
 --dpi-desync-fooling=badsum,badseq
 --new
 --filter-tcp=443
---dpi-desync=fake,fakeddisorder
 --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
+--dpi-desync=fake,fakeddisorder
 --dpi-desync-split-pos=10,midsld
 --dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_t2_ru.bin
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=m.ok.ru
