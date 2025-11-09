@@ -85,7 +85,7 @@ cat <<'EOF' | grep -Fxv -f "$file" 2>/dev/null >> "$file"
 EOF
 /etc/init.d/dnsmasq restart >/dev/null 2>&1
 # Применяем конфиг
-{ chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1; }
+chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 echo -e "${BLUE}🔴 ${GREEN}Стратегия отредактирована!${NC}"
 echo -e ""
 read -p "Нажмите Enter для выхода в главное меню..." dummy
