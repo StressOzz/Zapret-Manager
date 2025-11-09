@@ -18,7 +18,6 @@ echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию${NC}"
 sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" /etc/config/zapret
 # Вставляем новый блок сразу после строки option NFQWS_OPT '
 cat <<'EOF' >> /etc/config/zapret
-#v2
   option NFQWS_OPT '
 --filter-tcp=443
 --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
@@ -39,6 +38,7 @@ cat <<'EOF' >> /etc/config/zapret
 --dpi-desync=fake
 --dpi-desync-repeats=4
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
+#v2
 '
 EOF
 # добавление исключения
