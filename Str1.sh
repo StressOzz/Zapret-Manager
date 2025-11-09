@@ -67,7 +67,8 @@ grep -Fxq "$domain" "$exclude_file" || echo "$domain" >> "$exclude_file"
 done < "$tmpfile"
 fi
 rm -f "$tmpfile"
-# Проверка и добавление hosts
+# Редактируем /etc/hosts
+echo -e "${GREEN}🔴 ${CYAN}Редактируем ${NC}/etc/hosts"
 file="/etc/hosts"
 cat <<'EOF' | grep -Fxv -f "$file" 2>/dev/null >> "$file"
 130.255.77.28 ntc.party
