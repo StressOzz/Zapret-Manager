@@ -223,7 +223,7 @@ fi
 fix_default() {
 local NO_PAUSE=$1
 [ "$NO_PAUSE" != "1" ] && clear
-echo -e "${MAGENTA}Редактируем стратегию${NC}\n"
+echo -e "${MAGENTA}Оптимизируем стратегию${NC}\n"
 # Проверка, установлен ли Zapret
 if [ ! -f /etc/init.d/zapret ]; then
 echo -e "${RED}Zapret не установлен!${NC}"
@@ -615,7 +615,7 @@ echo -e "${CYAN}2) ${GREEN}Оптимизировать стратегию${NC}"
 echo -e "${CYAN}3) ${GREEN}Вернуть настройки по умолчанию${NC}"
 echo -e "${CYAN}4) ${GREEN}Остановить / Запустить ${NC}Zapret"
 echo -e "${CYAN}5) ${GREEN}Удалить ${NC}Zapret"
-echo -e "${CYAN}6) ${GREEN}Добавить / удалить стратегию для игр"
+echo -e "${CYAN}6) ${GREEN}Добавить / Удалить стратегию для игр"
 echo -e "${CYAN}7) ${GREEN}Меню настройки ${NC}Discord${GREEN} и звонков в ${NC}TG${GREEN}/${NC}WA"
 echo -e "${CYAN}8) ${GREEN}Удалить / Установить / Настроить${NC} Zapret"
 echo -e "${CYAN}Enter) ${GREEN}Выход${NC}\n"
