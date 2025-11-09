@@ -38,35 +38,16 @@ option NFQWS_OPT '
 '
 EOF
 # Проверка и перезапись файла исключений пользователей
-sed -i \
-'/^play\.google\.com$/d; \
-/^android\.com$/d; \
-/^google-analytics\.com$/d; \
-/^googleusercontent\.com$/d; \
-/^gstatic\.com$/d; \
-/^gvt1\.com$/d; \
-/^ggpht\.com$/d; \
-/^dl\.google\.com$/d; \
-/^dl-ssl\.google\.com$/d; \
-/^android\.clients\.google\.com$/d; \
-/^gvt2\.com$/d; \
-/^gvt3\.com$/d' /opt/zapret/ipset/zapret-hosts-user-exclude.txt
-# Скачиваем список доменов и добавляем
 echo -e "${GREEN}🔴 ${CYAN}Добавляем домены в ${NC}hostlist"
 exclude_file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
 remote_url="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/exclude-list.txt"
-tmpfile=$(mktemp)
-if ! curl -fsSL "$remote_url" -o "$tmpfile"; then
+# Удаляем старый файл
+rm -f "$exclude_file"
+# Скачиваем новый файл на его место
+if ! curl -fsSL "$remote_url" -o "$exclude_file"; then
 echo -e "${RED}Не удалось загрузить список с GitHub!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
-else
-while read -r domain; do
-# пропускаем пустые строки и строки с #
-[[ -z "$domain" || "$domain" == \#* ]] && continue
-grep -Fxq "$domain" "$exclude_file" || echo "$domain" >> "$exclude_file"
-done < "$tmpfile"
 fi
-rm -f "$tmpfile"
 # Редактируем /etc/hosts
 echo -e "${GREEN}🔴 ${CYAN}Редактируем ${NC}/etc/hosts"
 file="/etc/hosts"
