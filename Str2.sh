@@ -13,13 +13,6 @@ CONF="/etc/config/zapret"
 # v6.0
 clear
 echo -e "${MAGENTA}Оптимизируем стратегию${NC}\n"
-# Проверка, установлен ли Zapret
-if [ ! -f /etc/init.d/zapret ]; then
-echo -e "${RED}Zapret не установлен!${NC}"
-echo -e ""
-read -p "Нажмите Enter для выхода в главное меню..." dummy
-return
-fi
 echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию${NC}"
 # Удаляем строку и всё, что идёт ниже строки с option NFQWS_OPT '
 sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" /etc/config/zapret
@@ -66,7 +59,7 @@ openwrt.org
 EOF
 # Применяем конфиг
 echo -e "${GREEN}🔴 ${CYAN}Применяем новую стратегию и настройки\n"
-{ chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1; }
+chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 echo -e "${BLUE}🔴 ${GREEN}Стратегия отредактирована!${NC}"
 echo -e ""
 read -p "Нажмите Enter для выхода в главное меню..." dummy
