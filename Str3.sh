@@ -11,7 +11,6 @@ DGRAY="\033[38;5;236m"
 WORKDIR="/tmp/zapret-update"
 CONF="/etc/config/zapret"
 # v6.5
-clear
 echo -e "${MAGENTA}Оптимизируем стратегию${NC}\n"
 echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию${NC}"
 # Удаляем строку и всё, что идёт ниже строки с option NFQWS_OPT '
