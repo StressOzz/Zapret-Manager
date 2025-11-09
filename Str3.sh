@@ -11,7 +11,7 @@ DGRAY="\033[38;5;236m"
 WORKDIR="/tmp/zapret-update"
 CONF="/etc/config/zapret"
 # v6.5
-echo -e "${MAGENTA}Оптимизируем стратегию${NC}\n"
+echo -e "${MAGENTA}Устанавливаем стратегию v3${NC}\n"
 echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию${NC}"
 # Удаляем строку и всё, что идёт ниже строки с option NFQWS_OPT '
 sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" /etc/config/zapret
@@ -98,4 +98,4 @@ EOF
 # Применяем конфиг
 echo -e "${GREEN}🔴 ${CYAN}Применяем новую стратегию и настройки${NC}\n"
 chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
-echo -e "${BLUE}🔴 ${GREEN}Стратегия отредактирована!${NC}"
+echo -e "${BLUE}🔴 ${GREEN}Стратегия v3 установлена!${NC}\n"
