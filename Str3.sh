@@ -1,4 +1,15 @@
 #!/bin/sh
+GREEN="\033[1;32m"
+RED="\033[1;31m"
+CYAN="\033[1;36m"
+YELLOW="\033[1;33m"
+MAGENTA="\033[1;35m"
+BLUE="\033[0;34m"
+NC="\033[0m"
+GRAY="\033[38;5;239m"
+DGRAY="\033[38;5;236m"
+WORKDIR="/tmp/zapret-update"
+CONF="/etc/config/zapret"
 # v6.5
 clear
 echo -e "${MAGENTA}Оптимизируем стратегию${NC}\n"
