@@ -1,12 +1,23 @@
+#!/bin/sh
+GREEN="\033[1;32m"
+RED="\033[1;31m"
+CYAN="\033[1;36m"
+YELLOW="\033[1;33m"
+MAGENTA="\033[1;35m"
+BLUE="\033[0;34m"
+NC="\033[0m"
+GRAY="\033[38;5;239m"
+DGRAY="\033[38;5;236m"
+WORKDIR="/tmp/zapret-update"
+CONF="/etc/config/zapret"
 # v6.0
-local NO_PAUSE=$1
-[ "$NO_PAUSE" != "1" ] && clear
+clear
 echo -e "${MAGENTA}Оптимизируем стратегию${NC}\n"
 # Проверка, установлен ли Zapret
 if [ ! -f /etc/init.d/zapret ]; then
 echo -e "${RED}Zapret не установлен!${NC}"
-[ "$NO_PAUSE" != "1" ] && echo -e ""
-[ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
+echo -e ""
+read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
 echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию${NC}"
@@ -55,7 +66,7 @@ openwrt.org
 EOF
 # Применяем конфиг
 echo -e "${GREEN}🔴 ${CYAN}Применяем новую стратегию и настройки\n"
-[ "$NO_PAUSE" != "1" ] && { chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1; }
+{ chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1; }
 echo -e "${BLUE}🔴 ${GREEN}Стратегия отредактирована!${NC}"
-[ "$NO_PAUSE" != "1" ] && echo -e ""
-[ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
+echo -e ""
+read -p "Нажмите Enter для выхода в главное меню..." dummy
