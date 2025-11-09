@@ -1,3 +1,4 @@
+
 #!/bin/sh
 # ==========================================
 # Zapret on remittor Manager by StressOzz
@@ -218,71 +219,6 @@ fi
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 # ==========================================
-# Чиним дефолтную стратегию
-# ==========================================
-fix_default() {
-local NO_PAUSE=$1
-[ "$NO_PAUSE" != "1" ] && clear
-echo -e "${MAGENTA}Оптимизируем стратегию${NC}\n"
-# Проверка, установлен ли Zapret
-if [ ! -f /etc/init.d/zapret ]; then
-echo -e "${RED}Zapret не установлен!${NC}"
-[ "$NO_PAUSE" != "1" ] && echo -e ""
-[ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
-return
-fi
-echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию${NC}"
-# Удаляем строку и всё, что идёт ниже строки с option NFQWS_OPT '
-sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" /etc/config/zapret
-# Вставляем новый блок сразу после строки option NFQWS_OPT '
-cat <<'EOF' >> /etc/config/zapret
-  option NFQWS_OPT '
---filter-tcp=443
---hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
---dpi-desync=fake,fakeddisorder
---dpi-desync-split-pos=10,midsld
---dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
---dpi-desync-fake-tls-mod=rnd,dupsid,sni=fonts.google.com
---dpi-desync-fake-tls=0x0F0F0F0F
---dpi-desync-fake-tls-mod=none
---dpi-desync-fakedsplit-pattern=/opt/zapret/files/fake/tls_clienthello_vk_com.bin
---dpi-desync-split-seqovl=336
---dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_gosuslugi_ru.bin
---dpi-desync-fooling=badseq,badsum
---dpi-desync-badseq-increment=0
---new
---filter-udp=443
---hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
---dpi-desync=fake
---dpi-desync-repeats=4
---dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
-'
-EOF
-# Редактируем /etc/hosts
-echo -e "${GREEN}🔴 ${CYAN}Редактируем ${NC}/etc/hosts"
-file="/etc/hosts"
-cat <<'EOF' | grep -Fxv -f "$file" 2>/dev/null >> "$file"
-130.255.77.28 ntc.party
-57.144.222.34 instagram.com www.instagram.com
-173.245.58.219 rutor.info d.rutor.info
-193.46.255.29 rutor.info
-157.240.9.174 instagram.com www.instagram.com
-EOF
-/etc/init.d/dnsmasq restart >/dev/null 2>&1
-# добавление исключения
-file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
-rm -f "$file"
-cat <<'EOF' > "$file"
-openwrt.org
-EOF
-# Применяем конфиг
-echo -e "${GREEN}🔴 ${CYAN}Применяем новую стратегию и настройки${NC}\n"
-[ "$NO_PAUSE" != "1" ] && { chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1; }
-echo -e "${BLUE}🔴 ${GREEN}Стратегия отредактирована!${NC}"
-[ "$NO_PAUSE" != "1" ] && echo -e ""
-[ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
-}
-# ==========================================
 # Включение Discord и звонков в TG и WA
 # ==========================================
 enable_discord_calls() {
@@ -345,7 +281,7 @@ show_menu
 return ;;
 *)
 echo -e "\nВыходим в главное меню..."
-sleep 2
+sleep 1
 show_menu
 return ;;
 esac
@@ -440,8 +376,8 @@ return
 fi
 uninstall_zapret "1"
 install_Zapret "1"
-fix_default "1"
-echo -e "\n${MAGENTA}Включаем Discord и звонки в TG и WA${NC}\n"
+curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str3.sh | sh
+echo -e "${MAGENTA}Включаем Discord и звонки в TG и WA${NC}\n"
 enable_discord_calls "1"
 fix_REDSEC "1"
 if [ -f /etc/init.d/zapret ]; then
@@ -567,6 +503,62 @@ start_zapret
 fi
 }
 # ==========================================
+# Выбор стратегий
+# ==========================================
+menu_str() {
+clear
+echo -e "${MAGENTA}Меню выбора стратегии${NC}\n"
+# Проверка, установлен ли Zapret
+if [ ! -f /etc/init.d/zapret ]; then
+echo -e "${RED}Zapret не установлен!${NC}\n"
+read -p "Нажмите Enter для выхода в главное меню..." dummy
+return
+fi
+if [ -f /etc/init.d/zapret ]; then
+echo -e "${YELLOW}Используемая стратегия:${NC} $(show_current_strategy)\n"
+fi
+echo -e "${CYAN}1) ${GREEN}Установить стратегию${NC} v1"
+echo -e "${CYAN}2) ${GREEN}Установить стратегию${NC} v2"
+echo -e "${CYAN}3) ${GREEN}Установить стратегию${NC} v3"
+echo -e "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n"
+echo -ne "${YELLOW}Выберите пункт:${NC} "
+read choice
+case "$choice" in
+1) clear
+curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str1.sh | sh
+read -p "Нажмите Enter для выхода в главное меню..." dummy
+;;
+2) clear
+curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str2.sh | sh
+read -p "Нажмите Enter для выхода в главное меню..." dummy
+;;
+3) clear
+curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str3.sh | sh
+read -p "Нажмите Enter для выхода в главное меню..." dummy
+;;
+*) echo -e "\nВыходим в главное меню..."
+sleep 1
+show_menu
+return ;;
+esac
+}
+show_current_strategy() {
+CONFstr="/etc/config/zapret"
+[ -f "$CONFstr" ] && {
+if grep -q "#v1" "$CONFstr"; then
+echo -e "v1"
+elif grep -q "#v2" "$CONFstr"; then
+echo -e "v2"
+elif grep -q "#v3" "$CONFstr"; then
+echo -e "v3"
+elif grep -q "dpi-desync-split-pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1" "$CONFstr"; then
+echo -e "дефолтная"
+else
+echo -e "${RED}не известная${NC}"
+fi
+}
+}
+# ==========================================
 # Главное меню
 # ==========================================
 show_menu() {
@@ -575,7 +567,7 @@ clear
 echo -e "╔════════════════════════════════════╗"
 echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 echo -e "╚════════════════════════════════════╝"
-echo -e "                     ${DGRAY}by StressOzz v6.0${NC}"
+echo -e "                     ${DGRAY}by StressOzz v6.5${NC}"
 # Определяем актуальная/устарела
 if [ "$LIMIT_REACHED" -eq 1 ] || [ "$LATEST_VER" = "не найдена" ]; then
 INST_COLOR=$CYAN; INSTALLED_DISPLAY="$INSTALLED_VER"
@@ -608,10 +600,14 @@ esac
 if [ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*1024-65535" "$CONF" && grep -q -- "--filter-udp=1024-65535" "$CONF"; then
 echo -e "\n${YELLOW}Стратегия для игр: ${NC}активна${NC}"
 fi
+if [ -f /etc/init.d/zapret ]; then
+    echo -e "\n${YELLOW}Используемая стратегия:${NC} $(show_current_strategy)"
+fi
+
 echo -e ""
 # Вывод пунктов меню
 echo -e "${CYAN}1) ${GREEN}Установить последнюю версию${NC}"
-echo -e "${CYAN}2) ${GREEN}Оптимизировать стратегию${NC}"
+echo -e "${CYAN}2) ${GREEN}Меню выбора стратегии${NC}"
 echo -e "${CYAN}3) ${GREEN}Вернуть настройки по умолчанию${NC}"
 echo -e "${CYAN}4) ${GREEN}Остановить / Запустить ${NC}Zapret"
 echo -e "${CYAN}5) ${GREEN}Удалить ${NC}Zapret"
@@ -623,7 +619,7 @@ echo -ne "${YELLOW}Выберите пункт:${NC} "
 read choice
 case "$choice" in
 1) install_Zapret ;;
-2) fix_default ;;
+2) menu_str ;;
 3) comeback_def ;;
 4) startstop_zpr ;;
 5) uninstall_zapret;;
