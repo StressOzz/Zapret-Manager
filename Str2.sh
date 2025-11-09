@@ -40,6 +40,12 @@ cat <<'EOF' >> /etc/config/zapret
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
 '
 EOF
+# добавление исключения
+file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
+rm -f "$file"
+cat <<'EOF' > "$file"
+openwrt.org
+EOF
 # Редактируем /etc/hosts
 echo -e "${GREEN}🔴 ${CYAN}Редактируем ${NC}/etc/hosts"
 file="/etc/hosts"
@@ -51,12 +57,6 @@ cat <<'EOF' | grep -Fxv -f "$file" 2>/dev/null >> "$file"
 157.240.9.174 instagram.com www.instagram.com
 EOF
 /etc/init.d/dnsmasq restart >/dev/null 2>&1
-# добавление исключения
-file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
-rm -f "$file"
-cat <<'EOF' > "$file"
-openwrt.org
-EOF
 # Применяем конфиг
 echo -e "${GREEN}🔴 ${CYAN}Применяем новую стратегию и настройки${NC}\n"
 chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
