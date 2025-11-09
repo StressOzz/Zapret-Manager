@@ -13,13 +13,6 @@ CONF="/etc/config/zapret"
 # v5.5
 clear
 echo -e "${MAGENTA}Редактируем стратегию${NC}\n"
-# Проверка, установлен ли Zapret
-if [ ! -f /etc/init.d/zapret ]; then
-echo -e "${RED}Zapret не установлен!${NC}"
-echo -e ""
-read -p "Нажмите Enter для выхода в главное меню..." dummy
-return
-fi
 echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию${NC}"
 # Удаляем строку и всё, что идёт ниже строки с option NFQWS_OPT '
 sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" /etc/config/zapret
