@@ -10,7 +10,7 @@ GRAY="\033[38;5;239m"
 DGRAY="\033[38;5;236m"
 WORKDIR="/tmp/zapret-update"
 CONF="/etc/config/zapret"
-# v6.5
+# v3
 echo -e "${MAGENTA}Устанавливаем стратегию v3${NC}\n"
 echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию${NC}"
 # Удаляем строку и всё, что идёт ниже строки с option NFQWS_OPT '
@@ -39,13 +39,13 @@ cat <<'EOF' >> /etc/config/zapret
 #v3
 '
 EOF
-# Добавляем исключение и домены Youtube
+# Добавляем исключение
 file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
 rm -f "$file"
 cat <<'EOF' > "$file"
 gstatic.com
 EOF
-# дкопируем tls_clienthello_t2_ru.bin
+# копируем tls_clienthello_t2_ru.bin
 echo -e "${GREEN}🔴 ${CYAN}Копируем ${NC}tls_clienthello_t2_ru.bin${CYAN} на устройство${NC}"
 curl -sLo /opt/zapret/files/fake/tls_clienthello_t2_ru.bin https://github.com/StressOzz/Zapret-Manager/raw/refs/heads/main/tls_clienthello_t2_ru.bin
 # Редактируем /etc/hosts
