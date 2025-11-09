@@ -18,6 +18,7 @@ echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию${NC}"
 sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" /etc/config/zapret
 # Вставляем новый блок сразу после строки option NFQWS_OPT '
 cat <<'EOF' >> /etc/config/zapret
+#v2
   option NFQWS_OPT '
 --filter-tcp=443
 --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
