@@ -52,7 +52,7 @@ sed -i \
 /^gvt2\.com$/d; \
 /^gvt3\.com$/d' /opt/zapret/ipset/zapret-hosts-user-exclude.txt
 # Скачиваем список доменов и добавляем
-echo -e "${GREEN}🔴 ${CYAN}Добавляем домены в ${NC}hostlist${CYAN} и редактируем ${NC}/etc/hosts\n"
+echo -e "${GREEN}🔴 ${CYAN}Добавляем домены в ${NC}hostlist"
 exclude_file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
 remote_url="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/exclude-list.txt"
 tmpfile=$(mktemp)
