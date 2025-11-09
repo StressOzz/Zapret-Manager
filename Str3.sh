@@ -18,7 +18,6 @@ echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию${NC}"
 sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" /etc/config/zapret
 # Вставляем новый блок сразу после строки option NFQWS_OPT '
 cat <<'EOF' >> /etc/config/zapret
-#v3
   option NFQWS_OPT '
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
@@ -49,6 +48,7 @@ cat <<'EOF' >> /etc/config/zapret
 --dpi-desync=fake
 --dpi-desync-repeats=4
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
+#v3
 '
 EOF
 # Добавляем исключение и домены Youtube
