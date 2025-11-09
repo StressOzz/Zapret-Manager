@@ -58,7 +58,7 @@ cat <<'EOF' > "$file"
 openwrt.org
 EOF
 # Применяем конфиг
-echo -e "${GREEN}🔴 ${CYAN}Применяем новую стратегию и настройки\n"
+echo -e "${GREEN}🔴 ${CYAN}Применяем новую стратегию и настройки${NC}\n"
 chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 echo -e "${BLUE}🔴 ${GREEN}Стратегия отредактирована!${NC}"
 echo -e ""
