@@ -11,13 +11,13 @@ DGRAY="\033[38;5;236m"
 WORKDIR="/tmp/zapret-update"
 CONF="/etc/config/zapret"
 # v5.5
-echo -e "${MAGENTA}Редактируем стратегию${NC}\n"
+echo -e "${MAGENTA}Устанавливаем стратегию v1${NC}\n"
 echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию${NC}"
 # Удаляем строку и всё, что идёт ниже строки с option NFQWS_OPT '
 sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" /etc/config/zapret
 # Вставляем новый блок сразу после строки option NFQWS_OPT '
 cat <<'EOF' >> /etc/config/zapret
-option NFQWS_OPT '
+  option NFQWS_OPT '
 --filter-tcp=443
 --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
 --dpi-desync=fake,multidisorder
@@ -62,4 +62,4 @@ EOF
 # Применяем конфиг
 echo -e "${GREEN}🔴 ${CYAN}Применяем новую стратегию и настройки${NC}\n"
 chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
-echo -e "${BLUE}🔴 ${GREEN}Стратегия отредактирована!${NC}"
+echo -e "${BLUE}🔴 ${GREEN}Стратегия v1 установлена!${NC}\n"
