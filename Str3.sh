@@ -29,7 +29,7 @@ cat <<'EOF' >> /etc/config/zapret
 --dpi-desync-fakedsplit-pattern=/opt/zapret/files/fake/tls_clienthello_vk_com.bin
 --dpi-desync-split-seqovl=336
 --dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_gosuslugi_ru.bin
---dpi-desync-fooling=badsum,badseq
+--dpi-desync-fooling=badseq,badsum
 --dpi-desync-badseq-increment=0
 --new
 --filter-udp=443
