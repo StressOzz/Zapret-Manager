@@ -40,7 +40,7 @@ cat <<'EOF' >> /etc/config/zapret
 #v2
 '
 EOF
-# добавление исключения
+# Добавляем исключение
 file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
 rm -f "$file"
 cat <<'EOF' > "$file"
