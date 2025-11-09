@@ -273,18 +273,7 @@ EOF
 file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
 rm -f "$file"
 cat <<'EOF' > "$file"
-archive.openwrt.org
-cdn.openwrt.org
-dev.openwrt.org
-downloads.openwrt.org
-forum.openwrt.org
-fwdownloads.openwrt.org
-gh.openwrt.org
-git.openwrt.org
-lede-project.org
-lists.openwrt.org
 openwrt.org
-wiki.openwrt.org
 EOF
 # Применяем конфиг
 echo -e "${GREEN}🔴 ${CYAN}Применяем новую стратегию и настройки\n"
