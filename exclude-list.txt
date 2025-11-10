@@ -165,6 +165,5 @@ mirror-03.infra.openwrt.org
 mirror-04.infra.openwrt.org
 openwrt.gitlab.io
 openwrt.org
-raw.githubusercontent.com
 wiki.openwrt.org
 #########################################################################
