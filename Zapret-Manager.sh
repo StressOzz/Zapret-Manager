@@ -377,8 +377,8 @@ fi
 uninstall_zapret "1"
 install_Zapret "1"
 curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str3.sh | sh
-grep -q "#v3" /etc/config/zapret || { 
-echo -e "\n${RED}Cтратегия v3 не установлена!${NC}\n"
+grep -q "#v" /etc/config/zapret || { 
+echo -e "\n${RED}Cтратегия не установлена!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 }
