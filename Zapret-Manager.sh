@@ -170,9 +170,10 @@ echo -e "${BLUE}🔴 ${GREEN}Последняя версия уже устано
 return
 fi
 # --- Обновление списка пакетов
-echo -e "${GREEN}🔴 ${CYAN}Обновляем список пакетов${NC}"
 opkg update >/dev/null 2>&1 || { 
-echo -e "\n${RED}Ошибка при обновлении списка пакетов!${NC}\n"; exit 1; 
+echo -e "\n${RED}Ошибка при обновлении списка пакетов!${NC}\n"
+read -p "Нажмите Enter для выхода в главное меню..." dummy
+return
 }
 # --- Остановка сервиса и старых процессов Zapret
 if [ -f /etc/init.d/zapret ]; then
@@ -372,6 +373,10 @@ return
 fi
 uninstall_zapret "1"
 install_Zapret "1"
+if [ ! -f /etc/init.d/zapret ]; then
+read -p "Нажмите Enter для выхода в главное меню..." dummy
+return
+fi
 curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str3.sh | sh
 enable_discord_calls "1"
 fix_GAME "1"
