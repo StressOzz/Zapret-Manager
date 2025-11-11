@@ -21,7 +21,7 @@ cat <<'EOF' >> /etc/config/zapret
 --dpi-desync=fake,fakeddisorder
 --dpi-desync-split-pos=10,midsld
 --dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_t2_ru.bin
---dpi-desync-fake-tls-mod=rnd,dupsid,sni=4pda.to
+--dpi-desync-fake-tls-mod=rnd,dupsid,sni=m.ok.ru
 --dpi-desync-fake-tls=0x0F0F0F0F
 --dpi-desync-fake-tls-mod=none
 --dpi-desync-fakedsplit-pattern=/opt/zapret/files/fake/tls_clienthello_vk_com.bin
