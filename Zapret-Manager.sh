@@ -170,8 +170,9 @@ echo -e "${BLUE}🔴 ${GREEN}Последняя версия уже устано
 return
 fi
 # --- Обновление списка пакетов
+echo -e "${GREEN}🔴 ${CYAN}Обновляем список пакетов${NC}"
 opkg update >/dev/null 2>&1 || { 
-echo -e "\n${RED}Ошибка при обновлении списка пакетов!${NC}\n"
+echo -e "\n${RED}Ошибка при обновлении списка пакетов! Попробуйте ещё раз!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 }
@@ -223,10 +224,12 @@ fi
 # --- Сообщение об успешной установке или нет
 if [ -f /etc/init.d/zapret ]; then
 echo -e "\n${BLUE}🔴 ${GREEN}Zapret установлен!${NC}\n"
+[ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 else
 echo -e "\n${RED}Zapret не был установлен! Попробуйте ещё раз!${NC}\n"
+read -p "Нажмите Enter для выхода в главное меню..." dummy
+return
 fi
-[ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 # ==========================================
 # Включение Discord и звонков в TG и WA
@@ -373,18 +376,15 @@ return
 fi
 uninstall_zapret "1"
 install_Zapret "1"
-if [ ! -f /etc/init.d/zapret ]; then
+curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str3.sh | sh
+grep -q "#v3" /etc/config/zapret || { 
+echo -e "\n${RED}Cтратегия v3 не установлена!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
-fi
-curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str3.sh | sh
+}
 enable_discord_calls "1"
 fix_GAME "1"
-if [ -f /etc/init.d/zapret ]; then
 echo -e "${BLUE}🔴 ${GREEN}Zapret ${GREEN}установлен и настроен!${NC}\n"
-else
-echo -e "${RED}Zapret не установлен!${NC}\n"
-fi
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 # ==========================================
