@@ -8,13 +8,14 @@ BLUE="\033[0;34m"
 NC="\033[0m"
 GRAY="\033[38;5;239m"
 DGRAY="\033[38;5;236m"
-# v1
-echo -e "${MAGENTA}Устанавливаем стратегию v1${NC}\n"
+# Версия стратегии
+version="v1"
+echo -e "${MAGENTA}Устанавливаем стратегию ${version}${NC}\n"
 echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию${NC}"
 # Удаляем строку и всё, что идёт ниже строки с option NFQWS_OPT '
 sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" /etc/config/zapret
 # Вставляем новый блок сразу после строки option NFQWS_OPT '
-cat <<'EOF' >> /etc/config/zapret
+cat <<EOF >> /etc/config/zapret
   option NFQWS_OPT '
 --filter-tcp=443
 --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
@@ -32,7 +33,7 @@ cat <<'EOF' >> /etc/config/zapret
 --dpi-desync=fake
 --dpi-desync-repeats=4
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
-#v1
+#${version}
 '
 EOF
 # Проверка и перезапись файла исключений пользователей
@@ -60,4 +61,4 @@ EOF
 # Применяем конфиг
 echo -e "${GREEN}🔴 ${CYAN}Применяем новую стратегию и настройки${NC}\n"
 chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
-echo -e "${BLUE}🔴 ${GREEN}Стратегия v1 установлена!${NC}\n"
+echo -e "${BLUE}🔴 ${GREEN}Стратегия ${version} установлена!${NC}\n"
