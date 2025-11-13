@@ -44,6 +44,7 @@ cat <<EOF >> /etc/config/zapret
 '
 EOF
 # Добавляем домены google
+echo -e "${GREEN}🔴 ${CYAN}Добавляем домены ${NC}google"
 file="/opt/zapret/ipset/zapret-hosts-google.txt"
 cat <<'EOF' | grep -Fxv -f "$file" 2>/dev/null >> "$file"
 cdn.youtube.com
