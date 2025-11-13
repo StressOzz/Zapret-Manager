@@ -502,6 +502,8 @@ elif grep -q "#v2" "$CONFstr"; then
 echo -e "\n${YELLOW}Используется стратегия: ${NC}v2"
 elif grep -q "#v3" "$CONFstr"; then
 echo -e "\n${YELLOW}Используется стратегия: ${NC}v3"
+elif grep -q "#v4" "$CONFstr"; then
+echo -e "\n${YELLOW}Используется стратегия: ${NC}v4"
 elif grep -q "dpi-desync-split-pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1" "$CONFstr"; then
 echo -e "\n${YELLOW}Используется стратегия: ${NC}дефолтная"
 fi
