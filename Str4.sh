@@ -42,7 +42,7 @@ cat <<'EOF' >> /etc/config/zapret
 #v4
 '
 EOF
-# Добавляем исключение
+# Добавляем домены google
 file="/opt/zapret/ipset/zapret-hosts-google.txt"
 cat <<'EOF' | grep -Fxv -f "$file" 2>/dev/null >> "$file"
 cdn.youtube.com
