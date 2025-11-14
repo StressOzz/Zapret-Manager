@@ -18,7 +18,7 @@ sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" /etc/config/zapret
 cat <<EOF >> /etc/config/zapret
   option NFQWS_OPT '
 --filter-tcp=443
---hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
+--hostlist-exclude-domains=openwrt.org
 --dpi-desync=fake,fakeddisorder
 --dpi-desync-split-pos=10,midsld
 --dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
@@ -37,12 +37,6 @@ cat <<EOF >> /etc/config/zapret
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
 #${version}
 '
-EOF
-# Добавляем исключение
-file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
-rm -f "$file"
-cat <<'EOF' > "$file"
-openwrt.org
 EOF
 # Редактируем /etc/hosts
 echo -e "${GREEN}🔴 ${CYAN}Редактируем ${NC}/etc/hosts"
