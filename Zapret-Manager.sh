@@ -366,7 +366,8 @@ fi
 uninstall_zapret "1"
 install_Zapret "1"
 [ ! -f /etc/init.d/zapret ] && return
-curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str3.sh | sh
+# ТУТ ПИШЕМ КАКАЯ СТРАТЕГИЯ БУДЕТ УСТАНАВЛИВАТЬСЯ ЧЕРЕЗ ПУНКТ 8
+curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str4.sh | sh
 if [ ! -f "$CONF" ]; then
 echo -e "\n${RED}Файл ${NC}$CONF${RED} не найден!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
