@@ -29,6 +29,7 @@ cat <<EOF >> /etc/config/zapret
 --dpi-desync-fooling=badseq
 --new
 --filter-tcp=443
+--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
 --dpi-desync-any-protocol=1
 --dpi-desync-cutoff=n5
 --dpi-desync=multisplit
@@ -37,6 +38,7 @@ cat <<EOF >> /etc/config/zapret
 --dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/4pda.bin
 --new
 --filter-udp=443
+--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
 --dpi-desync=fake
 --dpi-desync-repeats=4
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
