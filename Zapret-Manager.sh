@@ -171,8 +171,7 @@ return
 fi
 # --- Остановка сервиса и старых процессов Zapret
 if [ -f /etc/init.d/zapret ]; then
-echo -e "${GREEN}🔴 ${CYAN}Останавливаем ${NC}zapret"
-/etc/init.d/zapret stop >/dev/null 2>&1
+echo -e "${GREEN}🔴 ${CYAN}Останавливаем ${NC}zapret" && /etc/init.d/zapret stop >/dev/null 2>&1
 PIDS=$(pgrep -f /opt/zapret)
 [ -n "$PIDS" ] && for pid in $PIDS; do kill -9 "$pid" >/dev/null 2>&1; done
 fi
@@ -367,9 +366,7 @@ uninstall_zapret "1"
 install_Zapret "1"
 [ ! -f /etc/init.d/zapret ] && return
 # Останавливаем zapret на случай если дефолтная стратегия ломает трафик
-echo -e "${MAGENTA}Останавливаем сервис Zapret${NC}\n"
-/etc/init.d/zapret stop >/dev/null 2>&1
-echo -e "${BLUE}🔴 ${GREEN}Zapret остановлен!${NC}\n"
+echo -e "${MAGENTA}Останавливаем Zapret${NC}\n" && /etc/init.d/zapret stop >/dev/null 2>&1 && echo -e "${BLUE}🔴 ${GREEN}Zapret остановлен!${NC}\n"
 # ТУТ ПИШЕМ КАКАЯ СТРАТЕГИЯ БУДЕТ УСТАНАВЛИВАТЬСЯ ЧЕРЕЗ ПУНКТ 8
 curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str2.sh | sh
 if [ ! -f "$CONF" ]; then
@@ -423,11 +420,10 @@ show_menu
 # ==========================================
 stop_zapret() {
 clear
-echo -e "${MAGENTA}Останавливаем сервис Zapret${NC}\n"
+echo -e "${MAGENTA}Останавливаем Zapret${NC}\n"
 # Остановка службы через init.d и убийство процессов
 if [ -f /etc/init.d/zapret ]; then
-echo -e "${GREEN}🔴 ${CYAN}Останавливаем ${NC}Zapret"
-/etc/init.d/zapret stop >/dev/null 2>&1
+echo -e "${GREEN}🔴 ${CYAN}Останавливаем ${NC}Zapret" && /etc/init.d/zapret stop >/dev/null 2>&1
 PIDS=$(pgrep -f /opt/zapret)
 if [ -n "$PIDS" ]; then
 echo -e "${GREEN}🔴 ${CYAN}Убиваем все процессы ${NC}Zapret"
@@ -447,7 +443,7 @@ clear
 echo -e "${MAGENTA}Запускаем Zapret${NC}\n"
 # Запуск службы через init.d
 if [ -f /etc/init.d/zapret ]; then
-echo -e "${GREEN}🔴 ${CYAN}Запускаем сервис ${NC}Zapret"
+echo -e "${GREEN}🔴 ${CYAN}Запускаем ${NC}Zapret"
 /etc/init.d/zapret start >/dev/null 2>&1
 chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 echo -e "\n${BLUE}🔴 ${GREEN}Zapret запущен!${NC}\n"
@@ -465,7 +461,6 @@ local NO_PAUSE=$1
 echo -e "${MAGENTA}Удаляем ZAPRET${NC}\n"
 if ! [[ "$LATEST_VER" =~ 7 ]]; then
 echo -e "${RED}Внимание! Версия для установки не найдена!${NC}\n"
-echo -e "${YELLOW}После удаления, установка возможна только в ручном режиме!${NC}\n"
 read -p "Продолжить удаление? [y/N]: " answer
 case "$answer" in
 [yY]) echo -e "";;  # продолжаем удаление
@@ -475,9 +470,7 @@ sleep 2
 return;;
 esac
 fi
-echo -e "${GREEN}🔴 ${CYAN}Останавливаем ${NC}zapret"
-echo -e "${GREEN}🔴 ${CYAN}Убиваем процессы${NC}"
-/etc/init.d/zapret stop >/dev/null 2>&1
+echo -e "${GREEN}🔴 ${CYAN}Останавливаем ${NC}zapret" && echo -e "${GREEN}🔴 ${CYAN}Убиваем процессы${NC}" && /etc/init.d/zapret stop >/dev/null 2>&1
 for pid in $(pgrep -f /opt/zapret 2>/dev/null); do kill -9 "$pid" 2>/dev/null; done
 echo -e "${GREEN}🔴 ${CYAN}Удаляем пакеты${NC}"
 opkg --force-removal-of-dependent-packages --autoremove remove zapret luci-app-zapret >/dev/null 2>&1
