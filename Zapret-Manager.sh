@@ -333,7 +333,7 @@ cat <<'EOF' >> "$CONF"
 --filter-udp=1024-65535
 --dpi-desync=fake
 --dpi-desync-cutoff=d2
---dpi-desync-any-protocol
+--dpi-desync-any-protocol=1
 --dpi-desync-fake-unknown-udp=/opt/zapret/files/fake/quic_initial_www_google_com.bin
 '
 EOF
