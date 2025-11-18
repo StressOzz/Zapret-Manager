@@ -171,7 +171,7 @@ return
 fi
 # --- Остановка сервиса и старых процессов Zapret
 if [ -f /etc/init.d/zapret ]; then
-echo -e "${GREEN}🔴 ${CYAN}Останавливаем сервис ${NC}zapret"
+echo -e "${GREEN}🔴 ${CYAN}Останавливаем ${NC}zapret"
 /etc/init.d/zapret stop >/dev/null 2>&1
 PIDS=$(pgrep -f /opt/zapret)
 [ -n "$PIDS" ] && for pid in $PIDS; do kill -9 "$pid" >/dev/null 2>&1; done
@@ -366,6 +366,10 @@ fi
 uninstall_zapret "1"
 install_Zapret "1"
 [ ! -f /etc/init.d/zapret ] && return
+# Останавливаем zapret на случай если дефолтная стратегия ломает трафик
+echo -e "${MAGENTA}Останавливаем сервис Zapret${NC}\n"
+/etc/init.d/zapret stop >/dev/null 2>&1
+echo -e "${BLUE}🔴 ${GREEN}Zapret остановлен!${NC}\n"
 # ТУТ ПИШЕМ КАКАЯ СТРАТЕГИЯ БУДЕТ УСТАНАВЛИВАТЬСЯ ЧЕРЕЗ ПУНКТ 8
 curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str2.sh | sh
 if [ ! -f "$CONF" ]; then
@@ -380,7 +384,7 @@ return
 fi
 enable_discord_calls "1"
 fix_GAME "1"
-echo -e "${BLUE}🔴 ${GREEN}Zapret ${GREEN}установлен и настроен!${NC}\n"
+echo -e "${BLUE}🔴 ${GREEN}Zapret установлен и настроен!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 # ==========================================
@@ -419,10 +423,10 @@ show_menu
 # ==========================================
 stop_zapret() {
 clear
-echo -e "${MAGENTA}Останавливаем Zapret${NC}\n"
+echo -e "${MAGENTA}Останавливаем сервис Zapret${NC}\n"
 # Остановка службы через init.d и убийство процессов
 if [ -f /etc/init.d/zapret ]; then
-echo -e "${GREEN}🔴 ${CYAN}Останавливаем сервис ${NC}Zapret"
+echo -e "${GREEN}🔴 ${CYAN}Останавливаем ${NC}Zapret"
 /etc/init.d/zapret stop >/dev/null 2>&1
 PIDS=$(pgrep -f /opt/zapret)
 if [ -n "$PIDS" ]; then
@@ -471,7 +475,7 @@ sleep 2
 return;;
 esac
 fi
-echo -e "${GREEN}🔴 ${CYAN}Останавливаем сервис${NC}"
+echo -e "${GREEN}🔴 ${CYAN}Останавливаем ${NC}zapret"
 echo -e "${GREEN}🔴 ${CYAN}Убиваем процессы${NC}"
 /etc/init.d/zapret stop >/dev/null 2>&1
 for pid in $(pgrep -f /opt/zapret 2>/dev/null); do kill -9 "$pid" 2>/dev/null; done
