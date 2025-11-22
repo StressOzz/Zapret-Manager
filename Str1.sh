@@ -38,7 +38,7 @@ cat <<EOF >> /etc/config/zapret
 '
 EOF
 # Проверка и перезапись файла исключений пользователей
-echo -e "${GREEN}🔴 ${CYAN}Добавляем домены в ${NC}hostlist"
+echo -e "${GREEN}🔴 ${CYAN}Добавляем домены в исключения${NC}"
 exclude_file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
 remote_url="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/zapret-hosts-user-exclude.txt"
 # Удаляем старый файл
