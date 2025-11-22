@@ -49,7 +49,7 @@ EOF
 # Проверка и перезапись файла исключений пользователей
 echo -e "${GREEN}🔴 ${CYAN}Добавляем домены в ${NC}hostlist"
 exclude_file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
-remote_url="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/exclude-list.txt"
+remote_url="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/zapret-hosts-user-exclude.txt"
 # Удаляем старый файл
 rm -f "$exclude_file"
 # Скачиваем новый файл на его место
