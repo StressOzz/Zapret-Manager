@@ -46,32 +46,6 @@ cat <<EOF >> /etc/config/zapret
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
 '
 EOF
-# Добавляем домены google
-echo -e "${GREEN}🔴 ${CYAN}Добавляем домены ${NC}google"
-file="/opt/zapret/ipset/zapret-hosts-google.txt"
-cat <<'EOF' | grep -Fxv -f "$file" 2>/dev/null >> "$file"
-cdn.youtube.com
-fonts.googleapis.com
-fonts.gstatic.com
-ggpht.com
-googleapis.com
-googleusercontent.com
-i.ytimg.com
-i9.ytimg.com
-kids.youtube.com
-m.youtube.com
-manifest.googlevideo.com
-music.youtube.com
-nhacmp3youtube.com
-returnyoutubedislikeapi.com
-s.ytimg.com
-signaler-pa.youtube.com
-studio.youtube.com
-tv.youtube.com
-yt3.googleusercontent.com
-yting.com
-gstatic.com
-EOF
 # Проверка и перезапись файла исключений пользователей
 echo -e "${GREEN}🔴 ${CYAN}Добавляем домены в ${NC}hostlist"
 exclude_file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
