@@ -136,7 +136,7 @@ fi
 if [ "$LIMIT_REACHED" -eq 1 ] || [ "$LATEST_VER" = "не найдена" ]; then
 INST_COLOR=$CYAN; INSTALLED_DISPLAY="$INSTALLED_VER"
 elif [ "$INSTALLED_VER" = "$LATEST_VER" ]; then
-INST_COLOR=$GREEN; INSTALLED_DISPLAY="$INSTALLED_VER (актуальная)"
+INST_COLOR=$GREEN; INSTALLED_DISPLAY="$INSTALLED_VER"
 elif [ "$INSTALLED_VER" != "не найдена" ]; then
 INST_COLOR=$RED; INSTALLED_DISPLAY="$INSTALLED_VER (устарела)"
 else
@@ -226,15 +226,13 @@ show_script_50() {
 SCRIPT_FILE="/opt/zapret/init.d/openwrt/custom.d/50-script.sh"
 [ -f "$SCRIPT_FILE" ] || return
 line=$(head -n1 "$SCRIPT_FILE")
-if echo "$line" | grep -q "QUIC"; then
-echo -e "\n${YELLOW}Установлен скрипт: ${NC}50-quic4all"
-elif echo "$line" | grep -q "stun"; then
-echo -e "\n${YELLOW}Установлен скрипт: ${NC}50-stun4all"
-elif echo "$line" | grep -q "discord media"; then
-echo -e "\n${YELLOW}Установлен скрипт: ${NC}50-discord-media"
-elif echo "$line" | grep -q "discord subnets"; then
-echo -e "\n${YELLOW}Установлен скрипт: ${NC}50-discord"
-fi
+case "$line" in
+  *QUIC*)              name="50-quic4all" ;;
+  *stun*)              name="50-stun4all" ;;
+  *"discord media"*)   name="50-discord-media" ;;
+  *"discord subnets"*) name="50-discord" ;;
+  *)                   name="" ;;
+esac
 }
 enable_discord_calls() {
 local NO_PAUSE=$1
@@ -246,7 +244,7 @@ echo -e "\n${RED}Zapret не установлен!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
-[ "$NO_PAUSE" != "1" ] && show_script_50
+[ "$NO_PAUSE" != "1" ] && show_script_50 && [ -n "$name" ] && echo -e "\n${YELLOW}Установлен скрипт:${NC} $name"
 if [ "$NO_PAUSE" = "1" ]; then
 SELECTED="50-stun4all"
 URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-stun4all"
@@ -365,9 +363,9 @@ fi
 uninstall_zapret "1"
 install_Zapret "1"
 [ ! -f /etc/init.d/zapret ] && return
-# Останавливаем zapret на случай если дефолтная стратегия ломает трафик
+# --- Останавливаем zapret на случай если дефолтная стратегия ломает трафик
 echo -e "${MAGENTA}Останавливаем Zapret${NC}\n" && /etc/init.d/zapret stop >/dev/null 2>&1 && echo -e "${BLUE}🔴 ${GREEN}Zapret остановлен!${NC}\n"
-# ТУТ ПИШЕМ КАКАЯ СТРАТЕГИЯ БУДЕТ УСТАНАВЛИВАТЬСЯ ЧЕРЕЗ ПУНКТ 8
+# --- ТУТ ПИШЕМ КАКАЯ СТРАТЕГИЯ БУДЕТ УСТАНАВЛИВАТЬСЯ ЧЕРЕЗ ПУНКТ 8
 curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str2.sh | sh
 if [ ! -f "$CONF" ]; then
 echo -e "\n${RED}Файл ${NC}$CONF${RED} не найден!${NC}\n"
@@ -421,7 +419,6 @@ show_menu
 stop_zapret() {
 clear
 echo -e "${MAGENTA}Останавливаем Zapret${NC}\n"
-# Остановка службы через init.d и убийство процессов
 if [ -f /etc/init.d/zapret ]; then
 echo -e "${GREEN}🔴 ${CYAN}Останавливаем ${NC}Zapret" && /etc/init.d/zapret stop >/dev/null 2>&1
 PIDS=$(pgrep -f /opt/zapret)
@@ -441,7 +438,6 @@ read -p "Нажмите Enter для выхода в главное меню..."
 start_zapret() {
 clear
 echo -e "${MAGENTA}Запускаем Zapret${NC}\n"
-# Запуск службы через init.d
 if [ -f /etc/init.d/zapret ]; then
 echo -e "${GREEN}🔴 ${CYAN}Запускаем ${NC}Zapret"
 /etc/init.d/zapret start >/dev/null 2>&1
@@ -495,15 +491,16 @@ show_current_strategy() {
 CONFstr="/etc/config/zapret"
 [ -f "$CONFstr" ] || return
 if grep -q "#v1" "$CONFstr"; then
-echo -e "\n${YELLOW}Используется стратегия: ${NC}v1"
+ver="v1"
 elif grep -q "#v2" "$CONFstr"; then
-echo -e "\n${YELLOW}Используется стратегия: ${NC}v2"
+ver="v2"
 elif grep -q "#v3" "$CONFstr"; then
-echo -e "\n${YELLOW}Используется стратегия: ${NC}v3"
+ver="v3"
 elif grep -q "#v4" "$CONFstr"; then
-echo -e "\n${YELLOW}Используется стратегия: ${NC}v4"
-elif grep -q "dpi-desync-split-pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1" "$CONFstr"; then
-echo -e "\n${YELLOW}Используется стратегия: ${NC}дефолтная"
+ver="v4"
+elif grep -q -- "--hostlist=/opt/zapret/ipset/zapret-hosts-user.txt" "$CONFstr" \
+&& grep -q -- "--hostlist-exclude-domains=openwrt.org" "$CONFstr"; then
+ver="дефолтная"
 fi
 }
 menu_str() {
@@ -511,7 +508,7 @@ clear
 echo -e "${MAGENTA}Меню выбора стратегии${NC}"
 # Проверка, установлен ли Zapret
 [ ! -f /etc/init.d/zapret ] && { echo -e "\n${RED}Zapret не установлен!${NC}\n"; read -p "Нажмите Enter для выхода в главное меню..." dummy; return; }
-show_current_strategy
+show_current_strategy && [ -n "$ver" ] && echo -e "\n${YELLOW}Используется стратегия:${NC} $ver"
 echo -e "\n${CYAN}1) ${GREEN}Установить стратегию${NC} v1"
 echo -e "${CYAN}2) ${GREEN}Установить стратегию${NC} v2"
 echo -e "${CYAN}3) ${GREEN}Установить стратегию${NC} v3"
@@ -551,15 +548,15 @@ clear
 echo -e "╔════════════════════════════════════╗"
 echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 echo -e "╚════════════════════════════════════╝"
-echo -e "                     ${DGRAY}by StressOzz v6.6${NC}"
+echo -e "                     ${DGRAY}by StressOzz v6.7${NC}"
 # Вывод информации
-echo -e "\n${YELLOW}Установленная версия: ${INST_COLOR}$INSTALLED_DISPLAY${NC}"
-echo -e "\n${YELLOW}Последняя версия на GitHub: ${CYAN}$LATEST_VER${NC}"
-echo -e "\n${YELLOW}Архитектура устройства:${NC} $LOCAL_ARCH"
-[ -n "$ZAPRET_STATUS" ] && echo -e "\n${YELLOW}Статус Zapret: ${NC}$ZAPRET_STATUS"
-show_script_50
-[ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*1024-65535" "$CONF" && grep -q -- "--filter-udp=1024-65535" "$CONF" && echo -e "\n${YELLOW}Стратегия для игр: ${NC}активна${NC}"
-show_current_strategy
+echo -e "\n${YELLOW}Установленная версия:       ${INST_COLOR}$INSTALLED_DISPLAY${NC}"
+echo -e "${YELLOW}Последняя версия на GitHub: ${CYAN}$LATEST_VER${NC}"
+echo -e "${YELLOW}Архитектура устройства:${NC}     $LOCAL_ARCH"
+[ -n "$ZAPRET_STATUS" ] && echo -e "${YELLOW}Статус Zapret:${NC}              $ZAPRET_STATUS"
+show_script_50 && [ -n "$name" ] && echo -e "${YELLOW}Установлен скрипт:${NC}          $name"
+show_current_strategy && [ -n "$ver" ] && echo -e "${YELLOW}Используется стратегия:${NC}     ${CYAN}$ver"
+[ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*1024-65535" "$CONF" && grep -q -- "--filter-udp=1024-65535" "$CONF" && echo -e "${YELLOW}Стратегия для игр:${NC}          ${GREEN}активна${NC}"
 # Вывод пунктов меню
 echo -e "\n${CYAN}1) ${GREEN}Установить последнюю версию${NC}"
 echo -e "${CYAN}2) ${GREEN}Меню выбора стратегии${NC}"
