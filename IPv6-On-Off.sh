@@ -14,19 +14,7 @@ RESET="\033[0m"
 
 clear
 
-# Проверяем текущее состояние IPv6
-echo -e ""
-echo -e "${BLUE}🔴${RESET} Проверяем текущее состояние IPv6..."
-if ip -6 addr show | grep -q "inet6"; then
-    IPV6_STATE="enabled"
-    echo -e "${GREEN}🔴${RESET} IPv6 ${GREEN}включён.${RESET}"
-else
-    IPV6_STATE="disabled"
-    echo -e "${RED}🔴${RESET} IPv6 ${RED}отключён.${RESET}"
-fi
-
 # --- Меню ---
-echo -e ""
 echo -e "${MAGENTA}╔══════════════════════════════════╗${RESET}"
 echo -e "${MAGENTA}║     ${BLUE}Управление IPv6 (OpenWRT)    ${MAGENTA}║${RESET}"
 echo -e "${MAGENTA}╠══════════════════════════════════╣${RESET}"
@@ -35,6 +23,14 @@ echo -e "${MAGENTA}║ ${RED}2) Выключить IPv6 (жёстко)       ${M
 echo -e "${MAGENTA}║ ${CYAN}3) Выключить IPv6 (мягко)        ${MAGENTA}║${RESET}"
 echo -e "${MAGENTA}║ ${YELLOW}0) Отмена                        ${MAGENTA}║${RESET}"
 echo -e "${MAGENTA}╚══════════════════════════════════╝${RESET}"
+echo -e ""
+if ip -6 addr show | grep -q "inet6"; then
+    IPV6_STATE="enabled"
+    echo -e "${GREEN}🔴${RESET} IPv6 ${GREEN}включён.${RESET}"
+else
+    IPV6_STATE="disabled"
+    echo -e "${RED}🔴${RESET} IPv6 ${RED}отключён.${RESET}"
+fi
 echo -e ""
 echo -n -e "${YELLOW}Выберите опцию [0-3]: ${RESET}"
 read -r CHOICE
@@ -111,7 +107,7 @@ EOF
         fi
         ;;
     3)
-        echo -e "${CYAN}🔵${RESET} Мягко удаляем IPv6 (без трогания ядра и DNS)..."
+        echo -e "${CYAN}🔵${RESET} Мягко отключаем IPv6..."
 
         uci set network.lan.ipv6='0'
         uci set network.wan.ipv6='0'
