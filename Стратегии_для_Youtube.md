@@ -1,15 +1,17 @@
 <h1 align="center">Cтратегии для YouTube</h1>
 
-<h1 align="center">Удаляйте ВСЮ старую стратегию и вставляете ТОЛЬКО ОДНУ из ЭТИХ СТРАТЕГИЙ !!!</h1>
+> [!IMPORTANT]
+> Удаляйте ВСЮ старую стратегию и вставляете ТОЛЬКО ОДНУ из ЭТИХ СТРАТЕГИЙ !!!
 
-<h1 align="center">После каждой смены стратегии, Restart и перезапуск браузера, делать - ОБЯЗАТЕЛЬНО !!!</h1>
+> [!IMPORTANT]
+> После каждой смены стратегии, **Restart** и перезапуск браузера, делать - **ОБЯЗАТЕЛЬНО** !!!
 
-+
+---
 ```
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
 --dpi-desync=multisplit
---dpi-desync-split-pos=1,sniext+1
+--dpi-desync-split-pos=1,sniext---1
 --dpi-desync-split-seqovl=1
 --new
 --filter-udp=443
@@ -18,7 +20,7 @@
 --dpi-desync-repeats=2
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
 ```
-+
+---
 ```
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
@@ -26,7 +28,7 @@
 --dpi-desync-split-seqovl=681
 --dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
 ```
-+
+---
 ```
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
@@ -48,12 +50,12 @@
 --dpi-desync-repeats=4
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
 ```
-+
+---
 ```
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
 --dpi-desync=multidisorder
---dpi-desync-split-pos=7,sld+1
+--dpi-desync-split-pos=7,sld---1
 --dpi-desync-fake-tls=0x0F0F0F0F
 --dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
@@ -66,7 +68,7 @@
 --dpi-desync-repeats=8
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
 ```
-+
+---
 ```
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
@@ -83,7 +85,7 @@
 --dpi-desync-cutoff=d3
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
 ```
-+
+---
 ```
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
@@ -101,7 +103,7 @@
 --dpi-desync-repeats=11
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
 ```
-+
+---
 ```
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
@@ -119,7 +121,7 @@
 --dpi-desync-fooling=datanoack
 --dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
 ```
-+
+---
 ```
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
@@ -129,14 +131,14 @@
 --dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
 ```
-+
+---
 ```
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
 --dpi-desync=multidisorder
---dpi-desync-split-pos=2,5,105,host+5,sld-1,endsld-5,endsld
+--dpi-desync-split-pos=2,5,105,host---5,sld-1,endsld-5,endsld
 ```
-+
+---
 ```
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
@@ -150,7 +152,7 @@
 --dpi-desync-fooling=datanoack
 --dpi-desync-cutoff=d3
 ```
-+
+---
 ```
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
@@ -169,7 +171,7 @@
 --dpi-desync-repeats=4
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
 ```
-+
+---
 ```
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
@@ -183,7 +185,7 @@
 --dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
 --dpi-desync-fooling=badseq
 ```
-+
+---
 ```
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
@@ -196,3 +198,4 @@
 --dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
 --dpi-desync-fooling=badsum,badseq
 ```
+---
