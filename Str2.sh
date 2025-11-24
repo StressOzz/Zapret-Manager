@@ -20,7 +20,7 @@ cat <<EOF >> /etc/config/zapret
 #${version} УДАЛИТЕ ЭТУ СТРОЧКУ, ЕСЛИ ВНОСИТЕ ИЗМЕННЕНИЯ В СТРАТЕГИЮ !!!
 
 --filter-tcp=443
---hostlist-exclude-domains=openwrt.org
+--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
 --dpi-desync=fake,fakeddisorder
 --dpi-desync-split-pos=10,midsld
 --dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
