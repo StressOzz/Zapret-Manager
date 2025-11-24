@@ -167,4 +167,16 @@ mirror-04.infra.openwrt.org
 openwrt.gitlab.io
 openwrt.org
 wiki.openwrt.org
-####################################
+#################################### UbisoftConnect
+ubi.com
+ubisoft.com
+store.ubi.com
+ubisoftconnect.com
+connect.ubisoft.com
+drops-register.ubi.com
+public-ubiservices.ubi.com
+ubisoftconnect.cdn.ubi.com
+uplaypc-s-ubisoft.cdn.ubi.com
+uplaypc-s-ubisoft-ww.cdn.ubi.com
+ubisoft-orbit-savegames.s3.amazonaws.com
+ubisoft-uplay-savegames.s3.amazonaws.com
