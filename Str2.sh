@@ -39,6 +39,17 @@ cat <<EOF >> /etc/config/zapret
 --dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
 '
 EOF
+# Проверка и перезапись файла исключений пользователей
+echo -e "${GREEN}🔴 ${CYAN}Добавляем домены в исключения"
+exclude_file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
+remote_url="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/zapret-hosts-user-exclude.txt"
+# Удаляем старый файл
+rm -f "$exclude_file"
+# Скачиваем новый файл на его место
+if ! curl -fsSL "$remote_url" -o "$exclude_file"; then
+echo -e "\n${RED}Не удалось загрузить список с GitHub!${NC}\n"
+read -p "Нажмите Enter для выхода в главное меню..." dummy
+fi
 # Редактируем /etc/hosts
 echo -e "${GREEN}🔴 ${CYAN}Редактируем ${NC}/etc/hosts"
 file="/etc/hosts"
