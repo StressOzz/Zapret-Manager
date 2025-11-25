@@ -227,11 +227,11 @@ SCRIPT_FILE="/opt/zapret/init.d/openwrt/custom.d/50-script.sh"
 [ -f "$SCRIPT_FILE" ] || return
 line=$(head -n1 "$SCRIPT_FILE")
 case "$line" in
-  *QUIC*)              name="50-quic4all" ;;
-  *stun*)              name="50-stun4all" ;;
-  *"discord media"*)   name="50-discord-media" ;;
-  *"discord subnets"*) name="50-discord" ;;
-  *)                   name="" ;;
+*QUIC*) name="50-quic4all" ;;
+*stun*) name="50-stun4all" ;;
+*"discord media"*) name="50-discord-media" ;;
+*"discord subnets"*) name="50-discord" ;;
+*) name="" ;;
 esac
 }
 enable_discord_calls() {
@@ -268,6 +268,8 @@ URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.exa
 URL="https://raw.githubusercontent.com/bol-van/zapret/v70.5/init.d/custom.d.examples.linux/50-discord" ;;
 5) echo -e "\n${BLUE}🔴 ${GREEN}Скрипт удалён!${NC}\n"
 rm -f "$CUSTOM_DIR/50-script.sh" 2>/dev/null
+sed -i "s/,50000-50099//" "$CONF"
+sed -i ':a;N;$!ba;s|--new\n--filter-udp=50000-50099\n--filter-l7=discord,stun\n--dpi-desync=fake\n*||g' "$CONF"
 chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 show_menu
@@ -282,18 +284,34 @@ if curl -fsSLo "$CUSTOM_DIR/50-script.sh" "$URL"; then
 [ "$NO_PAUSE" != "1" ] && 
 echo -e "\n${GREEN}🔴 ${CYAN}Скрипт ${NC}$SELECTED${CYAN} успешно установлен!${NC}\n"
 if [ "$SELECTED" = "50-quic4all" ] || [ "$SELECTED" = "50-stun4all" ]; then
-echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены!${NC}"
+echo -e "${BLUE}🔴 ${GREEN}Звонки и Discord включены!${NC}\n"
 elif [ "$SELECTED" = "50-discord-media" ] || [ "$SELECTED" = "50-discord" ]; then
-echo -e "${BLUE}🔴 ${GREEN}Discord включён!${NC}"
+echo -e "${BLUE}🔴 ${GREEN}Discord включён!${NC}\n"
 else
-echo -e "${BLUE}🔴 ${GREEN}Скрипт активирован!${NC}"
+echo -e "${BLUE}🔴 ${GREEN}Скрипт активирован!${NC}\n"
 fi
 else
 echo -e "${RED}Ошибка при скачивании скрипта!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
-echo -e ""
+# добавляем в стратегию блок для дискорда
+if ! grep -q "option NFQWS_PORTS_UDP.*50000-50099" "$CONF"; then
+sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,50000-50099'/" "$CONF"
+fi
+if ! grep -q -- "--filter-udp=50000-50099" "$CONF"; then
+last_line1=$(grep -n "^'$" "$CONF" | tail -n1 | cut -d: -f1)
+if [ -n "$last_line1" ]; then
+sed -i "${last_line1},\$d" "$CONF"
+fi
+cat <<'EOF' >> "$CONF"
+--new
+--filter-udp=50000-50099
+--filter-l7=discord,stun
+--dpi-desync=fake
+'
+EOF
+fi
 chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
@@ -309,26 +327,26 @@ if [ ! -f /etc/init.d/zapret ]; then
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
-if grep -q "option NFQWS_PORTS_UDP.*1024-65535" "$CONF" && grep -q -- "--filter-udp=1024-65535" "$CONF"; then
+if grep -q "option NFQWS_PORTS_UDP.*1024-49999,50100-65535" "$CONF" && grep -q -- "--filter-udp=1024-49999,50100-65535" "$CONF"; then
 echo -e "${GREEN}🔴 ${CYAN}Удаляем из стратегии настройки для игр${NC}"
-sed -i ':a;N;$!ba;s|--new\n--filter-udp=1024-65535\n--dpi-desync=fake\n--dpi-desync-cutoff=d2\n--dpi-desync-any-protocol\n--dpi-desync-fake-unknown-udp=/opt/zapret/files/fake/quic_initial_www_google_com\.bin\n*||g' "$CONF"
-sed -i "s/,1024-65535//" "$CONF"
+sed -i ':a;N;$!ba;s|--new\n--filter-udp=1024-49999,50100-65535\n--dpi-desync=fake\n--dpi-desync-cutoff=d2\n--dpi-desync-any-protocol=1\n--dpi-desync-fake-unknown-udp=/opt/zapret/files/fake/quic_initial_www_google_com\.bin\n*||g' "$CONF"
+sed -i "s/,1024-49999,50100-65535//" "$CONF"
 chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 echo -e "\n${BLUE}🔴 ${GREEN}Настройки для игр удалены!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
-if ! grep -q "option NFQWS_PORTS_UDP.*1024-65535" "$CONF"; then
-sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,1024-65535'/" "$CONF"
+if ! grep -q "option NFQWS_PORTS_UDP.*1024-49999,50100-65535" "$CONF"; then
+sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,1024-49999,50100-65535'/" "$CONF"
 fi
-if ! grep -q -- "--filter-udp=1024-65535" "$CONF"; then
+if ! grep -q -- "--filter-udp=1024-49999,50100-65535" "$CONF"; then
 last_line=$(grep -n "^'$" "$CONF" | tail -n1 | cut -d: -f1)
 if [ -n "$last_line" ]; then
 sed -i "${last_line},\$d" "$CONF"
 fi
 cat <<'EOF' >> "$CONF"
 --new
---filter-udp=1024-65535
+--filter-udp=1024-49999,50100-65535
 --dpi-desync=fake
 --dpi-desync-cutoff=d2
 --dpi-desync-any-protocol=1
@@ -540,6 +558,103 @@ return ;;
 esac
 }
 # ==========================================
+# Системная информация
+# ==========================================
+sys_info() {
+clear
+# Модель и архитектура
+echo -e "${GREEN}===== Модель и архитектура роутера =====${NC}"
+cat /tmp/sysinfo/model
+awk -F= '
+/DISTRIB_ARCH/   { gsub(/'\''/, ""); print $2 }
+/DISTRIB_TARGET/ { gsub(/'\''/, ""); print $2 }
+' /etc/openwrt_release
+# Версия OpenWrt ----
+echo -e "\n${GREEN}===== Версия OpenWrt =====${NC}"
+awk -F= '
+/DISTRIB_DESCRIPTION/ {
+gsub(/'\''|OpenWrt /, "")
+print $2
+}
+' /etc/openwrt_release
+# Пользовательские пакеты
+echo -e "\n${GREEN}===== Пользовательские пакеты =====${NC}"
+awk '
+/^Package:/ { p=$2 }
+/^Status: install user/ { print p }
+' /usr/lib/opkg/status
+# Flow Offloading + DPI
+echo -e "\n${GREEN}===== Flow Offloading =====${NC}"
+sw=$(uci -q get firewall.@defaults[0].flow_offloading)
+hw=$(uci -q get firewall.@defaults[0].flow_offloading_hw)
+if grep -q "ct original packets ge 30" /usr/share/firewall4/templates/ruleset.uc; then
+dpi="${RED}yes${NC}"
+else
+dpi="${GREEN}no${NC}"
+fi
+echo -e "SW: ${RED}${sw:+on}${GREEN}${sw:-off}${NC} | HW: ${RED}${hw:+on}${GREEN}${hw:-off}${NC} | FIX: ${dpi}${NC}"
+echo -e "\n${GREEN}===== Настройки запрет =====${NC}"
+echo -e "Установленная версия: ${INST_COLOR}$INSTALLED_DISPLAY${NC}"
+[ -n "$ZAPRET_STATUS" ] && echo -e "Статус Zapret: $ZAPRET_STATUS"
+show_script_50 && [ -n "$name" ] && echo -e "Установлен скрипт: ${GREEN}$name${NC}"
+[ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*1024-49999,50100-65535" "$CONF" && grep -q -- "--filter-udp=1024-49999,50100-65535" "$CONF" && echo -e "Стратегия для игр:${NC} ${GREEN}активна${NC}"
+show_current_strategy && [ -n "$ver" ] && echo -e "Используется стратегия: ${CYAN}$ver"
+# Проверка сайтов
+echo -e "\n${GREEN}===== Доступность сайтов =====${NC}"
+SITES=$(cat <<'EOF'
+gosuslugi.ru
+esia.gosuslugi.ru/login
+rutube.ru
+youtube.com
+instagram.com
+rutor.info
+ntc.party
+rutracker.org
+epidemz.net.co
+nnmclub.to
+openwrt.org
+sxyprn.net
+pornhub.com
+discord.com
+x.com
+filmix.my
+flightradar24.com
+genderize.io
+EOF
+)
+sites_clean=$(echo "$SITES" | grep -v '^#' | grep -v '^\s*$')
+total=$(echo "$sites_clean" | wc -l)
+half=$(( (total + 1) / 2 ))
+sites_list=""
+for site in $sites_clean; do
+sites_list="$sites_list $site"
+done
+for idx in $(seq 1 $half); do
+left=$(echo $sites_list | cut -d' ' -f$idx)
+right_idx=$((idx + half))
+right=$(echo $sites_list | cut -d' ' -f$right_idx)
+left_pad=$(printf "%-25s" "$left")
+right_pad=$(printf "%-25s" "$right")
+if curl -Is --connect-timeout 3 --max-time 4 "https://$left" >/dev/null 2>&1; then
+left_color="[${GREEN}OK${NC}]  "
+else
+left_color="[${RED}FAIL${NC}]"
+fi
+if [ -n "$right" ]; then
+if curl -Is --connect-timeout 3 --max-time 4 "https://$right" >/dev/null 2>&1; then
+right_color="[${GREEN}OK${NC}]  "
+else
+right_color="[${RED}FAIL${NC}]"
+fi
+echo -e "$left_color $left_pad $right_color $right_pad"
+else
+echo -e "$left_color $left_pad"
+fi
+done
+echo ""
+read -p "Нажмите Enter для выхода в главное меню..." dummy
+}
+# ==========================================
 # Главное меню
 # ==========================================
 show_menu() {
@@ -548,15 +663,14 @@ clear
 echo -e "╔════════════════════════════════════╗"
 echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 echo -e "╚════════════════════════════════════╝"
-echo -e "                     ${DGRAY}by StressOzz v6.7${NC}"
+echo -e "                     ${DGRAY}by StressOzz v6.8${NC}"
 # Вывод информации
 echo -e "\n${YELLOW}Установленная версия:       ${INST_COLOR}$INSTALLED_DISPLAY${NC}"
 echo -e "${YELLOW}Последняя версия на GitHub: ${CYAN}$LATEST_VER${NC}"
-echo -e "${YELLOW}Архитектура устройства:${NC}     $LOCAL_ARCH"
 [ -n "$ZAPRET_STATUS" ] && echo -e "${YELLOW}Статус Zapret:${NC}              $ZAPRET_STATUS"
 show_script_50 && [ -n "$name" ] && echo -e "${YELLOW}Установлен скрипт:${NC}          $name"
+[ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*1024-49999,50100-65535" "$CONF" && grep -q -- "--filter-udp=1024-49999,50100-65535" "$CONF" && echo -e "${YELLOW}Стратегия для игр:${NC}          ${GREEN}активна${NC}"
 show_current_strategy && [ -n "$ver" ] && echo -e "${YELLOW}Используется стратегия:${NC}     ${CYAN}$ver"
-[ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*1024-65535" "$CONF" && grep -q -- "--filter-udp=1024-65535" "$CONF" && echo -e "${YELLOW}Стратегия для игр:${NC}          ${GREEN}активна${NC}"
 # Вывод пунктов меню
 echo -e "\n${CYAN}1) ${GREEN}Установить последнюю версию${NC}"
 echo -e "${CYAN}2) ${GREEN}Меню выбора стратегии${NC}"
@@ -566,6 +680,7 @@ echo -e "${CYAN}5) ${GREEN}Удалить ${NC}Zapret"
 echo -e "${CYAN}6) ${GREEN}Добавить / Удалить стратегию для игр"
 echo -e "${CYAN}7) ${GREEN}Меню настройки ${NC}Discord${GREEN} и звонков в ${NC}TG${GREEN}/${NC}WA"
 echo -e "${CYAN}8) ${GREEN}Удалить / Установить / Настроить${NC} Zapret"
+echo -e "${CYAN}9) ${GREEN}Системная информация для отладки${NC}"
 echo -e "${CYAN}Enter) ${GREEN}Выход${NC}\n"
 echo -ne "${YELLOW}Выберите пункт:${NC} "
 read choice
@@ -578,6 +693,7 @@ case "$choice" in
 6) fix_GAME  ;;
 7) enable_discord_calls ;;
 8) zapret_key ;;
+9) sys_info ;;
 *) 
 echo -e ""
 exit 0 ;;
