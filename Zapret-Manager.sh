@@ -63,7 +63,7 @@ sleep 2 ;;
 sed -i 's/meta l4proto { tcp, udp } flow offload @ft;/meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;/' /usr/share/firewall4/templates/ruleset.uc
 fw4 restart >/dev/null 2>&1
 sleep 2 ;;
-*) echo -e "\n${RED}Скрипт остановлен! Отключите или примените фикс!${NC}\n"
+*) echo -e "\n${RED}Скрипт остановлен!${NC}\n"
 exit 1 ;;
 esac
 fi
@@ -563,14 +563,12 @@ esac
 # ==========================================
 sys_info() {
 clear
-# Модель и архитектура
 echo -e "${GREEN}===== Модель и архитектура роутера =====${NC}"
 cat /tmp/sysinfo/model
 awk -F= '
 /DISTRIB_ARCH/   { gsub(/'\''/, ""); print $2 }
 /DISTRIB_TARGET/ { gsub(/'\''/, ""); print $2 }
 ' /etc/openwrt_release
-# Версия OpenWrt ----
 echo -e "\n${GREEN}===== Версия OpenWrt =====${NC}"
 awk -F= '
 /DISTRIB_DESCRIPTION/ {
@@ -578,29 +576,34 @@ gsub(/'\''|OpenWrt /, "")
 print $2
 }
 ' /etc/openwrt_release
-# Пользовательские пакеты
 echo -e "\n${GREEN}===== Пользовательские пакеты =====${NC}"
 awk '
 /^Package:/ { p=$2 }
 /^Status: install user/ { print p }
 ' /usr/lib/opkg/status
-# Flow Offloading + DPI
 echo -e "\n${GREEN}===== Flow Offloading =====${NC}"
 sw=$(uci -q get firewall.@defaults[0].flow_offloading)
 hw=$(uci -q get firewall.@defaults[0].flow_offloading_hw)
-if grep -q "ct original packets ge 30" /usr/share/firewall4/templates/ruleset.uc; then
+if grep -q 'ct original packets ge 30' /usr/share/firewall4/templates/ruleset.uc 2>/dev/null; then
 dpi="${RED}yes${NC}"
 else
 dpi="${GREEN}no${NC}"
 fi
-echo -e "SW: ${RED}${sw:+on}${GREEN}${sw:-off}${NC} | HW: ${RED}${hw:+on}${GREEN}${hw:-off}${NC} | FIX: ${dpi}${NC}"
+if [ "$hw" = "1" ]; then
+out="HW: ${RED}on${NC}"
+elif [ "$sw" = "1" ]; then
+out="SW: ${RED}on${NC}"
+else
+out="SW: ${GREEN}off${NC} | HW: ${GREEN}off${NC}"
+fi
+out="$out | FIX: ${dpi}"
+echo -e "$out"
 echo -e "\n${GREEN}===== Настройки запрет =====${NC}"
 echo -e "Установленная версия: ${INST_COLOR}$INSTALLED_DISPLAY${NC}"
 [ -n "$ZAPRET_STATUS" ] && echo -e "Статус Zapret: $ZAPRET_STATUS"
 show_script_50 && [ -n "$name" ] && echo -e "Установлен скрипт: ${GREEN}$name${NC}"
 [ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*1024-49999,50100-65535" "$CONF" && grep -q -- "--filter-udp=1024-49999,50100-65535" "$CONF" && echo -e "Стратегия для игр:${NC} ${GREEN}активна${NC}"
 show_current_strategy && [ -n "$ver" ] && echo -e "Используется стратегия: ${GREEN}$ver${NC}"
-# Проверка сайтов
 echo -e "\n${GREEN}===== Доступность сайтов =====${NC}"
 SITES=$(cat <<'EOF'
 gosuslugi.ru
@@ -664,7 +667,7 @@ clear
 echo -e "╔════════════════════════════════════╗"
 echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 echo -e "╚════════════════════════════════════╝"
-echo -e "                    ${DGRAY}by StressOzz v$ZAPRET_MANAGER_VERSION${NC}"
+echo -e "                     ${DGRAY}by StressOzz v$ZAPRET_MANAGER_VERSION${NC}"
 # Вывод информации
 echo -e "\n${YELLOW}Установленная версия:       ${INST_COLOR}$INSTALLED_DISPLAY${NC}"
 echo -e "${YELLOW}Последняя версия на GitHub: ${CYAN}$LATEST_VER${NC}"
