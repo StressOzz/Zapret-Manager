@@ -122,3 +122,4 @@ else
 echo -e "$left_color $left_pad"
 fi
 done
+echo -e ""
