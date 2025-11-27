@@ -536,20 +536,16 @@ echo -e "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n"
 echo -ne "${YELLOW}Выберите пункт:${NC} "
 read choice
 case "$choice" in
-1) clear
-curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str1.sh | sh
+1) curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str1.sh | sh
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 ;;
-2) clear
-curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str2.sh | sh
+2) curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str2.sh | sh
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 ;;
-3) clear
-curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str3.sh | sh
+3) curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str3.sh | sh
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 ;;
-4) clear
-curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str4.sh | sh
+4) curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str4.sh | sh
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 ;;
 *) echo -e "\nВыходим в главное меню..."
@@ -557,106 +553,6 @@ sleep 1
 show_menu
 return ;;
 esac
-}
-# ==========================================
-# Системная информация
-# ==========================================
-sys_info() {
-clear
-echo -e "${GREEN}===== Модель и архитектура роутера =====${NC}"
-cat /tmp/sysinfo/model
-awk -F= '
-/DISTRIB_ARCH/   { gsub(/'\''/, ""); print $2 }
-/DISTRIB_TARGET/ { gsub(/'\''/, ""); print $2 }
-' /etc/openwrt_release
-echo -e "\n${GREEN}===== Версия OpenWrt =====${NC}"
-awk -F= '
-/DISTRIB_DESCRIPTION/ {
-gsub(/'\''|OpenWrt /, "")
-print $2
-}
-' /etc/openwrt_release
-echo -e "\n${GREEN}===== Пользовательские пакеты =====${NC}"
-awk '
-/^Package:/ { p=$2 }
-/^Status: install user/ { print p }
-' /usr/lib/opkg/status
-echo -e "\n${GREEN}===== Flow Offloading =====${NC}"
-sw=$(uci -q get firewall.@defaults[0].flow_offloading)
-hw=$(uci -q get firewall.@defaults[0].flow_offloading_hw)
-if grep -q 'ct original packets ge 30' /usr/share/firewall4/templates/ruleset.uc 2>/dev/null; then
-dpi="${RED}yes${NC}"
-else
-dpi="${GREEN}no${NC}"
-fi
-if [ "$hw" = "1" ]; then
-out="HW: ${RED}on${NC}"
-elif [ "$sw" = "1" ]; then
-out="SW: ${RED}on${NC}"
-else
-out="SW: ${GREEN}off${NC} | HW: ${GREEN}off${NC}"
-fi
-out="$out | FIX: ${dpi}"
-echo -e "$out"
-echo -e "\n${GREEN}===== Настройки запрет =====${NC}"
-echo -e "Установленная версия: ${INST_COLOR}$INSTALLED_DISPLAY${NC}"
-[ -n "$ZAPRET_STATUS" ] && echo -e "Статус Zapret: $ZAPRET_STATUS"
-show_script_50 && [ -n "$name" ] && echo -e "Установлен скрипт: ${GREEN}$name${NC}"
-[ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*1024-49999,50100-65535" "$CONF" && grep -q -- "--filter-udp=1024-49999,50100-65535" "$CONF" && echo -e "Стратегия для игр:${NC} ${GREEN}активна${NC}"
-show_current_strategy && [ -n "$ver" ] && echo -e "Используется стратегия: ${GREEN}$ver${NC}"
-echo -e "\n${GREEN}===== Доступность сайтов =====${NC}"
-SITES=$(cat <<'EOF'
-gosuslugi.ru
-esia.gosuslugi.ru/login
-rutube.ru
-youtube.com
-instagram.com
-rutor.info
-ntc.party
-rutracker.org
-epidemz.net.co
-nnmclub.to
-openwrt.org
-sxyprn.net
-pornhub.com
-discord.com
-x.com
-filmix.my
-flightradar24.com
-genderize.io
-EOF
-)
-sites_clean=$(echo "$SITES" | grep -v '^#' | grep -v '^\s*$')
-total=$(echo "$sites_clean" | wc -l)
-half=$(( (total + 1) / 2 ))
-sites_list=""
-for site in $sites_clean; do
-sites_list="$sites_list $site"
-done
-for idx in $(seq 1 $half); do
-left=$(echo $sites_list | cut -d' ' -f$idx)
-right_idx=$((idx + half))
-right=$(echo $sites_list | cut -d' ' -f$right_idx)
-left_pad=$(printf "%-25s" "$left")
-right_pad=$(printf "%-25s" "$right")
-if curl -Is --connect-timeout 3 --max-time 4 "https://$left" >/dev/null 2>&1; then
-left_color="[${GREEN}OK${NC}]  "
-else
-left_color="[${RED}FAIL${NC}]"
-fi
-if [ -n "$right" ]; then
-if curl -Is --connect-timeout 3 --max-time 4 "https://$right" >/dev/null 2>&1; then
-right_color="[${GREEN}OK${NC}]  "
-else
-right_color="[${RED}FAIL${NC}]"
-fi
-echo -e "$left_color $left_pad $right_color $right_pad"
-else
-echo -e "$left_color $left_pad"
-fi
-done
-echo ""
-read -p "Нажмите Enter для выхода в главное меню..." dummy
 }
 # ==========================================
 # Главное меню
@@ -697,7 +593,9 @@ case "$choice" in
 6) fix_GAME  ;;
 7) enable_discord_calls ;;
 8) zapret_key ;;
-9) sys_info ;;
+9) curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/sys_info.sh | sh
+read -p "Нажмите Enter для выхода в главное меню..." dummy
+;;
 *) 
 echo -e ""
 exit 0 ;;
