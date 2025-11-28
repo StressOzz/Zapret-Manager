@@ -52,7 +52,11 @@ out="$out | FIX: ${dpi}"
 echo -e "$out"
 echo -e "\n${GREEN}===== Проверка GitHub =====${NC}"
 RATE=$(curl -s https://api.github.com/rate_limit | grep '"remaining"' | head -1 | awk '{print $2}' | tr -d ,)
-[ -n "$RATE" ] && RATE_OUT="${GREEN}${RATE}${NC}" || RATE_OUT="${RED}N/A${NC}"
+if [ -z "$RATE" ] || [ "$RATE" -eq 0 ]; then
+RATE_OUT="${RED}N/A${NC}"
+else
+RATE_OUT="${GREEN}${RATE}${NC}"
+fi
 echo -n "GitHub IPv4: "
 curl -4 -Is --connect-timeout 3 https://github.com >/dev/null 2>&1 && echo -ne "${GREEN}ok${NC}" || echo -ne "${RED}fail${NC}"
 echo -n "  IPv6: "
