@@ -555,7 +555,7 @@ echo -e "${CYAN}5) ${GREEN}Удалить ${NC}Zapret"
 echo -e "${CYAN}6) ${GREEN}Добавить / Удалить стратегию для игр"
 echo -e "${CYAN}7) ${GREEN}Меню настройки ${NC}Discord${GREEN} и звонков в ${NC}TG${GREEN}/${NC}WA"
 echo -e "${CYAN}8) ${GREEN}Удалить / Установить / Настроить${NC} Zapret"
-echo -e "${CYAN}9) ${GREEN}Системная информация для отладки${NC}"
+echo -e "${CYAN}9) ${GREEN}Системная информация${NC}"
 echo -e "${CYAN}Enter) ${GREEN}Выход${NC}\n"
 echo -ne "${YELLOW}Выберите пункт:${NC} "
 read choice
