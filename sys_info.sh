@@ -83,7 +83,6 @@ case "$line" in
 *"discord subnets"*) name="50-discord" ;;
 *) name="" ;;
 esac
-[ -n "$name" ] && echo -e "Скрипт: ${GREEN}$name${NC}"
 fi
 TCP_VAL=$(grep -E "^[[:space:]]*option NFQWS_PORTS_TCP[[:space:]]+'" "$CONF" \
 | sed "s/.*'\(.*\)'.*/\1/")
