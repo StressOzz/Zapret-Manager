@@ -119,6 +119,8 @@ discord.com
 x.com
 filmix.my
 flightradar24.com
+cdn77.com
+play.google.com
 genderize.io
 EOF
 )
