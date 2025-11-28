@@ -74,7 +74,7 @@ else
 ZAPRET_STATUS="${RED}остановлен${NC}"
 fi
 SCRIPT_FILE="/opt/zapret/init.d/openwrt/custom.d/50-script.sh"
-[ -f "$SCRIPT_FILE" ] || return
+if [ -f "$SCRIPT_FILE" ]; then
 line=$(head -n1 "$SCRIPT_FILE")
 case "$line" in
 *QUIC*) name="50-quic4all" ;;
@@ -83,12 +83,14 @@ case "$line" in
 *"discord subnets"*) name="50-discord" ;;
 *) name="" ;;
 esac
+[ -n "$name" ] && echo -e "Скрипт: ${GREEN}$name${NC}"
+fi
 TCP_VAL=$(grep -E "^[[:space:]]*option NFQWS_PORTS_TCP[[:space:]]+'" "$CONF" \
 | sed "s/.*'\(.*\)'.*/\1/")
 UDP_VAL=$(grep -E "^[[:space:]]*option NFQWS_PORTS_UDP[[:space:]]+'" "$CONF" \
 | sed "s/.*'\(.*\)'.*/\1/")
 echo -e "Версия: ${GREEN}$INSTALLED_VER${NC} | $ZAPRET_STATUS"
-echo -e "Скрипт: ${GREEN}$name${NC}"
+[ -n "$name" ] && echo -e "Скрипт: ${GREEN}$name${NC}"
 echo -e "Порты TCP: ${GREEN}$TCP_VAL${NC} | UDP: ${GREEN}$UDP_VAL${NC}"
 echo -e "\n${GREEN}===== Стратегия =====${NC}"
 awk '
