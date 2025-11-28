@@ -4,24 +4,35 @@ RED="\033[1;31m"
 NC="\033[0m"
 CONF="/etc/config/zapret"
 clear
-echo -e "\n${GREEN}===== Модель и архитектура роутера =====${NC}"
-cat /tmp/sysinfo/model
-awk -F= '
-/DISTRIB_ARCH/   { gsub(/'\''/, ""); print $2 }
-/DISTRIB_TARGET/ { gsub(/'\''/, ""); print $2 }
-' /etc/openwrt_release
-echo -e "\n${GREEN}===== Версия OpenWrt =====${NC}"
-awk -F= '
-/DISTRIB_DESCRIPTION/ {
-gsub(/'\''|OpenWrt /, "")
-print $2
-}
-' /etc/openwrt_release
+echo -e "\n${GREEN}===== Информация о системе =====${NC}"
+MODEL=$(cat /tmp/sysinfo/model)
+TARGET=$(awk -F= '/DISTRIB_TARGET/ {gsub(/'\''/, "", $2); print $2}' /etc/openwrt_release)
+ARCH=$(awk -F= '/DISTRIB_ARCH/ {gsub(/'\''/, "", $2); print $2}' /etc/openwrt_release)
+OWRT=$(awk -F= '/DISTRIB_DESCRIPTION/ {gsub(/'\''|OpenWrt /, "", $2); print $2}' /etc/openwrt_release)
+echo -e "Роутер: ${GREEN}$MODEL${NC}"
+echo -e "Архитектура: ${GREEN}$ARCH${NC} | ${GREEN}$TARGET${NC}"
+echo -e "OpenWrt: ${GREEN}$OWRT${NC}"
 echo -e "\n${GREEN}===== Пользовательские пакеты =====${NC}"
-awk '
-/^Package:/ { p=$2 }
-/^Status: install user/ { print p }
-' /usr/lib/opkg/status
+PKGS=$(awk '/^Package:/ {p=$2} /^Status: install user/ {print p}' /usr/lib/opkg/status | grep -v '^$')
+idx=0
+for pkg in $PKGS; do
+idx=$((idx+1))
+eval "pkg$idx='$pkg'"
+done
+total=$idx
+half=$(( (total + 1) / 2 ))
+for i in $(seq 1 $half); do
+eval "left=\$pkg$i"
+right_idx=$((i + half))
+eval "right=\$pkg$right_idx"
+left_pad=$(printf "%-20s" "$left")
+if [ -n "$right" ]; then
+right_pad=$(printf "%-20s" "$right")
+echo "$left_pad $right_pad"
+else
+echo "$left_pad"
+fi
+done
 echo -e "\n${GREEN}===== Flow Offloading =====${NC}"
 sw=$(uci -q get firewall.@defaults[0].flow_offloading)
 hw=$(uci -q get firewall.@defaults[0].flow_offloading_hw)
@@ -39,7 +50,19 @@ out="SW: ${GREEN}off${NC} | HW: ${GREEN}off${NC}"
 fi
 out="$out | FIX: ${dpi}"
 echo -e "$out"
-echo -e "\n${GREEN}===== Настройки запрет =====${NC}"
+echo -e "\n${GREEN}===== Проверка GitHub =====${NC}"
+RATE=$(curl -s https://api.github.com/rate_limit | grep '"remaining"' | head -1 | awk '{print $2}' | tr -d ,)
+[ -n "$RATE" ] && RATE_OUT="${GREEN}${RATE}${NC}" || RATE_OUT="${RED}N/A${NC}"
+echo -n "GitHub IPv4: "
+curl -4 -Is --connect-timeout 3 https://github.com >/dev/null 2>&1 && echo -ne "${GREEN}ok${NC}" || echo -ne "${RED}fail${NC}"
+echo -n "  IPv6: "
+curl -6 -Is --connect-timeout 3 https://github.com >/dev/null 2>&1 && echo -e "${GREEN}ok${NC}" || echo -e "${RED}fail${NC}"
+echo -n "GitHub API: "
+curl -Is --connect-timeout 3 https://api.github.com >/dev/null 2>&1 \
+&& echo -e "${GREEN}ok${NC}   Остаток: $RATE_OUT" \
+|| echo -e "${RED}fail${NC}   Остаток: $RATE_OUT"
+echo -e "\n${GREEN}===== Настройки Zapret =====${NC}"
+zpr_info() {
 INSTALLED_VER=$(opkg list-installed | grep '^zapret ' | awk '{print $3}')
 if /etc/init.d/zapret status 2>/dev/null | grep -qi "running"; then
 ZAPRET_STATUS="${GREEN}запущен${NC}"
@@ -60,17 +83,22 @@ TCP_VAL=$(grep -E "^[[:space:]]*option NFQWS_PORTS_TCP[[:space:]]+'" "$CONF" \
 | sed "s/.*'\(.*\)'.*/\1/")
 UDP_VAL=$(grep -E "^[[:space:]]*option NFQWS_PORTS_UDP[[:space:]]+'" "$CONF" \
 | sed "s/.*'\(.*\)'.*/\1/")
-echo -e "Версия: ${GREEN}$INSTALLED_VER${NC}"
-echo -e "Статус: $ZAPRET_STATUS"
+echo -e "Версия: ${GREEN}$INSTALLED_VER${NC} | $ZAPRET_STATUS"
 echo -e "Скрипт: ${GREEN}$name${NC}"
-echo -e "Порты: TCP: ${GREEN}$TCP_VAL${NC} | UDP: ${GREEN}$UDP_VAL${NC}"
-echo -e "\n${GREEN}===== Стратегия=====${NC}"
+echo -e "Порты TCP: ${GREEN}$TCP_VAL${NC} | UDP: ${GREEN}$UDP_VAL${NC}"
+echo -e "\n${GREEN}===== Стратегия =====${NC}"
 awk '
 /^[[:space:]]*option[[:space:]]+NFQWS_OPT[[:space:]]*'\''/ {flag=1; sub(/^[[:space:]]*option[[:space:]]+NFQWS_OPT[[:space:]]*'\''/, ""); next}
 flag {
 if (/'\''/) {sub(/'\''$/, ""); print; exit}
 print
 }' "$CONF"
+}
+if [ -f /etc/init.d/zapret ]; then
+zpr_info
+else
+echo -e "\n${RED}Zapret не установлен!${NC}\n"
+fi
 echo -e "${GREEN}===== Доступность сайтов =====${NC}"
 SITES=$(cat <<'EOF'
 gosuslugi.ru
