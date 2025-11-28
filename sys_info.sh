@@ -6,9 +6,9 @@ CONF="/etc/config/zapret"
 clear
 echo -e "\n${GREEN}===== Информация о системе =====${NC}"
 MODEL=$(cat /tmp/sysinfo/model)
-TARGET=$(awk -F= '/DISTRIB_TARGET/ {gsub(/'\''/, "", $2); print $2}' /etc/openwrt_release)
-ARCH=$(awk -F= '/DISTRIB_ARCH/ {gsub(/'\''/, "", $2); print $2}' /etc/openwrt_release)
-OWRT=$(awk -F= '/DISTRIB_DESCRIPTION/ {gsub(/'\''|OpenWrt /, "", $2); print $2}' /etc/openwrt_release)
+TARGET=$(sed -n "s/.*TARGET='\(.*\)'/\1/p" /etc/openwrt_release)
+ARCH=$(sed -n "s/.*ARCH='\(.*\)'/\1/p" /etc/openwrt_release)
+OWRT=$(sed -n "s/.*OpenWrt \([0-9.]*\).*/\1/p" /etc/openwrt_release)
 echo -e "${GREEN}$MODEL${NC}"
 echo -e "${GREEN}$ARCH${NC} | ${GREEN}$TARGET${NC}"
 echo -e "${GREEN}$OWRT${NC}"
