@@ -18,7 +18,6 @@ CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"
 # Получение информации о версиях, архитектуре и статусе
 # ==========================================
 get_versions() {
-# --- Проверка byedpi и youtubeUnblock
 if opkg list-installed | grep -q "byedpi"; then
 clear
 echo -e "${RED}Найден установленный ${NC}ByeDPI${RED}!${NC}\n"
@@ -39,7 +38,6 @@ case "$answer" in
 * ) echo -e "\n${RED}Скрипт остановлен! Удалите ${NC}youtubeUnblock ${RED}!${NC}\n"; exit 1;;
 esac
 fi
-# --- Проверка Flow Offloading (программного и аппаратного)
 local FLOW_STATE=$(uci get firewall.@defaults[0].flow_offloading 2>/dev/null)
 local HW_FLOW_STATE=$(uci get firewall.@defaults[0].flow_offloading_hw 2>/dev/null)
 if [ "$FLOW_STATE" = "1" ] || [ "$HW_FLOW_STATE" = "1" ]; then
@@ -95,13 +93,10 @@ done
 echo -e "${BLUE}🔴 ${GREEN}Установленно!${NC}"
 sleep 2
 fi
-# --- Получаем текущую установленную версию zapret
 INSTALLED_VER=$(opkg list-installed | grep '^zapret ' | awk '{print $3}')
 [ -z "$INSTALLED_VER" ] && INSTALLED_VER="не найдена"
-# --- Определяем архитектуру устройства
 LOCAL_ARCH=$(awk -F\' '/DISTRIB_ARCH/ {print $2}' /etc/openwrt_release)
 [ -z "$LOCAL_ARCH" ] && LOCAL_ARCH=$(opkg print-architecture | grep -v "noarch" | sort -k3 -n | tail -n1 | awk '{print $2}')
-# --- Проверяем лимит GitHub API и доступность
 LIMIT_REACHED=0
 LIMIT_CHECK=$(curl -s -4 --connect-timeout 5 "https://api.github.com/repos/remittor/zapret-openwrt/releases/latest" 2>/dev/null)
 if [ -z "$LIMIT_CHECK" ]; then
@@ -113,7 +108,6 @@ if echo "$LIMIT_CHECK" | grep -q 'API rate limit exceeded'; then
 LATEST_VER="${RED}Достигнут лимит GitHub API! Подождите 15 минут.${NC}"
 LIMIT_REACHED=1
 else
-# --- Извлекаем номер версии из имени архива
 LATEST_URL=$(echo "$LIMIT_CHECK" | grep browser_download_url | grep "$LOCAL_ARCH.zip" | cut -d '"' -f 4)
 if [ -n "$LATEST_URL" ] && echo "$LATEST_URL" | grep -q '\.zip$'; then
 LATEST_VER=$(basename "$LATEST_URL" | sed -E 's/.*zapret_v([0-9]+\.[0-9]+)_.*\.zip/\1/')
@@ -123,7 +117,6 @@ LATEST_VER="не найдена"
 USED_ARCH="нет пакета для вашей архитектуры"
 fi
 fi
-# --- Проверяем состояние сервиса zapret
 if [ -f /etc/init.d/zapret ]; then
 if /etc/init.d/zapret status 2>/dev/null | grep -qi "running"; then
 ZAPRET_STATUS="${GREEN}запущен${NC}"
@@ -133,7 +126,6 @@ fi
 else
 ZAPRET_STATUS=""
 fi
-# Определяем актуальная/устарела
 if [ "$LIMIT_REACHED" -eq 1 ] || [ "$LATEST_VER" = "не найдена" ]; then
 INST_COLOR=$CYAN; INSTALLED_DISPLAY="$INSTALLED_VER"
 elif [ "$INSTALLED_VER" = "$LATEST_VER" ]; then
@@ -152,65 +144,53 @@ local NO_PAUSE=$1
 [ "$NO_PAUSE" != "1" ] && clear
 echo -e "${MAGENTA}Устанавливаем ZAPRET${NC}\n"
 get_versions
-# --- Проверка лимита API GitHub
 if [ "$LIMIT_REACHED" -eq 1 ]; then
 echo -e "$LATEST_VER\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
-# --- Проверка доступности пакета для архитектуры
 if [ "$USED_ARCH" = "нет пакета для вашей архитектуры" ]; then
 echo -e "${RED}Нет доступного пакета для вашей архитектуры: ${NC}$LOCAL_ARCH\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
-# --- Проверка уже установленной версии
 if [ "$INSTALLED_VER" = "$LATEST_VER" ]; then
 echo -e "${BLUE}🔴 ${GREEN}Последняя версия уже установлена!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
-# --- Остановка сервиса и старых процессов Zapret
 if [ -f /etc/init.d/zapret ]; then
 echo -e "${GREEN}🔴 ${CYAN}Останавливаем ${NC}zapret" && /etc/init.d/zapret stop >/dev/null 2>&1
 PIDS=$(pgrep -f /opt/zapret)
 [ -n "$PIDS" ] && for pid in $PIDS; do kill -9 "$pid" >/dev/null 2>&1; done
 fi
-# --- Обновление списка пакетов
 echo -e "${GREEN}🔴 ${CYAN}Обновляем список пакетов${NC}"
 opkg update >/dev/null 2>&1 || { 
 echo -e "\n${RED}Ошибка при обновлении списка пакетов!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 }
-# --- Подготовка временной директории для загрузки и распаковки
 mkdir -p "$WORKDIR"
 rm -f "$WORKDIR"/* 2>/dev/null
 cd "$WORKDIR" || return
-# --- Получаем имя архива
 FILE_NAME=$(basename "$LATEST_URL")
 echo -e "${GREEN}🔴 ${CYAN}Скачиваем архив ${NC}$FILE_NAME"
-# --- Скачивание архива с GitHub
 wget -q "$LATEST_URL" -O "$FILE_NAME" || {
 echo -e "\n${RED}Не удалось скачать ${NC}$FILE_NAME\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 }
-# --- Распаковка архива
 echo -e "${GREEN}🔴 ${CYAN}Распаковываем архив${NC}"
 unzip -o "$FILE_NAME" >/dev/null
-# --- Установка пакетов
 for PKG in zapret_*.ipk luci-app-zapret_*.ipk; do
 [ -f "$PKG" ] && {
 echo -e "${GREEN}🔴 ${CYAN}Устанавливаем пакет ${NC}$PKG"
 opkg install --force-reinstall "$PKG" >/dev/null 2>&1
 }
 done
-# --- Очистка временных файлов и пакетов
 echo -e "${GREEN}🔴 ${CYAN}Удаляем временные файлы и пакеты${NC}"
 cd /
 rm -rf "$WORKDIR" /tmp/*.ipk /tmp/*.zip /tmp/*zapret* 2>/dev/null
-# --- Сообщение об успешной установке или нет
 if [ -f /etc/init.d/zapret ]; then
 echo -e "\n${BLUE}🔴 ${GREEN}Zapret установлен!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
@@ -296,7 +276,6 @@ echo -e "${RED}Ошибка при скачивании скрипта!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
 return
 fi
-# добавляем в стратегию блок для дискорда
 if ! grep -q "option NFQWS_PORTS_UDP.*50000-50099" "$CONF"; then
 sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,50000-50099'/" "$CONF"
 fi
@@ -367,7 +346,6 @@ zapret_key(){
 clear
 echo -e "${MAGENTA}Удаление, установка и настройка Zapret${NC}\n"
 get_versions
-# Проверка лимита API
 if [ "$LIMIT_REACHED" -eq 1 ]; then
 echo -e "${RED}Достигнут лимит GitHub API! Подождите 15 минут.${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
@@ -382,7 +360,6 @@ fi
 uninstall_zapret "1"
 install_Zapret "1"
 [ ! -f /etc/init.d/zapret ] && return
-# --- Останавливаем zapret на случай если дефолтная стратегия ломает трафик
 echo -e "${MAGENTA}Останавливаем Zapret${NC}\n" && /etc/init.d/zapret stop >/dev/null 2>&1 && echo -e "${BLUE}🔴 ${GREEN}Zapret остановлен!${NC}\n"
 # --- ТУТ ПИШЕМ КАКАЯ СТРАТЕГИЯ БУДЕТ УСТАНАВЛИВАТЬСЯ ЧЕРЕЗ ПУНКТ 8
 curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str2.sh | sh
@@ -478,7 +455,7 @@ if ! [[ "$LATEST_VER" =~ 7 ]]; then
 echo -e "${RED}Внимание! Версия для установки не найдена!${NC}\n"
 read -p "Продолжить удаление? [y/N]: " answer
 case "$answer" in
-[yY]) echo -e "";;  # продолжаем удаление
+[yY]) echo -e "";;
 *) echo -e "\n${GREEN}Удаление отменено!${NC}\n"
 echo -e "Выходим в главное меню..."
 sleep 2
@@ -536,16 +513,16 @@ echo -e "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n"
 echo -ne "${YELLOW}Выберите пункт:${NC} "
 read choice
 case "$choice" in
-1) curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str1.sh | sh
+1) clear && curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str1.sh | sh
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 ;;
-2) curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str2.sh | sh
+2) clear && curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str2.sh | sh
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 ;;
-3) curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str3.sh | sh
+3) clear && curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str3.sh | sh
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 ;;
-4) curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str4.sh | sh
+4) clear && curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str4.sh | sh
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 ;;
 *) echo -e "\nВыходим в главное меню..."
@@ -564,14 +541,12 @@ echo -e "╔══════════════════════�
 echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 echo -e "╚════════════════════════════════════╝"
 echo -e "                     ${DGRAY}by StressOzz v$ZAPRET_MANAGER_VERSION${NC}"
-# Вывод информации
 echo -e "\n${YELLOW}Установленная версия:       ${INST_COLOR}$INSTALLED_DISPLAY${NC}"
 echo -e "${YELLOW}Последняя версия на GitHub: ${CYAN}$LATEST_VER${NC}"
 [ -n "$ZAPRET_STATUS" ] && echo -e "${YELLOW}Статус Zapret:${NC}              $ZAPRET_STATUS"
 show_script_50 && [ -n "$name" ] && echo -e "${YELLOW}Установлен скрипт:${NC}          $name"
 [ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*1024-49999,50100-65535" "$CONF" && grep -q -- "--filter-udp=1024-49999,50100-65535" "$CONF" && echo -e "${YELLOW}Стратегия для игр:${NC}          ${GREEN}активна${NC}"
 show_current_strategy && [ -n "$ver" ] && echo -e "${YELLOW}Используется стратегия:${NC}     ${CYAN}$ver${NC}"
-# Вывод пунктов меню
 echo -e "\n${CYAN}1) ${GREEN}Установить последнюю версию${NC}"
 echo -e "${CYAN}2) ${GREEN}Меню выбора стратегии${NC}"
 echo -e "${CYAN}3) ${GREEN}Вернуть настройки по умолчанию${NC}"
