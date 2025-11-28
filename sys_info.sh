@@ -9,9 +9,9 @@ MODEL=$(cat /tmp/sysinfo/model)
 TARGET=$(awk -F= '/DISTRIB_TARGET/ {gsub(/'\''/, "", $2); print $2}' /etc/openwrt_release)
 ARCH=$(awk -F= '/DISTRIB_ARCH/ {gsub(/'\''/, "", $2); print $2}' /etc/openwrt_release)
 OWRT=$(awk -F= '/DISTRIB_DESCRIPTION/ {gsub(/'\''|OpenWrt /, "", $2); print $2}' /etc/openwrt_release)
-echo -e "Роутер: ${GREEN}$MODEL${NC}"
-echo -e "Архитектура: ${GREEN}$ARCH${NC} | ${GREEN}$TARGET${NC}"
-echo -e "OpenWrt: ${GREEN}$OWRT${NC}"
+echo -e "${GREEN}$MODEL${NC}"
+echo -e "${GREEN}$ARCH${NC} | ${GREEN}$TARGET${NC}"
+echo -e "${GREEN}$OWRT${NC}"
 echo -e "\n${GREEN}===== Пользовательские пакеты =====${NC}"
 PKGS=$(awk '/^Package:/ {p=$2} /^Status: install user/ {print p}' /usr/lib/opkg/status | grep -v '^$')
 idx=0
@@ -53,14 +53,14 @@ echo -e "$out"
 echo -e "\n${GREEN}===== Проверка GitHub =====${NC}"
 RATE=$(curl -s https://api.github.com/rate_limit | grep '"remaining"' | head -1 | awk '{print $2}' | tr -d ,)
 [ -z "$RATE" ] && RATE_OUT="${RED}N/A${NC}" || RATE_OUT=$([ "$RATE" -eq 0 ] && echo -e "${RED}0${NC}" || echo -e "${GREEN}$RATE${NC}")
-echo -n "GitHub IPv4: "
+echo -n "IPv4: "
 curl -4 -Is --connect-timeout 3 https://github.com >/dev/null 2>&1 && echo -ne "${GREEN}ok${NC}" || echo -ne "${RED}fail${NC}"
 echo -n "  IPv6: "
 curl -6 -Is --connect-timeout 3 https://github.com >/dev/null 2>&1 && echo -e "${GREEN}ok${NC}" || echo -e "${RED}fail${NC}"
-echo -n "GitHub API: "
+echo -n "API: "
 curl -Is --connect-timeout 3 https://api.github.com >/dev/null 2>&1 \
-&& echo -e "${GREEN}ok${NC}   Остаток: $RATE_OUT" \
-|| echo -e "${RED}fail${NC}   Остаток: $RATE_OUT"
+&& echo -e "${GREEN}ok${NC}   Limit: $RATE_OUT" \
+|| echo -e "${RED}fail${NC}   Limit: $RATE_OUT"
 echo -e "\n${GREEN}===== Настройки Zapret =====${NC}"
 zpr_info() {
 INSTALLED_VER=$(opkg list-installed | grep '^zapret ' | awk '{print $3}')
@@ -84,9 +84,9 @@ TCP_VAL=$(grep -E "^[[:space:]]*option NFQWS_PORTS_TCP[[:space:]]+'" "$CONF" \
 | sed "s/.*'\(.*\)'.*/\1/")
 UDP_VAL=$(grep -E "^[[:space:]]*option NFQWS_PORTS_UDP[[:space:]]+'" "$CONF" \
 | sed "s/.*'\(.*\)'.*/\1/")
-echo -e "Версия: ${GREEN}$INSTALLED_VER${NC} | $ZAPRET_STATUS"
-[ -n "$name" ] && echo -e "Скрипт: ${GREEN}$name${NC}"
-echo -e "Порты TCP: ${GREEN}$TCP_VAL${NC} | UDP: ${GREEN}$UDP_VAL${NC}"
+echo -e "${GREEN}$INSTALLED_VER${NC} | $ZAPRET_STATUS"
+[ -n "$name" ] && echo -e "${GREEN}$name${NC}"
+echo -e "TCP: ${GREEN}$TCP_VAL${NC} | UDP: ${GREEN}$UDP_VAL${NC}"
 echo -e "\n${GREEN}===== Стратегия =====${NC}"
 awk '
 /^[[:space:]]*option[[:space:]]+NFQWS_OPT[[:space:]]*'\''/ {flag=1; sub(/^[[:space:]]*option[[:space:]]+NFQWS_OPT[[:space:]]*'\''/, ""); next}
