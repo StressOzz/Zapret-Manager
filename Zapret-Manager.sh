@@ -2,7 +2,8 @@
 # ==========================================
 # Zapret on remittor Manager by StressOzz
 # ==========================================
-ZAPRET_MANAGER_VERSION="6.8"
+ZAPRET_MANAGER_VERSION="6.9"
+ZAPRET_VERSION="72.20251122"
 GREEN="\033[1;32m"
 RED="\033[1;31m"
 CYAN="\033[1;36m"
@@ -15,9 +16,8 @@ WORKDIR="/tmp/zapret-update"
 CONF="/etc/config/zapret"
 CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"
 # ==========================================
-# Получение информации о версиях, архитектуре и статусе
+# Проверяем наличие byedpi, youtubeUnblock, Flow Offloading
 # ==========================================
-get_versions() {
 if opkg list-installed | grep -q "byedpi"; then
 clear
 echo -e "${RED}Найден установленный ${NC}ByeDPI${RED}!${NC}\n"
@@ -38,8 +38,8 @@ case "$answer" in
 * ) echo -e "\n${RED}Скрипт остановлен! Удалите ${NC}youtubeUnblock ${RED}!${NC}\n"; exit 1;;
 esac
 fi
-local FLOW_STATE=$(uci get firewall.@defaults[0].flow_offloading 2>/dev/null)
-local HW_FLOW_STATE=$(uci get firewall.@defaults[0].flow_offloading_hw 2>/dev/null)
+FLOW_STATE=$(uci get firewall.@defaults[0].flow_offloading 2>/dev/null)
+HW_FLOW_STATE=$(uci get firewall.@defaults[0].flow_offloading_hw 2>/dev/null)
 if [ "$FLOW_STATE" = "1" ] || [ "$HW_FLOW_STATE" = "1" ]; then
 if ! grep -q 'meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;' /usr/share/firewall4/templates/ruleset.uc; then
 clear
@@ -66,57 +66,16 @@ exit 1 ;;
 esac
 fi
 fi
-# --- Проверка наличия curl и unzip
-TO_INSTALL=""
-command -v curl >/dev/null 2>&1 || TO_INSTALL="$TO_INSTALL curl"
-command -v unzip >/dev/null 2>&1 || TO_INSTALL="$TO_INSTALL unzip"
-if [ -n "$TO_INSTALL" ]; then
-clear
-echo -e "${MAGENTA}ZAPRET on remittor Manager by StressOzz${NC}\n"
-echo -e "${GREEN}🔴 ${CYAN}Устанавливаем${NC}$TO_INSTALL${NC}\n"
-opkg update >/dev/null 2>&1 || { 
-echo -e "${RED}Ошибка при обновлении списка пакетов!${NC}\n"; exit 1; 
-}
-for pkg in $TO_INSTALL; do
-pkg_installed=0
-for i in 1 2 3; do
-command -v "$pkg" >/dev/null 2>&1 && { pkg_installed=1; break; }
-opkg install "$pkg" >/dev/null 2>&1 && { pkg_installed=1; break; }
-sleep 1
-done
-if [ $pkg_installed -eq 0 ]; then
-echo -e "${RED}Не удалось установить ${NC}$pkg${RED} после ${NC}3${RED} попыток!${NC}"
-echo -e "Установите вручную: ${CYAN}opkg install $pkg${NC}\n"
-exit 1
-fi
-done
-echo -e "${BLUE}🔴 ${GREEN}Установленно!${NC}"
-sleep 2
-fi
-INSTALLED_VER=$(opkg list-installed | grep '^zapret ' | awk '{print $3}')
-[ -z "$INSTALLED_VER" ] && INSTALLED_VER="не найдена"
+# ==========================================
+# Получение версии и подготовка установки Zapret
+# ==========================================
+get_versions() {
 LOCAL_ARCH=$(awk -F\' '/DISTRIB_ARCH/ {print $2}' /etc/openwrt_release)
 [ -z "$LOCAL_ARCH" ] && LOCAL_ARCH=$(opkg print-architecture | grep -v "noarch" | sort -k3 -n | tail -n1 | awk '{print $2}')
-LIMIT_REACHED=0
-LIMIT_CHECK=$(curl -s -4 --connect-timeout 5 "https://api.github.com/repos/remittor/zapret-openwrt/releases/latest" 2>/dev/null)
-if [ -z "$LIMIT_CHECK" ]; then
-echo -e "\napi.github.com ${RED}недоступен!${NC}"
-echo -e "\nСкрипт остановлен!\n"
-exit 1
-fi
-if echo "$LIMIT_CHECK" | grep -q 'API rate limit exceeded'; then
-LATEST_VER="${RED}Достигнут лимит GitHub API! Подождите 15 минут.${NC}"
-LIMIT_REACHED=1
-else
-LATEST_URL=$(echo "$LIMIT_CHECK" | grep browser_download_url | grep "$LOCAL_ARCH.zip" | cut -d '"' -f 4)
-if [ -n "$LATEST_URL" ] && echo "$LATEST_URL" | grep -q '\.zip$'; then
-LATEST_VER=$(basename "$LATEST_URL" | sed -E 's/.*zapret_v([0-9]+\.[0-9]+)_.*\.zip/\1/')
 USED_ARCH="$LOCAL_ARCH"
-else
-LATEST_VER="не найдена"
-USED_ARCH="нет пакета для вашей архитектуры"
-fi
-fi
+LATEST_URL="https://github.com/remittor/zapret-openwrt/releases/download/v${ZAPRET_VERSION}/zapret_v${ZAPRET_VERSION}_${LOCAL_ARCH}.zip"
+INSTALLED_VER=$(opkg list-installed | grep '^zapret ' | awk '{print $3}')
+[ -z "$INSTALLED_VER" ] && INSTALLED_VER="не найдена"
 if [ -f /etc/init.d/zapret ]; then
 if /etc/init.d/zapret status 2>/dev/null | grep -qi "running"; then
 ZAPRET_STATUS="${GREEN}запущен${NC}"
@@ -126,37 +85,28 @@ fi
 else
 ZAPRET_STATUS=""
 fi
-if [ "$LIMIT_REACHED" -eq 1 ] || [ "$LATEST_VER" = "не найдена" ]; then
-INST_COLOR=$CYAN; INSTALLED_DISPLAY="$INSTALLED_VER"
-elif [ "$INSTALLED_VER" = "$LATEST_VER" ]; then
-INST_COLOR=$GREEN; INSTALLED_DISPLAY="$INSTALLED_VER"
+if [ "$INSTALLED_VER" = "$ZAPRET_VERSION" ]; then
+INST_COLOR=$GREEN
+INSTALLED_DISPLAY="$INSTALLED_VER"
 elif [ "$INSTALLED_VER" != "не найдена" ]; then
-INST_COLOR=$RED; INSTALLED_DISPLAY="$INSTALLED_VER (устарела)"
+INST_COLOR=$RED
+INSTALLED_DISPLAY="$INSTALLED_VER (устарела)"
 else
-INST_COLOR=$RED; INSTALLED_DISPLAY="$INSTALLED_VER"
+INST_COLOR=$RED
+INSTALLED_DISPLAY="$INSTALLED_VER"
 fi
 }
 # ==========================================
-# Установка Zapret
+# Установка Zapret (без авто-поиска версии)
 # ==========================================
 install_Zapret() {
 local NO_PAUSE=$1
 [ "$NO_PAUSE" != "1" ] && clear
 echo -e "${MAGENTA}Устанавливаем ZAPRET${NC}\n"
 get_versions
-if [ "$LIMIT_REACHED" -eq 1 ]; then
-echo -e "$LATEST_VER\n"
-read -p "Нажмите Enter для выхода в главное меню..." dummy
-return
-fi
-if [ "$USED_ARCH" = "нет пакета для вашей архитектуры" ]; then
-echo -e "${RED}Нет доступного пакета для вашей архитектуры: ${NC}$LOCAL_ARCH\n"
-read -p "Нажмите Enter для выхода в главное меню..." dummy
-return
-fi
-if [ "$INSTALLED_VER" = "$LATEST_VER" ]; then
+if [ "$INSTALLED_VER" = "$ZAPRET_VERSION" ]; then
 echo -e "${BLUE}🔴 ${GREEN}Последняя версия уже установлена!${NC}\n"
-read -p "Нажмите Enter для выхода в главное меню..." dummy
+read -p "Нажмите Enter для выхода..." dummy
 return
 fi
 if [ -f /etc/init.d/zapret ]; then
@@ -165,19 +115,19 @@ PIDS=$(pgrep -f /opt/zapret)
 [ -n "$PIDS" ] && for pid in $PIDS; do kill -9 "$pid" >/dev/null 2>&1; done
 fi
 echo -e "${GREEN}🔴 ${CYAN}Обновляем список пакетов${NC}"
-opkg update >/dev/null 2>&1 || { 
-echo -e "\n${RED}Ошибка при обновлении списка пакетов!${NC}\n"
-read -p "Нажмите Enter для выхода в главное меню..." dummy
-return
-}
+opkg update >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка при обновлении списка пакетов!${NC}\n"; sleep 7; return; }
 mkdir -p "$WORKDIR"
 rm -f "$WORKDIR"/* 2>/dev/null
 cd "$WORKDIR" || return
 FILE_NAME=$(basename "$LATEST_URL")
+if ! command -v unzip >/dev/null 2>&1; then
+echo -e "${GREEN}🔴 ${CYAN}Устанавливаем ${NC}unzip"
+opkg install unzip >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось установить unzip!${NC}\n"; sleep 7; return; }
+fi
 echo -e "${GREEN}🔴 ${CYAN}Скачиваем архив ${NC}$FILE_NAME"
 wget -q "$LATEST_URL" -O "$FILE_NAME" || {
-echo -e "\n${RED}Не удалось скачать ${NC}$FILE_NAME\n"
-read -p "Нажмите Enter для выхода в главное меню..." dummy
+echo -e "${RED}Не удалось скачать ${NC}$FILE_NAME\n"
+read -p "Нажмите Enter для выхода..." dummy
 return
 }
 echo -e "${GREEN}🔴 ${CYAN}Распаковываем архив${NC}"
@@ -188,16 +138,15 @@ echo -e "${GREEN}🔴 ${CYAN}Устанавливаем пакет ${NC}$PKG"
 opkg install --force-reinstall "$PKG" >/dev/null 2>&1
 }
 done
-echo -e "${GREEN}🔴 ${CYAN}Удаляем временные файлы и пакеты${NC}"
+echo -e "${GREEN}🔴 ${CYAN}Удаляем временные файлы${NC}"
 cd /
 rm -rf "$WORKDIR" /tmp/*.ipk /tmp/*.zip /tmp/*zapret* 2>/dev/null
 if [ -f /etc/init.d/zapret ]; then
 echo -e "\n${BLUE}🔴 ${GREEN}Zapret установлен!${NC}\n"
-[ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy
+[ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода..." dummy
 else
 echo -e "\n${RED}Zapret не был установлен!${NC}\n"
-read -p "Нажмите Enter для выхода в главное меню..." dummy
-return
+read -p "Нажмите Enter для выхода..." dummy
 fi
 }
 # ==========================================
@@ -261,7 +210,7 @@ show_menu
 return ;;
 esac
 fi
-if curl -fsSLo "$CUSTOM_DIR/50-script.sh" "$URL"; then
+if wget -qO "$CUSTOM_DIR/50-script.sh" "$URL"; then
 [ "$NO_PAUSE" != "1" ] && 
 echo -e "\n${GREEN}🔴 ${CYAN}Скрипт ${NC}$SELECTED${CYAN} успешно установлен!${NC}\n"
 if [ "$SELECTED" = "50-quic4all" ] || [ "$SELECTED" = "50-stun4all" ]; then
@@ -346,23 +295,12 @@ zapret_key(){
 clear
 echo -e "${MAGENTA}Удаление, установка и настройка Zapret${NC}\n"
 get_versions
-if [ "$LIMIT_REACHED" -eq 1 ]; then
-echo -e "${RED}Достигнут лимит GitHub API! Подождите 15 минут.${NC}\n"
-read -p "Нажмите Enter для выхода в главное меню..." dummy
-return
-fi
-# Проверка версии
-if ! [[ "$LATEST_VER" =~ 7 ]]; then
-echo -e "${RED}Внимание! Версия для установки не найдена!${NC}\n"
-read -p "Нажмите Enter для выхода в главное меню..." dummy
-return
-fi
 uninstall_zapret "1"
 install_Zapret "1"
 [ ! -f /etc/init.d/zapret ] && return
 echo -e "${MAGENTA}Останавливаем Zapret${NC}\n" && /etc/init.d/zapret stop >/dev/null 2>&1 && echo -e "${BLUE}🔴 ${GREEN}Zapret остановлен!${NC}\n"
 # --- ТУТ ПИШЕМ КАКАЯ СТРАТЕГИЯ БУДЕТ УСТАНАВЛИВАТЬСЯ ЧЕРЕЗ ПУНКТ 8
-curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str2.sh | sh
+wget -qO- https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str2.sh | sh
 if [ ! -f "$CONF" ]; then
 echo -e "\n${RED}Файл ${NC}$CONF${RED} не найден!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
@@ -394,7 +332,7 @@ mkdir -p "$IPSET_DIR"
 FILES="zapret-hosts-google.txt zapret-hosts-user-exclude.txt"
 URL_BASE="https://raw.githubusercontent.com/remittor/zapret-openwrt/master/zapret/ipset"
 for f in $FILES; do
-curl -fsSLo "$IPSET_DIR/$f" "$URL_BASE/$f"
+wget -qO "$IPSET_DIR/$f" "$URL_BASE/$f"
 done
 chmod +x /opt/zapret/restore-def-cfg.sh && /opt/zapret/restore-def-cfg.sh
 chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh
@@ -451,17 +389,6 @@ uninstall_zapret() {
 local NO_PAUSE=$1
 [ "$NO_PAUSE" != "1" ] && clear
 echo -e "${MAGENTA}Удаляем ZAPRET${NC}\n"
-if ! [[ "$LATEST_VER" =~ 7 ]]; then
-echo -e "${RED}Внимание! Версия для установки не найдена!${NC}\n"
-read -p "Продолжить удаление? [y/N]: " answer
-case "$answer" in
-[yY]) echo -e "";;
-*) echo -e "\n${GREEN}Удаление отменено!${NC}\n"
-echo -e "Выходим в главное меню..."
-sleep 2
-return;;
-esac
-fi
 echo -e "${GREEN}🔴 ${CYAN}Останавливаем ${NC}zapret" && echo -e "${GREEN}🔴 ${CYAN}Убиваем процессы${NC}" && /etc/init.d/zapret stop >/dev/null 2>&1
 for pid in $(pgrep -f /opt/zapret 2>/dev/null); do kill -9 "$pid" 2>/dev/null; done
 echo -e "${GREEN}🔴 ${CYAN}Удаляем пакеты${NC}"
@@ -513,16 +440,16 @@ echo -e "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n"
 echo -ne "${YELLOW}Выберите пункт:${NC} "
 read choice
 case "$choice" in
-1) clear && curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str1.sh | sh
+1) clear && wget -qO- https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str1.sh | sh
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 ;;
-2) clear && curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str2.sh | sh
+2) clear && wget -qO- https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str2.sh | sh
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 ;;
-3) clear && curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str3.sh | sh
+3) clear && wget -qO- https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str3.sh | sh
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 ;;
-4) clear && curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str4.sh | sh
+4) clear && wget -qO- https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str4.sh | sh
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 ;;
 *) echo -e "\nВыходим в главное меню..."
@@ -542,7 +469,6 @@ echo -e "║     ${BLUE}Zapret on remittor Manager${NC}     ║"
 echo -e "╚════════════════════════════════════╝"
 echo -e "                     ${DGRAY}by StressOzz v$ZAPRET_MANAGER_VERSION${NC}"
 echo -e "\n${YELLOW}Установленная версия:       ${INST_COLOR}$INSTALLED_DISPLAY${NC}"
-echo -e "${YELLOW}Последняя версия на GitHub: ${CYAN}$LATEST_VER${NC}"
 [ -n "$ZAPRET_STATUS" ] && echo -e "${YELLOW}Статус Zapret:${NC}              $ZAPRET_STATUS"
 show_script_50 && [ -n "$name" ] && echo -e "${YELLOW}Установлен скрипт:${NC}          $name"
 [ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*1024-49999,50100-65535" "$CONF" && grep -q -- "--filter-udp=1024-49999,50100-65535" "$CONF" && echo -e "${YELLOW}Стратегия для игр:${NC}          ${GREEN}активна${NC}"
@@ -568,7 +494,7 @@ case "$choice" in
 6) fix_GAME  ;;
 7) enable_discord_calls ;;
 8) zapret_key ;;
-9) curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/sys_info.sh | sh
+9) wget -qO- https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/sys_info.sh | sh
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 ;;
 *) 
