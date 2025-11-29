@@ -6,11 +6,10 @@ CONF="/etc/config/zapret"
 clear
 echo -e "\n${GREEN}===== Информация о системе =====${NC}"
 MODEL=$(cat /tmp/sysinfo/model)
-TARGET=$(sed -n "s/.*TARGET='\(.*\)'/\1/p" /etc/openwrt_release)
 ARCH=$(sed -n "s/.*ARCH='\(.*\)'/\1/p" /etc/openwrt_release)
 OWRT=$(sed -n "s/.*OpenWrt \([0-9.]*\).*/\1/p" /etc/openwrt_release)
 echo -e "$MODEL"
-echo -e "$ARCH | $TARGET"
+echo -e "$ARCH"
 echo -e "$OWRT"
 echo -e "\n${GREEN}===== Пользовательские пакеты =====${NC}"
 PKGS=$(awk '/^Package:/ {p=$2} /^Status: install user/ {print p}' /usr/lib/opkg/status | grep -v '^$')
