@@ -4,6 +4,7 @@
 # ==========================================
 ZAPRET_MANAGER_VERSION="6.9"
 ZAPRET_VERSION="72.20251122"
+STR_VERSION_AUTOINSTALL="2"
 GREEN="\033[1;32m"
 RED="\033[1;31m"
 CYAN="\033[1;36m"
@@ -61,8 +62,7 @@ sleep 2 ;;
 sed -i 's/meta l4proto { tcp, udp } flow offload @ft;/meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;/' /usr/share/firewall4/templates/ruleset.uc
 fw4 restart >/dev/null 2>&1
 sleep 2 ;;
-*) echo -e "\n${RED}Скрипт остановлен!${NC}\n"
-exit 1 ;;
+*) echo -e "\n${RED}Скрипт остановлен!${NC}\n"; exit 1 ;;
 esac
 fi
 fi
@@ -202,12 +202,8 @@ sed -i "s/,50000-50099//" "$CONF"
 sed -i ':a;N;$!ba;s|--new\n--filter-udp=50000-50099\n--filter-l7=discord,stun\n--dpi-desync=fake\n*||g' "$CONF"
 chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
 read -p "Нажмите Enter для выхода в главное меню..." dummy
-show_menu
 return ;;
-*) echo -e "\nВыходим в главное меню..."
-sleep 1
-show_menu
-return ;;
+*) return ;;
 esac
 fi
 if wget -qO "$CUSTOM_DIR/50-script.sh" "$URL"; then
@@ -299,8 +295,7 @@ uninstall_zapret "1"
 install_Zapret "1"
 [ ! -f /etc/init.d/zapret ] && return
 echo -e "${MAGENTA}Останавливаем Zapret${NC}\n" && /etc/init.d/zapret stop >/dev/null 2>&1 && echo -e "${BLUE}🔴 ${GREEN}Zapret остановлен!${NC}\n"
-# --- ТУТ ПИШЕМ КАКАЯ СТРАТЕГИЯ БУДЕТ УСТАНАВЛИВАТЬСЯ ЧЕРЕЗ ПУНКТ 8
-wget -qO- https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str2.sh | sh
+wget -qO- "https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str${STR_VERSION_AUTOINSTALL}.sh" | sh
 if [ ! -f "$CONF" ]; then
 echo -e "\n${RED}Файл ${NC}$CONF${RED} не найден!${NC}\n"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
@@ -322,13 +317,11 @@ read -p "Нажмите Enter для выхода в главное меню..."
 comeback_def () {
 clear
 echo -e "${MAGENTA}Возвращаем настройки по умолчанию${NC}\n"
-# Проверка скрипта восстановления и его запуск
 if [ -f /opt/zapret/restore-def-cfg.sh ]; then
 rm -f /opt/zapret/init.d/openwrt/custom.d/50-script.sh
 [ -f /etc/init.d/zapret ] && /etc/init.d/zapret stop >/dev/null 2>&1
 echo -e "${GREEN}🔴 ${CYAN}Возвращаем ${NC}настройки${CYAN}, ${NC}стратегию${CYAN} и ${NC}hostlist${CYAN} к значениям по умолчанию${NC}\n"
 IPSET_DIR="/opt/zapret/ipset"
-mkdir -p "$IPSET_DIR"
 FILES="zapret-hosts-google.txt zapret-hosts-user-exclude.txt"
 URL_BASE="https://raw.githubusercontent.com/remittor/zapret-openwrt/master/zapret/ipset"
 for f in $FILES; do
@@ -345,7 +338,6 @@ else
 echo -e "${RED}Zapret не установлен!${NC}\n"
 fi
 read -p "Нажмите Enter для выхода в главное меню..." dummy
-show_menu
 }
 # ==========================================
 # Остановить Zapret
@@ -429,7 +421,6 @@ fi
 menu_str() {
 clear
 echo -e "${MAGENTA}Меню выбора стратегии${NC}"
-# Проверка, установлен ли Zapret
 [ ! -f /etc/init.d/zapret ] && { echo -e "\n${RED}Zapret не установлен!${NC}\n"; read -p "Нажмите Enter для выхода в главное меню..." dummy; return; }
 show_current_strategy && [ -n "$ver" ] && echo -e "\n${YELLOW}Используется стратегия:${NC} $ver"
 echo -e "\n${CYAN}1) ${GREEN}Установить стратегию${NC} v1"
@@ -452,10 +443,7 @@ read -p "Нажмите Enter для выхода в главное меню..."
 4) clear && wget -qO- https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Str4.sh | sh
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 ;;
-*) echo -e "\nВыходим в главное меню..."
-sleep 1
-show_menu
-return ;;
+*) return ;;
 esac
 }
 # ==========================================
@@ -497,9 +485,7 @@ case "$choice" in
 9) wget -qO- https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/sys_info.sh | sh
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 ;;
-*) 
-echo -e ""
-exit 0 ;;
+*) echo -e ""; exit 0 ;;
 esac
 }
 # ==========================================
