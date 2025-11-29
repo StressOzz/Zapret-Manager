@@ -9,9 +9,9 @@ MODEL=$(cat /tmp/sysinfo/model)
 TARGET=$(sed -n "s/.*TARGET='\(.*\)'/\1/p" /etc/openwrt_release)
 ARCH=$(sed -n "s/.*ARCH='\(.*\)'/\1/p" /etc/openwrt_release)
 OWRT=$(sed -n "s/.*OpenWrt \([0-9.]*\).*/\1/p" /etc/openwrt_release)
-echo -e "${GREEN}$MODEL${NC}"
-echo -e "${GREEN}$ARCH${NC} | ${GREEN}$TARGET${NC}"
-echo -e "${GREEN}$OWRT${NC}"
+echo -e "$MODEL"
+echo -e "$ARCH | $TARGET"
+echo -e "$OWRT"
 echo -e "\n${GREEN}===== Пользовательские пакеты =====${NC}"
 PKGS=$(awk '/^Package:/ {p=$2} /^Status: install user/ {print p}' /usr/lib/opkg/status | grep -v '^$')
 idx=0
@@ -25,9 +25,9 @@ for i in $(seq 1 $half); do
 eval "left=\$pkg$i"
 right_idx=$((i + half))
 eval "right=\$pkg$right_idx"
-left_pad=$(printf "%-20s" "$left")
+left_pad=$(printf "%-25s" "$left")
 if [ -n "$right" ]; then
-right_pad=$(printf "%-20s" "$right")
+right_pad=$(printf "%-25s" "$right")
 echo "$left_pad $right_pad"
 else
 echo "$left_pad"
