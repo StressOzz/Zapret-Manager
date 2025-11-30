@@ -4,7 +4,7 @@ RED="\033[1;31m"
 NC="\033[0m"
 CONF="/etc/config/zapret"
 if ! command -v curl >/dev/null 2>&1; then
-echo -e "\n${GREEN}Устанавливаем ${NC}curl"
+echo -e "\n${GREEN}Устанавливаем ${NC}curl\n"
 opkg update >/dev/null 2>&1 && opkg install curl >/dev/null 2>&1
 fi
 clear; echo -e "${GREEN}===== Информация о системе =====${NC}"
