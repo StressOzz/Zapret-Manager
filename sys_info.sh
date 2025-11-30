@@ -49,14 +49,14 @@ fi
 out="$out | FIX: ${dpi}"
 echo -e "$out"
 echo -e "\n${GREEN}===== Проверка GitHub =====${NC}"
-RATE=$(curl -s https://api.github.com/rate_limit | grep '"remaining"' | head -1 | awk '{print $2}' | tr -d ,)
+RATE=$(wget -qO- -s https://api.github.com/rate_limit | grep '"remaining"' | head -1 | awk '{print $2}' | tr -d ,)
 [ -z "$RATE" ] && RATE_OUT="${RED}N/A${NC}" || RATE_OUT=$([ "$RATE" -eq 0 ] && echo -e "${RED}0${NC}" || echo -e "${GREEN}$RATE${NC}")
 echo -n "IPv4: "
-curl -4 -Is --connect-timeout 3 https://github.com >/dev/null 2>&1 && echo -ne "${GREEN}ok${NC}" || echo -ne "${RED}fail${NC}"
+wget -4 --timeout=3 --server-response --spider https://github.com >/dev/null 2>&1 && echo -ne "${GREEN}ok${NC}" || echo -ne "${RED}fail${NC}"
 echo -n "  IPv6: "
-curl -6 -Is --connect-timeout 3 https://github.com >/dev/null 2>&1 && echo -e "${GREEN}ok${NC}" || echo -e "${RED}fail${NC}"
+wget -6 --timeout=3 --server-response --spider https://github.com >/dev/null 2>&1 && echo -e "${GREEN}ok${NC}" || echo -e "${RED}fail${NC}"
 echo -n "API: "
-curl -Is --connect-timeout 3 https://api.github.com >/dev/null 2>&1 \
+wget --timeout=3 --server-response --spider https://api.github.com >/dev/null 2>&1 \
 && echo -e "${GREEN}ok${NC}   Limit: $RATE_OUT" \
 || echo -e "${RED}fail${NC}   Limit: $RATE_OUT"
 echo -e "\n${GREEN}===== Настройки Zapret =====${NC}"
@@ -135,13 +135,13 @@ right_idx=$((idx + half))
 right=$(echo $sites_list | cut -d' ' -f$right_idx)
 left_pad=$(printf "%-25s" "$left")
 right_pad=$(printf "%-25s" "$right")
-if curl -Is --connect-timeout 3 --max-time 4 "https://$left" >/dev/null 2>&1; then
+if wget --timeout=4 --server-response --spider "https://$left" >/dev/null 2>&1; then
 left_color="[${GREEN}OK${NC}]  "
 else
 left_color="[${RED}FAIL${NC}]"
 fi
 if [ -n "$right" ]; then
-if curl -Is --connect-timeout 3 --max-time 4 "https://$right" >/dev/null 2>&1; then
+if wget --timeout=4 --server-response --spider "https://$right" >/dev/null 2>&1; then
 right_color="[${GREEN}OK${NC}]  "
 else
 right_color="[${RED}FAIL${NC}]"
