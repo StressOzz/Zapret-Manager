@@ -3,7 +3,6 @@ GREEN="\033[1;32m"
 RED="\033[1;31m"
 NC="\033[0m"
 CONF="/etc/config/zapret"
-clear
 echo -e "\n${GREEN}===== Информация о системе =====${NC}"
 MODEL=$(cat /tmp/sysinfo/model)
 ARCH=$(sed -n "s/.*ARCH='\(.*\)'/\1/p" /etc/openwrt_release)
@@ -152,4 +151,3 @@ else
 echo -e "$left_color $left_pad"
 fi
 done
-echo -e ""
