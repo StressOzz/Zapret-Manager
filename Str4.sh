@@ -7,8 +7,8 @@ BLUE="\033[0;34m"
 NC="\033[0m"
 # Версия стратегии
 version="v4"
-echo -e "${MAGENTA}Устанавливаем стратегию ${version}${NC}\n"
-echo -e "${GREEN}🔴 ${CYAN}Меняем стратегию${NC}"
+echo -e "${MAGENTA}Устанавливаем стратегию ${version}${NC}"
+echo -e "${CYAN}Меняем стратегию${NC}"
 # Удаляем строку и всё, что идёт ниже строки с option NFQWS_OPT '
 sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" /etc/config/zapret
 # Вставляем новый блок сразу после строки option NFQWS_OPT '
@@ -44,21 +44,21 @@ cat <<EOF >> /etc/config/zapret
 '
 EOF
 # Проверка и перезапись файла исключений пользователей
-echo -e "${GREEN}🔴 ${CYAN}Добавляем домены в исключения"
+echo -e "${CYAN}Добавляем домены в исключения"
 exclude_file="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
 remote_url="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/zapret-hosts-user-exclude.txt"
 # Удаляем старый файл
 rm -f "$exclude_file"
 # Скачиваем новый файл на его место
 if ! curl -fsSL "$remote_url" -o "$exclude_file"; then
-echo -e "\n${RED}Не удалось загрузить список с GitHub!${NC}\n"
+echo -e "\n${RED}Не удалось загрузить список с GitHub!${NC}"
 read -p "Нажмите Enter для выхода в главное меню..." dummy
 fi
 # копируем 4pda.bin
-echo -e "${GREEN}🔴 ${CYAN}Копируем ${NC}4pda.bin${CYAN} на устройство${NC}"
+echo -e "${CYAN}Копируем ${NC}4pda.bin${CYAN} на устройство${NC}"
 curl -sLo /opt/zapret/files/fake/4pda.bin https://github.com/StressOzz/Zapret-Manager/raw/refs/heads/main/4pda.bin
 # Редактируем /etc/hosts
-echo -e "${GREEN}🔴 ${CYAN}Редактируем ${NC}/etc/hosts"
+echo -e "${CYAN}Редактируем ${NC}/etc/hosts"
 file="/etc/hosts"
 cat <<'EOF' | grep -Fxv -f "$file" 2>/dev/null >> "$file"
 130.255.77.28 ntc.party
@@ -69,6 +69,6 @@ cat <<'EOF' | grep -Fxv -f "$file" 2>/dev/null >> "$file"
 EOF
 /etc/init.d/dnsmasq restart >/dev/null 2>&1
 # Применяем конфиг
-echo -e "${GREEN}🔴 ${CYAN}Применяем новую стратегию и настройки${NC}\n"
+echo -e "${CYAN}Применяем новую стратегию и настройки${NC}"
 chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh && /etc/init.d/zapret restart >/dev/null 2>&1
-echo -e "${BLUE}🔴 ${GREEN}Стратегия ${version} установлена!${NC}\n"
+echo -e "${GREEN}Стратегия ${NC}${version} ${GREEN}установлена!${NC}"
