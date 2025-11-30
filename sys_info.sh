@@ -4,10 +4,10 @@ RED="\033[1;31m"
 NC="\033[0m"
 CONF="/etc/config/zapret"
 if ! command -v curl >/dev/null 2>&1; then
-echo -e "${GREEN}Устанавливаем ${NC}curl"
+echo -e "\n${GREEN}Устанавливаем ${NC}curl"
 opkg update >/dev/null 2>&1 && opkg install curl >/dev/null 2>&1
 fi
-echo -e "\n${GREEN}===== Информация о системе =====${NC}"
+clear; echo -e "\n${GREEN}===== Информация о системе =====${NC}"
 MODEL=$(cat /tmp/sysinfo/model)
 ARCH=$(sed -n "s/.*ARCH='\(.*\)'/\1/p" /etc/openwrt_release)
 OWRT=$(sed -n "s/.*OpenWrt \([0-9.]*\).*/\1/p" /etc/openwrt_release)
