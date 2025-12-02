@@ -29,12 +29,21 @@
 
 Подключитесь по SSH к роутеру и выполните команду:
 
-```bash
+```
 sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)
 ```
+или
 
+
+```
+curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh | sh
+```
+если  **curl** не установлен
+```
+opkg update && opkg install curl
+```
 >Если скрипт не запускается, остановите текущую версию Zapret:
->```bash
+>```
 >/etc/init.d/zapret stop
 >```
 >После этого снова запустите менеджер по ссылке выше.
@@ -79,10 +88,9 @@ sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Z
 - **Zapret** by *bol-van* (https://github.com/bol-van)
 - **Zapret-OpenWrt** by *remittor* (https://github.com/remittor)
 
-*принадлежит компании Meta, признанной экстремистской и запрещённой на территории РФ
-
 ---
 
 [<img width="190" height="175" alt="donate-button-click-donation-charity-600nw-2339825981" src="https://github.com/user-attachments/assets/2999757b-fbf3-4149-bf6c-48bf3e241529" />](https://github.com/StressOzz#-поддержать-проект)
 
 ---
+*принадлежит компании Meta, признанной экстремистской и запрещённой на территории РФ
