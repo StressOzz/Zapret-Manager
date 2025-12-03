@@ -64,7 +64,7 @@ opkg update && opkg install curl
 >⚠️ Использовать только для полной переустановки и настройки Zapret.
 
 - Станут работать многие сайты, а так же **rutor.info**, **Instagram*** на ПК и в приложении, **ntc.party**...
-- Заработают сетевые режимы в играх, включая BF 6, Apex Legend и в других...
+- Заработают сетевые режимы в играх, включая BF 6, Apex Legend, Roblox и в других...
 
 > [!IMPORTANT]
 > Весь трафик пойдёт через Zapret !!!
@@ -91,6 +91,16 @@ opkg update && opkg install curl
 ---
 
 [<img width="190" height="175" alt="donate-button-click-donation-charity-600nw-2339825981" src="https://github.com/user-attachments/assets/2999757b-fbf3-4149-bf6c-48bf3e241529" />](https://github.com/StressOzz#-поддержать-проект)
+
+---
+
+[![Star History Chart](https://api.star-history.com/svg?repos=StressOzz/Zapret-Manager&type=date&legend=top-left)](https://www.star-history.com/#StressOzz/Zapret-Manager&type=date&legend=top-left)
+
+---
+# Благодарности:
+
+- **Zapret** by *bol-van* (https://github.com/bol-van)
+- **Zapret-OpenWrt** by *remittor* (https://github.com/remittor)
 
 ---
 *принадлежит компании Meta, признанной экстремистской и запрещённой на территории РФ
