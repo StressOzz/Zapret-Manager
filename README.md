@@ -76,18 +76,6 @@ opkg update && opkg install curl
 
 [Cтратегии для Youtube](https://github.com/StressOzz/Zapret-Manager/blob/main/%D0%A1%D1%82%D1%80%D0%B0%D1%82%D0%B5%D0%B3%D0%B8%D0%B8_%D0%B4%D0%BB%D1%8F_Youtube.md)
 
-Как подобрали, заново установите стратегию, которая у Вас была и вставьте **в НАЧАЛО** стратегию для YouTube, которая Вам подошла...
-> [!IMPORTANT]
-> блоки в стратегии должны быть разделены `--new`
-
-> блок начинается с `--filter-...`
-
----
-# Благодарности:
-
-- **Zapret** by *bol-van* (https://github.com/bol-van)
-- **Zapret-OpenWrt** by *remittor* (https://github.com/remittor)
-
 ---
 
 [<img width="190" height="175" alt="donate-button-click-donation-charity-600nw-2339825981" src="https://github.com/user-attachments/assets/2999757b-fbf3-4149-bf6c-48bf3e241529" />](https://github.com/StressOzz#-поддержать-проект)
