@@ -10,7 +10,7 @@ fi
 clear; echo -e "${GREEN}===== Информация о системе =====${NC}"
 MODEL=$(cat /tmp/sysinfo/model)
 ARCH=$(sed -n "s/.*ARCH='\(.*\)'/\1/p" /etc/openwrt_release)
-OWRT=$(sed -n "s/.*OpenWrt \([0-9.]*\).*/\1/p" /etc/openwrt_release)
+OWRT=$(grep '^DISTRIB_RELEASE=' /etc/openwrt_release | cut -d"'" -f2)
 echo -e "$MODEL"
 echo -e "$ARCH"
 echo -e "$OWRT"
