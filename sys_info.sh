@@ -15,25 +15,13 @@ echo -e "$MODEL"
 echo -e "$ARCH"
 echo -e "$OWRT"
 echo -e "\n${GREEN}===== Пользовательские пакеты =====${NC}"
-PKGS=$(awk '/^Package:/ {p=$2} /^Status: install user/ {print p}' /usr/lib/opkg/status | grep -v '^$')
-idx=0
-for pkg in $PKGS; do
-idx=$((idx+1))
-eval "pkg$idx='$pkg'"
-done
-total=$idx
+PKGS=$(awk '/^Package:/ {p=$2} /^Status: install user/ {print p}' /usr/lib/opkg/status)
+total=$(echo "$PKGS" | wc -l)
 half=$(( (total + 1) / 2 ))
 for i in $(seq 1 $half); do
-eval "left=\$pkg$i"
-right_idx=$((i + half))
-eval "right=\$pkg$right_idx"
-left_pad=$(printf "%-25s" "$left")
-if [ -n "$right" ]; then
-right_pad=$(printf "%-25s" "$right")
-echo "$left_pad $right_pad"
-else
-echo "$left_pad"
-fi
+left=$(echo "$PKGS" | sed -n "${i}p")
+right=$(echo "$PKGS" | sed -n "$((i + half))p")
+[ -n "$right" ] && echo "$left | $right" || echo "$left"
 done
 echo -e "\n${GREEN}===== Flow Offloading =====${NC}"
 sw=$(uci -q get firewall.@defaults[0].flow_offloading)
