@@ -93,7 +93,7 @@ fi
 echo -e "${GREEN}===== Доступность сайтов =====${NC}"
 SITES=$(cat <<'EOF'
 gosuslugi.ru
-esia.gosuslugi.ru/login
+esia.gosuslugi.ru
 rutube.ru
 youtube.com
 instagram.com
