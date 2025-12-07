@@ -277,6 +277,23 @@ cat <<EOF | grep -Fxv -f /etc/hosts 2>/dev/null >> /etc/hosts
 157.240.9.174 instagram.com www.instagram.com
 EOF
 /etc/init.d/dnsmasq restart >/dev/null 2>&1
+
+fileGP="/opt/zapret/ipset/zapret-hosts-google.txt"
+cat <<'EOF' | grep -Fxv -f "$fileGP" 2>/dev/null >> "$fileGP"
+android.clients.google.com
+beacons.gvt2.com
+connectivitycheck.gstatic.com
+googleplay.com
+gvt1.com
+lh3.googleusercontent.com
+play.google.com
+play.googleapis.com
+play-fe.googleapis.com
+play-games.googleusercontent.com
+play-lh.googleusercontent.com
+prod-lt-playstoregatewayadapter-pa.googleapis.com
+EOF
+
 echo -e "${CYAN}Применяем новую стратегию и настройки${NC}"; chmod +x /opt/zapret/sync_config.sh; /opt/zapret/sync_config.sh; /etc/init.d/zapret restart >/dev/null 2>&1
 echo -e "${GREEN}Стратегия ${NC}${version} ${GREEN}установлена!${NC}"
 [ "$NO_PAUSE" != "1" ] && echo && read -p "Нажмите Enter для выхода в главное меню..." dummy; }
