@@ -187,7 +187,7 @@ cat <<EOF
 --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
 --dpi-desync=fake,fakeddisorder
 --dpi-desync-split-pos=10,midsld
---dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_t2_ru.bin
+--dpi-desync-fake-tls=/opt/zapret/files/fake/t2.bin
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=m.ok.ru
 --dpi-desync-fake-tls=0x0F0F0F0F
 --dpi-desync-fake-tls-mod=none
