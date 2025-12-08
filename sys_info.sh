@@ -41,6 +41,9 @@ fi
 out="$out | FIX: ${dpi}"
 echo -e "$out"
 echo -e "\n${GREEN}===== Проверка GitHub =====${NC}"
+if /etc/init.d/https-dns-proxy status >/dev/null 2>&1; then
+echo -e "${RED}DNS over HTTPS запущен! Проверка GitHub пропущена!${NC}"
+else
 RATE=$(curl -s https://api.github.com/rate_limit | grep '"remaining"' | head -1 | awk '{print $2}' | tr -d ,)
 [ -z "$RATE" ] && RATE_OUT="${RED}N/A${NC}" || RATE_OUT=$([ "$RATE" -eq 0 ] && echo -e "${RED}0${NC}" || echo -e "${GREEN}$RATE${NC}")
 echo -n "IPv4: "
@@ -51,6 +54,7 @@ echo -n "API: "
 curl -Is --connect-timeout 3 https://api.github.com >/dev/null 2>&1 \
 && echo -e "${GREEN}ok${NC}   Limit: $RATE_OUT" \
 || echo -e "${RED}fail${NC}   Limit: $RATE_OUT"
+fi
 echo -e "\n${GREEN}===== Настройки Zapret =====${NC}"
 zpr_info() {
 INSTALLED_VER=$(opkg list-installed | grep '^zapret ' | awk '{print $3}')
