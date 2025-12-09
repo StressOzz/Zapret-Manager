@@ -1,4 +1,4 @@
-<h1 align="center">Тут собраны стратегии используемые в скрипте</h1>
+<h1 align="center">Стратегии используемые в скрипте</h1>
 
 # v1
 ```
@@ -50,7 +50,7 @@
 --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
 --dpi-desync=fake,fakeddisorder
 --dpi-desync-split-pos=10,midsld
---dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_t2_ru.bin
+--dpi-desync-fake-tls=/opt/zapret/files/fake/t2.bin
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=m.ok.ru
 --dpi-desync-fake-tls=0x0F0F0F0F
 --dpi-desync-fake-tls-mod=none
@@ -67,7 +67,7 @@
 ```
 [zapret-hosts-user-exclude.txt](https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/zapret-hosts-user-exclude.txt)
 
-[tls_clienthello_t2_ru](https://github.com/StressOzz/Zapret-Manager/raw/refs/heads/main/tls_clienthello_t2_ru.bin)
+[t2.bin](https://github.com/StressOzz/Zapret-Manager/raw/refs/heads/main/t2.bin)
 
 # v4
 ```
@@ -100,6 +100,39 @@
 [zapret-hosts-user-exclude.txt](https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/zapret-hosts-user-exclude.txt)
 
 [4pda.bin](https://github.com/StressOzz/Zapret-Manager/raw/refs/heads/main/4pda.bin)
+
+
+# v5
+```
+--filter-tcp=443
+--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
+--ip-id=zero
+--dpi-desync=multisplit
+--dpi-desync-split-seqovl=681
+--dpi-desync-split-pos=1
+--dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
+--new
+--filter-tcp=443
+--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
+--dpi-desync=fake,fakeddisorder
+--dpi-desync-split-pos=10,midsld
+--dpi-desync-fake-tls=/opt/zapret/files/fake/max.bin
+--dpi-desync-fake-tls-mod=rnd,dupsid
+--dpi-desync-fake-tls=0x0F0F0F0F
+--dpi-desync-fake-tls-mod=none
+--dpi-desync-fakedsplit-pattern=/opt/zapret/files/fake/tls_clienthello_vk_com.bin
+--dpi-desync-fooling=badseq,badsum
+--dpi-desync-badseq-increment=0
+--new
+--filter-udp=443
+--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
+--dpi-desync=fake
+--dpi-desync-repeats=6
+--dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
+```
+[zapret-hosts-user-exclude.txt](https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/zapret-hosts-user-exclude.txt)
+
+[max.bin](https://github.com/StressOzz/Zapret-Manager/raw/refs/heads/main/max.bin)
 
 ---
 # Для игр
