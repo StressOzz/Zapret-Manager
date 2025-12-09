@@ -1,5 +1,6 @@
 <h1 align="center">Стратегии используемые в скрипте</h1>
 
+---
 # v1
 ```
 --filter-tcp=443
@@ -21,6 +22,7 @@
 ```
 [zapret-hosts-user-exclude.txt](https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/zapret-hosts-user-exclude.txt)
 
+---
 # v2
 ```
 --filter-tcp=443
@@ -44,6 +46,7 @@
 ```
 [zapret-hosts-user-exclude.txt](https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/zapret-hosts-user-exclude.txt)
 
+---
 # v3
 ```
 --filter-tcp=443
@@ -69,6 +72,7 @@
 
 [t2.bin](https://github.com/StressOzz/Zapret-Manager/raw/refs/heads/main/t2.bin)
 
+---
 # v4
 ```
 --filter-tcp=443
@@ -101,7 +105,7 @@
 
 [4pda.bin](https://github.com/StressOzz/Zapret-Manager/raw/refs/heads/main/4pda.bin)
 
-
+---
 # v5
 ```
 --filter-tcp=443
