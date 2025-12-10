@@ -8,7 +8,7 @@ NC="\033[0m"
 
 clear
 
-echo -e 'sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)' > /usr/bin/zms
+echo 'sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)' > /usr/bin/zms
 chmod +x /usr/bin/zms
 
 echo -e "${GREEN}Установка${NC}"
