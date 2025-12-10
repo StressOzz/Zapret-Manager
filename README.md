@@ -42,13 +42,13 @@ wget -O /tmp/Zapret-Manager.sh https://raw.githubusercontent.com/StressOzz/Zapre
 >```
 >После этого снова запустите менеджер по ссылке выше.
 
-Для запуска скрипта в браузере:
+Для запуска скрипта в браузере или в LucI
 - в SSH выполните
 ```
 sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/ZM_Browser.sh)
 ```
 - в браузере войдите http://192.168.1.1:7681
-
+- в LuCI войдите в **Services** → **Terminal**
 
 ---
 
