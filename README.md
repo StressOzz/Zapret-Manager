@@ -35,7 +35,7 @@ sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Z
 или
 
 ```
-curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh | sh
+sh <(curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)
 ```
 если  **curl** не установлен
 ```
