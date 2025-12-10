@@ -1,12 +1,12 @@
 #!/bin/sh
 
+clear
+
 GREEN="\033[1;32m"
 RED="\033[1;31m"
 CYAN="\033[1;36m"
 YELLOW="\033[1;33m"
 NC="\033[0m"
-
-clear
 
 echo 'sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)' > /usr/bin/zms
 chmod +x /usr/bin/zms
