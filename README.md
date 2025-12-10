@@ -34,7 +34,6 @@ sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Z
 ```
 или
 
-
 ```
 curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh | sh
 ```
@@ -51,6 +50,8 @@ opkg update && opkg install curl
 ---
 
 ## 🔹 3. Быстрый старт
+
+[Видео инструкция как запустить менеджер без SSH, прямо из браузера в LuCI](https://www.youtube.com/watch?v=9YptN75Me_k)
 
 **Пункт 8** — установка Zapret под ключ
 
