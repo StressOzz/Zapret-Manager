@@ -32,15 +32,7 @@
 ```
 sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)
 ```
-или
 
-```
-sh <(curl -sL https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)
-```
-если  **curl** не установлен
-```
-opkg update && opkg install curl
-```
 >Если скрипт не запускается, остановите текущую версию Zapret:
 >```
 >/etc/init.d/zapret stop
