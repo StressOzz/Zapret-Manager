@@ -182,4 +182,13 @@ uplaypc-s-ubisoft.cdn.ubi.com
 uplaypc-s-ubisoft-ww.cdn.ubi.com
 ubisoft-orbit-savegames.s3.amazonaws.com
 ubisoft-uplay-savegames.s3.amazonaws.com
+#################################### Aliexpress
+ae.com
+ae-rus.net
+alicdn.com
+aestatic.net
+aliexpress.ru
+aliexpress.us
+aliexpress.com
+aliexpress-media.com
 ####################################
