@@ -89,7 +89,7 @@ comeback_def () { if [ -f /opt/zapret/restore-def-cfg.sh ]; then echo -e "\n${MA
 for f in zapret-hosts-google.txt zapret-hosts-user-exclude.txt zapret-ip-exclude.txt; do wget -qO "/opt/zapret/ipset/$f" "https://raw.githubusercontent.com/remittor/zapret-openwrt/master/zapret/ipset/$f"; done
 for f in zapret-hosts-user-ipban.txt zapret-ip-user-ipban.txt zapret-hosts-user.txt zapret-ip-user.txt zapret-ip-user-exclude.txt; do : > "/opt/zapret/ipset/$f"; done
 chmod +x /opt/zapret/restore-def-cfg.sh && /opt/zapret/restore-def-cfg.sh; chmod +x /opt/zapret/sync_config.sh && /opt/zapret/sync_config.sh; /etc/init.d/zapret restart >/dev/null 2>&1
-sed -i '/185\.87\.51\.182 4pda\.to www\.4pda\.to/d; /130\.255\.77\.28 ntc\.party/d; /173\.245\.58\.219 rutor\.info d\.rutor\.info/d; /57\.144\.222\.34 instagram\.com www\.instagram\.com/d; /157\.240\.9\.174 instagram\.com www\.instagram\.com/d; /185\.39\.18\.98 lib\.rus\.ec www\.lib\.rus\.ec/d' /etc/hosts
+sed -i '/185\.87\.51\.182 4pda\.to www\.4pda\.to/d; /130\.255\.77\.28 ntc\.party/d; /173\.245\.58\.219 rutor\.info d\.rutor\.info/d; /57\.144\.222\.34 instagram\.com www\.instagram\.com/d; /157\.240\.9\.174 instagram\.com www\.instagram\.com/d; /157\.240\.245\.174 instagram\.com www\.instagram\.com/d; /185\.39\.18\.98 lib\.rus\.ec www\.lib\.rus\.ec/d' /etc/hosts
 /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "${GREEN}Настройки по умолчанию возвращены!${NC}\n"; else echo -e "\n${RED}Zapret не установлен!${NC}\n"; fi; read -p "Нажмите Enter для выхода в главное меню..." dummy; }
 # ==========================================
 # Cтарт/стоп Zapret
@@ -109,7 +109,7 @@ echo -e "${MAGENTA}Удаляем ZAPRET${NC}\n${CYAN}Останавливаем
 echo -e "${CYAN}Удаляем пакеты${NC}"; opkg --force-removal-of-dependent-packages --autoremove remove zapret luci-app-zapret >/dev/null 2>&1
 echo -e "${CYAN}Удаляем временные файлы${NC}"; rm -rf /opt/zapret /etc/config/zapret /etc/firewall.zapret /etc/init.d/zapret /tmp/*zapret* /var/run/*zapret* /tmp/*.ipk /tmp/*.zip 2>/dev/null
 crontab -l 2>/dev/null | grep -v -i "zapret" | crontab - 2>/dev/null; nft list tables 2>/dev/null | awk '{print $2}' | grep -E '(zapret|ZAPRET)' | while read t; do [ -n "$t" ] && nft delete table "$t" 2>/dev/null; done
-sed -i '/185\.87\.51\.182 4pda\.to www\.4pda\.to/d; /130\.255\.77\.28 ntc\.party/d; /173\.245\.58\.219 rutor\.info d\.rutor\.info/d; /57\.144\.222\.34 instagram\.com www\.instagram\.com/d; /157\.240\.9\.174 instagram\.com www\.instagram\.com/d; /185\.39\.18\.98 lib\.rus\.ec www\.lib\.rus\.ec/d' /etc/hosts
+sed -i '/185\.87\.51\.182 4pda\.to www\.4pda\.to/d; /130\.255\.77\.28 ntc\.party/d; /173\.245\.58\.219 rutor\.info d\.rutor\.info/d; /57\.144\.222\.34 instagram\.com www\.instagram\.com/d; /157\.240\.9\.174 instagram\.com www\.instagram\.com/d; /157\.240\.245\.174 instagram\.com www\.instagram\.com/d; /185\.39\.18\.98 lib\.rus\.ec www\.lib\.rus\.ec/d' /etc/hosts
 /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "${GREEN}Zapret полностью удалён!${NC}\n"
 [ "$NO_PAUSE" != "1" ] && read -p "Нажмите Enter для выхода в главное меню..." dummy; }
 # ==========================================
@@ -160,7 +160,7 @@ echo -e "${CYAN}Добавляем домены в исключения${NC}"; r
 case "$version" in v3) echo -e "${CYAN}Копируем ${NC}t2.bin${CYAN} на устройство${NC}"; file="t2.bin" ;;
 v4) echo -e "${CYAN}Копируем ${NC}4pda.bin${CYAN} на устройство${NC}"; file="4pda.bin" ;; v5) echo -e "${CYAN}Копируем ${NC}max.bin${CYAN} на устройство${NC}"; file="max.bin" ;;
 esac; [ -n "$file" ] && wget -q -O "/opt/zapret/files/fake/$file" "https://github.com/StressOzz/Zapret-Manager/raw/refs/heads/main/$file"; echo -e "${CYAN}Редактируем ${NC}/etc/hosts${NC}"
-printf '%s\n' "130.255.77.28 ntc.party" "185.87.51.182 4pda.to www.4pda.to" "173.245.58.219 rutor.info d.rutor.info" "57.144.222.34 instagram.com www.instagram.com" "157.240.9.174 instagram.com www.instagram.com" "185.39.18.98 lib.rus.ec www.lib.rus.ec" | grep -Fxv -f /etc/hosts 2>/dev/null >> /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1;
+printf '%s\n' "130.255.77.28 ntc.party" "185.87.51.182 4pda.to www.4pda.to" "173.245.58.219 rutor.info d.rutor.info" "57.144.222.34 instagram.com www.instagram.com" "157.240.9.174 instagram.com www.instagram.com" "157.240.245.174 instagram.com www.instagram.com" "185.39.18.98 lib.rus.ec www.lib.rus.ec" | grep -Fxv -f /etc/hosts 2>/dev/null >> /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1;
 fileGP="/opt/zapret/ipset/zapret-hosts-google.txt"; printf '%s\n' "android.clients.google.com" "beacons.gvt2.com" "connectivitycheck.gstatic.com" "googleplay.com" "gvt1.com" "lh3.googleusercontent.com" "play.google.com" "play.googleapis.com" | grep -Fxv -f "$fileGP" 2>/dev/null >> "$fileGP"
 printf '%s\n' "play-fe.googleapis.com" "play-games.googleusercontent.com" "play-lh.googleusercontent.com" "prod-lt-playstoregatewayadapter-pa.googleapis.com" | grep -Fxv -f "$fileGP" 2>/dev/null >> "$fileGP"
 echo -e "${CYAN}Применяем новую стратегию и настройки${NC}"; chmod +x /opt/zapret/sync_config.sh; /opt/zapret/sync_config.sh; /etc/init.d/zapret restart >/dev/null 2>&1; echo -e "${GREEN}Стратегия ${NC}${version} ${GREEN}установлена!${NC}"
