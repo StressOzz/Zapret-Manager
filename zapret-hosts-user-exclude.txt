@@ -192,4 +192,23 @@ aliexpress.ru
 aliexpress.us
 aliexpress.com
 aliexpress-media.com
+#################################### PSN
+scea.com
+np.scea.com
+ps5update.com
+psdownload.com
+playstation.net
+playstation.com
+account.sony.com
+psremoteplay.com
+ps4.playstation.com
+ps5.playstation.com
+playstationcloud.com
+psapi.playstation.net
+store.playstation.com
+media.playstation.com
+auth.np.ac.playstation.net
+sonyentertainmentnetwork.com
+np.community.playstation.net
+id.sonyentertainmentnetwork.com
 ####################################
