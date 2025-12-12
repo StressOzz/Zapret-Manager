@@ -1,6 +1,7 @@
 gstatic.com
 gosuslugi.ru
 ipstream.one
+openwrt.org
 #################################### Epicgames
 easy.ac
 fab.com
