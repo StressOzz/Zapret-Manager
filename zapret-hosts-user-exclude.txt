@@ -1,7 +1,7 @@
+nalog.ru
 gstatic.com
 gosuslugi.ru
 ipstream.one
-openwrt.org
 #################################### Epicgames
 easy.ac
 fab.com
@@ -211,4 +211,33 @@ auth.np.ac.playstation.net
 sonyentertainmentnetwork.com
 np.community.playstation.net
 id.sonyentertainmentnetwork.com
+#################################### Twitch
+twitch.tv
+ttvnw.net
+jtvnw.net
+twimg.com
+m.twitch.tv
+id.twitch.tv
+www.twitch.tv
+twitchcdn.net
+ext-twitch.tv
+twitchsvc.net
+api.twitch.tv
+gql.twitch.tv
+dev.twitch.tv
+live-video.net
+twitch.a2z.com
+chat.twitch.tv
+help.twitch.tv
+assets.twitch.tv
+twitch-shadow.net
+passport.twitch.tv
+irc.chat.twitch.tv
+vod-metro.twitch.tv
+twitchcdn-shadow.net
+static.twitchcdn.net
+vod-secure.twitch.tv
+irc-ws.chat.twitch.tv
+pubsub-edge.twitch.tv
+vod-pop-secure.twitch.tv
 ####################################
