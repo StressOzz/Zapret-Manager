@@ -2,7 +2,7 @@
 # ==========================================
 # Zapret on remittor Manager by StressOzz
 # =========================================
-ZAPRET_MANAGER_VERSION="7.4"; ZAPRET_VERSION="72.20251217"; STR_VERSION_AUTOINSTALL="v5"
+ZAPRET_MANAGER_VERSION="7.5"; ZAPRET_VERSION="72.20251217"; STR_VERSION_AUTOINSTALL="v5"
 GREEN="\033[1;32m"; RED="\033[1;31m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"
 MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 WORKDIR="/tmp/zapret-update"; CONF="/etc/config/zapret"; CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"
@@ -23,7 +23,7 @@ ZAPRET_STATUS=$([ -f /etc/init.d/zapret ] && /etc/init.d/zapret status 2>/dev/nu
 # ==========================================
 # Установка Zapret
 # ==========================================
-install_Zapret() { local NO_PAUSE=$1; get_versions; if [ "$INSTALLED_VER" = "$ZAPRET_VERSION" ]; then echo -e "\n${GREEN}Последняя версия уже установлена!${NC}\n"; read -p "Нажмите Enter..." dummy; return; fi
+install_Zapret() { local NO_PAUSE=$1; get_versions; if [ "$INSTALLED_VER" = "$ZAPRET_VERSION" ]; then echo -e "\nZapret ${GREEN}уже установлен!${NC}\n"; read -p "Нажмите Enter..." dummy; return; fi
 [ "$NO_PAUSE" != "1" ] && echo; echo -e "${MAGENTA}Устанавливаем ZAPRET${NC}"; if [ -f /etc/init.d/zapret ]; then echo -e "${CYAN}Останавливаем ${NC}zapret" && /etc/init.d/zapret stop >/dev/null 2>&1; for pid in $(pgrep -f /opt/zapret 2>/dev/null); do kill -9 "$pid" 2>/dev/null; done; fi
 echo -e "${CYAN}Обновляем список пакетов${NC}"; opkg update >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка при обновлении списка пакетов!${NC}\n"; read -p "Нажмите Enter..." dummy; return; }
 mkdir -p "$WORKDIR"; rm -f "$WORKDIR"/* 2>/dev/null; cd "$WORKDIR" || return; FILE_NAME=$(basename "$LATEST_URL"); if ! command -v unzip >/dev/null 2>&1; then
@@ -134,24 +134,45 @@ if ! grep -q -- "--filter-udp=19294-19344,50000-50100" "$CONF"; then last_line1=
 printf "%s\n" "--new" "--filter-udp=19294-19344,50000-50100" "--filter-l7=discord,stun" "--dpi-desync=fake" "--dpi-desync-repeats=6" "--new" "--filter-tcp=2053,2083,2087,2096,8443" "--hostlist-domains=discord.media" \
 "--dpi-desync=multisplit" "--dpi-desync-split-seqovl=652" "--dpi-desync-split-pos=2" "--dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin" "'" >> "$CONF"; fi; }
 # ==========================================
-# DNS over HTTP
+# DNS over HTTPS
 # ==========================================
+DoH_menu() { while true; do
+get_doh_status; clear; echo -e "${MAGENTA}Меню DNS over HTTPS${NC}\n"; opkg list-installed | grep -q '^https-dns-proxy ' && doh_st="Удалить" || doh_st="Установить"
+[ -n "$DOH_STATUS" ] && echo -e "${YELLOW}DNS over HTTPS: ${GREEN}$DOH_STATUS${NC}\n"; echo -e "${CYAN}1)${GREEN} $doh_st ${NC}DNS over HTTPS\n${CYAN}2)${GREEN} Настроить ${NC}Comss DNS\n${CYAN}3)${GREEN} Настроить ${NC}Xbox DNS"
+echo -e "${CYAN}4)${GREEN} Настроить ${NC}dns.malw.link\n${CYAN}5)${GREEN} Настроить ${NC}dns.malw.link (Cloudflare Gateway)\n${CYAN}6)${GREEN} Вернуть настройки по умолчанию"
+echo -ne "\n${YELLOW}Выберите пункт:${NC} " && read choiceDOH; case "$choiceDOH" in 1) D_o_H ;; 2) if [ ! -f /etc/config/https-dns-proxy ]; then echo -e "\n${RED}DNS over HTTPS не установлен!${NC}\n"
+read -p "Нажмите Enter..." dummy; else echo -e "\n${MAGENTA}Настраиваем DNS over HTTPS${NC}\n${CYAN}Настраиваем ${NC}Comss.one DNS\n${CYAN}Применяем новые настройки${NC}"
+rm -f "$fileDoH"; printf '%s\n' "$doh_set" "$doh_comss" > "$fileDoH"; doh_restart; echo -e "DNS over HTTP ${GREEN}настроен!${NC}\n"; read -p "Нажмите Enter..." dummy ; fi ;;
+3) if [ ! -f /etc/config/https-dns-proxy ]; then echo -e "\n${RED}DNS over HTTPS не установлен!${NC}\n"; read -p "Нажмите Enter..." dummy; else
+echo -e "\n${MAGENTA}Настраиваем DNS over HTTPS${NC}\n${CYAN}Настраиваем ${NC}Xbox DNS\n${CYAN}Применяем новые настройки${NC}"; rm -f "$fileDoH"
+printf '%s\n' "$doh_set" "$doh_xbox" > "$fileDoH"; doh_restart; echo -e "DNS over HTTP ${GREEN}настроен!${NC}\n"; read -p "Нажмите Enter..." dummy ; fi ;;
+4) if [ ! -f /etc/config/https-dns-proxy ]; then echo -e "\n${RED}DNS over HTTPS не установлен!${NC}\n"; read -p "Нажмите Enter..." dummy; else
+echo -e "\n${MAGENTA}Настраиваем DNS over HTTPS${NC}\n${CYAN}Настраиваем ${NC}dns.malw.link\n${CYAN}Применяем новые настройки${NC}"; rm -f "$fileDoH"
+printf '%s\n' "$doh_set" "$doh_query" > "$fileDoH"; doh_restart; echo -e "DNS over HTTP ${GREEN}настроен!${NC}\n"; read -p "Нажмите Enter..." dummy ; fi ;;
+5) if [ ! -f /etc/config/https-dns-proxy ]; then echo -e "\n${RED}DNS over HTTPS не установлен!${NC}\n"; read -p "Нажмите Enter..." dummy; else
+echo -e "\n${MAGENTA}Настраиваем DNS over HTTPS${NC}\n${CYAN}Настраиваем ${NC}dns.malw.link (Cloudflare Gateway)\n${CYAN}Применяем новые настройки${NC}"; rm -f "$fileDoH"
+printf '%s\n' "$doh_set" "$doh_queryCF" > "$fileDoH"; doh_restart; echo -e "DNS over HTTP ${GREEN}настроен!${NC}\n"; read -p "Нажмите Enter..." dummy ; fi ;;
+6) if [ ! -f /etc/config/https-dns-proxy ]; then echo -e "\n${RED}DNS over HTTPS не установлен!${NC}\n"; read -p "Нажмите Enter..." dummy; else
+echo -e "\n${MAGENTA}Возвращаем DNS over HTTPS настройки по умолчанию${NC}\n${CYAN}Возвращаем настройки к значениям по умолчанию${NC}\n${CYAN}Применяем новые настройки${NC}"
+printf '%s\n' "$doh_set" "$doh_def" > "$fileDoH"; doh_restart; echo -e "${GREEN}Настройки по умолчанию возвращены!${NC}\n"; read -p "Нажмите Enter..." dummy ; fi ;; *) echo; return ;; esac; done; }
+get_doh_status() { DOH_STATUS=""; [ ! -f "$fileDoH" ] && return; if grep -q "dns.comss.one" "$fileDoH"; then DOH_STATUS="Comss DNS"; elif grep -q "xbox-dns.ru" "$fileDoH"; then DOH_STATUS="Xbox DNS"
+elif grep -q "5u35p8m9i7.cloudflare-gateway.com" "$fileDoH"; then  DOH_STATUS="dns.malw.link (Cloudflare Gateway)"; elif grep -q "dns.malw.link" "$fileDoH"; then DOH_STATUS="dns.malw.link"; else DOH_STATUS="установлен"; fi; }
 D_o_H() { if opkg list-installed | grep -q '^https-dns-proxy '; then echo -e "\n${MAGENTA}Удаляем DNS over HTTPS\n${CYAN}Удаляем пакеты${NC}"; /etc/init.d/https-dns-proxy stop >/dev/null 2>&1; /etc/init.d/https-dns-proxy disable >/dev/null 2>&1
 opkg remove https-dns-proxy luci-app-https-dns-proxy --force-removal-of-dependent-packages >/dev/null 2>&1; echo -e "${CYAN}Удаляем файлы конфигурации ${NC}"
-rm -f /etc/config/https-dns-proxy; rm -f /etc/init.d/https-dns-proxy; echo -e "DNS over HTTPS${GREEN} удалён!${NC}\n"; else echo -e "\n${MAGENTA}Устанавливаем и настраиваем DNS over HTTPS\n${CYAN}Обновляем список пакетов${NC}"
+rm -f /etc/config/https-dns-proxy; rm -f /etc/init.d/https-dns-proxy; echo -e "DNS over HTTPS${GREEN} удалён!${NC}\n"; else echo -e "\n${MAGENTA}Устанавливаем DNS over HTTPS\n${CYAN}Обновляем список пакетов${NC}"
 opkg update >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка при обновлении списка пакетов!${NC}\n"; read -p "Нажмите Enter..." dummy; return; }; echo -e "${CYAN}Устанавливаем ${NC}https-dns-proxy"
-opkg install https-dns-proxy >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка при установки!${NC}\n"; read -p "Нажмите Enter..." dummy; return; }; echo -e "${CYAN}Устанавливаем ${NC}luci-app-https-dns-proxy"; opkg install luci-app-https-dns-proxy >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка при установки!${NC}\n"; read -p "Нажмите Enter..." dummy; return; }
-echo -e "${CYAN}Настраиваем ${NC}Comss.one DNS"; rm -f "$fileDoH"; printf '%s\n' "$doh_set" "$doh_comss" > "$fileDoH"; doh_restart; echo -e "DNS over HTTPS${GREEN} установлен и настроен!${NC}\n"; fi; read -p "Нажмите Enter..." dummy; }
-doh_st() { if grep -q 'dns.comss.one' /etc/config/https-dns-proxy 2>/dev/null; then comss_active=1; comss_text="${GREEN}Вернуть ${NC}DNS over HTTPS ${GREEN}настройки по умолчанию${NC}"; else comss_active=0; comss_text="${GREEN}Настроить ${NC}DNS over HTTPS"; fi; }
-DoH_def(){ doh_st; rm -f "$fileDoH"; if [ "$comss_active" = 0 ]; then echo -e "\n${MAGENTA}Настраиваем DNS over HTTPS${NC}\n${CYAN}Настраиваем ${NC}Comss.one DNS\n${CYAN}Применяем новые настройки${NC}"
-printf '%s\n' "$doh_set" "$doh_comss" > "$fileDoH"; doh_restart; echo -e "DNS over HTTP ${GREEN}настроен!${NC}\n"; else echo -e "\n${MAGENTA}Возвращаем DNS over HTTPS настройки по умолчанию${NC}\n${CYAN}Возвращаем настройки к значениям по умолчанию${NC}\n${CYAN}Применяем новые настройки${NC}"
-printf '%s\n' "$doh_set" "$doh_18" > "$fileDoH"; doh_restart; echo -e "${GREEN}Настройки по умолчанию возвращены!${NC}\n"; fi; read -p "Нажмите Enter..." dummy; }
-doh_restart() { /etc/init.d/https-dns-proxy reload >/dev/null 2>&1; /etc/init.d/https-dns-proxy restart >/dev/null 2>&1; }
+opkg install https-dns-proxy >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка при установки!${NC}\n"; read -p "Нажмите Enter..." dummy; return; }; echo -e "${CYAN}Устанавливаем ${NC}luci-app-https-dns-proxy"
+opkg install luci-app-https-dns-proxy >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка при установки!${NC}\n"; read -p "Нажмите Enter..." dummy; return; }
+echo -e "DNS over HTTPS${GREEN} установлен!${NC}\n"; fi; read -p "Нажмите Enter..." dummy; }
+doh_install() { [ -f "$fileDoH" ] && return 0; echo -e "\n${RED}DNS over HTTPS не установлен!${NC}\n"; read -p "Нажмите Enter..." dummy; return 1; }
+doh_restart() { /etc/init.d/https-dns-proxy reload >/dev/null 2>&1; /etc/init.d/https-dns-proxy restart >/dev/null 2>&1; }; fileDoH="/etc/config/https-dns-proxy"
+doh_comss=$(printf "%s\n" "" "config https-dns-proxy" "	option resolver_url 'https://dns.comss.one/dns-query'"); doh_xbox=$(printf "%s\n" "" "config https-dns-proxy" "	option resolver_url 'https://xbox-dns.ru/dns-query'")
+doh_query=$(printf "%s\n" "" "config https-dns-proxy" "	option resolver_url 'https://dns.malw.link/dns-query'"); doh_queryCF=$(printf "%s\n" "" "config https-dns-proxy" "	option resolver_url 'https://5u35p8m9i7.cloudflare-gateway.com/dns-query'")
+doh_def=$(printf "%s\n" "" "config https-dns-proxy" "	option bootstrap_dns '1.1.1.1,1.0.0.1'" "	option resolver_url 'https://cloudflare-dns.com/dns-query'" \
+"	option listen_port '5053'" "" "config https-dns-proxy" "	option bootstrap_dns '8.8.8.8,8.8.4.4'" "	option resolver_url 'https://dns.google/dns-query'" "	option listen_port '5054'")
 doh_set=$(printf "%s\n" "config main 'config'" "	option canary_domains_icloud '1'" "	option canary_domains_mozilla '1'" "	option dnsmasq_config_update '*'" "	option force_dns '1'" "	list force_dns_port '53'" "	list force_dns_port '853'" \
 "	list force_dns_src_interface 'lan'" "	option procd_trigger_wan6 '0'" "	option heartbeat_domain 'heartbeat.melmac.ca'" "	option heartbeat_sleep_timeout '10'" "	option heartbeat_wait_timeout '10'" "	option user 'nobody'" "	option group 'nogroup'" \
-"	option listen_addr '127.0.0.1'"); doh_comss=$(printf "%s\n" "" "config https-dns-proxy" "	option resolver_url 'https://dns.comss.one/dns-query'")
-doh_18=$(printf "%s\n" "" "config https-dns-proxy" "	option bootstrap_dns '1.1.1.1,1.0.0.1'" "	option resolver_url 'https://cloudflare-dns.com/dns-query'" \
-"	option listen_port '5053'" "" "config https-dns-proxy" "	option bootstrap_dns '8.8.8.8,8.8.4.4'" "	option resolver_url 'https://dns.google/dns-query'" "	option listen_port '5054'")
+"	option listen_addr '127.0.0.1'")
 # ==========================================
 # Доступ из браузера
 # ==========================================
@@ -181,41 +202,41 @@ uci commit firewall >/dev/null 2>&1; /etc/init.d/firewall restart >/dev/null 2>&
 # Системное меню
 # ==========================================
 sys_menu(){ while true; do
-doh_st; web_is_enabled && WEB_TEXT="Удалить доступ к скрипту из браузера" || WEB_TEXT="Активировать доступ к скрипту из браузера"
+web_is_enabled && WEB_TEXT="Удалить доступ к скрипту из браузера" || WEB_TEXT="Активировать доступ к скрипту из браузера"
 quic_is_blocked && QUIC_TEXT="${GREEN}Отключить блокировку${NC} QUIC ${GREEN}(80,443)${NC}" || QUIC_TEXT="${GREEN}Включить блокировку${NC} QUIC ${GREEN}(80,443)${NC}"
 clear; echo -e "${MAGENTA}Системное меню${NC}\n"; printed=0; if web_is_enabled; then echo -e "${YELLOW}Доступ из браузера:${NC} http://192.168.1.1:7681"; printed=1; fi
 if quic_is_blocked; then echo -e "${YELLOW}Блокировка QUIC:${NC}    ${GREEN}включена${NC}"; printed=1; fi
-if grep -q 'dns.comss.one' /etc/config/https-dns-proxy 2>/dev/null; then echo -e "${YELLOW}DNS over HTTPS:${NC}     ${GREEN}Comss DNS${NC}"; printed=1
-elif grep -q 'cloudflare-dns.com' /etc/config/https-dns-proxy 2>/dev/null && grep -q 'dns.google' /etc/config/https-dns-proxy 2>/dev/null; then
-echo -e "${YELLOW}DNS over HTTPS:${NC}     ${GREEN}по умолчанию${NC}"; printed=1; fi; [ "$printed" -eq 1 ] && echo
-echo -e "${CYAN}1) ${GREEN}Системная информация${NC}\n${CYAN}2) ${GREEN}$WEB_TEXT${NC}\n${CYAN}3) ${GREEN}$QUIC_TEXT${NC}"
-opkg list-installed | grep -q '^https-dns-proxy' && echo -e "${CYAN}4) $comss_text"; if uci get firewall.@defaults[0].flow_offloading 2>/dev/null | grep -q '^1$' || \
-uci get firewall.@defaults[0].flow_offloading_hw 2>/dev/null | grep -q '^1$'; then if ! grep -q 'meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;' /usr/share/firewall4/templates/ruleset.uc; then
-echo -e "${CYAN}5) ${GREEN}Применить ${NC}FIX${GREEN} для работы ${NC}Zapret${GREEN} с включённым ${NC}Flow Offloading${NC}"; fi; fi
+[ "$printed" -eq 1 ] && echo; echo -e "${CYAN}1) ${GREEN}Системная информация${NC}\n${CYAN}2) ${GREEN}$WEB_TEXT${NC}\n${CYAN}3) ${GREEN}$QUIC_TEXT${NC}"
+if uci get firewall.@defaults[0].flow_offloading 2>/dev/null | grep -q '^1$' || uci get firewall.@defaults[0].flow_offloading_hw 2>/dev/null | grep -q '^1$'
+then if ! grep -q 'meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;' /usr/share/firewall4/templates/ruleset.uc; then
+echo -e "${CYAN}4) ${GREEN}Применить ${NC}FIX${GREEN} для работы ${NC}Zapret${GREEN} с включённым ${NC}Flow Offloading${NC}"; fi; fi
 echo -ne "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n\n${YELLOW}Выберите пункт:${NC} " && read -r choiceMN; case "$choiceMN" in
 1) wget -qO- https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/sys_info.sh | sh; echo; read -p "Нажмите Enter..." dummy ;;
-2) toggle_web ;; 3) toggle_quic ;; 4) DoH_def ;; 5) echo -e "\n${MAGENTA}Применяем FIX для Flow Offloading${NC}"; sed -i 's/meta l4proto { tcp, udp } flow offload @ft;/meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;/' /usr/share/firewall4/templates/ruleset.uc; fw4 restart >/dev/null 2>&1
-echo -e "FIX ${GREEN}успешно применён!${NC}\n"; read -p "Нажмите Enter..." dummy ;; *) echo; return ;; esac; done; }
+2) toggle_web ;; 3) toggle_quic ;; 
+4) if uci get firewall.@defaults[0].flow_offloading 2>/dev/null | grep -q '^1$' || uci get firewall.@defaults[0].flow_offloading_hw 2>/dev/null | grep -q '^1$'; then
+if ! grep -q 'meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;' /usr/share/firewall4/templates/ruleset.uc; then echo -e "\n${MAGENTA}Применяем FIX для Flow Offloading${NC}"
+sed -i 's/meta l4proto { tcp, udp } flow offload @ft;/meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;/' /usr/share/firewall4/templates/ruleset.uc; fw4 restart >/dev/null 2>&1
+echo -e "FIX ${GREEN}успешно применён!${NC}\n"; read -p "Нажмите Enter..." dummy; fi; else break; fi ;; *) echo; return ;; esac; done; }
 # ==========================================
 # Главное меню
 # ==========================================
-show_menu() { get_versions; clear
+show_menu() { get_versions; clear; get_doh_status
 echo -e "╔════════════════════════════════════╗\n║     ${BLUE}Zapret on remittor Manager${NC}     ║\n╚════════════════════════════════════╝\n                     ${DGRAY}by StressOzz v$ZAPRET_MANAGER_VERSION${NC}"
 for pkg in byedpi youtubeUnblock; do if opkg list-installed | grep -q "^$pkg"; then echo -e "\n${RED}Найден установленный ${NC}$pkg${RED}!${NC}\nZapret${RED} может работать некорректно с ${NC}$pkg${RED}!${NC}"; fi; done
 if uci get firewall.@defaults[0].flow_offloading 2>/dev/null | grep -q '^1$' || uci get firewall.@defaults[0].flow_offloading_hw 2>/dev/null | grep -q '^1$'; 
-then if ! grep -q 'meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;' /usr/share/firewall4/templates/ruleset.uc; then echo -e "\n${RED}Включён ${NC}Flow Offloading${RED}!${NC}\n${NC}Zapret${RED} может работать некорректно с включённым ${NC}Flow Offloading${RED}"; fi; fi
+then if ! grep -q 'meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;' /usr/share/firewall4/templates/ruleset.uc; then echo -e "\n${RED}Включён ${NC}Flow Offloading${RED}!${NC}\n${NC}Zapret${RED} некорректно работает с включённым ${NC}Flow Offloading${RED}!\nПримените ${NC}FIX${RED} в системном меню!${NC}"; fi; fi
 menu_game=$( [ -f "$CONF" ] && grep -q "1024-19293,19345-49999,50101-65535" "$CONF" && echo "Удалить стратегию для игр" || echo "Добавить стратегию для игр" ); pgrep -f "/opt/zapret" >/dev/null 2>&1 && str_stp_zpr="Остановить" || str_stp_zpr="Запустить"
-opkg list-installed | grep -q '^https-dns-proxy ' && doh_menu="Удалить" || doh_menu="Установить → настроить"; echo -e "\n${YELLOW}Установленная версия:   ${INST_COLOR}$INSTALLED_DISPLAY${NC}"
+echo -e "\n${YELLOW}Установленная версия:   ${INST_COLOR}$INSTALLED_DISPLAY${NC}"
 [ -n "$ZAPRET_STATUS" ] && echo -e "${YELLOW}Статус Zapret:${NC}          $ZAPRET_STATUS"; show_script_50 && [ -n "$name" ] && echo -e "${YELLOW}Установлен скрипт:${NC}      $name"
 [ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*1024-19293,19345-49999,50101-65535" "$CONF" && grep -q -- "--filter-udp=1024-19293,19345-49999,50101-65535" "$CONF" && echo -e "${YELLOW}Стратегия для игр:${NC}      ${GREEN}активирована${NC}"
-if opkg list-installed | grep -q '^https-dns-proxy '; then if grep -q 'dns.comss.one' /etc/config/https-dns-proxy 2>/dev/null; then echo -e "${YELLOW}DNS over HTTPS:         ${GREEN}установлен | Comss DNS${NC}"
-else echo -e "${YELLOW}DNS over HTTPS:         ${GREEN}установлен${NC}"; fi; fi; web_is_enabled && if web_is_enabled; then echo -e "${YELLOW}Доступ из браузера:${NC}     http://192.168.1.1:7681"; fi
+[ -n "$DOH_STATUS" ] && echo -e "${YELLOW}DNS over HTTPS:${NC}         ${GREEN}$DOH_STATUS${NC}"
+web_is_enabled && if web_is_enabled; then echo -e "${YELLOW}Доступ из браузера:${NC}     http://192.168.1.1:7681"; fi
 quic_is_blocked && if quic_is_blocked; then echo -e "${YELLOW}Блокировка QUIC:${NC}        ${GREEN}включена${NC}"; fi; show_current_strategy && [ -n "$ver" ] && echo -e "${YELLOW}Используется стратегия:${NC} ${CYAN}$ver${NC}"
-echo -e "\n${CYAN}1) ${GREEN}Установить последнюю версию${NC}\n${CYAN}2) ${GREEN}Меню выбора стратегий${NC}\n${CYAN}3) ${GREEN}Вернуть настройки по умолчанию${NC}\n${CYAN}4) ${GREEN}$str_stp_zpr ${NC}Zapret"
+echo -e "\n${CYAN}1) ${GREEN}Установить${NC} Zapret\n${CYAN}2) ${GREEN}Меню выбора стратегий${NC}\n${CYAN}3) ${GREEN}Вернуть настройки по умолчанию${NC}\n${CYAN}4) ${GREEN}$str_stp_zpr ${NC}Zapret"
 echo -e "${CYAN}5) ${GREEN}Удалить ${NC}Zapret\n${CYAN}6) ${GREEN}$menu_game\n${CYAN}7) ${GREEN}Меню установки скриптов${NC}\n${CYAN}8) ${GREEN}Удалить → установить → настроить${NC} Zapret"
-echo -e "${CYAN}9) ${GREEN}$doh_menu ${NC}DNS over HTTPS\n${CYAN}0) ${GREEN}Системное меню${NC}" ; echo -ne "${CYAN}Enter) ${GREEN}Выход${NC}\n\n${YELLOW}Выберите пункт:${NC} " && read choice
+echo -e "${CYAN}9) ${GREEN}Меню ${NC}DNS over HTTPS\n${CYAN}0) ${GREEN}Системное меню${NC}" ; echo -ne "${CYAN}Enter) ${GREEN}Выход${NC}\n\n${YELLOW}Выберите пункт:${NC} " && read choice
 case "$choice" in 1) install_Zapret ;; 2) menu_str ;; 3) comeback_def ;; 4) pgrep -f /opt/zapret >/dev/null 2>&1 && stop_zapret || start_zapret ;; 5) uninstall_zapret ;; 6) fix_GAME ;; 7) scrypt_install ;; 8) zapret_key ;;
-9)  D_o_H ;; 0) sys_menu ;; *) echo; exit 0 ;; esac; }
+9) DoH_menu ;; 0) sys_menu ;; *) echo; exit 0 ;; esac; }
 # ==========================================
 # Старт скрипта
 # ==========================================
