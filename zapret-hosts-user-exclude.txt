@@ -155,6 +155,7 @@ steamcommunity-a.akamaihd.net.edgesuite.net
 github.com
 openwrt.org
 gh.openwrt.org
+api.github.com
 cdn.openwrt.org
 dev.openwrt.org
 git.openwrt.org
@@ -165,7 +166,9 @@ lists.openwrt.org
 openwrt.gitlab.io
 archive.openwrt.org
 downloads.openwrt.org
+githubusercontent.com
 fwdownloads.openwrt.org
+raw.githubusercontent.com
 mirror-01.infra.openwrt.org
 mirror-02.infra.openwrt.org
 mirror-03.infra.openwrt.org
