@@ -50,6 +50,8 @@ echo -e "${GREEN}===== Доступность сайтов =====${NC}"
 SITES=$(cat <<'EOF'
 gosuslugi.ru
 esia.gosuslugi.ru
+nalog.ru
+lkfl2.nalog.ru
 rutube.ru
 youtube.com
 instagram.com
