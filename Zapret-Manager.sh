@@ -89,7 +89,7 @@ hosts_clear; echo -e "Zapret ${GREEN}полностью удалён!${NC}\n"; [
 # ==========================================
 # Выбор стратегий
 # ==========================================
-show_current_strategy() { [ -f "$CONF" ] || return; for v in v1 v2 v3 v4 v5; do grep -q "#$v" "$CONF" && { ver="$v"; return; } done; grep -q -- "--hostlist-auto=/opt/zapret/ipset/zapret-hosts-auto.txt" "$CONF" && ver="дефолтная"; }
+show_current_strategy() { [ -f "$CONF" ] || return; for v in v1 v2 v3 v4 v5 v6; do grep -q "#$v" "$CONF" && { ver="$v"; return; } done; }
 menu_str() { local NO_PAUSE=$1; [ ! -f /etc/init.d/zapret ] && { echo -e "\n${RED}Zapret не установлен!${NC}\n"; read -p "Нажмите Enter..." dummy; return; }
 while true; do if [ "$NO_PAUSE" = "1" ]; then version=$STR_VERSION_AUTOINSTALL; else clear; echo -e "${MAGENTA}Меню выбора стратегии${NC}\n"; show_current_strategy && [ -n "$ver" ] && echo -e "${YELLOW}Используется стратегия:${NC} $ver\n"
 echo -e "${CYAN}1) ${GREEN}Установить стратегию${NC} v1\n${CYAN}2) ${GREEN}Установить стратегию${NC} v2\n${CYAN}3) ${GREEN}Установить стратегию${NC} v3\n${CYAN}4) ${GREEN}Установить стратегию${NC} v4"
