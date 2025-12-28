@@ -1,7 +1,7 @@
-#!/bin/sh
-
+#!/bin/ash
 # YouTube Strategies Enhanced Menu for Zapret-Manager
 # Автоматическое тестирование 16 стратегий для YouTube
+# Исправлено для совместимости с ash (OpenWrt)
 
 CONFIG_DIR="/opt/zapret"
 STRATEGY_FILE="$CONFIG_DIR/nfq/desync.txt"
@@ -403,25 +403,25 @@ auto_test_all_strategies() {
         # Обрабатываем результаты
         case $result_code in
             0)  # Работает, но продолжаем
-                ((working++))
-                ((tested++))
+                working=$((working + 1))
+                tested=$((tested + 1))
                 echo -e "${GREEN}✅ Стратегия работает (продолжаем тестирование)${NC}"
                 ;;
             1)  # Не работает
-                ((not_working++))
-                ((tested++))
+                not_working=$((not_working + 1))
+                tested=$((tested + 1))
                 echo -e "${RED}❌ Стратегия не работает${NC}"
                 ;;
             2)  # Работает и сохранена - завершаем
-                ((working++))
-                ((tested++))
+                working=$((working + 1))
+                tested=$((tested + 1))
                 echo -e "${GREEN}🎯 Стратегия работает и сохранена как основная!${NC}"
                 echo -e "${CYAN}🏆 Найдена рабочая стратегия!${NC}"
                 show_test_results
                 return 0
                 ;;
             3)  # Пропущена
-                ((skipped++))
+                skipped=$((skipped + 1))
                 echo -e "${YELLOW}⏭️  Стратегия пропущена${NC}"
                 ;;
         esac
