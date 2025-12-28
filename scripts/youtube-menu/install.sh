@@ -1,85 +1,98 @@
 #!/bin/sh
-# YouTube Strategies Menu Installer
-# With auto-testing feature
+# Установщик меню стратегий YouTube для Zapret-Manager
+# С функцией автоматического тестирования
 
 echo "========================================="
-echo "  🎯 YouTube Strategies Menu Installer"
-echo "  With Auto-Testing Feature"
+echo "  🎯 Установщик меню стратегий YouTube"
+echo "  С функцией автотестирования"
 echo "========================================="
 echo ""
 
-# Check if running as root
+# Проверка прав root
 if [ "$(id -u)" -ne 0 ]; then
-    echo "❌ Error: This script must be run as root"
-    echo "Use: sudo $0"
+    echo "❌ Ошибка: Этот скрипт должен запускаться от root"
+    echo "Используйте: sudo $0"
     exit 1
 fi
 
-# Check Zapret installation
-echo "🔍 Checking Zapret installation..."
+# Проверка установки Zapret
+echo "🔍 Проверяем установку Zapret..."
 if [ ! -f "/opt/zapret/nfq/nfqws" ]; then
-    echo "❌ ERROR: Zapret-Manager not found!"
-    echo "Please install Zapret-Manager first:"
+    echo "❌ ОШИБКА: Zapret-Manager не найден!"
+    echo "Пожалуйста, сначала установите Zapret-Manager:"
     echo "https://github.com/StressOzz/Zapret-Manager"
     exit 1
 fi
-echo "✅ Zapret-Manager found"
+echo "✅ Zapret-Manager найден"
 
-# Create directories
-echo "📁 Creating directories..."
+# Создание необходимых директорий
+echo "📁 Создаем директории..."
 mkdir -p /opt/zapret/strategies /opt/zapret/backups /usr/local/bin
-echo "✅ Directories created"
+echo "✅ Директории созданы"
 
-# Download menu script
-echo "⬇️  Downloading menu script..."
-MENU_URL="https://raw.githubusercontent.com/mataf0n/Zapret-Manager/main/scripts/youtube-menu/zapret-menu.sh"
+# Загрузка скрипта меню
+echo "⬇️  Загружаем скрипт меню..."
+URL_MENU="https://raw.githubusercontent.com/mataf0n/Zapret-Manager/main/scripts/youtube-menu/zapret-menu.sh"
 
-if wget -q "$MENU_URL" -O /usr/local/bin/zapret-menu.sh; then
+if wget -q "$URL_MENU" -O /usr/local/bin/zapret-menu.sh; then
     chmod +x /usr/local/bin/zapret-menu.sh
-    echo "✅ Menu script downloaded"
+    echo "✅ Скрипт меню загружен"
 else
-    echo "❌ Error: Failed to download menu script"
-    echo "Please check your internet connection"
+    echo "❌ Ошибка: Не удалось загрузить скрипт меню"
+    echo "Проверьте подключение к интернету"
     exit 1
 fi
 
-# Create symlinks
-echo "🔗 Creating command aliases..."
+# Создание симлинков для удобства
+echo "🔗 Создаем команды для удобства..."
 ln -sf /usr/local/bin/zapret-menu.sh /usr/bin/zapret-menu 2>/dev/null || true
 ln -sf /usr/local/bin/zapret-menu.sh /usr/bin/zapret-manager 2>/dev/null || true
 ln -sf /usr/local/bin/zapret-menu.sh /usr/bin/youtube-tester 2>/dev/null || true
-echo "✅ Command aliases created"
+echo "✅ Команды созданы"
 
-# Create strategy files
-echo "📄 Creating strategy files..."
+# Создание файлов стратегий
+echo "📄 Создаем файлы стратегий..."
 if /usr/local/bin/zapret-menu.sh --create > /tmp/zapret-install.log 2>&1; then
-    echo "✅ Strategy files created"
+    echo "✅ Файлы стратегий созданы"
 else
-    echo "⚠️  Warning: Some strategy files may not have been created"
-    echo "You can create them later with: zapret-menu --create"
+    echo "⚠️  Внимание: Некоторые файлы стратегий могли не создатьсть"
+    echo "Вы можете создать их позже командой: zapret-menu --create"
 fi
 
 echo ""
 echo "========================================="
-echo "  🎉 INSTALLATION COMPLETE!"
+echo "  🎉 УСТАНОВКА ЗАВЕРШЕНА!"
 echo "========================================="
 echo ""
-echo "🚀 Quick Start:"
-echo "  zapret-menu          - Start the menu"
-echo "  youtube-tester       - Alternative command"
+echo "🚀 Быстрый старт:"
+echo "  zapret-menu          - Запустить меню"
+echo "  youtube-tester       - Альтернативная команда"
 echo ""
-echo "📱 Features:"
-echo "  • Auto-testing of 16 YouTube strategies"
-echo "  • Interactive interface with emojis"
-echo "  • Results saving and recommendations"
-echo "  • System diagnostics"
+echo "📱 Основные функции:"
+echo "  • Автоматическое тестирование 16 стратегий YouTube"
+echo "  • Интерактивный интерфейс с эмодзи"
+echo "  • Сохранение результатов тестов"
+echo "  • Рекомендации по стратегиям"
+echo "  • Диагностика системы"
 echo ""
-echo "🔧 Usage:"
-echo "  1. Run: zapret-menu"
-echo "  2. Press 'A' for auto-testing"
-echo "  3. Follow on-screen instructions"
-echo "  4. Restart browser after finding working strategy"
+echo "🔧 Как использовать:"
+echo "  1. Запустите: zapret-menu"
+echo "  2. Нажмите 'A' для автотестирования"
+echo "  3. Следуйте инструкциям на экране"
+echo "  4. После нахождения работающей стратегии перезапустите браузер"
 echo ""
-echo "❓ Need help? Check:"
+echo "📚 Подробная документация:"
 echo "  https://github.com/mataf0n/Zapret-Manager"
+echo ""
+echo "❓ Помощь и поддержка:"
+echo "  Создайте Issue на GitHub если возникли проблемы"
 echo "========================================="
+
+# Краткая инструкция после установки
+echo ""
+echo "💡 Советы для первого запуска:"
+echo "  1. Убедитесь что Zapret работает: /etc/init.d/zapret status"
+echo "  2. Запустите автотест: zapret-menu --auto"
+echo "  3. Тестируйте стратегии по очереди"
+echo "  4. При нахождении работающей стратегии сохраните её"
+echo ""
