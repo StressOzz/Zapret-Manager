@@ -133,3 +133,11 @@ Yv15
 --dpi-desync-split-seqovl=2108
 --dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
 --dpi-desync-fooling=badsum,badseq
+Yv16
+--filter-tcp=443
+--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
+--dpi-desync=multisplit
+--dpi-desync-split-pos=1,sniext+1
+--dpi-desync-split-seqovl=1
+--dpi-desync-fooling=badsum,badseq
+--dpi-desync-badseq-increment=0
