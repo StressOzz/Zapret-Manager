@@ -17,8 +17,8 @@ markdown
 ### Быстрая установка (рекомендуется):
 
 wget -O- https://raw.githubusercontent.com/mataf0n/Zapret-Manager/main/scripts/youtube-menu/install.sh | sh
-Ручная установка:
 
+Ручная установка:
 # Скачать меню
 wget -O /usr/local/bin/zapret-menu.sh \
   https://raw.githubusercontent.com/mataf0n/Zapret-Manager/main/scripts/youtube-menu/zapret-menu.sh
