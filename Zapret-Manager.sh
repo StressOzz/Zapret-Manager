@@ -11,7 +11,7 @@ EXCLUDE_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/hea
 HOSTS_LIST="185.87.51.182 4pda.to www.4pda.to |130.255.77.28 ntc.party|30.255.77.28 ntc.party|173.245.58.219 rutor.info d.rutor.info|185.39.18.98 lib.rus.ec www.lib.rus.ec
 57.144.222.34 instagram.com www.instagram.com|157.240.9.174 instagram.com www.instagram.com|157.240.245.174 instagram.com www.instagram.com|157.240.205.174 instagram.com www.instagram.com"
 hosts_add(){ echo "$HOSTS_LIST" | tr '|' '\n' | grep -Fxv -f /etc/hosts >> /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }
-hosts_clear(){ echo "$HOSTS_LIST" | tr '|' '\n' | while IFS= read -r line; do [ -n "$line" ] && sed -i "\|$line|d" /etc/hosts; done; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }
+hosts_clear(){ for ip in 185.87.51.182 130.255.77.28 30.255.77.28 173.245.58.219 185.39.18.98 57.144.222.34 157.240.9.174 157.240.245.174 157.240.205.174; do sed -i "/$ip/d" /etc/hosts >/dev/null 2>&1; done; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }
 # ==========================================
 # Получение версии
 # ==========================================
