@@ -283,5 +283,4 @@ tiktokcdn-us.com.edgesuite.net
 #################################### Genshin Impact
 yuanshen.com
 hoyoverse.com
-appsflyersdk.com
 ####################################
