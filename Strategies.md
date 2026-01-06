@@ -127,15 +127,18 @@
 ```
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
---dpi-desync=hostfakesplit
---dpi-desync-hostfakesplit-mod=host=google.com
---dpi-desync-fooling=ts
+--dpi-desync=multisplit
+--dpi-desync-split-pos=1,sniext+1
+--dpi-desync-split-seqovl=1
 --new
 --filter-tcp=443
 --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
 --dpi-desync=hostfakesplit
---dpi-desync-hostfakesplit-mod=host=max.ru
---dpi-desync-fooling=ts
+--dpi-desync-hostfakesplit-mod=host=rzd.ru
+--dpi-desync-hostfakesplit-midhost=host-2
+--dpi-desync-split-seqovl=726
+--dpi-desync-fooling=badsum,badseq
+--dpi-desync-badseq-increment=0
 ```
 ---
 # v7
