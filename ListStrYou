@@ -158,3 +158,9 @@ Yv18
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
 --dpi-desync-hostfakesplit-mod=host=www.google.com,altorder=1
 --dpi-desync-fooling=ts
+Yv19
+--filter-tcp=443
+--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
+--dpi-desync=hostfakesplit
+--dpi-desync-hostfakesplit-mod=host=google.com
+--dpi-desync-fooling=ts
