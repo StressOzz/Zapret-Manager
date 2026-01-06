@@ -2,7 +2,7 @@
 # ==========================================
 # Zapret on remittor Manager by StressOzz
 # =========================================
-ZAPRET_MANAGER_VERSION="7.9"; ZAPRET_VERSION="72.20251227"; STR_VERSION_AUTOINSTALL="v7"
+ZAPRET_MANAGER_VERSION="7.9"; ZAPRET_VERSION="72.20251227"; STR_VERSION_AUTOINSTALL="v6"
 TEST_HOST="https://rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com"; LAN_IP=$(uci get network.lan.ipaddr)
 GREEN="\033[1;32m"; RED="\033[1;31m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"
 MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -76,7 +76,7 @@ echo -e "${CYAN}Включаем настройки для игр${NC}"; ZAPRET_
 # Zapret под ключ
 # ==========================================
 zapret_key() { clear; echo -e "${MAGENTA}Удаление, установка и настройка Zapret${NC}\n"; get_versions; uninstall_zapret "1"; install_Zapret "1"
-[ ! -f /etc/init.d/zapret ] && return; install_strategy v6 1; echo; scrypt_install "1"; fix_GAME "1"; echo -e "Zapret ${GREEN}установлен и настроен!${NC}\n"; read -p "Нажмите Enter..." dummy; }
+[ ! -f /etc/init.d/zapret ] && return; install_strategy $STR_VERSION_AUTOINSTALL "1"; echo; scrypt_install "1"; fix_GAME "1"; echo -e "Zapret ${GREEN}установлен и настроен!${NC}\n"; read -p "Нажмите Enter..." dummy; }
 # ==========================================
 # Вернуть настройки по умолчанию
 # ==========================================
@@ -130,7 +130,7 @@ sed -i 's|--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt|--h
 disable_rkn() { echo -e "\n${MAGENTA}Выключаем списки РКН${NC}"; sed -i 's|--hostlist=/opt/zapret/ipset/zapret-hosts-user.txt|--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt|' "$CONF"
 if [ -s $BACKUP_FILE ]; then cp $BACKUP_FILE "$HOSTLIST_FILE"; else : > "$HOSTLIST_FILE"; fi; rm -f $HOSTS_USER $BACKUP_FILE; ZAPRET_RESTART; echo -e "${GREEN}Обход по спискам ${NC}РКН${GREEN} выключен${NC}\n"; }
 toggle_rkn_bypass() { if grep -q -- "--filter-tcp=443 ˂HOSTLIST˃" "$CONF"; then if [ -f "$HOSTLIST_FILE" ] && [ "$(wc -c < "$HOSTLIST_FILE")" -gt "$HOSTLIST_MIN_SIZE" ]; then disable_rkn; else [ -f "$HOSTLIST_FILE" ] && cp "$HOSTLIST_FILE" "$BACKUP_FILE"
-enable_rkn; fi; read -p "Нажмите Enter..." dummy </dev/tty; return; fi; if grep -q -- "--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt" "$CONF" && grep -qE "#v[1-7]" "$CONF"; then enable_rkn; read -p "Нажмите Enter..." dummy </dev/tty
+enable_rkn; fi; read -p "Нажмите Enter..." dummy </dev/tty; return; fi; if grep -q -- "--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt" "$CONF" && grep -qE "#v[1-99]" "$CONF"; then enable_rkn; read -p "Нажмите Enter..." dummy </dev/tty
 elif grep -q -- "--hostlist=/opt/zapret/ipset/zapret-hosts-user.txt" "$CONF"; then disable_rkn; read -p "Нажмите Enter..." dummy </dev/tty; else echo -e "\n${RED}Стратегия не подходит для списков РКН\n${NC}"; read -p "Нажмите Enter..." dummy </dev/tty; fi; }
 RKN_Check() { if (grep -q -- "--hostlist=/opt/zapret/ipset/zapret-hosts-user.txt" "$CONF" >/dev/null 2>&1 || grep -q -- "--filter-tcp=443 ˂HOSTLIST˃" "$CONF" >/dev/null 2>&1) && [ "$(wc -c < /opt/zapret/ipset/zapret-hosts-user.txt)" -gt 1800000 ]
 then RKN_STATUS="/ РКН"; RKN_TEXT_MENU="${GREEN}Выключить обход по спискам${NC} РКН"; else RKN_STATUS=""; RKN_TEXT_MENU="${GREEN}Включить обход по спискам${NC} РКН"; fi; }
@@ -157,8 +157,9 @@ strategy_v5() { printf '%s\n' "#v5" "#Yv01" "--filter-tcp=443" "--hostlist=/opt/
 printf '%s\n' "--new" "--filter-tcp=443" "--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt" "--dpi-desync=fake,fakeddisorder" "--dpi-desync-split-pos=10,midsld" "--dpi-desync-fake-tls=/opt/zapret/files/fake/max.bin" "--dpi-desync-fake-tls-mod=rnd,dupsid"
 printf '%s\n' "--dpi-desync-fake-tls=0x0F0F0F0F" "--dpi-desync-fake-tls-mod=none" "--dpi-desync-fakedsplit-pattern=/opt/zapret/files/fake/tls_clienthello_vk_com.bin" "--dpi-desync-fooling=badseq,badsum" "--dpi-desync-badseq-increment=0" "--new" "--filter-udp=443"
 printf '%s\n' "--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt" "--dpi-desync=fake" "--dpi-desync-repeats=6" "--dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin"; }
-strategy_v6() { printf '%s\n' "#v6" "#Yv19" "--filter-tcp=443" "--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt" "--dpi-desync=hostfakesplit" "--dpi-desync-hostfakesplit-mod=host=google.com" "--dpi-desync-fooling=ts"
-printf '%s\n' "--new" "--filter-tcp=443" "--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt" "--dpi-desync=hostfakesplit" "--dpi-desync-hostfakesplit-mod=host=max.ru" "--dpi-desync-fooling=ts"; }
+strategy_v6() { printf '%s\n' "#v6" "#Yv03" "--filter-tcp=443" "--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt" "--dpi-desync=fake,multisplit" "--dpi-desync-split-pos=2,sld" "--dpi-desync-fake-tls=0x0F0F0F0F" "--dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin"
+printf '%s\n' "--dpi-desync-fake-tls-mod=rnd,dupsid,sni=ggpht.com" "--dpi-desync-split-seqovl=620" "--dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin" "--dpi-desync-fooling=badsum,badseq"
+printf '%s\n' "--new" "--filter-tcp=443" "--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt" "--dpi-desync=hostfakesplit" "--dpi-desync-hostfakesplit-mod=host=max.ru" "--dpi-desync-hostfakesplit-midhost=host-2" "--dpi-desync-split-seqovl=726" "--dpi-desync-fooling=badsum,badseq" "--dpi-desync-badseq-increment=0"; }
 strategy_v7() { printf '%s\n' "#v7" "#Yv03" "--filter-tcp=443" "--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt" "--dpi-desync=fake,multisplit" "--dpi-desync-split-pos=2,sld" "--dpi-desync-fake-tls=0x0F0F0F0F" "--dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin"
 printf '%s\n' "--dpi-desync-fake-tls-mod=rnd,dupsid,sni=ggpht.com" "--dpi-desync-split-seqovl=620" "--dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin" "--dpi-desync-fooling=badsum,badseq"
 printf '%s\n' "--new" "--filter-tcp=443" "--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt" "--dpi-desync=fake,multisplit" "--dpi-desync-split-seqovl=654" "--dpi-desync-split-pos=1" "--dpi-desync-fooling=ts" "--dpi-desync-repeats=8" "--dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/max.bin" "--dpi-desync-fake-tls=/opt/zapret/files/fake/max.bin"; }
@@ -172,7 +173,7 @@ print=0; current="$ver$( [ -n "$ver" ] && [ -n "$yv_ver" ] && echo " / " )$yv_ve
 [ "$print" -eq 1 ] && echo; echo -e "${CYAN}1) ${GREEN}Выбрать стратегию для установки ${NC}v1-v7\n${CYAN}2) ${GREEN}$menu_game\n${CYAN}3) $RKN_TEXT_MENU\n${CYAN}4) ${GREEN}Подобрать стратегию для ${NC}YouTube"
 echo -ne "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n\n${YELLOW}Выберите пункт:${NC} "; read choiceST; case "$choiceST" in 1) strategy_CHOUSE ;; 2) fix_GAME ;; 3) toggle_rkn_bypass; continue ;; 4) auto_stryou ;; *) return ;; esac; done }
 strategy_CHOUSE () { echo -ne "\n${YELLOW}Введите версию стратегии для установки (1-7):${NC} "; read -r choice; if [[ "$choice" =~ ^[1-7]$ ]]; then install_strategy "v$choice"; fi; }
-show_current_strategy() { [ -f "$CONF" ] || return; ver=""; for i in $(seq 1 20); do grep -q "#v$i" "$CONF" && { ver="v$i"; break; }; done; yv_ver=""; for i in $(seq -w 1 50); do grep -q "#Yv$i" "$CONF" && { yv_ver="Yv$i"; break; }; done; }
+show_current_strategy() { [ -f "$CONF" ] || return; ver=""; for i in $(seq 1 99); do grep -q "#v$i" "$CONF" && { ver="v$i"; break; }; done; yv_ver=""; for i in $(seq -w 1 99); do grep -q "#Yv$i" "$CONF" && { yv_ver="Yv$i"; break; }; done; }
 discord_str_add() { if ! grep -q "option NFQWS_PORTS_UDP.*19294-19344,50000-50100" "$CONF"; then sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,19294-19344,50000-50100'/" "$CONF"; fi
 if ! grep -q "option NFQWS_PORTS_TCP.*2053,2083,2087,2096,8443" "$CONF"; then sed -i "/^[[:space:]]*option NFQWS_PORTS_TCP '/s/'$/,2053,2083,2087,2096,8443'/" "$CONF"; fi
 if ! grep -q -- "--filter-udp=19294-19344,50000-50100" "$CONF"; then last_line1=$(grep -n "^'$" "$CONF" | tail -n1 | cut -d: -f1); if [ -n "$last_line1" ]; then sed -i "${last_line1},\$d" "$CONF"; fi
