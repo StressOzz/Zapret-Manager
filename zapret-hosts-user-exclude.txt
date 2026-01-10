@@ -327,14 +327,18 @@ xiaomisa.org
 roborock.com
 mi-robot.com
 yeelight.com
+miot-spec.cn
 xiaomidns.com
 xiaomidns.net
 xiaomiinc.com
 xiaomiinc.net
 duokanbox.com
 youpin.com.cn
+miot-spec.org
+miot-spec.com
 xiaomiwear.com
 xiaomimimo.com
+dreamehome.com
 xiaomiprint.com
 xiaomidns.com.cn
 xiaomiinc.com.cn
@@ -345,5 +349,6 @@ xiaoaiassist.com
 xiaomi-mijia.com
 xiaomifactory.com
 airstarfinance.net
-global.market.xiaomi.com
+dreame-technology.cn
+dreame-technology.com
 ####################################
