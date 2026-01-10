@@ -14,7 +14,7 @@ HOSTLIST_MIN_SIZE=1800000; FINAL_STR="/opt/StrFINAL"; NEW_STR="/opt/StrNEW"; HOS
 EXCLUDE_FILE="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"; fileDoH="/etc/config/https-dns-proxy"
 RKN_URL="https://raw.githubusercontent.com/IndeecFOX/zapret4rocket/refs/heads/master/extra_strats/TCP/RKN/List.txt"
 EXCLUDE_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/zapret-hosts-user-exclude.txt"
-HOSTS_LIST="185.87.51.182 4pda.to www.4pda.to|130.255.77.28 ntc.party|30.255.77.28 ntc.party|173.245.58.219 rutor.info d.rutor.info|185.39.18.98 lib.rus.ec www.lib.rus.ec
+HOSTS_LIST="130.255.77.28 ntc.party|30.255.77.28 ntc.party|173.245.58.219 rutor.info d.rutor.info|185.39.18.98 lib.rus.ec www.lib.rus.ec
 57.144.222.34 instagram.com www.instagram.com|157.240.9.174 instagram.com www.instagram.com|157.240.245.174 instagram.com www.instagram.com|157.240.205.174 instagram.com www.instagram.com"
 ZAPRET_RESTART () { chmod +x /opt/zapret/sync_config.sh; /opt/zapret/sync_config.sh; /etc/init.d/zapret restart >/dev/null 2>&1; }
 hosts_add() { echo "$HOSTS_LIST" | tr '|' '\n' | grep -Fxv -f /etc/hosts >> /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }
@@ -275,7 +275,7 @@ if [ -n "$current" ]; then echo -e "${YELLOW}Используется страт
 echo -e "\n${CYAN}1) ${GREEN}Установить${NC} Zapret\n${CYAN}2) ${GREEN}Меню стратегий${NC}\n${CYAN}3) ${GREEN}Вернуть ${NC}настройки по умолчанию\n${CYAN}4) ${GREEN}$str_stp_zpr ${NC}Zapret"
 echo -e "${CYAN}5) ${GREEN}Удалить ${NC}Zapret\n${CYAN}6) ${GREEN}Меню настройки ${NC}Discord\n${CYAN}7) ${GREEN}Меню ${NC}DNS over HTTPS\n${CYAN}8) ${GREEN}Удалить → установить → настроить${NC} Zapret\n${CYAN}0) ${GREEN}Системное меню${NC}" ; echo -ne "${CYAN}Enter) ${GREEN}Выход${NC}\n\n${YELLOW}Выберите пункт:${NC} " && read choice
 case "$choice" in 1) install_Zapret ;; 2) menu_str ;; 3) comeback_def ;; 4) pgrep -f /opt/zapret >/dev/null 2>&1 && stop_zapret || start_zapret ;; 5) uninstall_zapret ;; 6) scrypt_install ;; 7) DoH_menu ;; 8) zapret_key ;; 
-888) echo; uninstall_zapret "1"; install_Zapret "1"; curl -fsSL https://raw.githubusercontent.com/StressOzz/Test/refs/heads/main/zapret -o "$CONF"; ZAPRET_RESTART; echo -e "\033[5m${GREEN}OK${NC}"; read -n 1 -s ;; 0) sys_menu ;; *) echo; exit 0 ;; esac; }
+888) echo; uninstall_zapret "1"; install_Zapret "1"; curl -fsSL https://raw.githubusercontent.com/StressOzz/Test/refs/heads/main/zapret -o "$CONF"; hosts_add; ZAPRET_RESTART; echo -e "\033[5m${GREEN}OK${NC}"; read -n 1 -s ;; 0) sys_menu ;; *) echo; exit 0 ;; esac; }
 # ==========================================
 # Старт скрипта
 # ==========================================
