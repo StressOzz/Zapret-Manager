@@ -1,6 +1,7 @@
 gov.ru
 nalog.ru
 sudrf.ru
+ottai.com
 gstatic.com
 gosuslugi.ru
 ipstream.one
