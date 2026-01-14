@@ -46,6 +46,10 @@
 ```
 sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)
 ```
+или
+```
+wget -O /tmp/Zapret-Manager.sh https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh && sh /tmp/Zapret-Manager.sh
+```
 >Если скрипт не запускается, остановите Zapret:
 >```
 >/etc/init.d/zapret stop
