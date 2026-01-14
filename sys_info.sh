@@ -27,13 +27,17 @@ RATE=$(curl -s https://api.github.com/rate_limit | grep '"remaining"' | head -1 
 [ -z "$RATE" ] && RATE_OUT="${RED}N/A${NC}" || RATE_OUT=$([ "$RATE" -eq 0 ] && echo -e "${RED}0${NC}" || echo -e "${GREEN}$RATE${NC}")
 echo -n "API: "; curl -Is --connect-timeout 3 https://api.github.com >/dev/null 2>&1 && echo -e "${GREEN}ok${NC} | Limit: $RATE_OUT" || echo -e "${RED}fail${NC} | Limit: $RATE_OUT"; fi
 echo -e "\n${GREEN}===== Проверка IPv4 / IPv6 =====${NC}"
+wget -qO- "http://ip-api.com/line/?fields=as,isp,country,city" | tr '\n' ',' | sed -E 's/AS[0-9]+ ?//g; s/,$//; s/,/, /g; s/(.*), (O.*)/\1\n\2/'
+echo
 echo -n "Google IPv4: "; time=$(ping -4 -c 1 -W 2 google.com 2>/dev/null | grep 'time=' | awk -F'time=' '{print $2}' | awk '{print $1}')
 if [ -n "$time" ]; then echo -e "${GREEN}ok ($time ms)${NC}"; else echo -e "${RED}fail${NC}"; fi
 echo -n "Google IPv6: "; time=$(ping -6 -c 1 -W 2 google.com 2>/dev/null | grep 'time=' | awk -F'time=' '{print $2}' | awk '{print $1}')
 if [ -n "$time" ]; then echo -e "${GREEN}ok ($time ms)${NC}"; else echo -e "${RED}fail${NC}"; fi
 echo -e "\n${GREEN}===== Настройки Zapret =====${NC}"
 zpr_info() { INSTALLED_VER=$(opkg list-installed | grep '^zapret ' | awk '{print $3}')
-if /etc/init.d/zapret status 2>/dev/null | grep -qi "running"; then ZAPRET_STATUS="${GREEN}запущен${NC}"
+NFQ_RUN=$(pgrep -f nfqws | wc -l); NFQ_ALL=$(/etc/init.d/zapret info 2>/dev/null | grep -o 'instance[0-9]\+' | wc -l); NFQ_STAT=""
+[ "$NFQ_RUN" -ne 0 ] || [ "$NFQ_ALL" -ne 0 ] && { [ "$NFQ_RUN" -eq "$NFQ_ALL" ] && NFQ_CLR="$GREEN" || NFQ_CLR="$RED"; NFQ_STAT="${NFQ_CLR}[${NFQ_RUN}/${NFQ_ALL}]${NC}"; }
+if /etc/init.d/zapret status 2>/dev/null | grep -qi "running"; then ZAPRET_STATUS="${GREEN}запущен${NC} $NFQ_STAT"
 else ZAPRET_STATUS="${RED}остановлен${NC}"; fi; SCRIPT_FILE="/opt/zapret/init.d/openwrt/custom.d/50-script.sh"
 if [ -f "$SCRIPT_FILE" ]; then line=$(head -n1 "$SCRIPT_FILE"); case "$line" in *QUIC*) name="50-quic4all" ;;
 *stun*) name="50-stun4all" ;; *"discord media"*) name="50-discord-media" ;;
@@ -62,6 +66,7 @@ epidemz.net.co
 nnmclub.to
 openwrt.org
 sxyprn.net
+spankbang.com
 pornhub.com
 discord.com
 x.com
@@ -70,6 +75,7 @@ flightradar24.com
 cdn77.com
 play.google.com
 genderize.io
+ottai.com
 EOF
 )
 sites_clean=$(echo "$SITES" | grep -v '^#' | grep -v '^\s*$'); total=$(echo "$sites_clean" | wc -l); half=$(( (total + 1) / 2 ))
