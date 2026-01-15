@@ -143,15 +143,19 @@ twitch.a2z.com
 twitch-shadow.net
 twitchcdn-shadow.net
 #################################### Valorant
+qq.com
 pvp.net
 vivox.com
 sd-rtn.com
+adjust.com
 riotcdn.net
 adobess.com
 valorant.com
 akamaihd.net
+myqcloud.com
 riotgames.com
 playvalorant.com
+wildrift-na.akamaized.net
 #################################### TikTok
 musical.ly
 tiktok.com
@@ -251,4 +255,12 @@ dreame-technology.com
 picoocru.com
 picooc-g.com
 picooc-int.com
+#################################### Huawei
+huawei.com
+dbankcdn.ru
+hicloud.com
+dbankcdn.com
+dbankcloud.ru
+dbankcloud.cn
+dbankcloud.com
 ####################################
