@@ -256,11 +256,25 @@ picoocru.com
 picooc-g.com
 picooc-int.com
 #################################### Huawei
+hc-cdn.cn
+huawei.ru
 huawei.com
+hc-cdn.com
+huawei.net
 dbankcdn.ru
 hicloud.com
 dbankcdn.com
 dbankcloud.ru
 dbankcloud.cn
 dbankcloud.com
+huaweicloud.com
+huaweistatic.com
+hwclouds-dns.com
+hwclouds-dns.net
+myhuaweicloud.cn
+myhuaweicloud.com
+huaweicloud-dns.cn
+huaweicloud-dns.ru
+huaweicloud-dns.com
+huaweicloud-dns.org
 ####################################
