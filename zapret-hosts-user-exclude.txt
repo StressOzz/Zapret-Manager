@@ -8,6 +8,7 @@ kinopoisk.ru
 gosuslugi.ru
 ipstream.one
 mos-gorsud.ru
+mos.ru
 #################################### Epicgames
 easy.ac
 fab.com
