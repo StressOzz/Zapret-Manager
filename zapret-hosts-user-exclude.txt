@@ -279,3 +279,5 @@ huaweicloud-dns.ru
 huaweicloud-dns.com
 huaweicloud-dns.org
 ####################################
+vkusvill.ru
+kinopoisk.ru
