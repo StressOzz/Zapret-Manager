@@ -278,4 +278,7 @@ huaweicloud-dns.cn
 huaweicloud-dns.ru
 huaweicloud-dns.com
 huaweicloud-dns.org
+#################################### Okko
+okko.tv
+playfamily.ru
 ####################################
