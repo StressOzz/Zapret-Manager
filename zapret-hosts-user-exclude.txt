@@ -281,4 +281,7 @@ huaweicloud-dns.org
 #################################### Okko
 okko.tv
 playfamily.ru
+#################################### Beeline
+beeline.ru
+beeline.tv
 ####################################
