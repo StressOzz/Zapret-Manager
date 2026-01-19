@@ -1,14 +1,9 @@
-gov.ru
-mos.ru
-nalog.ru
-sudrf.ru
+ru
+рф
+su
 ottai.com
 gstatic.com
-vkusvill.ru
-kinopoisk.ru
-gosuslugi.ru
 ipstream.one
-mos-gorsud.ru
 #################################### Epicgames
 easy.ac
 fab.com
@@ -62,7 +57,6 @@ steampowered.com
 valvecontent.com
 valvesoftware.com
 valvesoftware.net
-steam.cdn.webra.ru
 steambroadcast.com
 steamcommunity.com
 dl.steam.clngaa.com
@@ -117,7 +111,6 @@ ae.com
 ae-rus.net
 alicdn.com
 aestatic.net
-aliexpress.ru
 aliexpress.us
 aliexpress.com
 aliexpress-media.com
@@ -258,14 +251,11 @@ picooc-g.com
 picooc-int.com
 #################################### Huawei
 hc-cdn.cn
-huawei.ru
 huawei.com
 hc-cdn.com
 huawei.net
-dbankcdn.ru
 hicloud.com
 dbankcdn.com
-dbankcloud.ru
 dbankcloud.cn
 dbankcloud.com
 huaweicloud.com
@@ -275,13 +265,10 @@ hwclouds-dns.net
 myhuaweicloud.cn
 myhuaweicloud.com
 huaweicloud-dns.cn
-huaweicloud-dns.ru
 huaweicloud-dns.com
 huaweicloud-dns.org
 #################################### Okko
 okko.tv
-playfamily.ru
 #################################### Beeline
-beeline.ru
 beeline.tv
 ####################################
