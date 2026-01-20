@@ -2,6 +2,7 @@ ru
 рф
 su
 ottai.com
+xsolla.com
 gstatic.com
 ipstream.one
 #################################### Epicgames
