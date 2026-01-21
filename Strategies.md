@@ -165,6 +165,32 @@
 --dpi-desync-fake-tls=/opt/zapret/files/fake/max.bin
 ```
 ---
+```
+# v8
+--filter-tcp=443
+--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
+--dpi-desync=fake,multisplit
+--dpi-desync-split-pos=2,sld
+--dpi-desync-fake-tls=0x0F0F0F0F
+--dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
+--dpi-desync-fake-tls-mod=rnd,dupsid,sni=ggpht.com
+--dpi-desync-split-seqovl=620
+--dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
+--dpi-desync-fooling=badsum,badseq
+--new
+--filter-tcp=443
+--dpi-desync=fake
+--dpi-desync-repeats=6
+--dpi-desync-fooling=ts
+--dpi-desync-fake-tls=/opt/zapret/files/fake/4pda.bin
+--dpi-desync-fake-tls-mod=none
+--new
+--filter-udp=19294-19344,50000-50100
+--filter-l7=discord,stun
+--dpi-desync=fake
+--dpi-desync-repeats=6
+```
+---
 # Стратегия для игр
 
 - в **NFQWS_PORTS_UDP** добавить `1024-65535`
