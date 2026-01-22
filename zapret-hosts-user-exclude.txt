@@ -272,4 +272,36 @@ huaweicloud-dns.org
 okko.tv
 #################################### Beeline
 beeline.tv
+#################################### Delta Force
+volces.com
+wetest.net
+intlgame.com
+fleetlogd.com
+dgameglobal.com
+tdatamaster.com
+playdeltaforce.com
+quovadisglobal.com
+jupiterlauncher.com
+anticheatexpert.com
+#################################### Microsoft
+live.com
+lync.com
+skype.com
+microsoft
+msauth.net
+office.net
+office.com
+msocdn.com
+mojang.com
+windows.net
+msftauth.net
+xboxlive.com
+microsoft.com
+office365.com
+azureedge.net
+skypeassets.com
+windowsupdate.com
+microsoftonline.com
+microsoftonline-p.com
+minecraftservices.com
 ####################################
