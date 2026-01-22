@@ -1,6 +1,7 @@
 ru
 рф
 su
+qwen.ai
 ottai.com
 xsolla.com
 gstatic.com
