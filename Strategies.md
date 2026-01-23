@@ -165,8 +165,8 @@
 --dpi-desync-fake-tls=/opt/zapret/files/fake/max.bin
 ```
 ---
-```
 # v8
+```
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
 --dpi-desync=fake,multisplit
@@ -185,11 +185,6 @@
 --dpi-desync-fooling=ts
 --dpi-desync-fake-tls=/opt/zapret/files/fake/4pda.bin
 --dpi-desync-fake-tls-mod=none
---new
---filter-udp=19294-19344,50000-50100
---filter-l7=discord,stun
---dpi-desync=fake
---dpi-desync-repeats=6
 ```
 ---
 # Стратегия для игр
