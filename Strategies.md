@@ -179,6 +179,7 @@
 --dpi-desync-fooling=badsum,badseq
 --new
 --filter-tcp=443
+--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
 --dpi-desync=fake
 --dpi-desync-repeats=6
 --dpi-desync-fooling=ts
