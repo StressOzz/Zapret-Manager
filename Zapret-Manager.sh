@@ -2,7 +2,7 @@
 # ==========================================
 # Zapret on remittor Manager by StressOzz
 # =========================================
-ZAPRET_MANAGER_VERSION="8.3"; ZAPRET_VERSION="72.20260119"; STR_VERSION_AUTOINSTALL="v6"
+ZAPRET_MANAGER_VERSION="8.3"; ZAPRET_VERSION="72.20260125"; STR_VERSION_AUTOINSTALL="v6"
 TEST_HOST="https://rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com"; LAN_IP=$(uci get network.lan.ipaddr)
 GREEN="\033[1;32m"; RED="\033[1;31m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"
 MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -81,7 +81,7 @@ local NO_PAUSE=$1; while true; do [ "$NO_PAUSE" != "1" ] && clear && echo -e "${
 [ "$NO_PAUSE" != "1" ] && NUMDv=$(grep -o -E '^#[[:space:]]*Dv[0-9][0-9]*' "$CONF" | sed 's/[^0-9]//g' | head -n1) && [ -n "$NUMDv" ] && echo -e "${YELLOW}Стратегия для discord.media: ${CYAN}Dv$NUMDv${NC}"  && output_shown=true
 $output_shown && echo; if [ "$NO_PAUSE" = "1" ]; then SELECTED="50-stun4all"; URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-stun4all"; else
 echo -e "${CYAN}1) ${GREEN}Установить скрипт ${NC}50-stun4all\n${CYAN}2) ${GREEN}Установить скрипт ${NC}50-quic4all\n${CYAN}3) ${GREEN}Установить скрипт ${NC}50-discord-media\n${CYAN}4) ${GREEN}Установить скрипт ${NC}50-discord\n${CYAN}5) ${GREEN}Удалить скрипт${NC}"
-grep -q '104\.25\.158\.178 finland[0-9]\{5\}\.discord\.media' /etc/hosts && FIN_TXT="${GREEN}Удалить Финские ${NC}IP ${GREEN}из ${NC}hosts" || FIN_TXT="${GREEN}Добавить Финские ${NC}IP ${GREEN}в ${NC}hosts"
+grep -q '104\.25\.158\.178 finland[0-9]\{5\}\.discord\.media' /etc/hosts && FIN_TXT="${GREEN}Удалить Финские ${NC}IP ${GREEN}из ${NC}hosts" || FIN_TXT="${GREEN}Добавить ${NC}Финские IP ${GREEN}в ${NC}hosts"
 echo -ne "${CYAN}6) $FIN_TXT\n${CYAN}7) ${GREEN}Выбрать и установить стратегию для ${NC}discord.media\n${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n\n${YELLOW}Выберите пункт:${NC} " && read choiceSC; case "$choiceSC" in
 1) SELECTED="50-stun4all"; URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-stun4all";; 2) SELECTED="50-quic4all"; URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-quic4all";;
 3) SELECTED="50-discord-media"; URL="https://raw.githubusercontent.com/bol-van/zapret/master/init.d/custom.d.examples.linux/50-discord-media";; 4) SELECTED="50-discord"; URL="https://raw.githubusercontent.com/bol-van/zapret/v70.5/init.d/custom.d.examples.linux/50-discord";;
@@ -234,11 +234,11 @@ menu_game=$( [ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*88,500,1024-1929
 if [ -f "$CONF" ]; then current="$ver$( [ -n "$ver" ] && [ -n "$yv_ver" ] && echo " / " )$yv_ver"; DV=$(grep -o -E '^#[[:space:]]*Dv[0-9][0-9]*' "$CONF" | sed 's/^#[[:space:]]*/\/ /' | head -n1)
 if [ -n "$current" ]; then echo -e "${YELLOW}Используется стратегия:${NC} ${CYAN}$current${DV:+ $DV}${RKN_STATUS:+ $RKN_STATUS}${NC}"; elif [ -n "$RKN_STATUS" ]; then  echo -e "${YELLOW}Используется стратегия:${NC}${CYAN} РКН${DV:+ $DV}${NC}"; fi; fi
 [ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*88,500,1024-19293,19345-49999,50101-65535" "$CONF" && grep -q -- "--filter-udp=88,500,1024-19293,19345-49999,50101-65535" "$CONF" && echo -e "${YELLOW}Стратегия для игр:${NC} ${GREEN}включена${NC}"
-if hosts_enabled; then echo -e "${YELLOW}Домены в /etc/hosts: ${GREEN}добавлены${NC}\n"; else echo -e "${YELLOW}Домены в /etc/hosts: ${RED}отсутствуют${NC}\n"; fi
+if hosts_enabled; then echo -e "${YELLOW}Домены в hosts: ${GREEN}добавлены${NC}\n"; else echo -e "${YELLOW}Домены в hosts: ${RED}отсутствуют${NC}\n"; fi
 echo -e "${CYAN}1) ${GREEN}Выбрать и установить стратегию ${NC}v1-v8\n${CYAN}2) ${GREEN}Выбрать и установить стратегию от ${NC}Flowseal\n${CYAN}3) ${GREEN}Выбрать и установить стратегию для ${NC}YouTube\n${CYAN}4) ${GREEN}Подобрать стратегию для ${NC}YouTube"
-echo -e "${CYAN}5) ${GREEN}Меню управления доменами в ${NC}/etc/hosts\n${CYAN}6) ${NC}$RKN_TEXT_MENU${NC}\n${CYAN}7) ${GREEN}Обновить список исключений${NC}\n${CYAN}8) ${GREEN}$menu_game"
+echo -e "${CYAN}5) ${GREEN}Меню управления доменами в ${NC}hosts\n${CYAN}6) ${NC}$RKN_TEXT_MENU${NC}\n${CYAN}7) ${GREEN}$menu_game\n${CYAN}8) ${GREEN}Обновить список исключений${NC}"
 echo -ne "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n\n${YELLOW}Выберите пункт:${NC} "; read choiceST; case "$choiceST" in 1) strategy_CHOUSE;; 2) flowseal_menu;; 3) choose_strategy_manual;; 4) auto_stryou;; 5) menu_hosts;;
-6) toggle_rkn_bypass; continue;; 8) fix_GAME;; 7) echo -e "\n${MAGENTA}Обновляем список исключений${NC}\n${CYAN}Останавливаем ${NC}Zapret"; /etc/init.d/zapret stop >/dev/null 2>&1; echo -e "${CYAN}Добавляем домены в исключения${NC}"
+6) toggle_rkn_bypass; continue;; 7) fix_GAME;; 8) echo -e "\n${MAGENTA}Обновляем список исключений${NC}\n${CYAN}Останавливаем ${NC}Zapret"; /etc/init.d/zapret stop >/dev/null 2>&1; echo -e "${CYAN}Добавляем домены в исключения${NC}"
 rm -f "$EXCLUDE_FILE"; wget -q -U "Mozilla/5.0" -O "$EXCLUDE_FILE" "$EXCLUDE_URL" || echo -e "\n${RED}Не удалось загрузить exclude файл${NC}\n"; echo -e "${CYAN}Перезапускаем ${NC}Zapret"
 ZAPRET_RESTART; echo -e "${GREEN}Список исключений обновлён!${NC}\n"; PAUSE;; *) return;; esac; done }
 strategy_CHOUSE () { echo -ne "\n${YELLOW}Введите версию стратегии ${NC}(1-8)${YELLOW}:${NC} "; read -r choice; if [[ "$choice" =~ ^[1-8]$ ]]; then install_strategy "v$choice"; fi; }
@@ -251,7 +251,7 @@ printf "%s\n" "--new" "--filter-udp=19294-19344,50000-50100" "--filter-l7=discor
 install_strategy() { local version="$1"; local NO_PAUSE="${2:-0}"; local fileGP="/opt/zapret/ipset/zapret-hosts-google.txt"; [ "$NO_PAUSE" != "1" ] && echo
 echo -e "${MAGENTA}Устанавливаем стратегию ${version}${NC}\n${CYAN}Меняем стратегию${NC}"; sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" "$CONF"; { echo "  option NFQWS_OPT '"; strategy_"$version"; echo "'"; } >> "$CONF"
 printf '%s\n' "gvt1.com" "googleplay.com" "play.google.com" "beacons.gvt2.com" "play.googleapis.com" "play-fe.googleapis.com" "lh3.googleusercontent.com" "android.clients.google.com" "connectivitycheck.gstatic.com" \
-"play-lh.googleusercontent.com" "play-games.googleusercontent.com" "prod-lt-playstoregatewayadapter-pa.googleapis.com" | grep -Fxv -f "$fileGP" 2>/dev/null >> "$fileGP"; echo -e "${CYAN}Редактируем ${NC}/etc/hosts${NC}"; hosts_add
+"play-lh.googleusercontent.com" "play-games.googleusercontent.com" "prod-lt-playstoregatewayadapter-pa.googleapis.com" | grep -Fxv -f "$fileGP" 2>/dev/null >> "$fileGP"; echo -e "${CYAN}Редактируем ${NC}hosts${NC}"; hosts_add
 echo -e "${CYAN}Добавляем домены в исключения${NC}"; rm -f "$EXCLUDE_FILE"; wget -q -U "Mozilla/5.0" -O "$EXCLUDE_FILE" "$EXCLUDE_URL" || { echo -e "\n${RED}Не удалось загрузить exclude файл${NC}\n"; PAUSE; return; }
 discord_str_add; echo -e "${CYAN}Применяем новую стратегию и настройки${NC}"; ZAPRET_RESTART; echo -e "${GREEN}Стратегия ${NC}${version}${GREEN} установлена!${NC}"; [ "$NO_PAUSE" != "1" ] && echo && PAUSE; }
 choose_strategy_manual() { curl -fsSL "$STR_URL" -o "$TMP_LIST" || { echo -e "\n${RED}Не удалось скачать список${NC}\n"; read -p "Нажмите Enter..." dummy </dev/tty; return 1; }
@@ -342,8 +342,8 @@ toggle_block() { if status_block "$1"; then remove_block "$1"; echo -e "\n${CYAN
 toggle_all() { if status_block "$ALL_BLOCKS"; then remove_block "$ALL_BLOCKS"; echo -e "\n${CYAN}Удаляем и применяем${NC}"; else add_block "$ALL_BLOCKS"; echo -e "\n${CYAN}Добавляем и применяем${NC}"; fi; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "${GREEN}Готово!${NC}\n"; PAUSE; }
 menu_hosts() { while true; do clear; status_block "$INSTAGRAM" && S1="Удалить" || S1="Добавить"; status_block "$PDA" && S2="Удалить" || S2="Добавить"; status_block "$NTC" && S3="Удалить" || S3="Добавить"
 status_block "$RUTOR" && S4="Удалить" || S4="Добавить"; status_block "$LIBRUSEC" && S5="Удалить" || S5="Добавить"; status_block "$ALL_BLOCKS" && S6="${GREEN}Удалить все домены${NC}" || S6="${GREEN}Добавить все домены${NC}"
-echo -e "${YELLOW}Меню управления доменами в /etc/hosts${NC}\n\n${CYAN}1) ${GREEN}$S2${NC} 4Pda\n${CYAN}2) ${GREEN}$S4${NC} Rutor\n${CYAN}3) ${GREEN}$S3${NC} ntc.party\n${CYAN}4) ${GREEN}$S1${NC} Instagram"
-echo -e "${CYAN}5) ${GREEN}$S5${NC} Lib.rus.ec\n${CYAN}6) ${NC}$S6${NC}\n${CYAN}Enter) ${GREEN}Выход в меню стратегий${NC}"
+echo -e "${YELLOW}Меню управления доменами в hosts${NC}\n\n${CYAN}1) ${GREEN}$S2${NC} 4pda.to\n${CYAN}2) ${GREEN}$S4${NC} rutor.info\n${CYAN}3) ${GREEN}$S3${NC} ntc.party\n${CYAN}4) ${GREEN}$S1${NC} instagram.com"
+echo -e "${CYAN}5) ${GREEN}$S5${NC} lib.rus.ec\n${CYAN}6) ${NC}$S6${NC}\n${CYAN}Enter) ${GREEN}Выход в меню стратегий${NC}"
 echo -ne "\n${YELLOW}Выберите пункт:${NC} "; read -r choiceIP; case "$choiceIP" in 4) toggle_block "$INSTAGRAM";; 1) toggle_block "$PDA";; 3) toggle_block "$NTC";; 2) toggle_block "$RUTOR";; 5) toggle_block "$LIBRUSEC";; 6) toggle_all;; *) break;; esac; done; }
 # ==========================================
 # Главное меню
