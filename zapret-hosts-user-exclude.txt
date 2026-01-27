@@ -3,6 +3,7 @@ ru
 su
 qwen.ai
 ottai.com
+trovo.live
 xsolla.com
 gstatic.com
 ipstream.one
@@ -305,4 +306,9 @@ windowsupdate.com
 microsoftonline.com
 microsoftonline-p.com
 minecraftservices.com
+#################################### Arknights: Endfield
+skport.com
+hg-cdn.com
+helpshift.com
+gryphline.com
 ####################################
