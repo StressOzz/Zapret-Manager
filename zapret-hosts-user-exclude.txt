@@ -311,4 +311,9 @@ skport.com
 hg-cdn.com
 helpshift.com
 gryphline.com
+#################################### Samsung
+samsungosp.com
+samsungqbe.com
+amazontrust.com
+samsungcloudsolution.com
 ####################################
