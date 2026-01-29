@@ -7,12 +7,25 @@ clear; echo -e "${GREEN}===== Информация о системе =====${NC}"
 MODEL=$(cat /tmp/sysinfo/model); ARCH=$(sed -n "s/.*ARCH='\(.*\)'/\1/p" /etc/openwrt_release)
 OWRT=$(grep '^DISTRIB_RELEASE=' /etc/openwrt_release | cut -d"'" -f2); echo -e "$MODEL\n$ARCH\n$OWRT"
 echo -e "\n${GREEN}===== Пользовательские пакеты =====${NC}"
-awk '/^Package:/{p=$2}/^Status: install user/{k=p;sub(/^(luci-(app|mod|proto|theme)-|kmod-|lib|ucode-mod-)/,"",k);grp[k]=grp[k]?grp[k]"\n"p:p}
-END{for(k in grp){n=split(grp[k],a,"\n");if(n<2)continue;for(i=1;i<=n;i++)for(j=i+1;j<=n;j++)if(a[i]>a[j]){t=a[i];a[i]=a[j];a[j]=t}
+if [ "$PKG_IS_APK" -eq 1 ]; then
+apk info -v | awk '
+BEGIN{grp[""]=0}
+{pkg=$1; gsub(/^(luci-(app|mod|proto|theme)-|kmod-|lib|ucode-mod-)/,"",pkg); grp[pkg]=grp[pkg]?grp[pkg]"\n"$1:$1}
+END{
+for(k in grp){
+n=split(grp[k],a,"\n");
+if(n<2) continue;
+for(i=1;i<=n;i++) for(j=i+1;j<=n;j++) if(a[i]>a[j]){t=a[i];a[i]=a[j];a[j]=t}
+for(i=1;i<=n;i+=2) if(i+1<=n){L=a[i];R=a[i+1];if(L~/^luci-/&&R!~/^luci-/){t=L;L=R;R=t} print L" | "R}else print a[i]
+}
+}'
+else awk '/^Package:/{p=$2}/^Status: install user/{k=p;sub(/^(luci-(app|mod|proto|theme)-|kmod-|lib|ucode-mod-)/,"",k);grp[k]=grp[k]?grp[k]"\n"p:p}
+END{
+for(k in grp){n=split(grp[k],a,"\n");if(n<2)continue;for(i=1;i<=n;i++)for(j=i+1;j<=n;j++)if(a[i]>a[j]){t=a[i];a[i]=a[j];a[j]=t}
 for(i=1;i<=n;i+=2)if(i+1<=n){L=a[i];R=a[i+1];if(L~/^luci-/&&R!~/^luci-/){t=L;L=R;R=t}print L" | "R}else print a[i]}
 for(k in grp){n=split(grp[k],a,"\n"); if(n==1)single[++s]=a[1]}
 for(i=1;i<=s;i++)for(j=i+1;j<=s;j++)if(length(single[i])<length(single[j])||(length(single[i])==length(single[j])&&single[i]>single[j])){t=single[i];single[i]=single[j];single[j]=t}
-half=int((s+1)/2);for(i=1;i<=half;i++){j=s-i+1;if(i<j){L=single[i];R=single[j];if(L~/^luci-/&&R!~/^luci-/){t=L;L=R;R=t}print L" | "R}else print single[i]}; }' /usr/lib/opkg/status
+half=int((s+1)/2);for(i=1;i<=half;i++){j=s-i+1;if(i<j){L=single[i];R=single[j];if(L~/^luci-/&&R!~/^luci-/){t=L;L=R;R=t}print L" | "R}else print single[i]}; }' /usr/lib/opkg/status; fi
 echo -e "\n${GREEN}===== Flow Offloading =====${NC}"
 sw=$(uci -q get firewall.@defaults[0].flow_offloading); hw=$(uci -q get firewall.@defaults[0].flow_offloading_hw)
 if grep -q 'ct original packets ge 30' /usr/share/firewall4/templates/ruleset.uc 2>/dev/null; then
