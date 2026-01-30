@@ -2,27 +2,33 @@
 # ==========================================
 # Zapret on remittor Manager by StressOzz
 # =========================================
-ZAPRET_MANAGER_VERSION="8.5"; ZAPRET_VERSION="72.20260128"; STR_VERSION_AUTOINSTALL="v6"
+ZAPRET_MANAGER_VERSION="8.6"; ZAPRET_VERSION="72.20260128"; STR_VERSION_AUTOINSTALL="v6"
 TEST_HOST="https://rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com"; LAN_IP=$(uci get network.lan.ipaddr 2>/dev/null | cut -d/ -f1)
 GREEN="\033[1;32m"; RED="\033[1;31m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"
 MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 WORKDIR="/tmp/zapret-update"; CONF="/etc/config/zapret"; CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"
 STR_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ListStrYou"
-TMP_LIST="/opt/zapret_yt_list.txt"; SAVED_STR="/opt/StrYou"; OLD_STR="/opt/StrOLD"
-Fin_IP_Dis="104\.25\.158\.178 finland[0-9]\{5\}\.discord\.media"
-TMP_SF="/opt/zapret_temp"; OUT="$TMP_SF/str_flow.txt"; ZIP="$TMP_SF/repo.zip"
-BACKUP_FILE="/opt/hosts_temp.txt"; HOSTLIST_FILE="/opt/zapret/ipset/zapret-hosts-user.txt"
-STR_FILE="/opt/zapret_temp/str_test.txt"; TEMP_FILE="/opt/zapret_temp/str_temp.txt"
-RESULTS="/opt/zapret_temp/zapret_bench.txt"; BACK="/opt/zapret_temp/zapret_back"; PARALLEL=8
-HOSTLIST_MIN_SIZE=1800000; FINAL_STR="/opt/StrFINAL"; NEW_STR="/opt/StrNEW"; HOSTS_USER="/opt/hosts-user.txt"
+TMP_SF="/opt/zapret_temp"; TMP_LIST="$TMP_SF/zapret_yt_list.txt"; SAVED_STR="$TMP_SF/StrYou"; OLD_STR="$TMP_SF/StrOLD"
+Fin_IP_Dis="104\.25\.158\.178 finland[0-9]\{5\}\.discord\.media"; OUT_DPI="$TMP_SF/dpi_urls.txt"
+OUT="$TMP_SF/str_flow.txt"; ZIP="$TMP_SF/repo.zip"
+RAW="https://raw.githubusercontent.com/hyperion-cs/dpi-checkers/main/ru/tcp-16-20/index.html"
+BACKUP_FILE="$TMP_SF/hosts_temp.txt"; HOSTLIST_FILE="/opt/zapret/ipset/zapret-hosts-user.txt"
+STR_FILE="$TMP_SF/str_test.txt"; TEMP_FILE="$TMP_SF/str_temp.txt"
+RESULTS="$TMP_SF/zapret_bench.txt"; BACK="$TMP_SF/zapret_back"; PARALLEL=8
+HOSTLIST_MIN_SIZE=1800000; FINAL_STR="$TMP_SF/StrFINAL"; NEW_STR="$TMP_SF/StrNEW"; HOSTS_USER="$TMP_SF/hosts-user.txt"
 EXCLUDE_FILE="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"; fileDoH="/etc/config/https-dns-proxy"
 RKN_URL="https://raw.githubusercontent.com/IndeecFOX/zapret4rocket/refs/heads/master/extra_strats/TCP/RKN/List.txt"
 EXCLUDE_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/zapret-hosts-user-exclude.txt"
-HOSTS_FILE="/etc/hosts"; HOSTS_LIST="45.155.204.190 gemini.google.com|130.255.77.28 ntc.party|30.255.77.28 ntc.party|173.245.58.219 rutor.info d.rutor.info|185.39.18.98 lib.rus.ec www.lib.rus.ec
-57.144.222.34 instagram.com www.instagram.com|157.240.9.174 instagram.com www.instagram.com|157.240.245.174 instagram.com www.instagram.com|157.240.205.174 instagram.com www.instagram.com"
-hosts_enabled() { grep -q "gemini.google.com\|4pda.to\|instagram.com\|rutor.info\|lib.rus.ec\|ntc.party" /etc/hosts; }
-hosts_add() { echo "$HOSTS_LIST" | tr '|' '\n' | grep -Fxv -f /etc/hosts >> /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }
-hosts_clear() { for ip in 45.155.204.190 185.87.51.182 130.255.77.28 30.255.77.28 173.245.58.219 185.39.18.98 57.144.222.34 157.240.9.174 157.240.245.174 157.240.205.174; do sed -i "/$ip/d" /etc/hosts >/dev/null 2>&1; done; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }
+INSTAGRAM="57.144.222.34 instagram.com www.instagram.com\n157.240.9.174 instagram.com www.instagram.com\n157.240.245.174 instagram.com www.instagram.com\n157.240.205.174 instagram.com www.instagram.com"
+PDA="185.87.51.182 4pda.to www.4pda.to"; NTC="30.255.77.28 ntc.party\n130.255.77.28 ntc.party"; RUTOR="173.245.58.219 rutor.info d.rutor.info"; LIBRUSEC="185.39.18.98 lib.rus.ec www.lib.rus.ec"
+AI="45.155.204.190 gemini.google.com chatgpt.com ab.chatgpt.com auth.openai.com auth0.openai.com platform.openai.com\n45.155.204.190 cdn.oaistatic.com files.oaiusercontent.com cdn.auth0.com tcr9i.chat.openai.com webrtc.chatgpt.com
+45.155.204.190 android.chat.openai.com api.openai.com operator.chatgpt.com sora.chatgpt.com sora.com videos.openai.com\n45.155.204.190 ios.chat.openai.com grok.com accounts.x.ai assets.grok.com deepl.com www.deepl.com www2.deepl.com
+45.155.204.190 login-wall.deepl.com w.deepl.com dict.deepl.com ita-free.www.deepl.com write-free.www.deepl.com\n45.155.204.190 experimentation.deepl.com experimentation-grpc.deepl.com ita-free.app.deepl.com shield.deepl.com
+45.155.204.190 ott.deepl.com api-free.deepl.com backend.deepl.com clearance.deepl.com errortracking.deepl.com\n45.155.204.190 auth.deepl.com oneshot-free.www.deepl.com checkout.www.deepl.com gtm.deepl.com"
+HOSTS_FILE="/etc/hosts"; ALL_BLOCKS="$AI\n$INSTAGRAM\n$NTC\n$RUTOR\n$LIBRUSEC"
+hosts_enabled() { grep -q "45.155.204.190\|4pda.to\|instagram.com\|rutor.info\|lib.rus.ec\|ntc.party" /etc/hosts; }
+hosts_add() { printf "%b\n" "$1" | while IFS= read -r L; do grep -qxF "$L" /etc/hosts || echo "$L" >> /etc/hosts; done; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }
+hosts_clear() { printf "%b\n" "$1" | while IFS= read -r L; do sed -i "\|^$L$|d" /etc/hosts; done; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }
 ZAPRET_RESTART () { chmod +x /opt/zapret/sync_config.sh; /opt/zapret/sync_config.sh; /etc/init.d/zapret restart >/dev/null 2>&1; sleep 1; }
 PAUSE() { echo "Нажмите Enter..."; read dummy; }; BACKUP_DIR="/opt/zapret_backup"; DATE_FILE="$BACKUP_DIR/date_backup.txt"
 if command -v apk >/dev/null 2>&1; then PKG_IS_APK=1; else PKG_IS_APK=0; fi
@@ -122,7 +128,7 @@ read choice; case $choice in 1) save_backup;; 2) restore_backup;; 3) restore_def
 delete_backup() { if [ -d "$BACKUP_DIR" ]; then rm -rf "$BACKUP_DIR"; echo -e "\n${GREEN}Резервная копия удалена!${NC}\n"; else echo -e "\n${RED}Резервная копия не найдена!${NC}\n"; fi; PAUSE; }
 restore_default() { if [ -f /opt/zapret/restore-def-cfg.sh ]; then echo -e "\n${MAGENTA}Возвращаем настройки по умолчанию${NC}"; rm -f /opt/zapret/init.d/openwrt/custom.d/50-script.sh; for i in 1 2 3 4; do rm -f "/opt/zapret/ipset/cust$i.txt"; done
 [ -f /etc/init.d/zapret ] && /etc/init.d/zapret stop >/dev/null 2>&1; echo -e "${CYAN}Возвращаем ${NC}настройки${CYAN}, ${NC}стратегию${CYAN} и ${NC}hostlist${CYAN} к значениям по умолчанию${NC}"; cp -f /opt/zapret/ipset_def/* /opt/zapret/ipset/
-chmod +x /opt/zapret/restore-def-cfg.sh && /opt/zapret/restore-def-cfg.sh; ZAPRET_RESTART; hosts_clear; echo -e "${GREEN}Настройки по умолчанию возвращены!${NC}\n"; else echo -e "\n${RED}Zapret не установлен!${NC}\n"; fi; PAUSE; }
+chmod +x /opt/zapret/restore-def-cfg.sh && /opt/zapret/restore-def-cfg.sh; ZAPRET_RESTART; hosts_clear "$ALL_BLOCKS"; echo -e "${GREEN}Настройки по умолчанию возвращены!${NC}\n"; else echo -e "\n${RED}Zapret не установлен!${NC}\n"; fi; PAUSE; }
 save_backup() { [ ! -f /etc/init.d/zapret ] && { echo -e "\n${RED}Zapret не установлен!${NC}\n"; PAUSE; return; }; rm -rf "$BACKUP_DIR"; mkdir -p "$BACKUP_DIR"; tar -czf "$BACKUP_DIR/zapret.tar.gz" -C /opt zapret 2>/dev/null
 cp -p /etc/config/zapret "$BACKUP_DIR/"; printf '%s / %s\n' "$(date '+%d.%m.%y')" "$(du -sh /opt/zapret_backup 2>/dev/null | cut -f1 | sed -E 's/\.0K$/K/;s/K$/ КБ/;s/M$/ МБ/')" > "$DATE_FILE"
 echo -e "\n${GREEN}Настройки сохранены в${NC} $BACKUP_DIR\n"; PAUSE; }
@@ -143,12 +149,11 @@ pkg_remove() { local pkg_name="$1"; if [ "$PKG_IS_APK" -eq 1 ]; then apk del "$p
 uninstall_zapret() { local NO_PAUSE=$1; [ "$NO_PAUSE" != "1" ] && echo; echo -e "${MAGENTA}Удаляем ZAPRET${NC}\n${CYAN}Останавливаем ${NC}zapret"; /etc/init.d/zapret stop >/dev/null 2>&1; echo -e "${CYAN}Убиваем процессы${NC}"
 for pid in $(pgrep -f /opt/zapret 2>/dev/null); do kill -9 "$pid" 2>/dev/null; done; echo -e "${CYAN}Удаляем пакеты${NC}"; pkg_remove zapret; pkg_remove luci-app-zapret; echo -e "${CYAN}Удаляем временные файлы${NC}"
 rm -rf /opt/zapret /etc/config/zapret /etc/firewall.zapret /etc/init.d/zapret /tmp/*zapret* /var/run/*zapret* /tmp/*.ipk /tmp/*.zip 2>/dev/null; crontab -l 2>/dev/null | grep -v -i "zapret" | crontab - 2>/dev/null
-nft list tables 2>/dev/null | awk '{print $2}' | grep -E '(zapret|ZAPRET)' | while read t; do [ -n "$t" ] && nft delete table "$t" 2>/dev/null; done; rm -rf "${FINAL_STR:-}" "${NEW_STR:-}" "${OLD_STR:-}" "${SAVED_STR:-}" \
-"${TMP_LIST:-}" "${HOSTS_USER:-}" "${BACKUP_FILE:-}" "${TMP_SF:-}" 2>/dev/null; hosts_clear; echo -e "Zapret ${GREEN}удалён!${NC}\n"; [ "$NO_PAUSE" != "1" ] && PAUSE; }
+nft list tables 2>/dev/null | awk '{print $2}' | grep -E '(zapret|ZAPRET)' | while read t; do [ -n "$t" ] && nft delete table "$t" 2>/dev/null; done; rm -rf -- "$TMP_SF"; hosts_clear "$ALL_BLOCKS"; echo -e "Zapret ${GREEN}удалён!${NC}\n"; [ "$NO_PAUSE" != "1" ] && PAUSE; }
 # ==========================================
 # Подбор стратегии для Ютуб
 # ==========================================
-auto_stryou() { awk '/^[[:space:]]*option NFQWS_OPT '\''/{flag=1} flag{print}' "$CONF" > "$OLD_STR"; curl -fsSL "$STR_URL" -o "$TMP_LIST" || { echo -e "\n${RED}Не удалось скачать список${NC}\n"; PAUSE </dev/tty; return 1; }
+auto_stryou() { mkdir -p "$TMP_SF"; awk '/^[[:space:]]*option NFQWS_OPT '\''/{flag=1} flag{print}' "$CONF" > "$OLD_STR"; curl -fsSL "$STR_URL" -o "$TMP_LIST" || { echo -e "\n${RED}Не удалось скачать список${NC}\n"; PAUSE </dev/tty; return 1; }
 TOTAL=$(grep -c '^Yv[0-9]\+' "$TMP_LIST"); echo -e "\n${MAGENTA}Подбираем стратегию для ${NC}YouTube${NC}"; echo -e "${CYAN}Найдено стратегий: ${NC}$TOTAL"; CURRENT_NAME=""; CURRENT_BODY=""; COUNT=0
 while IFS= read -r LINE || [ -n "$LINE" ]; do if echo "$LINE" | grep -q '^Yv[0-9]\+'; then if [ -n "$CURRENT_NAME" ]; then COUNT=$((COUNT + 1))
 echo -e "\n${CYAN}Проверяем стратегию: ${NC}$CURRENT_NAME ($COUNT/$TOTAL)"; apply_strategy "$CURRENT_NAME" "$CURRENT_BODY"; STATUS=$(check_access); if [ "$STATUS" = "ok" ]; then echo -e "${GREEN}Видео на ПК открывается!${NC}\n${YELLOW}Проверьте работу ${NC}YouTube${YELLOW} на других устройствах!${NC}"
@@ -176,7 +181,7 @@ curl -fsSL "$RKN_URL" -o "$HOSTLIST_FILE" || { echo -e "\n${RED}Не удало�
 sed -i 's|--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt|--hostlist=/opt/zapret/ipset/zapret-hosts-user.txt|' "$CONF"; ZAPRET_RESTART; echo -e "${GREEN}Обход по спискам ${NC}РКН${GREEN} включен${NC}\n"; }
 disable_rkn() { echo -e "\n${MAGENTA}Выключаем списки РКН${NC}"; sed -i 's|--hostlist=/opt/zapret/ipset/zapret-hosts-user.txt|--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt|' "$CONF"
 if [ -s $BACKUP_FILE ]; then cp $BACKUP_FILE "$HOSTLIST_FILE"; else : > "$HOSTLIST_FILE"; fi; rm -f $HOSTS_USER $BACKUP_FILE; ZAPRET_RESTART; echo -e "${GREEN}Обход по спискам ${NC}РКН${GREEN} выключен${NC}\n"; }
-toggle_rkn_bypass() { if grep -q -- "--filter-tcp=443 <HOSTLIST>" "$CONF"; then if [ -f "$HOSTLIST_FILE" ] && [ "$(wc -c < "$HOSTLIST_FILE")" -gt "$HOSTLIST_MIN_SIZE" ]; then disable_rkn; else [ -f "$HOSTLIST_FILE" ] && cp "$HOSTLIST_FILE" "$BACKUP_FILE"
+toggle_rkn_bypass() { mkdir -p "$TMP_SF"; if grep -q -- "--filter-tcp=443 <HOSTLIST>" "$CONF"; then if [ -f "$HOSTLIST_FILE" ] && [ "$(wc -c < "$HOSTLIST_FILE")" -gt "$HOSTLIST_MIN_SIZE" ]; then disable_rkn; else [ -f "$HOSTLIST_FILE" ] && cp "$HOSTLIST_FILE" "$BACKUP_FILE"
 enable_rkn; fi; PAUSE </dev/tty; return; fi; if grep -q -- "--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt" "$CONF"; then enable_rkn; PAUSE </dev/tty
 elif grep -q -- "--hostlist=/opt/zapret/ipset/zapret-hosts-user.txt" "$CONF"; then disable_rkn; PAUSE </dev/tty; else echo -e "\n${RED}Стратегия не подходит для списков РКН\n${NC}"; PAUSE </dev/tty; fi; }
 RKN_Check() { if (grep -q -- "--hostlist=/opt/zapret/ipset/zapret-hosts-user.txt" "$CONF" >/dev/null 2>&1 || grep -q -- "--filter-tcp=443 <HOSTLIST>" "$CONF" >/dev/null 2>&1) && [ "$(wc -c < /opt/zapret/ipset/zapret-hosts-user.txt)" -gt 1800000 ]
@@ -216,7 +221,7 @@ printf '%s\n' "--new" "--filter-tcp=443" "--hostlist-exclude=/opt/zapret/ipset/z
 # ==========================================
 # Cтратегии Flowseal
 # ==========================================
-flowseal_menu() { [ ! -f "$OUT" ] && download_strategies; while true; do STRATEGIES=$(grep '^#' "$OUT" | sed 's/^#//'); clear
+flowseal_menu() { mkdir -p "$TMP_SF"; [ ! -f "$OUT" ] && download_strategies; while true; do STRATEGIES=$(grep '^#' "$OUT" | sed 's/^#//'); clear
 echo -e "${YELLOW}Список стратегий от Flowseal${NC}\n"; i=1; echo "$STRATEGIES" | while IFS= read -r line; do echo -e "${CYAN}$i) ${NC}$line"; i=$((i+1)); done
 echo -en "${CYAN}0) ${GREEN}Обновить стратегии${NC}\n${CYAN}Enter) ${GREEN}Выход в меню стратегий${NC}\n\n${YELLOW}Выберите пункт: ${NC}"; read CHOICE_SF
 [ -z "$CHOICE_SF" ] && return; echo "$CHOICE_SF" | grep -qE '^[0-9]+$' || return; [ "$CHOICE_SF" -eq 0 ] && { rm -rf "$TMP_SF"; download_strategies; continue; }; SEL_NAME=$(echo "$STRATEGIES" | sed -n "${CHOICE_SF}p"); [ -z "$SEL_NAME" ] && return
@@ -245,8 +250,9 @@ if [ -n "$current" ]; then echo -e "${YELLOW}Используется страт
 if hosts_enabled; then echo -e "${YELLOW}Домены в hosts: ${GREEN}добавлены${NC}\n"; else echo -e "${YELLOW}Домены в hosts: ${RED}отсутствуют${NC}\n"; fi
 echo -e "${CYAN}1) ${GREEN}Выбрать и установить стратегию ${NC}v1-v8\n${CYAN}2) ${GREEN}Выбрать и установить стратегию от ${NC}Flowseal\n${CYAN}3) ${GREEN}Выбрать и установить стратегию для ${NC}YouTube\n${CYAN}4) ${GREEN}Подобрать стратегию для ${NC}YouTube"
 echo -e "${CYAN}5) ${GREEN}Меню управления доменами в ${NC}hosts\n${CYAN}6) ${NC}$RKN_TEXT_MENU${NC}\n${CYAN}7) ${GREEN}$menu_game\n${CYAN}8) ${GREEN}Обновить список исключений${NC}\n${CYAN}9) ${GREEN}Тестирование всех стратегий${NC}"
+if [ -f "$RESULTS" ] && [ -s "$RESULTS" ]; then echo -e "${CYAN}0) ${GREEN}Результат тестирования стратегий${NC}"; fi
 echo -ne "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n\n${YELLOW}Выберите пункт:${NC} "; read choiceST; case "$choiceST" in 1) strategy_CHOUSE;; 2) flowseal_menu;; 3) choose_strategy_manual;; 4) auto_stryou;; 5) menu_hosts;; 9) run_test_strategies;;
-6) toggle_rkn_bypass; continue;; 7) fix_GAME;; 8) echo -e "\n${MAGENTA}Обновляем список исключений${NC}\n${CYAN}Останавливаем ${NC}Zapret"; /etc/init.d/zapret stop >/dev/null 2>&1; echo -e "${CYAN}Добавляем домены в исключения${NC}"
+6) toggle_rkn_bypass; continue;; 7) fix_GAME;; 0) show_test_results;; 8) echo -e "\n${MAGENTA}Обновляем список исключений${NC}\n${CYAN}Останавливаем ${NC}Zapret"; /etc/init.d/zapret stop >/dev/null 2>&1; echo -e "${CYAN}Добавляем домены в исключения${NC}"
 rm -f "$EXCLUDE_FILE"; wget -q -U "Mozilla/5.0" -O "$EXCLUDE_FILE" "$EXCLUDE_URL" || echo -e "\n${RED}Не удалось загрузить exclude файл${NC}\n"; echo -e "${CYAN}Перезапускаем ${NC}Zapret"
 ZAPRET_RESTART; echo -e "${GREEN}Список исключений обновлён!${NC}\n"; PAUSE;; *) return;; esac; done }
 strategy_CHOUSE () { echo -ne "\n${YELLOW}Введите версию стратегии ${NC}(1-8)${YELLOW}:${NC} "; read -r choice; if [[ "$choice" =~ ^[1-8]$ ]]; then install_strategy "v$choice"; fi; }
@@ -259,10 +265,10 @@ printf "%s\n" "--new" "--filter-udp=19294-19344,50000-50100" "--filter-l7=discor
 install_strategy() { local version="$1"; local NO_PAUSE="${2:-0}"; local fileGP="/opt/zapret/ipset/zapret-hosts-google.txt"; [ "$NO_PAUSE" != "1" ] && echo
 echo -e "${MAGENTA}Устанавливаем стратегию ${version}${NC}\n${CYAN}Меняем стратегию${NC}"; sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" "$CONF"; { echo "  option NFQWS_OPT '"; strategy_"$version"; echo "'"; } >> "$CONF"
 printf '%s\n' "gvt1.com" "googleplay.com" "play.google.com" "beacons.gvt2.com" "play.googleapis.com" "play-fe.googleapis.com" "lh3.googleusercontent.com" "android.clients.google.com" "connectivitycheck.gstatic.com" \
-"play-lh.googleusercontent.com" "play-games.googleusercontent.com" "prod-lt-playstoregatewayadapter-pa.googleapis.com" | grep -Fxv -f "$fileGP" 2>/dev/null >> "$fileGP"; echo -e "${CYAN}Редактируем ${NC}hosts${NC}"; hosts_add
+"play-lh.googleusercontent.com" "play-games.googleusercontent.com" "prod-lt-playstoregatewayadapter-pa.googleapis.com" | grep -Fxv -f "$fileGP" 2>/dev/null >> "$fileGP"; echo -e "${CYAN}Редактируем ${NC}hosts${NC}"; hosts_add "$ALL_BLOCKS"
 echo -e "${CYAN}Добавляем домены в исключения${NC}"; rm -f "$EXCLUDE_FILE"; wget -q -U "Mozilla/5.0" -O "$EXCLUDE_FILE" "$EXCLUDE_URL" || { echo -e "\n${RED}Не удалось загрузить exclude файл${NC}\n"; PAUSE; return; }
 discord_str_add; echo -e "${CYAN}Применяем новую стратегию и настройки${NC}"; ZAPRET_RESTART; echo -e "${GREEN}Стратегия ${NC}${version}${GREEN} установлена!${NC}"; [ "$NO_PAUSE" != "1" ] && echo && PAUSE; }
-choose_strategy_manual() { curl -fsSL "$STR_URL" -o "$TMP_LIST" || { echo -e "\n${RED}Не удалось скачать список${NC}\n"; read -p "Нажмите Enter..." dummy </dev/tty; return 1; }
+choose_strategy_manual() { mkdir -p "$TMP_SF"; curl -fsSL "$STR_URL" -o "$TMP_LIST" || { echo -e "\n${RED}Не удалось скачать список${NC}\n"; read -p "Нажмите Enter..." dummy </dev/tty; return 1; }
 COUNT=0; > /tmp/strategy_list; while IFS= read -r LINE; do case "$LINE" in Yv[0-9]*) COUNT=$((COUNT + 1)); echo "$LINE" >> /tmp/strategy_list;; esac; done < "$TMP_LIST"
 [ "$COUNT" -eq 0 ] && echo -e "${RED}Стратегий не найдено!${NC}" && read -p "Нажмите Enter..." dummy </dev/tty && rm -f /tmp/strategy_list && return 1; echo -en "\n${YELLOW}Введите версию стратегии для YouTube ${NC}(1-$COUNT)${YELLOW}:${NC} "
 read CHOICE </dev/tty; if ! echo "$CHOICE" | grep -qE '^[0-9]+$' || [ "$CHOICE" -lt 1 ] || [ "$CHOICE" -gt "$COUNT" ]; then return 1; fi; SELECTED_NAME=$(sed -n "${CHOICE}p" /tmp/strategy_list); rm -f /tmp/strategy_list
@@ -345,9 +351,7 @@ sed -i 's/meta l4proto { tcp, udp } flow offload @ft;/meta l4proto { tcp, udp } 
 # ==========================================
 # Hosts menu
 # ==========================================
-INSTAGRAM="57.144.222.34 instagram.com www.instagram.com\n157.240.9.174 instagram.com www.instagram.com\n157.240.245.174 instagram.com www.instagram.com\n157.240.205.174 instagram.com www.instagram.com"
-PDA="185.87.51.182 4pda.to www.4pda.to"; NTC="30.255.77.28 ntc.party\n130.255.77.28 ntc.party"; RUTOR="173.245.58.219 rutor.info d.rutor.info"; LIBRUSEC="185.39.18.98 lib.rus.ec www.lib.rus.ec"
-GENEMI="45.155.204.190 gemini.google.com"; ALL_BLOCKS="$GENEMI\n$INSTAGRAM\n$PDA\n$NTC\n$RUTOR\n$LIBRUSEC"
+hosts_reset() { echo -e "\n${MAGENTA}Восстанавливаем hosts${NC}"; : > /etc/hosts; echo -e "127.0.0.1\tlocalhost\n\n::1\tlocalhost ip6-localhost ip6-loopback\nff02::1 ip6-allnodes\nff02::2 ip6-allrouters" > /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}восстановлен!${NC}\n"; PAUSE; }
 status_block() { while IFS= read -r line; do [ -z "$line" ] && continue; grep -Fxq "$line" "$HOSTS_FILE" || return 1; done < <(printf '%b\n' "$1"); return 0; }
 add_block() { while IFS= read -r line; do [ -z "$line" ] && continue; grep -Fxq "$line" "$HOSTS_FILE" || echo "$line" >> "$HOSTS_FILE"; done < <(printf '%b\n' "$1"); }
 remove_block() { while IFS= read -r line; do [ -z "$line" ] && continue; sed -i "\|^$line$|d" "$HOSTS_FILE"; done < <(printf '%b\n' "$1"); }
@@ -356,78 +360,29 @@ toggle_all() { if status_block "$ALL_BLOCKS"; then remove_block "$ALL_BLOCKS"; e
 get_state() { status_block "$1" && echo "Удалить " || echo "Добавить"; }
 menu_hosts() { while true; do clear; S_ALL=$(status_block "$ALL_BLOCKS" && echo "${GREEN}Удалить все домены${NC}" || echo "${GREEN}Добавить все домены${NC}")
 echo -e "${YELLOW}Меню управления доменами в hosts${NC}\n\n${CYAN}1) ${GREEN}$(get_state "$PDA")${NC} 4pda.to\n${CYAN}2) ${GREEN}$(get_state "$RUTOR")${NC} rutor.info\n${CYAN}3) ${GREEN}$(get_state "$NTC")${NC} ntc.party"
-echo -e "${CYAN}4) ${GREEN}$(get_state "$INSTAGRAM")${NC} instagram.com\n${CYAN}5) ${GREEN}$(get_state "$LIBRUSEC")${NC} lib.rus.ec\n${CYAN}6) ${GREEN}$(get_state "$GENEMI")${NC} Google Gemini\n${CYAN}7) $S_ALL"
+echo -e "${CYAN}4) ${GREEN}$(get_state "$INSTAGRAM")${NC} instagram.com\n${CYAN}5) ${GREEN}$(get_state "$LIBRUSEC")${NC} lib.rus.ec\n${CYAN}6) ${GREEN}$(get_state "$AI")${NC} ChatGPT & Gemini & Grok & DeepL\n${CYAN}7) $S_ALL\n${CYAN}0) ${GREEN}Восстановить ${NC}hosts"
 echo -ne "${CYAN}Enter) ${GREEN}Выход в меню стратегий${NC}\n\n${YELLOW}Выберите пункт:${NC} ";read -r c; case "$c" in
-1) toggle_block "$PDA" ;; 2) toggle_block "$RUTOR" ;; 3) toggle_block "$NTC" ;; 4) toggle_block "$INSTAGRAM" ;; 5) toggle_block "$LIBRUSEC" ;; 6) toggle_block "$GENEMI" ;; 7) toggle_all ;; *) break ;; esac; done; }
+1) toggle_block "$PDA";; 2) toggle_block "$RUTOR";; 3) toggle_block "$NTC";; 4) toggle_block "$INSTAGRAM";; 5) toggle_block "$LIBRUSEC";; 6) toggle_block "$AI";; 7) toggle_all;; 0) hosts_reset;; *) break;; esac; done; }
 # ==========================================
 # Тест стратегий
 # ==========================================
-run_test_strategies() { echo; clear; echo -e "${MAGENTA}Тестирование стратегий${NC}"; echo -e "${CYAN}Собираем стратегии для теста${NC}"; rm -rf "$TMP_SF"
-download_strategies 1; cp /opt/zapret_temp/str_flow.txt /opt/zapret_temp/str_test.txt;cp "$OUT" "$STR_FILE"; cp "$CONF" "$BACK"; for N in $(seq 1 100)
-do strategy_v$N >> "$STR_FILE" 2>/dev/null || break; done; sed -i '/#Y/d' "$STR_FILE"; TOTAL_STR=$(grep -c '^#' "$STR_FILE"); echo -e "${CYAN}Найдено стратегий: ${NC}$TOTAL_STR"
-URLS="$(cat <<EOF
-Госуслуги|https://gosuslugi.ru
-Госуслуги ЛК|https://esia.gosuslugi.ru
-Налоги|https://nalog.ru
-Налоги ЛК|https://lkfl2.nalog.ru
-ntc.party|https://ntc.party/
-RuTube|https://rutube.ru
-Instagram|https://instagram.com
-Rutor|https://rutor.info
-Rutracker|https://rutracker.org
-Epidemz|https://epidemz.net.co
-NNM Club|https://nnmclub.to
-OpenWRT|https://openwrt.org
-Sxyprn|https://sxyprn.net
-Spankbang|https://ru.spankbang.com
-Pornhub|https://pornhub.com
-Discord|https://discord.com
-X|https://x.com
-Filmix|https://filmix.my
-FlightRadar24|https://flightradar24.com
-GooglePlay|https://play.google.com
-Ottai|https://ottai.com
-US.CF-01|https://img.wzstats.gg/cleaver/gunFullDisplay
-US.CF-02|https://genshin.jmp.blue/characters/all
-US.CF-03|https://api.frankfurter.dev/v1/2000-01-01..2002-12-31
-US.CF-04|https://www.bigcartel.com/
-US.DO-01|https://genderize.io/
-DE.HE-01|https://j.dejure.org/jcg/doctrine/doctrine_banner.webp
-DE.HE-02|https://accesorioscelular.com/tienda/css/plugins.css
-FI.HE-01|https://251b5cd9.nip.io/1MB.bin
-FI.HE-02|https://nioges.com/libs/fontawesome/webfonts/fa-solid-900.woff2
-FI.HE-03|https://5fd8bdae.nip.io/1MB.bin
-FI.HE-04|https://5fd8bca5.nip.io/1MB.bin
-FR.OVH-01|https://eu.api.ovh.com/console/rapidoc-min.js
-FR.OVH-02|https://ovh.sfx.ovh/10M.bin
-SE.OR-01|https://oracle.sfx.ovh/10M.bin
-DE.AWS-01|https://www.getscope.com/assets/fonts/fa-solid-900.woff2
-US.AWS-01|https://corp.kaltura.com/wp-content/cache/min/1/wp-content/themes/airfleet/dist/styles/theme.css
-US.GC-01|https://api.usercentrics.eu/gvl/v3/en.json
-US.FST-01|https://www.jetblue.com/footer/footer-element-es2015.js
-CA.FST-01|https://www.cnn10.com/
-US.AKM-01|https://www.roxio.com/static/roxio/images/products/creator/nxt9/call-action-footer-bg.jpg
-PL.AKM-01|https://media-assets.stryker.com/is/image/stryker/gateway_1
-US.CDN77-01|https://cdn.eso.org/images/banner1920/eso2520a.jpg
-FR.CNTB-01|https://bandobaskent.com/logo.png
-NL.SW-01|https://www.velivole.fr/img/header.jpg
-US.CNST-01|https://cdn.xuansiwei.com/common/lib/font-awesome/4.7.0/fontawesome-webfont.woff2
-EOF
-)"; TOTAL=$(echo "$URLS" | grep -c "|"); : > "$RESULTS"; check_url() { TEXT=$(echo "$1" | cut -d"|" -f1); LINK=$(echo "$1" | cut -d"|" -f2)
-if curl -Is --connect-timeout 2 --max-time 3 "$LINK" >/dev/null 2>&1; then echo 1 >> "$TMP_OK"; echo -e "${GREEN}[ OK ]${NC} $TEXT"; else echo -e "${RED}[FAIL]${NC} $TEXT"; fi; }
+check_url() { TEXT=$(echo "$1" | cut -d"|" -f1); LINK=$(echo "$1" | cut -d"|" -f2); if curl -Is --connect-timeout 2 --max-time 3 "$LINK" >/dev/null 2>&1; then echo 1 >> "$TMP_OK"; echo -e "${GREEN}[ OK ]${NC} $TEXT"; else echo -e "${RED}[FAIL]${NC} $TEXT"; fi; }
 check_all_urls() { TMP_OK="/tmp/z_ok.$$"; : > "$TMP_OK"; RUN=0; while IFS= read -r URL; do [ -z "$URL" ] && continue; check_url "$URL" & RUN=$((RUN+1)); if [ "$RUN" -ge "$PARALLEL" ]; then wait; RUN=0; fi
 done <<EOF
 $URLS
 EOF
 wait; OK=$(wc -l < "$TMP_OK" | tr -d ' '); rm -f "$TMP_OK"; }
-LINES=$(grep -n '^#' "$STR_FILE" | cut -d: -f1); CUR=0; echo "$LINES" | while read START; do CUR=$((CUR+1)); NEXT=$(echo "$LINES" | awk -v s="$START" '$1>s{print;exit}')
-if [ -z "$NEXT" ]; then sed -n "${START},\$p" "$STR_FILE" > "$TEMP_FILE"; else sed -n "${START},$((NEXT-1))p" "$STR_FILE" > "$TEMP_FILE"; fi
-BLOCK=$(cat "$TEMP_FILE"); NAME=$(head -n1 "$TEMP_FILE"); NAME="${NAME#\#}"
-awk -v block="$BLOCK" 'BEGIN{skip=0} /option NFQWS_OPT '\''/ {printf "\toption NFQWS_OPT '\''\n%s\n'\''\n", block; skip=1; next} skip && /^'\''$/ {skip=0; next} !skip {print}' "$CONF" > "${CONF}.tmp"
-mv "${CONF}.tmp" "$CONF"; echo -e "\n${CYAN}Тестируем стратегию: ${YELLOW}${NAME}${NC} ($CUR/$TOTAL_STR)"; ZAPRET_RESTART; OK=0; check_all_urls
-if [ "$OK" -eq "$TOTAL" ]; then COLOR="${GREEN}"; elif [ "$OK" -gt 0 ]; then COLOR="${YELLOW}"; else COLOR="${RED}"; fi; echo -e "${CYAN}Результат теста: ${COLOR}$OK/$TOTAL${NC}"; echo "$OK $NAME" >> "$RESULTS"; done
-echo -e "\n${GREEN}Тестирование завершено!${NC}"; echo -e "\n${YELLOW}Лучшие стратегии:${NC}"; sort -rn "$RESULTS" | head -n 10 | while IFS= read -r LINE; do COUNT=$(echo "$LINE" | cut -d" " -f1); NAME=$(echo "$LINE" | cut -d" " -f2-)
-if [ "$COUNT" -eq "$TOTAL" ]; then COLOR="${GREEN}"; elif [ "$COUNT" -gt 0 ]; then COLOR="${YELLOW}"; else COLOR="${RED}"; fi; echo -e "${COLOR}${NAME}${NC} → $COUNT/$TOTAL"; done; mv -f "$BACK" "$CONF"; echo; ZAPRET_RESTART; PAUSE; }
+run_test_strategies() { clear; echo -e "${MAGENTA}Тестирование стратегий${NC}\n\n${CYAN}Собираем стратегии для теста${NC}"; rm -rf "$TMP_SF"; download_strategies 1; cp /opt/zapret_temp/str_flow.txt /opt/zapret_temp/str_test.txt; cp "$OUT" "$STR_FILE"; cp "$CONF" "$BACK"
+for N in $(seq 1 100); do strategy_v$N >> "$STR_FILE" 2>/dev/null || break; done; sed -i '/#Y/d' "$STR_FILE"; curl -fsSL "$RAW" | grep 'url:' | sed -n 's/.*id: "\([^"]*\)".*url: "\([^"]*\)".*/\1|\2/p' > "$OUT_DPI" || { echo -e "\n${RED}Ошибка загрузки DPI списка${NC}\n"; PAUSE; return; }
+printf '%s\n' "Госуслуги|https://gosuslugi.ru" "Госуслуги ЛК|https://esia.gosuslugi.ru" "Налоги|https://nalog.ru" "Налоги ЛК|https://lkfl2.nalog.ru" "ntc.party|https://ntc.party/" "RuTube|https://rutube.ru" "Instagram|https://instagram.com" "Rutor|https://rutor.info" "Rutracker|https://rutracker.org" \
+"Epidemz|https://epidemz.net.co" "NNM Club|https://nnmclub.to" "OpenWRT|https://openwrt.org" "Sxyprn|https://sxyprn.net" "Spankbang|https://ru.spankbang.com" "Pornhub|https://pornhub.com" "Discord|https://discord.com" "X|https://x.com" "Filmix|https://filmix.my" "FlightRadar24|https://flightradar24.com" \
+"GooglePlay|https://play.google.com" "Ottai|https://ottai.com" > "${OUT_DPI}.tmp"; cat "$OUT_DPI" >> "${OUT_DPI}.tmp"; mv "${OUT_DPI}.tmp" "$OUT_DPI"; URLS="$(cat "$OUT_DPI")"; TOTAL=$(grep -c "|" "$OUT_DPI"); TOTAL_STR=$(grep -c '^#' "$STR_FILE"); echo -e "${CYAN}Найдено стратегий: ${NC}$TOTAL_STR"
+: > "$RESULTS"; LINES=$(grep -n '^#' "$STR_FILE" | cut -d: -f1); CUR=0; echo "$LINES" | while read START; do CUR=$((CUR+1)); NEXT=$(echo "$LINES" | awk -v s="$START" '$1>s{print;exit}'); if [ -z "$NEXT" ]; then sed -n "${START},\$p" "$STR_FILE" > "$TEMP_FILE"; else sed -n "${START},$((NEXT-1))p" "$STR_FILE" > "$TEMP_FILE"; fi
+BLOCK=$(cat "$TEMP_FILE"); NAME=$(head -n1 "$TEMP_FILE"); NAME="${NAME#\#}"; awk -v block="$BLOCK" 'BEGIN{skip=0} /option NFQWS_OPT '\''/ {printf "\toption NFQWS_OPT '\''\n%s\n'\''\n", block; skip=1; next} skip && /^'\''$/ {skip=0; next} !skip {print}' "$CONF" > "${CONF}.tmp"; mv "${CONF}.tmp" "$CONF"
+echo -e "\n${CYAN}Тестируем стратегию: ${YELLOW}${NAME}${NC} ($CUR/$TOTAL_STR)"; ZAPRET_RESTART; OK=0; check_all_urls; if [ "$OK" -eq "$TOTAL" ]; then COLOR="${GREEN}"; elif [ "$OK" -ge $((TOTAL/2)) ]; then COLOR="${YELLOW}"; else COLOR="${RED}"; fi; echo -e "${CYAN}Результат теста: ${COLOR}$OK/$TOTAL${NC}"
+echo -e "${NAME} → ${OK}/${TOTAL}" >> "$RESULTS"; done; sort -t'/' -k1 -nr "$RESULTS" -o "$RESULTS"; mv -f "$BACK" "$CONF"; rm -f "$OUT_DPI"; ZAPRET_RESTART; show_test_results; }
+show_test_results() { clear; echo -e "${MAGENTA}Результат тестирования стратегий${NC}\n"; [ ! -f "$RESULTS" ] || [ ! -s "$RESULTS" ] && { echo -e "${RED}Результат не найден!${NC}\n"; PAUSE; return; }
+TOTAL=$(head -n1 "$RESULTS" | awk -F'/' '{print $2}'); awk -F'[/ ]' '{for(i=1;i<=NF;i++) if($i ~ /^[0-9]+$/){print $i "/" $(i+1), $0; break}}' "$RESULTS" | sort -nr -k1,1 | awk -v total="$TOTAL" -v GREEN="$GREEN" -v YELLOW="$YELLOW" -v RED="$RED" -v NC="$NC" '{split($1,a,"/"); count=a[1]; $1=""; sub(/^ /,""); line=$0; if(count==total) color=GREEN; else if(count>total/2) color=YELLOW; else color=RED; print color line NC}'; echo; PAUSE; }
 # ==========================================
 # Главное меню
 # ==========================================
@@ -448,5 +403,5 @@ if [ -f "$CONF" ]; then current="$ver$( [ -n "$ver" ] && [ -n "$yv_ver" ] && ech
 if [ -n "$current" ]; then echo -e "${YELLOW}Используется стратегия:${NC}  ${CYAN}$current${DV:+ $DV}${RKN_STATUS:+ $RKN_STATUS}${NC}"; elif [ -n "$RKN_STATUS" ]; then echo -e "${YELLOW}Используется стратегия:${NC}${CYAN}  РКН${DV:+ $DV}${NC}"; fi; fi
 echo -e "\n${CYAN}1) ${GREEN}Установить${NC} Zapret\n${CYAN}2) ${GREEN}Меню стратегий${NC}\n${CYAN}3) ${GREEN}Меню настроек\n${CYAN}4) ${GREEN}$str_stp_zpr ${NC}Zapret"
 echo -e "${CYAN}5) ${GREEN}Удалить ${NC}Zapret\n${CYAN}6) ${GREEN}Меню настройки ${NC}Discord\n${CYAN}7) ${GREEN}Меню ${NC}DNS over HTTPS\n${CYAN}8) ${GREEN}Удалить → установить → настроить${NC} Zapret\n${CYAN}0) ${GREEN}Системное меню${NC}" ; echo -ne "${CYAN}Enter) ${GREEN}Выход${NC}\n\n${YELLOW}Выберите пункт:${NC} " && read choice
-case "$choice" in 888) echo; uninstall_zapret "1"; install_Zapret "1"; curl -fsSL https://raw.githubusercontent.com/StressOzz/Test/refs/heads/main/zapret -o "$CONF"; hosts_add; rm -f "$EXCLUDE_FILE"; wget -q -U "Mozilla/5.0" -O "$EXCLUDE_FILE" "$EXCLUDE_URL"; ZAPRET_RESTART; PAUSE;;
+case "$choice" in 888) echo; uninstall_zapret "1"; install_Zapret "1"; curl -fsSL https://raw.githubusercontent.com/StressOzz/Test/refs/heads/main/zapret -o "$CONF"; hosts_add "$ALL_BLOCKS"; rm -f "$EXCLUDE_FILE"; wget -q -U "Mozilla/5.0" -O "$EXCLUDE_FILE" "$EXCLUDE_URL"; ZAPRET_RESTART; PAUSE;;
 1) install_Zapret;; 2) menu_str;; 3) backup_menu;; 4) pgrep -f /opt/zapret >/dev/null 2>&1 && stop_zapret || start_zapret;; 5) uninstall_zapret;; 6) scrypt_install;; 7) DoH_menu;; 8) zapret_key;; 0) sys_menu;; *) echo; exit 0;; esac; }; while true; do show_menu; done
