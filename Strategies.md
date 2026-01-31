@@ -159,10 +159,11 @@
 --dpi-desync=fake,multisplit
 --dpi-desync-split-seqovl=654
 --dpi-desync-split-pos=1
---dpi-desync-fooling=ts
+--dpi-desync-fooling=badseq,badsum
 --dpi-desync-repeats=8
 --dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/max.bin
 --dpi-desync-fake-tls=/opt/zapret/files/fake/max.bin
+--dpi-desync-badseq-increment=0
 ```
 ---
 # v8
