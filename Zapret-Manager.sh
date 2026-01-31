@@ -6,26 +6,45 @@ ZAPRET_MANAGER_VERSION="8.6"; ZAPRET_VERSION="72.20260128"; STR_VERSION_AUTOINST
 TEST_HOST="https://rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com"; LAN_IP=$(uci get network.lan.ipaddr 2>/dev/null | cut -d/ -f1)
 GREEN="\033[1;32m"; RED="\033[1;31m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"
 MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
-WORKDIR="/tmp/zapret-update"; CONF="/etc/config/zapret"; CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"
+CONF="/etc/config/zapret"; CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"
+HOSTLIST_FILE="/opt/zapret/ipset/zapret-hosts-user.txt"
 STR_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ListStrYou"
-TMP_SF="/opt/zapret_temp"; TMP_LIST="$TMP_SF/zapret_yt_list.txt"; SAVED_STR="$TMP_SF/StrYou"; OLD_STR="$TMP_SF/StrOLD"
-Fin_IP_Dis="104\.25\.158\.178 finland[0-9]\{5\}\.discord\.media"; OUT_DPI="$TMP_SF/dpi_urls.txt"
-OUT="$TMP_SF/str_flow.txt"; ZIP="$TMP_SF/repo.zip"
+HOSTS_FILE="/etc/hosts"; TMP_SF="/tmp/zapret_temp"; WORKDIR="$TMP_SF/zapret-update"
+TMP_LIST="$TMP_SF/zapret_yt_list.txt"; SAVED_STR="$TMP_SF/StrYou"; HOSTS_USER="$TMP_SF/hosts-user.txt"
+OUT_DPI="$TMP_SF/dpi_urls.txt"; OUT="$TMP_SF/str_flow.txt"; ZIP="$TMP_SF/repo.zip"
+BACKUP_FILE="/opt/zapret/tmp/hosts_temp.txt"; STR_FILE="$TMP_SF/str_test.txt"; TEMP_FILE="$TMP_SF/str_temp.txt"
+RESULTS="/opt/zapret/tmp/zapret_bench.txt"; BACK="$TMP_SF/zapret_back"
+FINAL_STR="$TMP_SF/StrFINAL"; NEW_STR="$TMP_SF/StrNEW"; OLD_STR="$TMP_SF/StrOLD"
+Fin_IP_Dis="104\.25\.158\.178 finland[0-9]\{5\}\.discord\.media"; PARALLEL=8
 RAW="https://raw.githubusercontent.com/hyperion-cs/dpi-checkers/main/ru/tcp-16-20/index.html"
-BACKUP_FILE="$TMP_SF/hosts_temp.txt"; HOSTLIST_FILE="/opt/zapret/ipset/zapret-hosts-user.txt"
-STR_FILE="$TMP_SF/str_test.txt"; TEMP_FILE="$TMP_SF/str_temp.txt"
-RESULTS="$TMP_SF/zapret_bench.txt"; BACK="$TMP_SF/zapret_back"; PARALLEL=8
-HOSTLIST_MIN_SIZE=1800000; FINAL_STR="$TMP_SF/StrFINAL"; NEW_STR="$TMP_SF/StrNEW"; HOSTS_USER="$TMP_SF/hosts-user.txt"
 EXCLUDE_FILE="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"; fileDoH="/etc/config/https-dns-proxy"
 RKN_URL="https://raw.githubusercontent.com/IndeecFOX/zapret4rocket/refs/heads/master/extra_strats/TCP/RKN/List.txt"
 EXCLUDE_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/zapret-hosts-user-exclude.txt"
-INSTAGRAM="57.144.222.34 instagram.com www.instagram.com\n157.240.9.174 instagram.com www.instagram.com\n157.240.245.174 instagram.com www.instagram.com\n157.240.205.174 instagram.com www.instagram.com"
-PDA="185.87.51.182 4pda.to www.4pda.to"; NTC="30.255.77.28 ntc.party\n130.255.77.28 ntc.party"; RUTOR="173.245.58.219 rutor.info d.rutor.info"; LIBRUSEC="185.39.18.98 lib.rus.ec www.lib.rus.ec"
-AI="45.155.204.190 gemini.google.com chatgpt.com ab.chatgpt.com auth.openai.com auth0.openai.com platform.openai.com\n45.155.204.190 cdn.oaistatic.com files.oaiusercontent.com cdn.auth0.com tcr9i.chat.openai.com webrtc.chatgpt.com
-45.155.204.190 android.chat.openai.com api.openai.com operator.chatgpt.com sora.chatgpt.com sora.com videos.openai.com\n45.155.204.190 ios.chat.openai.com grok.com accounts.x.ai assets.grok.com deepl.com www.deepl.com www2.deepl.com
-45.155.204.190 login-wall.deepl.com w.deepl.com dict.deepl.com ita-free.www.deepl.com write-free.www.deepl.com\n45.155.204.190 experimentation.deepl.com experimentation-grpc.deepl.com ita-free.app.deepl.com shield.deepl.com
-45.155.204.190 ott.deepl.com api-free.deepl.com backend.deepl.com clearance.deepl.com errortracking.deepl.com\n45.155.204.190 auth.deepl.com oneshot-free.www.deepl.com checkout.www.deepl.com gtm.deepl.com"
-HOSTS_FILE="/etc/hosts"; ALL_BLOCKS="$AI\n$INSTAGRAM\n$NTC\n$RUTOR\n$LIBRUSEC"
+INSTAGRAM="#Instagram\n57.144.222.34 instagram.com www.instagram.com\n157.240.9.174 instagram.com www.instagram.com\n157.240.245.174 instagram.com www.instagram.com\n157.240.205.174 instagram.com www.instagram.com"
+PDA="#4pda\n185.87.51.182 4pda.to www.4pda.to"; NTC="#ntc.party\n30.255.77.28 ntc.party\n130.255.77.28 ntc.party"; RUTOR="#rutor\n173.245.58.219 rutor.info d.rutor.info"; LIBRUSEC="#lib.rus.e\n185.39.18.98 lib.rus.ec www.lib.rus.ec"
+AI="#Gemini\n45.155.204.190 gemini.google.com\n#Grok\n45.155.204.190 grok.com accounts.x.ai assets.grok.com
+#OpenAI\n45.155.204.190 chatgpt.com ab.chatgpt.com auth.openai.com auth0.openai.com platform.openai.com cdn.oaistatic.com
+45.155.204.190 tcr9i.chat.openai.com webrtc.chatgpt.com android.chat.openai.com api.openai.com operator.chatgpt.com
+45.155.204.190 sora.chatgpt.com sora.com videos.openai.com ios.chat.openai.com cdn.auth0.com files.oaiusercontent.com
+#Microsoft\n45.155.204.190 copilot.microsoft.com sydney.bing.com edgeservices.bing.com rewards.bing.com
+45.155.204.190 xsts.auth.xboxlive.com xgpuwebf2p.gssv-play-prod.xboxlive.com xgpuweb.gssv-play-prod.xboxlive.com
+#GitHubCopilot\n144.31.14.104 api.github.com api.individual.githubcopilot.com proxy.individual.githubcopilot.com
+#ElevenLabs\n45.155.204.190 elevenlabs.io api.us.elevenlabs.io elevenreader.io api.elevenlabs.io help.elevenlabs.io
+#DeepL\n45.155.204.190 deepl.com www.deepl.com www2.deepl.com login-wall.deepl.com w.deepl.com dict.deepl.com ita-free.www.deepl.com
+45.155.204.190 write-free.www.deepl.com experimentation.deepl.com experimentation-grpc.deepl.com ita-free.app.deepl.com
+45.155.204.190 ott.deepl.com api-free.deepl.com backend.deepl.com clearance.deepl.com errortracking.deepl.com
+45.155.204.190 oneshot-free.www.deepl.com checkout.www.deepl.com gtm.deepl.com auth.deepl.com shield.deepl.com
+#Claude\n45.155.204.190 claude.ai console.anthropic.com api.anthropic.com
+#Trae.ai\n45.155.204.190 trae-api-sg.mchost.guru api.trae.ai api-sg-central.trae.ai api16-normal-alisg.mchost.guru
+#Windsurf\n45.155.204.190 windsurf.com codeium.com server.codeium.com web-backend.codeium.com  marketplace.windsurf.com
+45.155.204.190 unleash.codeium.com inference.codeium.com windsurf-stable.codeium.com
+144.31.14.104 windsurf-telemetry.codeium.com\n#Manus\n45.155.204.190 manus.im api.manus.im\n#Notion\n45.155.204.190 www.notion.so calendar.notion.so
+#AIStudio\n45.155.204.190 aistudio.google.com generativelanguage.googleapis.com aitestkitchen.withgoogle.com aisandbox-pa.googleapis.com xsts.auth.xboxlive.com
+45.155.204.190 webchannel-alkalimakersuite-pa.clients6.google.com alkalimakersuite-pa.clients6.google.com assistant-s3-pa.googleapis.com
+45.155.204.190 proactivebackend-pa.googleapis.com robinfrontend-pa.googleapis.com o.pki.goog labs.google labs.google.com notebooklm.google
+45.155.204.190 notebooklm.google.com jules.google.com stitch.withgoogle.com gemini.google.com copilot.microsoft.com edgeservices.bing.com
+45.155.204.190 rewards.bing.com sydney.bing.com xboxdesignlab.xbox.com xgpuweb.gssv-play-prod.xboxlive.com xgpuwebf2p.gssv-play-prod.xboxlive.com"
+ALL_BLOCKS="$AI\n$INSTAGRAM\n$NTC\n$RUTOR\n$LIBRUSEC"
 hosts_enabled() { grep -q "45.155.204.190\|4pda.to\|instagram.com\|rutor.info\|lib.rus.ec\|ntc.party" /etc/hosts; }
 hosts_add() { printf "%b\n" "$1" | while IFS= read -r L; do grep -qxF "$L" /etc/hosts || echo "$L" >> /etc/hosts; done; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }
 hosts_clear() { printf "%b\n" "$1" | while IFS= read -r L; do sed -i "\|^$L$|d" /etc/hosts; done; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }
@@ -269,10 +288,10 @@ printf '%s\n' "gvt1.com" "googleplay.com" "play.google.com" "beacons.gvt2.com" "
 echo -e "${CYAN}Добавляем домены в исключения${NC}"; rm -f "$EXCLUDE_FILE"; wget -q -U "Mozilla/5.0" -O "$EXCLUDE_FILE" "$EXCLUDE_URL" || { echo -e "\n${RED}Не удалось загрузить exclude файл${NC}\n"; PAUSE; return; }
 discord_str_add; echo -e "${CYAN}Применяем новую стратегию и настройки${NC}"; ZAPRET_RESTART; echo -e "${GREEN}Стратегия ${NC}${version}${GREEN} установлена!${NC}"; [ "$NO_PAUSE" != "1" ] && echo && PAUSE; }
 choose_strategy_manual() { mkdir -p "$TMP_SF"; curl -fsSL "$STR_URL" -o "$TMP_LIST" || { echo -e "\n${RED}Не удалось скачать список${NC}\n"; read -p "Нажмите Enter..." dummy </dev/tty; return 1; }
-COUNT=0; > /tmp/strategy_list; while IFS= read -r LINE; do case "$LINE" in Yv[0-9]*) COUNT=$((COUNT + 1)); echo "$LINE" >> /tmp/strategy_list;; esac; done < "$TMP_LIST"
-[ "$COUNT" -eq 0 ] && echo -e "${RED}Стратегий не найдено!${NC}" && read -p "Нажмите Enter..." dummy </dev/tty && rm -f /tmp/strategy_list && return 1; echo -en "\n${YELLOW}Введите версию стратегии для YouTube ${NC}(1-$COUNT)${YELLOW}:${NC} "
-read CHOICE </dev/tty; if ! echo "$CHOICE" | grep -qE '^[0-9]+$' || [ "$CHOICE" -lt 1 ] || [ "$CHOICE" -gt "$COUNT" ]; then return 1; fi; SELECTED_NAME=$(sed -n "${CHOICE}p" /tmp/strategy_list); rm -f /tmp/strategy_list
-echo -e "\n${CYAN}Применяем стратегию: ${NC}$SELECTED_NAME"; SAVED_STR="/tmp/selected_str"; > "$SAVED_STR"; FLAG=0; while IFS= read -r LINE; do [ "$LINE" = "$SELECTED_NAME" ] && FLAG=1 && continue; case "$LINE" in Yv[0-9]*) FLAG=0;; esac
+COUNT=0; > $TMP_SF/strategy_list; while IFS= read -r LINE; do case "$LINE" in Yv[0-9]*) COUNT=$((COUNT + 1)); echo "$LINE" >> $TMP_SF/strategy_list;; esac; done < "$TMP_LIST"
+[ "$COUNT" -eq 0 ] && echo -e "${RED}Стратегий не найдено!${NC}" && read -p "Нажмите Enter..." dummy </dev/tty && rm -f $TMP_SF/strategy_list && return 1; echo -en "\n${YELLOW}Введите версию стратегии для YouTube ${NC}(1-$COUNT)${YELLOW}:${NC} "
+read CHOICE </dev/tty; if ! echo "$CHOICE" | grep -qE '^[0-9]+$' || [ "$CHOICE" -lt 1 ] || [ "$CHOICE" -gt "$COUNT" ]; then return 1; fi; SELECTED_NAME=$(sed -n "${CHOICE}p" $TMP_SF/strategy_list); rm -f $TMP_SF/strategy_list
+echo -e "\n${CYAN}Применяем стратегию: ${NC}$SELECTED_NAME"; SAVED_STR="$TMP_SF/selected_str"; > "$SAVED_STR"; FLAG=0; while IFS= read -r LINE; do [ "$LINE" = "$SELECTED_NAME" ] && FLAG=1 && continue; case "$LINE" in Yv[0-9]*) FLAG=0;; esac
 [ "$FLAG" -eq 1 ] && printf "%b\n" "$LINE" >> "$SAVED_STR"; done < "$TMP_LIST"; awk '/^[[:space:]]*option NFQWS_OPT '\''/{flag=1} flag{print}' "$CONF" > "$OLD_STR"; sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" "$CONF"; sed -i "/^[[:space:]]*#Yv[0-9]\+/d" "$OLD_STR"
 awk '{if(skip){if($0=="--new"||$0~/\047/){skip=0;next}if($0~/^[[:space:]]*$/)next;next}if($0=="--filter-tcp=443"){getline n;if(n=="--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt"){skip=1;next}else{print $0;print n;next}}if($0=="--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt")has_google=1;if($0~/^[[:space:]]*#Yv/)next;print}' "$OLD_STR" > "$NEW_STR"
 awk 'BEGIN{inserted=0;has_google=0} $0=="--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt"{has_google=1} $0=="--new"&&!inserted{while((getline l<"'"$SAVED_STR"'")>0) if(l!~/^[[:space:]]*$/) print l; print "--new"; inserted=1; next} $0~/^[[:space:]]*option NFQWS_OPT \047$/&&!has_google&&!inserted{print; print "#'"$SELECTED_NAME"'"; while((getline l<"'"$SAVED_STR"'")>0) if(l!~/^[[:space:]]*$/) print l; print "--new"; inserted=1; next} {print}' "$NEW_STR" > "$FINAL_STR"
@@ -360,19 +379,19 @@ toggle_all() { if status_block "$ALL_BLOCKS"; then remove_block "$ALL_BLOCKS"; e
 get_state() { status_block "$1" && echo "Удалить " || echo "Добавить"; }
 menu_hosts() { while true; do clear; S_ALL=$(status_block "$ALL_BLOCKS" && echo "${GREEN}Удалить все домены${NC}" || echo "${GREEN}Добавить все домены${NC}")
 echo -e "${YELLOW}Меню управления доменами в hosts${NC}\n\n${CYAN}1) ${GREEN}$(get_state "$PDA")${NC} 4pda.to\n${CYAN}2) ${GREEN}$(get_state "$RUTOR")${NC} rutor.info\n${CYAN}3) ${GREEN}$(get_state "$NTC")${NC} ntc.party"
-echo -e "${CYAN}4) ${GREEN}$(get_state "$INSTAGRAM")${NC} instagram.com\n${CYAN}5) ${GREEN}$(get_state "$LIBRUSEC")${NC} lib.rus.ec\n${CYAN}6) ${GREEN}$(get_state "$AI")${NC} ChatGPT & Gemini & Grok & DeepL\n${CYAN}7) $S_ALL\n${CYAN}0) ${GREEN}Восстановить ${NC}hosts"
+echo -e "${CYAN}4) ${GREEN}$(get_state "$INSTAGRAM")${NC} instagram.com\n${CYAN}5) ${GREEN}$(get_state "$LIBRUSEC")${NC} lib.rus.ec\n${CYAN}6) ${GREEN}$(get_state "$AI")${NC} AI сервисы\n${CYAN}7) $S_ALL\n${CYAN}0) ${GREEN}Восстановить ${NC}hosts"
 echo -ne "${CYAN}Enter) ${GREEN}Выход в меню стратегий${NC}\n\n${YELLOW}Выберите пункт:${NC} ";read -r c; case "$c" in
 1) toggle_block "$PDA";; 2) toggle_block "$RUTOR";; 3) toggle_block "$NTC";; 4) toggle_block "$INSTAGRAM";; 5) toggle_block "$LIBRUSEC";; 6) toggle_block "$AI";; 7) toggle_all;; 0) hosts_reset;; *) break;; esac; done; }
 # ==========================================
 # Тест стратегий
 # ==========================================
 check_url() { TEXT=$(echo "$1" | cut -d"|" -f1); LINK=$(echo "$1" | cut -d"|" -f2); if curl -Is --connect-timeout 2 --max-time 3 "$LINK" >/dev/null 2>&1; then echo 1 >> "$TMP_OK"; echo -e "${GREEN}[ OK ]${NC} $TEXT"; else echo -e "${RED}[FAIL]${NC} $TEXT"; fi; }
-check_all_urls() { TMP_OK="/tmp/z_ok.$$"; : > "$TMP_OK"; RUN=0; while IFS= read -r URL; do [ -z "$URL" ] && continue; check_url "$URL" & RUN=$((RUN+1)); if [ "$RUN" -ge "$PARALLEL" ]; then wait; RUN=0; fi
+check_all_urls() { TMP_OK="$TMP_SF/z_ok.$$"; : > "$TMP_OK"; RUN=0; while IFS= read -r URL; do [ -z "$URL" ] && continue; check_url "$URL" & RUN=$((RUN+1)); if [ "$RUN" -ge "$PARALLEL" ]; then wait; RUN=0; fi
 done <<EOF
 $URLS
 EOF
 wait; OK=$(wc -l < "$TMP_OK" | tr -d ' '); rm -f "$TMP_OK"; }
-run_test_strategies() { clear; echo -e "${MAGENTA}Тестирование стратегий${NC}\n\n${CYAN}Собираем стратегии для теста${NC}"; rm -rf "$TMP_SF"; download_strategies 1; cp /opt/zapret_temp/str_flow.txt /opt/zapret_temp/str_test.txt; cp "$OUT" "$STR_FILE"; cp "$CONF" "$BACK"
+run_test_strategies() { clear; echo -e "${MAGENTA}Тестирование стратегий${NC}\n\n${CYAN}Собираем стратегии для теста${NC}"; rm -rf "$TMP_SF"; download_strategies 1; cp "$OUT" "$STR_FILE"; cp "$CONF" "$BACK"
 for N in $(seq 1 100); do strategy_v$N >> "$STR_FILE" 2>/dev/null || break; done; sed -i '/#Y/d' "$STR_FILE"; curl -fsSL "$RAW" | grep 'url:' | sed -n 's/.*id: "\([^"]*\)".*url: "\([^"]*\)".*/\1|\2/p' > "$OUT_DPI" || { echo -e "\n${RED}Ошибка загрузки DPI списка${NC}\n"; PAUSE; return; }
 printf '%s\n' "Госуслуги|https://gosuslugi.ru" "Госуслуги ЛК|https://esia.gosuslugi.ru" "Налоги|https://nalog.ru" "Налоги ЛК|https://lkfl2.nalog.ru" "ntc.party|https://ntc.party/" "RuTube|https://rutube.ru" "Instagram|https://instagram.com" "Rutor|https://rutor.info" "Rutracker|https://rutracker.org" \
 "Epidemz|https://epidemz.net.co" "NNM Club|https://nnmclub.to" "OpenWRT|https://openwrt.org" "Sxyprn|https://sxyprn.net" "Spankbang|https://ru.spankbang.com" "Pornhub|https://pornhub.com" "Discord|https://discord.com" "X|https://x.com" "Filmix|https://filmix.my" "FlightRadar24|https://flightradar24.com" \
