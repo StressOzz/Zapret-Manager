@@ -1,6 +1,7 @@
 ru
 рф
 su
+vk.com
 qwen.ai
 ottai.com
 trovo.live
