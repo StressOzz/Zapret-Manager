@@ -2,7 +2,7 @@
 # ==========================================
 # Zapret on remittor Manager by StressOzz
 # =========================================
-ZAPRET_MANAGER_VERSION="8.6"; ZAPRET_VERSION="72.20260131"; STR_VERSION_AUTOINSTALL="v6"
+ZAPRET_MANAGER_VERSION="8.6"; ZAPRET_VERSION="72.20260202"; STR_VERSION_AUTOINSTALL="v6"
 TEST_HOST="https://rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com"; LAN_IP=$(uci get network.lan.ipaddr 2>/dev/null | cut -d/ -f1)
 GREEN="\033[1;32m"; RED="\033[1;31m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 CONF="/etc/config/zapret"; CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"; HOSTLIST_FILE="/opt/zapret/ipset/zapret-hosts-user.txt"
@@ -26,7 +26,6 @@ AI="#Gemini\n45.155.204.190 gemini.google.com\n#Grok\n45.155.204.190 grok.com ac
 45.155.204.190 sora.chatgpt.com sora.com videos.openai.com ios.chat.openai.com cdn.auth0.com files.oaiusercontent.com
 #Microsoft\n45.155.204.190 copilot.microsoft.com sydney.bing.com edgeservices.bing.com rewards.bing.com
 45.155.204.190 xsts.auth.xboxlive.com xgpuwebf2p.gssv-play-prod.xboxlive.com xgpuweb.gssv-play-prod.xboxlive.com
-#GitHubCopilot\n144.31.14.104 api.github.com api.individual.githubcopilot.com proxy.individual.githubcopilot.com
 #ElevenLabs\n45.155.204.190 elevenlabs.io api.us.elevenlabs.io elevenreader.io api.elevenlabs.io help.elevenlabs.io
 #DeepL\n45.155.204.190 deepl.com www.deepl.com www2.deepl.com login-wall.deepl.com w.deepl.com dict.deepl.com ita-free.www.deepl.com
 45.155.204.190 write-free.www.deepl.com experimentation.deepl.com experimentation-grpc.deepl.com ita-free.app.deepl.com
@@ -265,7 +264,7 @@ if [ -f "$CONF" ]; then current="$ver$( [ -n "$ver" ] && [ -n "$yv_ver" ] && ech
 if [ -n "$current" ]; then echo -e "${YELLOW}Используется стратегия:${NC} ${CYAN}$current${DV:+ $DV}${RKN_STATUS:+ $RKN_STATUS}${NC}"; elif [ -n "$RKN_STATUS" ]; then  echo -e "${YELLOW}Используется стратегия:${NC}${CYAN} РКН${DV:+ $DV}${NC}"; fi; fi
 [ -f "$CONF" ] && grep -q "option NFQWS_PORTS_UDP.*88,500,1024-19293,19345-49999,50101-65535" "$CONF" && grep -q -- "--filter-udp=88,500,1024-19293,19345-49999,50101-65535" "$CONF" && echo -e "${YELLOW}Стратегия для игр:${NC} ${GREEN}включена${NC}"
 if hosts_enabled; then echo -e "${YELLOW}Домены в hosts: ${GREEN}добавлены${NC}\n"; else echo -e "${YELLOW}Домены в hosts: ${RED}отсутствуют${NC}\n"; fi
-echo -e "${CYAN}1) ${GREEN}Выбрать и установить стратегию ${NC}v1-v8\n${CYAN}2) ${GREEN}Выбрать и установить стратегию от ${NC}Flowseal\n${CYAN}3) ${GREEN}Выбрать и установить стратегию для ${NC}YouTube\n${CYAN}4) ${GREEN}Подобрать стратегию для ${NC}YouTube"
+echo -e "${CYAN}1) ${GREEN}Выбрать и установить стратегию ${NC}v1-v8\n${CYAN}2) ${GREEN}Выбрать и установить стратегию от ${NC}Flowseal\n${CYAN}3) ${GREEN}Выбрать и установить стратегию для ${NC}YouTube\n${CYAN}4) ${GREEN}Тестирование стратегий для ${NC}YouTube"
 echo -e "${CYAN}5) ${GREEN}Меню управления доменами в ${NC}hosts\n${CYAN}6) ${NC}$RKN_TEXT_MENU${NC}\n${CYAN}7) ${GREEN}$menu_game\n${CYAN}8) ${GREEN}Обновить список исключений${NC}\n${CYAN}9) ${GREEN}Тестирование всех стратегий${NC}"
 if [ -f "$RESULTS" ] && [ -s "$RESULTS" ]; then echo -e "${CYAN}0) ${GREEN}Результат тестирования стратегий${NC}"; fi
 echo -ne "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n\n${YELLOW}Выберите пункт:${NC} "; read choiceST; case "$choiceST" in 1) strategy_CHOUSE;; 2) flowseal_menu;; 3) choose_strategy_manual;; 4) auto_stryou;; 5) menu_hosts;; 9) run_test_strategies;;
@@ -384,7 +383,7 @@ echo -ne "${CYAN}Enter) ${GREEN}Выход в меню стратегий${NC}\n
 # Тест стратегий
 # ==========================================
 check_zpr_off() { echo -e "\n${CYAN}Контрольный тест: ${YELLOW}Zapret выключен${NC}"; /etc/init.d/zapret stop >/dev/null 2>&1; OK=0; check_all_urls; if [ "$OK" -eq "$TOTAL" ]; then COLOR="${GREEN}"; elif [ "$OK" -ge $((TOTAL/2)) ]
-then COLOR="${YELLOW}"; else COLOR="${RED}"; fi; echo -e "${CYAN}Контрольный тест: ${COLOR}$OK/$TOTAL${NC}"; echo -e "Контрольный тест (Zapret выключен) → ${OK}/${TOTAL}" >> "$RESULTS"; /etc/init.d/zapret start >/dev/null 2>&1; }
+then COLOR="${YELLOW}"; else COLOR="${RED}"; fi; echo -e "${CYAN}Результат теста: ${COLOR}$OK/$TOTAL${NC}"; echo -e "Контрольный тест (Zapret выключен) → ${OK}/${TOTAL}" >> "$RESULTS"; /etc/init.d/zapret start >/dev/null 2>&1; }
 check_url() { TEXT=$(echo "$1" | cut -d"|" -f1); LINK=$(echo "$1" | cut -d"|" -f2); if curl -sL --connect-timeout 3 --max-time 5 --speed-time 3 --speed-limit 1 --range 0-65535 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o /dev/null "$LINK" >/dev/null 2>&1; then echo 1 >> "$TMP_OK"; echo -e "${GREEN}[ OK ]${NC} $TEXT"; else echo -e "${RED}[FAIL]${NC} $TEXT"; fi; }
 check_all_urls() { TMP_OK="$TMP_SF/z_ok.$$"; : > "$TMP_OK"; RUN=0; while IFS= read -r URL; do [ -z "$URL" ] && continue; check_url "$URL" & RUN=$((RUN+1)); if [ "$RUN" -ge "$PARALLEL" ]; then wait; RUN=0; fi
 done <<EOF
@@ -393,9 +392,9 @@ EOF
 wait; OK=$(wc -l < "$TMP_OK" | tr -d ' '); rm -f "$TMP_OK"; }
 run_test_strategies() { clear; echo -e "${MAGENTA}Тестирование стратегий${NC}\n\n${CYAN}Собираем стратегии для теста${NC}"; rm -rf "$TMP_SF"; download_strategies 1; cp "$OUT" "$STR_FILE"; cp "$CONF" "$BACK"
 for N in $(seq 1 100); do strategy_v$N >> "$STR_FILE" 2>/dev/null || break; done; sed -i '/#Y/d' "$STR_FILE"; curl -fsSL "$RAW" | grep 'url:' | sed -n 's/.*id: "\([^"]*\)".*url: "\([^"]*\)".*/\1|\2/p' > "$OUT_DPI" || { echo -e "\n${RED}Ошибка загрузки DPI списка${NC}\n"; PAUSE; return; }
-printf '%s\n' "Госуслуги|https://gosuslugi.ru" "Госуслуги ЛК|https://esia.gosuslugi.ru" "Налоги|https://nalog.ru" "Налоги ЛК|https://lkfl2.nalog.ru" "ntc.party|https://ntc.party/" "RuTube|https://rutube.ru" "Instagram|https://instagram.com" "Facebook|https://facebook.com" "Rutor|https://rutor.info" "Rutracker|https://rutracker.org" \
-"Epidemz|https://epidemz.net.co" "NNM Club|https://nnmclub.to" "OpenWRT|https://openwrt.org" "Sxyprn|https://sxyprn.net" "Spankbang|https://ru.spankbang.com" "Pornhub|https://pornhub.com" "Discord|https://discord.com" "X|https://x.com" "Filmix|https://filmix.my" "FlightRadar24|https://flightradar24.com" \
-"GooglePlay|https://play.google.com" "Kinozal|https://kinozal.tv" "СUB|https://cub.red" "Ottai|https://ottai.com" > "${OUT_DPI}.tmp"; cat "$OUT_DPI" >> "${OUT_DPI}.tmp"; mv "${OUT_DPI}.tmp" "$OUT_DPI"; URLS="$(cat "$OUT_DPI")"; TOTAL=$(grep -c "|" "$OUT_DPI"); TOTAL_STR=$(grep -c '^#' "$STR_FILE"); echo -e "${CYAN}Найдено стратегий: ${NC}$TOTAL_STR"
+printf '%s\n' "Госуслуги|https://gosuslugi.ru" "Госуслуги ЛК|https://esia.gosuslugi.ru" "Налоги|https://nalog.ru" "Налоги ЛК|https://lkfl2.nalog.ru" "ntc.party|https://ntc.party/" "rutube.ru|https://rutube.ru" "instagram.com|https://instagram.com" "facebook.com|https://facebook.com" "rutor.info|https://rutor.info" "rutracker.org|https://rutracker.org" \
+"epidemz.net.co|https://epidemz.net.co" "nnmclub.to|https://nnmclub.to" "openwrt.org|https://openwrt.org" "sxyprn.net|https://sxyprn.net" "spankbang.com|https://ru.spankbang.com" "pornhub.com|https://pornhub.com" "discord.com|https://discord.com" "x.com|https://x.com" "filmix.my|https://filmix.my" "flightradar24.com|https://flightradar24.com" \
+"play.google.com|https://play.google.com" "kinozal.tv|https://kinozal.tv" "cub.red|https://cub.red" "ottai.com|https://ottai.com" "mobile.de|https://mobile.de" "exleasingcar.com|https://exleasingcar.com" > "${OUT_DPI}.tmp"; cat "$OUT_DPI" >> "${OUT_DPI}.tmp"; mv "${OUT_DPI}.tmp" "$OUT_DPI"; URLS="$(cat "$OUT_DPI")"; TOTAL=$(grep -c "|" "$OUT_DPI"); TOTAL_STR=$(grep -c '^#' "$STR_FILE"); echo -e "${CYAN}Найдено стратегий: ${NC}$TOTAL_STR"
 : > "$RESULTS"; check_zpr_off; LINES=$(grep -n '^#' "$STR_FILE" | cut -d: -f1); CUR=0; echo "$LINES" | while read START; do CUR=$((CUR+1)); NEXT=$(echo "$LINES" | awk -v s="$START" '$1>s{print;exit}'); if [ -z "$NEXT" ]; then sed -n "${START},\$p" "$STR_FILE" > "$TEMP_FILE"; else sed -n "${START},$((NEXT-1))p" "$STR_FILE" > "$TEMP_FILE"; fi
 BLOCK=$(cat "$TEMP_FILE"); NAME=$(head -n1 "$TEMP_FILE"); NAME="${NAME#\#}"; awk -v block="$BLOCK" 'BEGIN{skip=0} /option NFQWS_OPT '\''/ {printf "\toption NFQWS_OPT '\''\n%s\n'\''\n", block; skip=1; next} skip && /^'\''$/ {skip=0; next} !skip {print}' "$CONF" > "${CONF}.tmp"; mv "${CONF}.tmp" "$CONF"
 echo -e "\n${CYAN}Тестируем стратегию: ${YELLOW}${NAME}${NC} ($CUR/$TOTAL_STR)"; ZAPRET_RESTART; OK=0; check_all_urls; if [ "$OK" -eq "$TOTAL" ]; then COLOR="${GREEN}"; elif [ "$OK" -ge $((TOTAL/2)) ]; then COLOR="${YELLOW}"; else COLOR="${RED}"; fi; echo -e "${CYAN}Результат теста: ${COLOR}$OK/$TOTAL${NC}"
@@ -421,6 +420,6 @@ then echo -e "${YELLOW}FIX для Flow Offloading:${NC} ${GREEN}включён${
 if [ -f "$CONF" ]; then current="$ver$( [ -n "$ver" ] && [ -n "$yv_ver" ] && echo " / " )$yv_ver"; DV=$(grep -o -E '^#[[:space:]]*Dv[0-9][0-9]*' "$CONF" | sed 's/^#[[:space:]]*/\/ /' | head -n1)
 if [ -n "$current" ]; then echo -e "${YELLOW}Используется стратегия:${NC}  ${CYAN}$current${DV:+ $DV}${RKN_STATUS:+ $RKN_STATUS}${NC}"; elif [ -n "$RKN_STATUS" ]; then echo -e "${YELLOW}Используется стратегия:${NC}${CYAN}  РКН${DV:+ $DV}${NC}"; fi; fi
 echo -e "\n${CYAN}1) ${GREEN}Установить${NC} Zapret\n${CYAN}2) ${GREEN}Меню стратегий${NC}\n${CYAN}3) ${GREEN}Меню настроек\n${CYAN}4) ${GREEN}$str_stp_zpr ${NC}Zapret"
-echo -e "${CYAN}5) ${GREEN}Удалить ${NC}Zapret\n${CYAN}6) ${GREEN}Меню настройки ${NC}Discord\n${CYAN}7) ${GREEN}Меню ${NC}DNS over HTTPS\n${CYAN}8) ${GREEN}Удалить → установить → настроить${NC} Zapret\n${CYAN}0) ${GREEN}Системное меню${NC}" ; echo -ne "${CYAN}Enter) ${GREEN}Выход${NC}\n\n${YELLOW}Выберите пункт:${NC} " && read choice
+echo -e "${CYAN}5) ${GREEN}Удалить ${NC}Zapret\n${CYAN}6) ${GREEN}Меню настройки ${NC}Discord\n${CYAN}7) ${GREEN}Меню ${NC}DNS over HTTPS\n${CYAN}8) ${GREEN}Удалить ${NC}→${GREEN} установить ${NC}→${GREEN} настроить${NC} Zapret\n${CYAN}0) ${GREEN}Системное меню${NC}" ; echo -ne "${CYAN}Enter) ${GREEN}Выход${NC}\n\n${YELLOW}Выберите пункт:${NC} " && read choice
 case "$choice" in 888) echo; uninstall_zapret "1"; install_Zapret "1"; curl -fsSL https://raw.githubusercontent.com/StressOzz/Test/refs/heads/main/zapret -o "$CONF"; hosts_add "$ALL_BLOCKS"; rm -f "$EXCLUDE_FILE"; wget -q -U "Mozilla/5.0" -O "$EXCLUDE_FILE" "$EXCLUDE_URL"; ZAPRET_RESTART; PAUSE;;
 1) install_Zapret;; 2) menu_str;; 3) backup_menu;; 4) pgrep -f /opt/zapret >/dev/null 2>&1 && stop_zapret || start_zapret;; 5) uninstall_zapret;; 6) scrypt_install;; 7) DoH_menu;; 8) zapret_key;; 0) sys_menu;; *) echo; exit 0;; esac; }; while true; do show_menu; done
