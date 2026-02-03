@@ -84,6 +84,7 @@ epidemz.net.co
 nnmclub.to
 openwrt.org
 github.com
+redirector.googlevideo.com/report_mapping
 sxyprn.net
 spankbang.com
 pornhub.com
@@ -99,12 +100,13 @@ kinozal.tv
 cub.red
 mobile.de
 exleasingcar.com
-redirector.googlevideo.com/report_mapping
 EOF
 )
 sites_clean=$(echo "$SITES" | grep -v '^#' | grep -v '^\s*$'); total=$(echo "$sites_clean" | wc -l); half=$(( (total + 1) / 2 ))
 sites_list=""; for site in $sites_clean; do sites_list="$sites_list $site"; done; for idx in $(seq 1 $half); do
 left=$(echo $sites_list | cut -d' ' -f$idx); right_idx=$((idx + half)); right=$(echo $sites_list | cut -d' ' -f$right_idx)
-left_pad=$(printf "%-25s" "$left"); right_pad=$(printf "%-25s" "$right"); if curl -Is --connect-timeout 3 --max-time 4 "https://$left" >/dev/null 2>&1; then
-left_color="[${GREEN}OK${NC}]  "; else left_color="[${RED}FAIL${NC}]"; fi; if [ -n "$right" ]; then if curl -Is --connect-timeout 3 --max-time 4 "https://$right" >/dev/null 2>&1; then
-right_color="[${GREEN}OK${NC}]  "; else right_color="[${RED}FAIL${NC}]"; fi; echo -e "$left_color $left_pad $right_color $right_pad"; else echo -e "$left_color $left_pad"; fi; done
+left_pad=$(printf "%-25s" "$left"); right_pad=$(printf "%-25s" "$right")
+if curl -sL --connect-timeout 3 --max-time 5 --speed-time 3 --speed-limit 1 --range 0-65535 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o /dev/null "https://$left" >/dev/null 2>&1
+then left_color="[${GREEN}OK${NC}]  "; else left_color="[${RED}FAIL${NC}]"; fi; if [ -n "$right" ]
+then if curl -sL --connect-timeout 3 --max-time 5 --speed-time 3 --speed-limit 1 --range 0-65535 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o /dev/null "https://$right" >/dev/null 2>&1
+then right_color="[${GREEN}OK${NC}]  "; else right_color="[${RED}FAIL${NC}]"; fi; echo -e "$left_color $left_pad $right_color $right_pad"; else echo -e "$left_color $left_pad"; fi; done
