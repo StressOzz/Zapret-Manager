@@ -75,6 +75,8 @@ nalog.ru
 lkfl2.nalog.ru
 rutube.ru
 youtube.com
+redirector.googlevideo.com/report_mapping
+facebook.com
 instagram.com
 rutor.info
 ntc.party
@@ -95,6 +97,8 @@ genderize.io
 ottai.com
 kinozal.tv
 cub.red
+mobile.de
+exleasingcar.com
 EOF
 )
 sites_clean=$(echo "$SITES" | grep -v '^#' | grep -v '^\s*$'); total=$(echo "$sites_clean" | wc -l); half=$(( (total + 1) / 2 ))
