@@ -75,7 +75,6 @@ nalog.ru
 lkfl2.nalog.ru
 rutube.ru
 youtube.com
-redirector.googlevideo.com/report_mapping
 facebook.com
 instagram.com
 rutor.info
@@ -84,6 +83,7 @@ rutracker.org
 epidemz.net.co
 nnmclub.to
 openwrt.org
+github.com
 sxyprn.net
 spankbang.com
 pornhub.com
@@ -99,6 +99,7 @@ kinozal.tv
 cub.red
 mobile.de
 exleasingcar.com
+redirector.googlevideo.com/report_mapping
 EOF
 )
 sites_clean=$(echo "$SITES" | grep -v '^#' | grep -v '^\s*$'); total=$(echo "$sites_clean" | wc -l); half=$(( (total + 1) / 2 ))
