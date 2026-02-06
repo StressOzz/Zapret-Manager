@@ -77,7 +77,7 @@ wget -O /tmp/Zapret-Manager.sh https://raw.githubusercontent.com/StressOzz/Zapre
 Установка **Zapret** под ключ - автоматически и без пауз выполняются пункты меню - **5** → **1** → **2** → **7** → **6** 
 - Удаляет Zapret
 - Устанавливает последнюю версию Zapret
-- Устанавливает стратегию **v6**
+- Устанавливает стратегию **v9**
 - Устанавливает скрипт **50-stun4all**
 - Добавляет в стратегию настройки для игр
 - Добавляет домены **AI**, **rutor.info**, **ntc.party**, **rutracker.org**, **lib.rus.ec**, **Instagram**  в `hosts`
@@ -89,6 +89,13 @@ wget -O /tmp/Zapret-Manager.sh https://raw.githubusercontent.com/StressOzz/Zapre
 - Заработает **Discord** (возможно придётся настроить через **пункт 7**)
 - Заработают сетевые режимы в играх: **Battlefield 6**, **Apex Legend**, **Roblox** и в других...
 - Без **VPN** откроется доступ к **AI** сервисам
+
+---
+
+для **v8** в терминале Windows выполнить:
+```
+netsh int tcp set global timestamps=enabled
+```
 
 ---
 
