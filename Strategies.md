@@ -188,6 +188,16 @@
 --dpi-desync-fake-tls-mod=none
 ```
 ---
+# v9
+```
+--filter-tcp=443
+--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
+--dpi-desync=hostfakesplit
+--dpi-desync-fooling=badseq,badsum
+--dpi-desync-hostfakesplit-mod=host=mapgl.2gis.com
+--dpi-desync-badseq-increment=0
+```
+---
 # Стратегия для игр
 
 - в **NFQWS_PORTS_UDP** добавить `1024-65535`
