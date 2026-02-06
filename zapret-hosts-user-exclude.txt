@@ -99,10 +99,11 @@ steamcdn-a.akamaihd.net.edgesuite.net
 steamcloudsweden.blob.core.windows.net
 steamcommunity-a.akamaihd.net.edgesuite.net
 #################################### OpenWRT
+gitlab.io
+github.io
 github.com
 openwrt.org
 lede-project.org
-gitlab.io
 githubusercontent.com
 #################################### UbisoftConnect
 ubi.com
