@@ -9,6 +9,7 @@ xsolla.com
 ip-api.com
 gstatic.com
 ipstream.one
+voidboost.cc
 #################################### Epicgames
 easy.ac
 fab.com
