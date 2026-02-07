@@ -80,8 +80,6 @@
 --new
 --filter-tcp=443
 --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
---dpi-desync-any-protocol=1
---dpi-desync-cutoff=n5
 --dpi-desync=multisplit
 --dpi-desync-split-seqovl=582
 --dpi-desync-split-pos=1
