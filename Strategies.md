@@ -4,21 +4,9 @@
 # v1
 ```
 --filter-tcp=443
---hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
---dpi-desync=fake,multidisorder
+--dpi-desync=split2
 --dpi-desync-split-seqovl=681
---dpi-desync-split-pos=1
---dpi-desync-fooling=badseq
---dpi-desync-badseq-increment=10000000
---dpi-desync-repeats=2
---dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
---dpi-desync-fake-tls-mod=rnd,dupsid,sni=fonts.google.com
---new
---filter-udp=443
---hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
---dpi-desync=fake
---dpi-desync-repeats=4
---dpi-desync-fake-quic=/opt/zapret/files/fake/quic_initial_www_google_com.bin
+--dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/stun.bin
 ```
 ---
 # v2
