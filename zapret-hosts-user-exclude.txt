@@ -6,6 +6,7 @@ qwen.ai
 ottai.com
 trovo.live
 xsolla.com
+ip-api.com
 gstatic.com
 ipstream.one
 #################################### Epicgames
