@@ -85,7 +85,7 @@
 --dpi-desync=multisplit
 --dpi-desync-split-seqovl=582
 --dpi-desync-split-pos=1
---dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/4pda.bin
+--dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/stun.bin
 --new
 --filter-udp=443
 --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
