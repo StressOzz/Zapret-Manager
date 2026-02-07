@@ -4,6 +4,7 @@
 # v1
 ```
 --filter-tcp=443
+--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
 --dpi-desync=split2
 --dpi-desync-split-seqovl=681
 --dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/stun.bin
