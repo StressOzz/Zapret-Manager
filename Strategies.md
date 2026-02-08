@@ -94,12 +94,10 @@
 --filter-tcp=443
 --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
 --dpi-desync=fake,fakeddisorder
---dpi-desync-split-pos=10,midsld
---dpi-desync-fake-tls=/opt/zapret/files/fake/max.bin
---dpi-desync-fake-tls-mod=rnd,dupsid
---dpi-desync-fake-tls=0x0F0F0F0F
+--dpi-desync-split-pos=1
+--dpi-desync-fake-tls=/opt/zapret/files/fake/stun.bin
 --dpi-desync-fake-tls-mod=none
---dpi-desync-fakedsplit-pattern=/opt/zapret/files/fake/tls_clienthello_vk_com.bin
+--dpi-desync-fakedsplit-pattern=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
 --dpi-desync-fooling=badseq,badsum
 --dpi-desync-badseq-increment=0
 --new
@@ -121,7 +119,7 @@
 --filter-tcp=443
 --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
 --dpi-desync=hostfakesplit
---dpi-desync-hostfakesplit-mod=host=rzd.ru
+--dpi-desync-hostfakesplit-mod=host=i2.photo.2gis.com
 --dpi-desync-hostfakesplit-midhost=host-2
 --dpi-desync-split-seqovl=726
 --dpi-desync-fooling=badsum,badseq
