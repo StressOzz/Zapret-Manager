@@ -320,4 +320,6 @@ samsungosp.com
 samsungqbe.com
 amazontrust.com
 samsungcloudsolution.com
+#################################### Rockstar
+rockstargames.com
 ####################################
