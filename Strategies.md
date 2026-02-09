@@ -137,7 +137,6 @@
 --dpi-desync-split-seqovl=654
 --dpi-desync-split-pos=1
 --dpi-desync-fooling=badseq,badsum
---dpi-desync-repeats=8
 --dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/stun.bin
 --dpi-desync-fake-tls=/opt/zapret/files/fake/stun.bin
 --dpi-desync-badseq-increment=0
@@ -159,7 +158,6 @@
 --filter-tcp=443
 --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
 --dpi-desync=fake
---dpi-desync-repeats=6
 --dpi-desync-fooling=ts
 --dpi-desync-fake-tls=/opt/zapret/files/fake/4pda.bin
 --dpi-desync-fake-tls-mod=none
