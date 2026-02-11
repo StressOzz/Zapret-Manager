@@ -10,6 +10,10 @@ ip-api.com
 gstatic.com
 ipstream.one
 voidboost.cc
+#################################### VK
+vk.com
+mycdn.me
+userapi.com
 #################################### Epicgames
 easy.ac
 fab.com
