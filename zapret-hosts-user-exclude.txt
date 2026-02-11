@@ -323,4 +323,12 @@ amazontrust.com
 samsungcloudsolution.com
 #################################### Rockstar
 rockstargames.com
+#################################### Tuya
+tuya.com
+tuyaeu.com
+lifeaiot.com
+tuyaedge.com
+tuyacloud.com
+smart-life.com
+smartlifeconnect.com
 ####################################
