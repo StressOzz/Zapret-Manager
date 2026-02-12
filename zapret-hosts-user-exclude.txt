@@ -10,6 +10,7 @@ ip-api.com
 gstatic.com
 ipstream.one
 voidboost.cc
+eu-central-1.amazonaws.com # ТЕСТ
 #################################### VK
 vk.com
 mycdn.me
@@ -329,10 +330,16 @@ samsungcloudsolution.com
 rockstargames.com
 #################################### Tuya
 tuya.com
+iot334.com
 tuyaeu.com
 lifeaiot.com
 tuyaedge.com
 tuyacloud.com
 smart-life.com
 smartlifeconnect.com
+#################################### TLC
+tcl.com
+tcljd.com
+tclhome.com
+tclclouds.com
 ####################################
