@@ -10,7 +10,9 @@ ip-api.com
 gstatic.com
 ipstream.one
 voidboost.cc
-eu-central-1.amazonaws.com # ТЕСТ
+akamaihd.net
+amazonaws.com
+akamaized.net
 #################################### VK
 vk.com
 mycdn.me
@@ -43,24 +45,29 @@ shadowcomplex.com
 battlebreakers.com
 capturingreality.com
 unrealtournament.com
-epicgames-download1.akamaized.net
 #################################### Steam
 s.team
 steam.tv
 valve.net
+clngaa.com
+qtlglb.com
+comcast.net
 steamcdn.com
 steamcdn.net
 steamstat.us
 valvecdn.com
+queniuqe.com
 steam-api.com
 steamchat.com
 steamdeck.com
+edgesuite.net
 steam-chat.com
 steamgames.com
 steamgames.net
 underlords.com
 steamserver.net
 steamstatic.com
+slingshot.co.nz
 playartifact.com
 steam.cdn.on.net
 steamcontent.com
@@ -70,41 +77,10 @@ valvesoftware.com
 valvesoftware.net
 steambroadcast.com
 steamcommunity.com
-dl.steam.clngaa.com
-steam.ru.qtlglb.com
-steam.eca.qtlglb.com
 steamusercontent.com
-steam.apac.qtlglb.com
-steam.naeu.qtlglb.com
-cdn.steamcommunity.com
 gstore.val.manlaxy.com
-partner.steamgames.com
 steam.cdn.orcon.net.nz
-steamcdn-a.akamaihd.net
-steampipe.akamaized.net
-steamcdn-a.akamaized.net
 steamdeckusercontent.com
-steam.cdn.slingshot.co.nz
-steammobile.akamaized.net
-steamstatic.akamaized.net
-steamstore-a.akamaihd.net
-steamvideo-a.akamaihd.net
-client-update.queniuqe.com
-steamdeckcdn.akamaized.net
-steampipe-kr.akamaized.net
-steamcontent-a.akamaihd.net
-steambroadcast.akamaized.net
-steamcommunity.akamaized.net
-scontent.steamusercontent.com
-steamcommunity-a.akamaihd.net
-edge.steam-dns.top.comcast.net
-steamcommunity-a.akamaized.net
-steamuserimages-a.akamaihd.net
-steampipe-partner.akamaized.net
-steamusercontent-a.akamaihd.net
-steamcdn-a.akamaihd.net.edgesuite.net
-steamcloudsweden.blob.core.windows.net
-steamcommunity-a.akamaihd.net.edgesuite.net
 #################################### OpenWRT
 gitlab.io
 github.io
@@ -116,8 +92,6 @@ githubusercontent.com
 ubi.com
 ubisoft.com
 ubisoftconnect.com
-connect.ubisoft.comubisoft-orbit-savegames.s3.amazonaws.com
-ubisoft-uplay-savegames.s3.amazonaws.com
 #################################### Aliexpress
 ae.com
 ae-rus.net
@@ -161,7 +135,6 @@ akamaihd.net
 myqcloud.com
 riotgames.com
 playvalorant.com
-wildrift-na.akamaized.net
 #################################### TikTok
 musical.ly
 tiktok.com
@@ -186,9 +159,6 @@ tiktokcdn-us.com
 tiktokeu-cdn.com
 tiktokrow-cdn.com
 tiktokglobalshopv.com
-tiktokcdn.com.akamaized.net
-tiktokcdn.com.edgesuite.net
-tiktokcdn-us.com.edgesuite.net
 #################################### Hoyoverse
 hoyo.link
 hoyolab.com
@@ -342,4 +312,12 @@ tcl.com
 tcljd.com
 tclhome.com
 tclclouds.com
+#################################### Call Of Duty
+azure.com
+akamai.net
+demonware.net
+callofduty.com
+activision.com
+akamaiedge.net
+cloudfront.net
 ####################################
