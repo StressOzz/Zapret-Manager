@@ -337,7 +337,7 @@ doh_mafioznik=$(printf "%s\n" "" "config https-dns-proxy" "	option resolver_url 
 # ==========================================
 web_is_enabled() { command -v ttyd >/dev/null 2>&1 && uci -q get ttyd.@ttyd[0].command | grep -q "/usr/bin/zms"; }
 toggle_web() { if web_is_enabled; then echo -e "\n${MAGENTA}Удаляем доступ из браузера${NC}"; if [ "$PKG_IS_APK" -eq 1 ]; then apk del luci-app-ttyd ttyd >/dev/null 2>&1; else opkg remove luci-app-ttyd ttyd >/dev/null 2>&1; fi
-rm -f /etc/config/ttyd; rm -f /usr/bin/zms; echo -e "${GREEN}Доступ удалён!${NC}\n"; PAUSE; else echo -e "\n${MAGENTA}Активируем доступ из браузера${NC}"; echo -e "${CYAN}Обновляем список пакетов${NC}"; if [ "$PKG_IS_APK" -eq 1 ]
+rm -f /etc/config/ttyd; echo -e "${GREEN}Доступ удалён!${NC}\n"; PAUSE; else echo -e "\n${MAGENTA}Активируем доступ из браузера${NC}"; echo -e "${CYAN}Обновляем список пакетов${NC}"; if [ "$PKG_IS_APK" -eq 1 ]
 then if ! apk update >/dev/null 2>&1; then echo -e "\n${RED}Ошибка при обновлении apk!${NC}\n"; PAUSE; return; fi; else if ! opkg update >/dev/null 2>&1; then echo -e "\n${RED}Ошибка при обновлении opkg!${NC}\n"; PAUSE; return; fi; fi
 echo -e "${CYAN}Устанавливаем ${NC}ttyd"; if [ "$PKG_IS_APK" -eq 1 ]; then if ! apk add luci-app-ttyd >/dev/null 2>&1; then echo -e "\n${RED}Ошибка при установке ttyd!${NC}\n"; PAUSE; return; fi; else if ! opkg install luci-app-ttyd >/dev/null 2>&1
 then echo -e "\n${RED}Ошибка при установке ttyd!${NC}\n"; PAUSE; return; fi; fi; echo -e "${CYAN}Настраиваем ${NC}ttyd"; sed -i 's#/bin/login#-t fontSize=15 sh /usr/bin/zms#' /etc/config/ttyd; /etc/init.d/ttyd restart >/dev/null 2>&1; if pidof ttyd >/dev/null
