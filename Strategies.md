@@ -127,6 +127,7 @@
 --dpi-desync-fake-tls=0x0F0F0F0F
 --dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=ggpht.com
+--dpi-desync-repeats=6
 --dpi-desync-split-seqovl=620
 --dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
 --dpi-desync-fooling=badsum,badseq
@@ -137,6 +138,7 @@
 --dpi-desync-split-seqovl=654
 --dpi-desync-split-pos=1
 --dpi-desync-fooling=badseq,badsum
+--dpi-desync-repeats=6
 --dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/stun.bin
 --dpi-desync-fake-tls=/opt/zapret/files/fake/stun.bin
 --dpi-desync-badseq-increment=0
