@@ -292,9 +292,23 @@ hg-cdn.com
 helpshift.com
 gryphline.com
 #################################### Samsung
+sbixby.com
+secb2b.com
+samsung.com
+bixbyllm.com
+samsungdm.com
+ospserver.net
+samsunggsl.com
 samsungosp.com
 samsungqbe.com
+samsungapps.com
+samsungknox.com
 amazontrust.com
+samsungcloud.com
+samsunghealth.com
+samsungmobile.com
+samsung-sm-ds.com
+samsungcloudplatform.com
 samsungcloudsolution.com
 #################################### Rockstar
 rockstargames.com
