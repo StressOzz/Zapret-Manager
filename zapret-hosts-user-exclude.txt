@@ -1,7 +1,6 @@
 ru
 рф
 su
-vk.com
 qwen.ai
 ottai.com
 trovo.live
@@ -131,7 +130,6 @@ adjust.com
 riotcdn.net
 adobess.com
 valorant.com
-akamaihd.net
 myqcloud.com
 riotgames.com
 playvalorant.com
