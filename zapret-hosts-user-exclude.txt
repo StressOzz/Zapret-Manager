@@ -9,9 +9,7 @@ ip-api.com
 gstatic.com
 ipstream.one
 voidboost.cc
-akamaihd.net
-amazonaws.com
-akamaized.net
+moondroplab.tech
 #################################### VK
 vk.com
 mycdn.me
@@ -301,7 +299,6 @@ samsungosp.com
 samsungqbe.com
 samsungapps.com
 samsungknox.com
-amazontrust.com
 samsungcloud.com
 samsunghealth.com
 samsungmobile.com
@@ -326,10 +323,19 @@ tclhome.com
 tclclouds.com
 #################################### Call Of Duty
 azure.com
-akamai.net
 demonware.net
 callofduty.com
 activision.com
-akamaiedge.net
 cloudfront.net
+#################################### Amazon
+amazon.dev
+amazon.com
+amazonaws.com
+amazontrust.com
+media-amazon.com
+#################################### Akamai
+akamai.net
+akamaihd.net
+akamaized.net
+akamaiedge.net
 ####################################
