@@ -338,4 +338,17 @@ akamai.net
 akamaihd.net
 akamaized.net
 akamaiedge.net
+#################################### Reddit
+redd.it
+reddit.com
+redditstatic.com
+redditspace.com
+redditmedia.com
+####################################  LG WebOs
+lge.com
+lgeapi.com
+lgtvsdp.com
+lgappstv.com
+nextlgsdp.com
+lgtvcommon.com
 ####################################
