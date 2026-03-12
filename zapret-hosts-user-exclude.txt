@@ -2,6 +2,7 @@ ru
 рф
 su
 qwen.ai
+avito.st
 ottai.com
 trovo.live
 xsolla.com
