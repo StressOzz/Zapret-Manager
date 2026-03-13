@@ -9,6 +9,7 @@ xsolla.com
 ip-api.com
 gstatic.com
 lichess.org
+premier.one
 ipstream.one
 voidboost.cc
 moondroplab.tech
