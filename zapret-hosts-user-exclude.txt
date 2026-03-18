@@ -354,4 +354,10 @@ lgtvsdp.com
 lgappstv.com
 nextlgsdp.com
 lgtvcommon.com
+#################################### Сursor
+cursor.sh
+cursor.com
+cursorapi.com
+todesktop.com
+cursor-cdn.com
 ####################################
