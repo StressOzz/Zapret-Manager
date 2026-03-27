@@ -4,6 +4,7 @@ su
 qwen.ai
 avito.st
 ottai.com
+ufanet.tv
 trovo.live
 xsolla.com
 ip-api.com
