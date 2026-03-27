@@ -361,4 +361,7 @@ cursor.com
 cursorapi.com
 todesktop.com
 cursor-cdn.com
+#################################### Warface
+qq.com
+qcloud.com
 ####################################
