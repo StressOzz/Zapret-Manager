@@ -1,4 +1,4 @@
-<h1 align="center"> Инструкция по настройке Zapret от remittor и Telegramm при помощи Zapret Manager</h1>
+<h1 align="center"> Инструкция по настройке Zapret от remittor и Telegram при помощи Zapret Manager</h1>
 
 > [!IMPORTANT]
 > Данный способ **не гарантирует 100% работу** !!!
