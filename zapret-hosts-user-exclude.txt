@@ -364,4 +364,11 @@ cursor-cdn.com
 #################################### Warface
 qq.com
 qcloud.com
+#################################### EA Games
+ea.com
+swtor.com
+origin.com
+tnt-ea.com
+easports.com
+eamobile.com
 ####################################
