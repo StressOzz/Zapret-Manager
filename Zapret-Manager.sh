@@ -535,26 +535,8 @@ echo -en "\n${YELLOW}Выберите зеркало: ${NC}"; read -r z; case "$
 # ==========================================
 # TG WS Proxy Go
 # ==========================================
-get_arch() {
-    if command -v opkg >/dev/null 2>&1; then
-        ARCH="$(opkg print-architecture | awk '{print $2}' | tail -n1)"
-
-    elif command -v apk >/dev/null 2>&1; then
-        ARCH="$(apk --print-arch 2>/dev/null)"
-
-    else
-        ARCH="$(uname -m)"
-    fi
-
-    case "$ARCH" in
-        aarch64) echo "tg-ws-proxy-openwrt-aarch64" ;;
-        armv7*|armhf|armv7l) echo "tg-ws-proxy-openwrt-armv7" ;;
-        mipsel_24kc|mipsel) echo "tg-ws-proxy-openwrt-mipsel_24kc" ;;
-        mips_24kc|mips) echo "tg-ws-proxy-openwrt-mips_24kc" ;;
-        x86_64) echo "tg-ws-proxy-openwrt-x86_64" ;;
-        *) echo "Неизвестная архитектура: $ARCH"; return 1 ;;
-    esac
-}
+get_arch() { if command -v opkg >/dev/null 2>&1; then ARCH="$(opkg print-architecture | awk '{print $2}' | tail -n1)"; elif command -v apk >/dev/null 2>&1; then ARCH="$(apk --print-arch 2>/dev/null)"; fi; case "$ARCH" in aarch64) echo "tg-ws-proxy-openwrt-aarch64";;
+armv7*|armhf|armv7l) echo "tg-ws-proxy-openwrt-armv7";; mipsel_24kc|mipsel) echo "tg-ws-proxy-openwrt-mipsel_24kc";; mips_24kc|mips) echo "tg-ws-proxy-openwrt-mips_24kc";; x86_64) echo "tg-ws-proxy-openwrt-x86_64";; *) echo "Неизвестная архитектура: $ARCH"; return 1;; esac; }
 remove_TG() { echo -e "\n${MAGENTA}Удаляем TG WS Proxy Go${NC}"; /etc/init.d/tg-ws-proxy-go stop >/dev/null 2>&1; /etc/init.d/tg-ws-proxy-go disable >/dev/null 2>&1; rm -f "$BIN_PATH"; rm -f "$INIT_PATH"; echo -e "TG WS Proxy Go ${GREEN}удалён!\n${NC}"; }
 install_TG() { echo -e "\n${MAGENTA}Установка TG WS Proxy Go${NC}"; ARCH_FILE="$(get_arch)" || { echo -e "\n${RED}Неизвестная архитектура:${NC} $(uname -m)"; exit 1; }; echo -e "${CYAN}Скачиваем и устанавливаем${NC} $ARCH_FILE"; 
 LATEST_TAG="$(curl -Ls -o /dev/null -w '%{url_effective}' https://github.com/d0mhate/-tg-ws-proxy-Manager-go/releases/latest | sed 's#.*/tag/##')"; DOWNLOAD_URL="https://github.com/d0mhate/-tg-ws-proxy-Manager-go/releases/download/$LATEST_TAG/$ARCH_FILE"; 
