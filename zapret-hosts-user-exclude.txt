@@ -371,4 +371,9 @@ origin.com
 tnt-ea.com
 easports.com
 eamobile.com
+#################################### IP Camera
+av380.net
+hiseese.com
+icloseli.com
+ucloudcam.com
 ####################################
