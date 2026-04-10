@@ -3,6 +3,7 @@ ru
 su
 qwen.ai
 avito.st
+nexon.com
 ottai.com
 ufanet.tv
 trovo.live
