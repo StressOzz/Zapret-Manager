@@ -12,6 +12,7 @@ gstatic.com
 lichess.org
 premier.one
 ipstream.one
+godville.net
 voidboost.cc
 moondroplab.tech
 #################################### VK
