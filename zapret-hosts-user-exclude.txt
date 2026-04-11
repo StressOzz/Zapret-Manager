@@ -379,5 +379,12 @@ hiseese.com
 icloseli.com
 ucloudcam.com
 #################################### The Finals
-codefusion.technology
+ac-upd.codefusion.technology
+ac-trg.codefusion.technology
+ac-rep.codefusion.technology
+ac-knock.codefusion.technology
+ac-prp-ap.codefusion.technology
+ac-survey.codefusion.technology
+ac-fallback.codefusion.technology
+ac-fileshare.codefusion.technology
 ####################################
