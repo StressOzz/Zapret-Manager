@@ -3,7 +3,9 @@ ru
 su
 qwen.ai
 avito.st
+habr.com
 nexon.com
+boosty.to
 ottai.com
 ufanet.tv
 trovo.live
@@ -387,4 +389,11 @@ ac-prp-ap.codefusion.technology
 ac-survey.codefusion.technology
 ac-fallback.codefusion.technology
 ac-fileshare.codefusion.technology
+#################################### Wordpress
+wp.com
+9to5mac.com
+wptavern.com
+wordpress.com
+9to5google.com
+techcrunch.com
 ####################################
