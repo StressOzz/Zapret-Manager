@@ -112,16 +112,26 @@ zms
 
 ---
 
-[<img width="190" height="175" alt="donate-button-click-donation-charity-600nw-2339825981" src="https://github.com/user-attachments/assets/2999757b-fbf3-4149-bf6c-48bf3e241529" />](https://github.com/StressOzz#-поддержать-проект)
+<table>
+  <tr>
+    <td>
+      <a href="https://github.com/StressOzz#-поддержать-проект">
+        <img width="280" height="130" src="https://github.com/user-attachments/assets/2999757b-fbf3-4149-bf6c-48bf3e241529">
+      </a>
+    </td>
+    <td>
+      <a href="https://github.com/StressOzz/StressKVN">
+        <img width="270" height="80" src="https://github.com/user-attachments/assets/7dbb964b-bb79-461a-9f47-9ca73323ebac">
+      </a>
+    </td>
+  </tr>
+</table>
 
 ---
 
 ## 🔹 Настройка Telegram
 
 **Пункт 5** —  установка или удаление **TG WS Proxy**
-> **TG WS Proxy Go** для архитектур **aarch64**, **armv7**, **x86_64**, **mipsel** и **mips**
->
-> **TG WS Proxy Rust** для архитектур **aarch64**, **armv7**, **x86_64** и **mipsel**
 
 В **Telegram Desktop**:
 - Настройки **→** Продвинутые настройки **→** Тип соеденения **→** Добавить прокси
