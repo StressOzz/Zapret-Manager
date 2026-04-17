@@ -1,7 +1,10 @@
 ru
 рф
 su
+#################################### Разное
+hf.co
 qwen.ai
+iiko.it
 avito.st
 habr.com
 nexon.com
