@@ -5,6 +5,7 @@ su
 hf.co
 qwen.ai
 iiko.it
+okko.tv
 avito.st
 habr.com
 nexon.com
@@ -12,6 +13,7 @@ boosty.to
 ottai.com
 ufanet.tv
 trovo.live
+beeline.tv
 xsolla.com
 ip-api.com
 gstatic.com
@@ -21,6 +23,7 @@ ipstream.one
 godville.net
 voidboost.cc
 moondroplab.tech
+rockstargames.com
 #################################### VK
 vk.cc
 vk.me
@@ -287,10 +290,6 @@ myhuaweicloud.com
 huaweicloud-dns.cn
 huaweicloud-dns.com
 huaweicloud-dns.org
-#################################### Okko
-okko.tv
-#################################### Beeline
-beeline.tv
 #################################### Delta Force
 volces.com
 wetest.net
@@ -346,8 +345,6 @@ samsungmobile.com
 samsung-sm-ds.com
 samsungcloudplatform.com
 samsungcloudsolution.com
-#################################### Rockstar
-rockstargames.com
 #################################### Tuya
 tuya.com
 iot334.com
