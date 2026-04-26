@@ -364,7 +364,7 @@ azure.com
 demonware.net
 callofduty.com
 activision.com
-cloudfront.net
+# cloudfront.net
 #################################### Amazon
 amazon.dev
 amazon.com
