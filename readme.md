@@ -1,4 +1,4 @@
-<h1 align="center">Универсальный менеджер обхода блокировок для OpenWrt</h1>
+<h1 align="center">Универсальный менеджер для обхода блокировок на OpenWrt</h1>
 
 <div align="center">
 
