@@ -111,7 +111,7 @@ zms
 
 Если у Вас не запускается **Youtube** на каком-либо устройстве, то попробуйте подобрать стратегию только для **YouTube**.
 
-### В скрипте, в 3 пункте - Тестировать стратегии для `YouTube` и Тестировать `v` и `Flowseal` стратегии
+В скрипте, в 3 пункте - Тестировать стратегии для `YouTube` и Тестировать `v` и `Flowseal` стратегии
 
 - [Cтратегии для Youtube](https://github.com/StressOzz/Zapret-Manager/blob/main/Strategies_For_Youtube.md)
 - [Cтратегии используемые в скрипте](https://github.com/StressOzz/Zapret-Manager/blob/main/Strategies.md)
