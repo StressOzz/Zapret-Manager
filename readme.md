@@ -1,11 +1,16 @@
 <h1 align="center">Универсальный менеджер обхода блокировок для OpenWrt</h1>
 
+<div align="center">
+
 ![Platform](https://img.shields.io/badge/Platform-OpenWrt-orange)
 ![Architecture](https://img.shields.io/badge/Architecture-All%20(OpenWrt)-yellow)
-![Script](https://img.shields.io/badge/script-sh%20(ash)-informational)
-![Status](https://img.shields.io/badge/Status-active-success)
-![Community](https://img.shields.io/badge/community-enabled-brightgreen)
+![Script](https://img.shields.io/badge/Script-sh-informational)
+![Status](https://img.shields.io/badge/Status-Active-success)
+![Community](https://img.shields.io/badge/Community-Enabled-green)
+![Version](https://img.shields.io/badge/Version-v9.5-blue)
 ![GitHub last commit](https://img.shields.io/github/last-commit/StressOzz/Zapret-Manager)
+
+</div>
 
 # Оглавление
 - [Возможности](#-возможности)
@@ -44,6 +49,7 @@
 - Сменить источник (выбрать зеркало) для пакетов **OpenWRT**
 - Установить **TG WS Proxy** для **Telegram**
 - Установить **Podkop Evolution**
+- Интегрировать [**VPN подпику**](https://github.com/StressOzz/StressKVN) или **WARP** в **Podkop Evolution**
 
 ---
 
@@ -89,7 +95,7 @@ zms
 
 ## 🔹 Быстрый старт
 
-**Пункт 9** — **Удалить → установить → настроить Zapret**
+**Пункт 9** - **Удалить → установить → настроить Zapret**
 
 Установка **Zapret** под ключ:
 - Удаляет Zapret
@@ -131,7 +137,7 @@ zms
 
 ## 🔹 Настройка Telegram
 
-**Пункт 4** —  установка или удаление **TG WS Proxy**
+**Пункт 4** -  установка или удаление **TG WS Proxy**
 
 В **Telegram Desktop**:
 - Настройки **→** Продвинутые настройки **→** Тип соеденения **→** Добавить прокси
