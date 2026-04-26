@@ -1,9 +1,7 @@
 <h1 align="center">Универсальный менеджер обхода блокировок для OpenWrt</h1>
 
-![OpenWrt](https://img.shields.io/badge/OpenWrt-supported-blue?logo=openwrt)
 ![Platform](https://img.shields.io/badge/Platform-OpenWrt-orange)
 ![Architecture](https://img.shields.io/badge/Architecture-All%20(OpenWrt)-yellow)
-![Shell](https://img.shields.io/badge/Shell-BusyBox/ash-green?logo=gnu-bash)
 ![Script](https://img.shields.io/badge/script-sh%20(ash)-informational)
 ![Status](https://img.shields.io/badge/Status-active-success)
 ![Community](https://img.shields.io/badge/community-enabled-brightgreen)
@@ -13,10 +11,9 @@
 - [Возможности](#-возможности)
 - [Подготовка системы](#-подготовка-системы)
 - [Запуск менеджера](#-запуск-менеджера)
-- [Быстрый старт и пункты меню](#-быстрый-старт)
+- [Быстрый старт](#-быстрый-старт)
 - [Настройка Telegram](#-настройка-telegram)
-- [Cтратегии для Youtube](#-стратегии-для-youtube)
-- [Cтратегии используемые в скрипте](#-стратегии-используемые-в-скрипте)
+- [Cтратегии](#-стратегии)
 - [Дерево меню Zapret Manager](#-дерево-меню-zapret-manager)
 - [Благодарности](#благодарности)
 - [Поддержать проект](https://github.com/StressOzz)
@@ -58,8 +55,9 @@
 >netsh int tcp set global timestamps=enabled
 >```
 
-- Если у Вас установлен **ByeDPI** или **youtubeUnblock** скрипт выдаст сообщение
-- Если у Вас включён **Flow offloading** скрипт выдаст сообщение и в `Системном меню`, появится пункт **0** - **Применить FIX**
+- Если у Вас установлен **ByeDPI** или **youtubeUnblock** скрипт выдаст сообщение.
+- Если у Вас включён **Flow offloading** скрипт выдаст сообщение и в `Системном меню`, появится пункт **0** - **Применить FIX**.
+- [**Podkop** берёт на себя роль DNS-резолвера](https://podkop.net/docs/dns/), поэтому с установленным `DNS over HTTPS` [**Podkop не установится!**](https://podkop.net/docs/install/#nesovmestimost)
 
 ---
 
@@ -103,19 +101,14 @@ zms
 
 >⚠️ Использовать только для полной переустановки и настройки Zapret.
 
-## 🔹 Стратегии для Youtube
+## 🔹 Стратегии
 
 Если у Вас не запускается **Youtube** на каком-либо устройстве, то попробуйте подобрать стратегию только для **YouTube**.
 
-### В скрипте, в 3 пункте - Тестировать стратегии для `YouTube`
+### В скрипте, в 3 пункте - Тестировать стратегии для `YouTube` и Тестировать `v` и `Flowseal` стратегии
 
-[Cтратегии для Youtube](https://github.com/StressOzz/Zapret-Manager/blob/main/Strategies_For_Youtube.md)
-
-## 🔹 Стратегии используемые в скрипте
-
-### В скрипте, в 3 пункте есть  - Тестировать `v` и `Flowseal` стратегии
-
-[Cтратегии используемые в скрипте](https://github.com/StressOzz/Zapret-Manager/blob/main/Strategies.md)
+- [Cтратегии для Youtube](https://github.com/StressOzz/Zapret-Manager/blob/main/Strategies_For_Youtube.md)
+- [Cтратегии используемые в скрипте](https://github.com/StressOzz/Zapret-Manager/blob/main/Strategies.md)
 
 ---
 
