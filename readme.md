@@ -1,7 +1,13 @@
-<h1 align="center"> Инструкция по настройке Zapret от remittor и Telegram при помощи Zapret Manager</h1>
+<h1 align="center">Универсальный менеджер обхода блокировок для OpenWrt</h1>
 
-> [!IMPORTANT]
-> Данный способ **не гарантирует 100% работу** !!!
+![OpenWrt](https://img.shields.io/badge/OpenWrt-supported-blue?logo=openwrt)
+![Platform](https://img.shields.io/badge/Platform-OpenWrt-orange)
+![Architecture](https://img.shields.io/badge/Architecture-All%20(OpenWrt)-yellow)
+![Shell](https://img.shields.io/badge/Shell-BusyBox/ash-green?logo=gnu-bash)
+![Script](https://img.shields.io/badge/script-sh%20(ash)-informational)
+![Status](https://img.shields.io/badge/Status-active-success)
+![Community](https://img.shields.io/badge/community-enabled-brightgreen)
+![GitHub last commit](https://img.shields.io/github/last-commit/StressOzz/Zapret-Manager)
 
 # Оглавление
 - [Возможности](#-возможности)
