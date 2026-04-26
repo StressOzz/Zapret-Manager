@@ -40,6 +40,7 @@
 - Разблокировать разрешение на **Twitch**
 - Сменить источник (выбрать зеркало) для пакетов **OpenWRT**
 - Установить **TG WS Proxy** для **Telegram**
+- Установить **Podkop Evolution**
 
 ---
 
@@ -68,7 +69,7 @@ sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Z
 wget -O /tmp/Zapret-Manager.sh https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh && sh /tmp/Zapret-Manager.sh
 ```
 
-После запуска скрипта по команде выше, в **SSH** скрипт можно запускать командой:
+После запуска скрипта по команде выше, скрипт можно запускать в **SSH** командой:
 ```
 zms
 ```
@@ -89,7 +90,7 @@ zms
 Установка **Zapret** под ключ:
 - Удаляет Zapret
 - Устанавливает последнюю версию Zapret
-- Устанавливает стратегию **v1**
+- Устанавливает стратегию **v7**
 - Устанавливает скрипт **50-stun4all**
 - Добавляет в стратегию настройки для игр
 - Добавляет домены **Telegram WEB**, **AI**, **rutor.info**, **ntc.party**, **lib.rus.ec**, **Twitch**, **Instagram***  в `hosts`
@@ -100,13 +101,13 @@ zms
 
 Если у Вас не запускается **Youtube** на каком-либо устройстве, то попробуйте подобрать стратегию только для **YouTube**.
 
-### В скрипте, в 4 пункте - Тестировать стратегии для `YouTube`
+### В скрипте, в 3 пункте - Тестировать стратегии для `YouTube`
 
 [Cтратегии для Youtube](https://github.com/StressOzz/Zapret-Manager/blob/main/Strategies_For_Youtube.md)
 
 ## 🔹 Стратегии используемые в скрипте
 
-### В скрипте, в 4 пункте есть  - Тестировать `v` и `Flowseal` стратегии
+### В скрипте, в 3 пункте есть  - Тестировать `v` и `Flowseal` стратегии
 
 [Cтратегии используемые в скрипте](https://github.com/StressOzz/Zapret-Manager/blob/main/Strategies.md)
 
@@ -131,7 +132,7 @@ zms
 
 ## 🔹 Настройка Telegram
 
-**Пункт 5** —  установка или удаление **TG WS Proxy**
+**Пункт 4** —  установка или удаление **TG WS Proxy**
 
 В **Telegram Desktop**:
 - Настройки **→** Продвинутые настройки **→** Тип соеденения **→** Добавить прокси
@@ -158,9 +159,7 @@ zms
 ```text
 ┌─ 1 Установить / Удалить / Обновить Zapret
 │
-├─ 2 Запустить / Остановить Zapret
-│
-├─ 3 Меню стратегий
+├─ 2 Меню стратегий
 │  ├─ 1 Выбрать и установить стратегию v1–v9
 │  ├─ 2 Выбрать и установить стратегию от Flowseal
 │  ├─ 3 Выбрать и установить стратегию для YouTube
@@ -169,7 +168,7 @@ zms
 │  ├─ 6 Обновить список исключений
 │  └─ Enter Выход в главное меню
 │
-├─ 4 Меню тестирование стратегий
+├─ 3 Меню тестирование стратегий
 │  ├─1 Тестировать стратегии v
 │  ├─2 Тестировать стратегии Flowseal
 │  ├─3 Тестировать v и Flowseal стратегии
@@ -180,12 +179,12 @@ zms
 │  ├─0 Удалить результаты тестования
 │  └─ Enter Выход в главное меню
 │
-├─ 5 Меню TG WS Proxy 
+├─ 4 Меню TG WS Proxy 
 │  ├─1 Установить / Удалить TG WS Proxy Go
 │  ├─2 Установить / Удалить TG WS Proxy Go
 │  └─ Enter Выход в главное меню
 │
-├─ 6 Меню DNS over HTTPS
+├─ 5 Меню DNS over HTTPS
 │  ├─ 1 Установить / Удалить DNS over HTTPS
 │  ├─ 2 Настроить Comss DNS
 │  ├─ 3 Настроить Xbox DNS
@@ -194,6 +193,13 @@ zms
 │  ├─ 6 Настроить dns.mafioznik.xyz
 │  ├─ 7 Настроить dns.astracat.ru
 │  ├─ 0 Вернуть настройки DNS по умолчанию
+│  └─ Enter Выход в главное меню
+│
+├─ 6 Меню Podkop Evolution
+│  ├─ 1 Установить / Удалить / Обновить Podkop Evolution
+│  ├─ 2 Установить / Удалить AWG и интерфейс AWG
+│  ├─ 3 Интегрировать VPN подписку в Podkop Evolution / Сменить VPN подписку в Podkop Evolution
+│  ├─ 4 Интегрировать AWG в Podkop
 │  └─ Enter Выход в главное меню
 │
 ├─ 7 Меню настройки Discord
@@ -222,6 +228,8 @@ zms
 │  └─Enter Выход в главное меню
 │
 ├─ 9 Удалить → установить → настроить Zapret
+│
+├─ s/S Запустить / Остановить Zapret
 │
 └─ 0 Системное меню
    ├─ 1 Показать системную информацию
@@ -260,6 +268,8 @@ zms
 - **Стратегии от Flowseal** by [*Flowseal*](https://github.com/Flowseal)
 - **TG WS Proxy Go** by [*byd0mhate*](https://github.com/d0mhate)
 - **TG WS Proxy Rust** by [*valnesfjord*](https://github.com/valnesfjord)
+- **Podkop Evolution** by [*yandexru45*](https://github.com/yandexru45)
+- **AWG OpenWrt** by [*Slava-Shchipunov*](https://github.com/Slava-Shchipunov)
 
 ---
 
