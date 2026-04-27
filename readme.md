@@ -49,7 +49,7 @@
 - Сменить источник (выбрать зеркало) для пакетов **OpenWRT**
 - Установить **TG WS Proxy** для **Telegram**
 - Установить **Podkop Evolution**
-- Интегрировать [**VPN подпику**](https://github.com/StressOzz/StressKVN) или **WARP** в **Podkop Evolution**
+- Интегрировать [**VPN подпиcку**](https://github.com/StressOzz/StressKVN) или **WARP** в **Podkop Evolution**
 
 ---
 
