@@ -9,6 +9,7 @@ PORTS_UDP="88,1024-2407,2409-4499,4502-19293,19345-49999,50101-65535"; PORTS_TCP
 GREEN="\033[1;32m"; RED="\033[1;31m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 CONF="/etc/config/zapret"; CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"; HOSTLIST_FILE="/opt/zapret/ipset/zapret-hosts-user.txt"
 STR_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ListStrYou"
+GEO_HOSTS="https://raw.githubusercontent.com/Internet-Helper/GeoHideDNS/refs/heads/main/hosts/hosts"
 TMP_SF="/tmp/zapret_temp"; HOSTS_FILE="/etc/hosts"; TMP_LIST="$TMP_SF/zapret_yt_list.txt"; tmpDIR="/tmp/PodkopAWG"
 IF_NAME="AWG"; PROTO="amneziawg"; DEV_NAME="amneziawg0"; BASE_URL="https://github.com/Slava-Shchipunov/awg-openwrt/releases/download/"
 SAVED_STR="$TMP_SF/StrYou.txt"; HOSTS_USER="$TMP_SF/hosts-user.txt"; OUT_DPI="$TMP_SF/dpi_urls.txt"; OUT="$TMP_SF/str_flow.txt"; ZIP="$TMP_SF/repo.zip"
@@ -57,7 +58,9 @@ SPFY="#Spotify\n45.155.204.190 api.spotify.com login5.spotify.com encore.scdn.co
 45.155.204.190 api-partner.spotify.com aet.spotify.com www.spotify.com accounts.spotify.com open.spotify.com
 45.155.204.190 accounts.scdn.co gew1-dealer.spotify.com open-exp.spotifycdn.com www-growth.scdn.co"
 ALL_BLOCKS="$AI\n$INSTAGRAM\n$NTC\n$RUTOR\n$LIBRUSEC\n$TGWeb\n$TWCH\n$SCell\n$SPFY"; TMP_ARCHIVE_RS="/tmp/tg-ws-proxy-rs.tar.gz"; TMP_DIR_RS="/tmp/tg-ws-proxy-rs"
-hosts_enabled() { grep -q "45.155.204.190\|instagram.com\|rutor.info\|lib.rus.ec\|ntc.party\|twitch.tv\|web.telegram.org\|www.spotify.com\|store.supercell.com" /etc/hosts; }
+hosts_enabled() { if grep -q "dns.geohide.ru" /etc/hosts; then hosts_echo="GeoHide"; return 0
+elif grep -q "45.155.204.190\|instagram.com\|rutor.info\|lib.rus.ec\|ntc.party\|twitch.tv\|web.telegram.org\|www.spotify.com\|store.supercell.com" /etc/hosts; then
+hosts_echo="добавлены"; return 0; fi; return 1; }
 hosts_add() { printf "%b\n" "$1" | while IFS= read -r L; do grep -qxF "$L" /etc/hosts || echo "$L" >> /etc/hosts; done; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }
 ZAPRET_RESTART () { chmod +x /opt/zapret/sync_config.sh; /opt/zapret/sync_config.sh; /etc/init.d/zapret restart >/dev/null 2>&1; sleep 1; }
 PAUSE() { echo -ne "Нажмите Enter..."; read dummy; }; BACKUP_DIR="/opt/zapret_backup"; DATE_FILE="$BACKUP_DIR/date_backup.txt"
@@ -275,27 +278,24 @@ rm -rf "$TMP_SF/zapret-discord-youtube-main" "$ZIP"; [ "$NO_PAUSE" != "1" ] && e
 # ==========================================
 # Меню стратегий
 # ==========================================
-add_wssize() { echo -e "\n${MAGENTA}Добавляем блок с --wssize 1:6${NC}"; last_line=$(grep -n "^'$" "$CONF" | tail -n1 | cut -d: -f1); [ -n "$last_line" ] && sed -i "${last_line},\$d" "$CONF"; printf "%s\n" "--new" "--filter-tcp=443" "--wssize 1:6" "'" >> "$CONF"
-ZAPRET_RESTART; echo -e "${GREEN}Блок с ${NC}--wssize 1:6${GREEN} добавлен!${NC}"; echo -e "\n${YELLOW}Данный блок может ломать всю стратегию!${NC}\n"; PAUSE; }
-remove_wssize() { echo -e "\n${MAGENTA}Удаляем блок с --wssize 1:6${NC}"; awk '
-$0=="--new" && getline l1 && getline l2 {
-    if (l1=="--filter-tcp=443" && l2=="--wssize 1:6") next
-    print "--new"; print l1; print l2; next
-}
-1
-' "$CONF" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"; ZAPRET_RESTART; echo -e "${GREEN}Блок с ${NC}--wssize 1:6${GREEN} удалён!${NC}\n"; PAUSE; }
+manage_block() { action="$1"; f1="$2"; f2="$3"; if [ "$action" = "add" ]; then echo -e "\n${MAGENTA}Добавляем блок с ${f2}${NC}"; last_line=$(grep -n "^'$" "$CONF" | tail -n1 | cut -d: -f1)
+[ -n "$last_line" ] && sed -i "${last_line},\$d" "$CONF"; printf "%s\n" "--new" "$f1" "$f2" "'" >> "$CONF"; ZAPRET_RESTART; echo -e "${GREEN}Блок с ${NC}${f2}${GREEN} добавлен!${NC}"
+echo -e "\n${YELLOW}Блок может влиять на скорость и стабильность интернета!${NC}"; PAUSE; fi; if [ "$action" = "remove" ]; then echo -e "\n${MAGENTA}Удаляем блок с ${f2}${NC}"
+awk -v l1="$f1" -v l2="$f2" '$0=="--new" && getline a && getline b { if (a==l1 && b==l2) next; print "--new"; print a; print b; next } 1' "$CONF" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"; ZAPRET_RESTART; echo -e "${GREEN}Блок с ${NC}${f2}${GREEN} удалён!${NC}\n"; PAUSE; fi; }
+add_wssize() { manage_block add "--filter-tcp=443" "--wssize 1:6"; }; remove_wssize() { manage_block remove "--filter-tcp=443" "--wssize 1:6"; }; add_methodeol() { manage_block add "--filter-tcp=80,443" "--methodeol"; }; remove_methodeol() { manage_block remove "--filter-tcp=80,443" "--methodeol"; }
 menu_str() { [ ! -f /etc/init.d/zapret ] && { echo -e "\n${RED}Zapret не установлен!${NC}\n"; PAUSE; return; }; while true; do show_current_strategy; RKN_Check; clear; echo -e "${MAGENTA}Меню стратегий${NC}\n"; pri=0
 [ -f "$CONF" ] && line=$(grep -m1 '^#general' "$CONF") && [ -n "$line" ] && echo -e "${YELLOW}Используется стратегия:${NC} ${CYAN}${line#?}${NC}" && pri=1
 if [ -f "$CONF" ]; then current="$ver$( [ -n "$ver" ] && [ -n "$yv_ver" ] && echo " / " )$yv_ver"; DV=$(grep -o -E '^#[[:space:]]*Dv[0-9][0-9]*' "$CONF" | sed 's/^#[[:space:]]*/\/ /' | head -n1)
 if [ -n "$current" ]; then echo -e "${YELLOW}Используется стратегия:${NC} ${CYAN}$current${DV:+ $DV}${RKN_STATUS:+ $RKN_STATUS}${NC}"; pri=1; elif [ -n "$RKN_STATUS" ]; then  echo -e "${YELLOW}Используется стратегия:${NC}${CYAN} РКН${DV:+ $DV}${NC}"; pri=1; fi; fi
 [ -f "$CONF" ] && CURRENT_GAME=$(grep -o '^#Gv[0-9]' "$CONF" | grep -o '[0-9]') && [ -n "$CURRENT_GAME" ] && echo -e "${YELLOW}Стратегия для игр:${NC} ${CYAN}Gv$CURRENT_GAME${NC}" && pri=1
-grep -q -F -- "--wssize 1:6" "$CONF" && echo -e "${YELLOW}Блок с --wssize 1:6: ${GREEN}активирован${NC}" && pri=1
+grep -q -F -- "--wssize 1:6" "$CONF" && echo -e "${YELLOW}Блок с --wssize 1:6: ${GREEN}активирован${NC}" && pri=1; grep -q -F -- "--methodeol" "$CONF" && echo -e "${YELLOW}Блок с --methodeol: ${GREEN}активирован${NC}" && pri=1
 [ "$pri" -eq 1 ] && echo; echo -e "${CYAN}1) ${GREEN}Выбрать и установить стратегию ${NC}v1-v9\n${CYAN}2) ${GREEN}Выбрать и установить стратегию от ${NC}Flowseal\n${CYAN}3) ${GREEN}Выбрать и установить стратегию для ${NC}YouTube\n${CYAN}4) ${GREEN}Выбрать и установить стратегию для ${NC}игр"
 echo -e "${CYAN}5) ${NC}$RKN_TEXT_MENU${NC}\n${CYAN}6) ${GREEN}Обновить список исключений${NC}"; if grep -q -F -- "--wssize 1:6" "$CONF"; then WSSIZE_MENU_TEXT="${GREEN}Удалить из стратегии блок с ${NC}--wssize 1:6"; else WSSIZE_MENU_TEXT="${GREEN}Добавить в стратегию блок с ${NC}--wssize 1:6"; fi
-echo -e "${CYAN}7) ${WSSIZE_MENU_TEXT}${NC}"; echo -ne "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n\n${YELLOW}Выберите пункт:${NC} "; read choiceST; case "$choiceST" in 1) strategy_CHOUSE;; 2) flowseal_menu;; 3) choose_strategy_manual;; 4) fix_GAME;;
+if grep -q -F -- "--methodeol" "$CONF"; then methodeol_MENU_TEXT="${GREEN}Удалить из стратегии блок с ${NC}--methodeol"; else methodeol_MENU_TEXT="${GREEN}Добавить в стратегию блок с ${NC}--methodeol"; fi
+echo -e "${CYAN}7) ${WSSIZE_MENU_TEXT}${NC}"; echo -e "${CYAN}8) ${methodeol_MENU_TEXT}${NC}"; echo -ne "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n\n${YELLOW}Выберите пункт:${NC} "; read choiceST; case "$choiceST" in 1) strategy_CHOUSE;; 2) flowseal_menu;; 3) choose_strategy_manual;; 4) fix_GAME;;
 5) toggle_rkn_bypass; continue;; 6) echo -e "\n${MAGENTA}Обновляем список исключений${NC}\n${CYAN}Останавливаем ${NC}Zapret"; /etc/init.d/zapret stop >/dev/null 2>&1; echo -e "${CYAN}Добавляем домены в исключения${NC}"
-rm -f "$EXCLUDE_FILE"; wget -q -U "Mozilla/5.0" -O "$EXCLUDE_FILE" "$EXCLUDE_URL" || echo -e "\n${RED}Не удалось загрузить exclude файл${NC}\n"; echo -e "${CYAN}Перезапускаем ${NC}Zapret"
-ZAPRET_RESTART; echo -e "${GREEN}Список исключений обновлён!${NC}\n"; PAUSE;; 7) if grep -q -F -- "--wssize 1:6" "$CONF"; then remove_wssize; else add_wssize; fi; continue;; *) return;; esac; done }
+rm -f "$EXCLUDE_FILE"; wget -q -U "Mozilla/5.0" -O "$EXCLUDE_FILE" "$EXCLUDE_URL" || echo -e "\n${RED}Не удалось загрузить exclude файл${NC}\n"; echo -e "${CYAN}Перезапускаем ${NC}Zapret"; ZAPRET_RESTART; echo -e "${GREEN}Список исключений обновлён!${NC}\n"; PAUSE;;
+7) if grep -q -F -- "--wssize 1:6" "$CONF"; then remove_wssize; else add_wssize; fi; continue;; 8) if grep -q -F -- "--methodeol" "$CONF"; then remove_methodeol; else add_methodeol; fi; continue;; *) return;; esac; done }
 strategy_CHOUSE () { echo -ne "\n${YELLOW}Введите версию стратегии ${NC}(1-9)${YELLOW}:${NC} "; read -r choice; if [[ "$choice" =~ ^[1-9]$ ]]; then install_strategy "v$choice"; fi; }
 show_current_strategy() { [ -f "$CONF" ] || return; ver=""; for i in $(seq 1 99); do grep -q "#v$i" "$CONF" && { ver="v$i"; break; }; done; yv_ver=""; for i in $(seq -w 1 99); do grep -q "#Yv$i" "$CONF" && { yv_ver="Yv$i"; break; }; done; }
 discord_str_add() { if ! grep -q "option NFQWS_PORTS_UDP.*19294-19344,50000-50100" "$CONF"; then sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,19294-19344,50000-50100'/" "$CONF"; fi
@@ -400,17 +400,20 @@ echo -e "\n${MAGENTA}Включаем IPv6 в Zapret${NC}"; ZAPRET_RESTART; echo
 # ==========================================
 hosts_reset() { echo -e "\n${MAGENTA}Восстанавливаем hosts${NC}"; : > /etc/hosts; echo -e "127.0.0.1\tlocalhost\n\n::1\tlocalhost ip6-localhost ip6-loopback\nff02::1 ip6-allnodes\nff02::2 ip6-allrouters" > /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}восстановлен!${NC}\n"; PAUSE; }
 add_block() { printf '%b\n' "$1" | while IFS= read -r line; do [ -z "$line" ] && continue; grep -Fxq "$line" "$HOSTS_FILE" || echo "$line" >> "$HOSTS_FILE"; done; }
+add_GEO_HOSTS() { echo -e "\n${MAGENTA}Заменяем hosts на GeoHide hosts${NC}"; : > /etc/hosts; echo -e "127.0.0.1\tlocalhost\n\n::1\tlocalhost ip6-localhost ip6-loopback\nff02::1 ip6-allnodes\nff02::2 ip6-allrouters" > /etc/hosts
+wget -q -U "Mozilla/5.0" -O - "$GEO_HOSTS" >> /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}заменён на ${NC}GeoHide hosts${GREEN}!${NC}\n"; PAUSE; }
 remove_block() { printf '%b\n' "$1" | while IFS= read -r line; do [ -z "$line" ] && continue; sed -i "\|^$line$|d" "$HOSTS_FILE"; done; }
 toggle_block() { if status_block "$1"; then remove_block "$1"; echo -e "\n${CYAN}Удаляем и применяем${NC}"; else add_block "$1"; echo -e "\n${CYAN}Добавляем и применяем${NC}"; fi; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "${GREEN}Готово!${NC}\n"; PAUSE; }
 toggle_all() { if status_block "$ALL_BLOCKS"; then remove_block "$ALL_BLOCKS"; echo -e "\n${CYAN}Удаляем и применяем${NC}"; else add_block "$ALL_BLOCKS"; echo -e "\n${CYAN}Добавляем и применяем${NC}"; fi; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "${GREEN}Готово!${NC}\n"; PAUSE; }
 get_state() { status_block "$1" && echo "Удалить " || echo "Добавить"; }
 menu_hosts() { while true; do clear; S_ALL=$(status_block "$ALL_BLOCKS" && echo "${GREEN}Удалить все домены${NC}" || echo "${GREEN}Добавить все домены${NC}"); prin=0
-echo -e "${MAGENTA}Меню управления доменами в hosts${NC}\n"; if hosts_enabled; then echo -e "${YELLOW}Домены в hosts: ${GREEN}добавлены${NC}"; prin=1; fi; [ "$prin" -eq 1 ] && echo
+echo -e "${MAGENTA}Меню управления доменами в hosts${NC}\n"; if hosts_enabled; then echo -e "${YELLOW}Домены в hosts: ${GREEN}$hosts_echo${NC}"; prin=1; fi; [ "$prin" -eq 1 ] && echo
 echo -e "${CYAN} 0) ${GREEN}$(get_state "$NALOG")${NC} nalog.ru\n${CYAN} 1) ${GREEN}$(get_state "$RUTOR")${NC} rutor.info\n${CYAN} 2) ${GREEN}$(get_state "$NTC")${NC} ntc.party"
 echo -e "${CYAN} 3) ${GREEN}$(get_state "$INSTAGRAM")${NC} Instagram & Facebook\n${CYAN} 4) ${GREEN}$(get_state "$LIBRUSEC")${NC} lib.rus.ec\n${CYAN} 5) ${GREEN}$(get_state "$AI")${NC} AI сервисы"
-echo -e "${CYAN} 6) ${GREEN}$(get_state "$TWCH")${NC} Twitch\n${CYAN} 7) ${GREEN}$(get_state "$TGWeb")${NC} Telegram Web\n${CYAN} 8) ${GREEN}$(get_state "$SPFY")${NC} Spotify\n${CYAN} 9) ${GREEN}$(get_state "$SCell")${NC} Supercell\n${CYAN}10) $S_ALL\n${CYAN}11) ${GREEN}Восстановить ${NC}hosts"
+echo -e "${CYAN} 6) ${GREEN}$(get_state "$TWCH")${NC} Twitch\n${CYAN} 7) ${GREEN}$(get_state "$TGWeb")${NC} Telegram Web"
+echo -e "${CYAN} 8) ${GREEN}$(get_state "$SPFY")${NC} Spotify\n${CYAN} 9) ${GREEN}$(get_state "$SCell")${NC} Supercell\n${CYAN}10) $S_ALL\n${CYAN}11) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}GeoHide host\n${CYAN}12) ${GREEN}Восстановить ${NC}hosts"
 echo -ne "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n\n${YELLOW}Выберите пункт:${NC} ";read -r c; case "$c" in 0) toggle_block "$NALOG";; 1) toggle_block "$RUTOR";; 2) toggle_block "$NTC";; 3) toggle_block "$INSTAGRAM";;
-4) toggle_block "$LIBRUSEC";; 5) toggle_block "$AI";; 6) toggle_block "$TWCH";; 7) toggle_block "$TGWeb";; 8) toggle_block "$SPFY";; 9) toggle_block "$SCell";; 10) toggle_all;; 11) hosts_reset;; *) break;; esac; done; }
+4) toggle_block "$LIBRUSEC";; 5) toggle_block "$AI";; 6) toggle_block "$TWCH";; 7) toggle_block "$TGWeb";; 8) toggle_block "$SPFY";; 9) toggle_block "$SCell";; 10) toggle_all;; 11) add_GEO_HOSTS;; 12) hosts_reset;; *) break;; esac; done; }
 status_block() { local line; while IFS= read -r line; do [ -z "$line" ] && continue; grep -Fxq "$line" "$HOSTS_FILE" || return 1; done <<EOF
 $(printf '%b\n' "$1")
 EOF
@@ -664,14 +667,14 @@ if uci get firewall.@defaults[0].flow_offloading 2>/dev/null | grep -q '^1$' || 
 then echo -e "\n${RED}Включён ${NC}Flow Offloading${RED}!${NC}\n${NC}Zapret${RED} некорректно работает с включённым ${NC}Flow Offloading${RED}!\nПримените ${NC}FIX${RED} в системном меню!${NC}"; fi; fi; pgrep -f "/opt/zapret" >/dev/null 2>&1 && str_stp_zpr="Остановить" || str_stp_zpr="Запустить"
 echo -e "\n${YELLOW}Установленная версия:    ${INST_COLOR}$INSTALLED_DISPLAY${NC}"; [ -n "$ZAPRET_STATUS" ] && echo -e "${YELLOW}Статус Zapret:${NC}           $ZAPRET_STATUS"
 TGSTATUS=""; [ "$(pidof tg-ws-proxy-go)" ] && TGSTATUS="Go"; [ "$(pidof tg-ws-proxy-rs)" ] && TGSTATUS="$TGSTATUS$( [ -n "$TGSTATUS" ] && echo "/" )Rust"; if [ -n "$TGSTATUS" ]; then echo -e "${YELLOW}Статус TG WS Proxy:${NC}      ${GREEN}запущен [$TGSTATUS]${NC}"; fi
-if hosts_enabled; then echo -e "${YELLOW}Домены в hosts:          ${GREEN}добавлены${NC}"; fi; [ -f "$DATE_FILE" ] && echo -e "${YELLOW}Резервная копия:${NC}         ${GREEN}сохранена"; show_script_50 && [ -n "$name" ] && echo -e "${YELLOW}Установлен скрипт:${NC}       $name"; grep -q "$Fin_IP_Dis" /etc/hosts && echo -e "${YELLOW}Финские IP для Discord:  ${GREEN}включены${NC}"
+if hosts_enabled; then echo -e "${YELLOW}Домены в hosts:          ${GREEN}$hosts_echo${NC}"; fi; [ -f "$DATE_FILE" ] && echo -e "${YELLOW}Резервная копия:${NC}         ${GREEN}сохранена"; show_script_50 && [ -n "$name" ] && echo -e "${YELLOW}Установлен скрипт:${NC}       $name"; grep -q "$Fin_IP_Dis" /etc/hosts && echo -e "${YELLOW}Финские IP для Discord:  ${GREEN}включены${NC}"
 [ -f "$CONF" ] && CURRENT_GAME=$(grep -o '^#Gv[0-9]' "$CONF" | grep -o '[0-9]') && [ -n "$CURRENT_GAME" ] && echo -e "${YELLOW}Стратегия для игр:${NC}       ${CYAN}Gv$CURRENT_GAME${NC}"; if [ -n "$DOH_STATUS" ]; then if [ "$PKG_IS_APK" -eq 1 ]; then apk info -e https-dns-proxy >/dev/null 2>&1 && echo -e "${YELLOW}DNS over HTTPS:${NC}          $DOH_STATUS"
-else opkg list-installed | grep -q '^https-dns-proxy ' && echo -e "${YELLOW}DNS over HTTPS:${NC}          $DOH_STATUS"; fi; fi; [ -f "$CONF" ] && grep -q -F -- "--wssize 1:6" "$CONF" && echo -e "${YELLOW}Блок с --wssize 1:6:     ${GREEN}активирован${NC}"; pkg_is_installed podkop && echo -e "${YELLOW}Podkop Evolution:${NC}        ${GREEN}установлен${NC}"
-if web_is_enabled; then echo -e "${YELLOW}Доступ из браузера:${NC}      $LAN_IP:7681"; fi; quic_is_blocked && if quic_is_blocked; then echo -e "${YELLOW}Блокировка QUIC:${NC}         ${GREEN}включена${NC}"; fi; if grep -q 'ct original packets ge 30 flow offload @ft;' /usr/share/firewall4/templates/ruleset.uc
+else opkg list-installed | grep -q '^https-dns-proxy ' && echo -e "${YELLOW}DNS over HTTPS:${NC}          $DOH_STATUS"; fi; fi; [ -f "$CONF" ] && grep -q -F -- "--wssize 1:6" "$CONF" && echo -e "${YELLOW}Блок с --wssize 1:6:     ${GREEN}активирован${NC}"; [ -f "$CONF" ] && grep -q -F -- "--methodeol" "$CONF" && echo -e  "${YELLOW}Блок с --methodeol:      ${GREEN}активирован${NC}"
+pkg_is_installed podkop && echo -e "${YELLOW}Podkop Evolution:${NC}        ${GREEN}установлен${NC}"; if web_is_enabled; then echo -e "${YELLOW}Доступ из браузера:${NC}      $LAN_IP:7681"; fi; quic_is_blocked && if quic_is_blocked; then echo -e "${YELLOW}Блокировка QUIC:${NC}         ${GREEN}включена${NC}"; fi; if grep -q 'ct original packets ge 30 flow offload @ft;' /usr/share/firewall4/templates/ruleset.uc
 then echo -e "${YELLOW}FIX для Flow Offloading:${NC} ${GREEN}включён${NC}"; fi; if [ "$CURR" != "default / OpenWrt" ]; then echo -e "${YELLOW}Используется зеркало:${NC}    $CURR"; fi; if [ -f /etc/init.d/zapret ] && [ -f "$CONF" ] && grep -Eq "^[[:space:]]*option DISABLE_IPV6 '0'" "$CONF"; then echo -e "${YELLOW}IPv6 в Zapret:           ${GREEN}включён${NC}"; fi
 [ -f "$CONF" ] && line=$(grep -m1 '^#general' "$CONF") && [ -n "$line" ] && echo -e "${YELLOW}Используется стратегия:${NC}  ${CYAN}${line#?}${NC}"; if [ -f "$CONF" ]; then current="$ver$( [ -n "$ver" ] && [ -n "$yv_ver" ] && echo " / " )$yv_ver"; DV=$(grep -o -E '^#[[:space:]]*Dv[0-9][0-9]*' "$CONF" | sed 's/^#[[:space:]]*/\/ /' | head -n1)
 if [ -n "$current" ]; then echo -e "${YELLOW}Используется стратегия:${NC}  ${CYAN}$current${DV:+ $DV}${RKN_STATUS:+ $RKN_STATUS}${NC}"; elif [ -n "$RKN_STATUS" ]; then echo -e "${YELLOW}Используется стратегия:${NC}${CYAN}  РКН${DV:+ $DV}${NC}"; fi; fi; echo -e "\n${CYAN}1) ${GREEN}$Z_ACTION_TEXT${NC} Zapret"
 echo -e "${CYAN}2) ${GREEN}Меню стратегий${NC}\n${CYAN}3) ${GREEN}Меню тестирования стратегий\n${CYAN}4) ${GREEN}Меню ${NC}TG WS Proxy\n${CYAN}5) ${GREEN}Меню ${NC}DNS over HTTPS\n${CYAN}6) ${GREEN}Меню ${NC}Podkop Evolution\n${CYAN}7) ${GREEN}Меню настройки ${NC}Discord\n${CYAN}8) ${GREEN}Меню управления доменами в ${NC}hosts"
-echo -e "${CYAN}9) ${GREEN}Удалить ${NC}→${GREEN} установить ${NC}→${GREEN} настроить${NC} Zapret\n${CYAN}s) ${GREEN}$str_stp_zpr ${NC}Zapret\n${CYAN}0) ${GREEN}Системное меню${NC}" ; echo -ne "${CYAN}Enter) ${GREEN}Выход${NC}\n\n${YELLOW}Выберите пункт:${NC} " && read choice
+echo -e "${CYAN}9) ${GREEN}Удалить ${NC}→${GREEN} установить ${NC}→${GREEN} настроить${NC} Zapret\n${CYAN}0) ${GREEN}Системное меню${NC}\n${CYAN}s) ${GREEN}$str_stp_zpr ${NC}Zapret" ; echo -ne "${CYAN}Enter) ${GREEN}Выход${NC}\n\n${YELLOW}Выберите пункт:${NC} " && read choice
 case "$choice" in 999) echo; uninstall_zapret "1"; install_Zapret "1"; curl -fsSL https://raw.githubusercontent.com/StressOzz/Test/refs/heads/main/zapret -o "$CONF"; hosts_add "$ALL_BLOCKS"; rm -f "$EXCLUDE_FILE"; wget -q -U "Mozilla/5.0" -O "$EXCLUDE_FILE" "$EXCLUDE_URL"; ZAPRET_RESTART; PAUSE;;
 1) $Z_ACTION_FUNC;; s|S) pgrep -f /opt/zapret >/dev/null 2>&1 && stop_zapret || start_zapret;; 2) menu_str;; 3)TEST_menu;; 4) menu_TG;; 5) DoH_menu;; 6) PODKOP_menu ;; 7) Discord_menu;; 8) menu_hosts;; 9) zapret_key;; 0) sys_menu;; *) echo; exit 0;; esac; }; while true; do show_menu; done
