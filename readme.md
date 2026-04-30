@@ -275,6 +275,7 @@ zms
 - **TG WS Proxy Rust** by [*valnesfjord*](https://github.com/valnesfjord)
 - **Podkop Evolution** by [*yandexru45*](https://github.com/yandexru45)
 - **AWG OpenWrt** by [*Slava-Shchipunov*](https://github.com/Slava-Shchipunov)
+- **TG WS Proxy Go** by [*spatiumstas*](https://github.com/spatiumstas)
 
 ---
 
