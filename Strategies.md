@@ -184,7 +184,7 @@
 --dpi-desync=fake
 --dpi-desync-cutoff=d2
 --dpi-desync-any-protocol=1
---dpi-desync-fake-unknown-udp=/opt/zapret/files/fake/quic_initial_www_google_com.bin
+--dpi-desync-fake-unknown-udp=/opt/zapret/files/fake/stun.bin
 ```
 ---
 # Стратегия для Discord
@@ -194,8 +194,8 @@
 --filter-udp=19294-19344,50000-50100
 --filter-l7=discord,stun
 --dpi-desync=fake
---dpi-desync-fake-discord=/opt/zapret/files/fake/quic_initial_www_google_com.bin
---dpi-desync-fake-stun=/opt/zapret/files/fake/quic_initial_www_google_com.bin
+--dpi-desync-fake-discord=/opt/zapret/files/fake/stun.bin
+--dpi-desync-fake-stun=/opt/zapret/files/fake/stun.bin
 --dpi-desync-repeats=6
 --new
 --filter-tcp=2053,2083,2087,2096,8443
