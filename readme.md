@@ -7,7 +7,7 @@
 ![Script](https://img.shields.io/badge/Script-sh-informational)
 ![Status](https://img.shields.io/badge/Status-Active-success)
 ![Community](https://img.shields.io/badge/Community-Enabled-green)
-![Version](https://img.shields.io/badge/Version-v9.6-blue)
+[![Views](https://views.whatilearened.today/views/github/StressOzz/Zapret-Manager.svg)](https://github.com/StressOzz/Zapret-Manager)
 ![GitHub last commit](https://img.shields.io/github/last-commit/StressOzz/Zapret-Manager)
 
 </div>
