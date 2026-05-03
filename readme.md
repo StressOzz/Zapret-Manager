@@ -15,7 +15,7 @@
 ---
 
 ### Для Windows - используйте это:
-https://github.com/StressOzz/Zapret-Manager/releases/ZapretOzz
+https://github.com/StressOzz/ZapretOzz
 
 ---
 
