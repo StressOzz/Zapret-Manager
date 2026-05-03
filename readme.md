@@ -7,10 +7,17 @@
 ![Script](https://img.shields.io/badge/Script-sh-informational)
 ![Status](https://img.shields.io/badge/Status-Active-success)
 ![Community](https://img.shields.io/badge/Community-Enabled-green)
-![Version](https://img.shields.io/badge/Version-v9.5-blue)
+![Version](https://img.shields.io/badge/Version-v9.6-blue)
 ![GitHub last commit](https://img.shields.io/github/last-commit/StressOzz/Zapret-Manager)
 
 </div>
+
+---
+
+### Для тех у кого Windows - используйте это:
+https://github.com/StressOzz/Zapret-Manager/releases/ZapretOzz
+
+---
 
 # Оглавление
 - [Возможности](#-возможности)
