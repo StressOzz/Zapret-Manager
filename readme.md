@@ -17,6 +17,9 @@
 ### Для Windows - используйте это:
 https://github.com/StressOzz/ZapretOzz
 
+![Downloads](https://img.shields.io/github/downloads/StressOzz/Zapret-Manager/total)
+![Latest Downloads](https://img.shields.io/github/downloads/StressOzz/Zapret-Manager/latest/total)
+
 ---
 
 # Оглавление
