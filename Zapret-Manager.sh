@@ -62,7 +62,7 @@ SPFY="#Spotify\n45.155.204.190 api.spotify.com login5.spotify.com encore.scdn.co
 GITH="#githubusercontent.com\n185.199.109.133 raw.githubusercontent.com release-assets.githubusercontent.com\n185.199.108.133 private-user-images.githubusercontent.com"
 ALL_BLOCKS="$AI\n$INSTAGRAM\n$NTC\n$RUTOR\n$LIBRUSEC\n$TGWeb\n$TWCH\n$SCell\n$SPFY\n$GITH"; TMP_ARCHIVE_RS="/tmp/tg-ws-proxy-rs.tar.gz"; TMP_DIR_RS="/tmp/tg-ws-proxy-rs"
 hosts_enabled() { if grep -q "dns.geohide.ru" /etc/hosts; then hosts_echo="GeoHide"; return 0
-elif grep -q "45.155.204.190\|instagram.com\|rutor.info\|lib.rus.ec\|ntc.party\|twitch.tv\|web.telegram.org\|www.spotify.com\|store.supercell.com\|raw.githubusercontent.com" /etc/hosts; then
+elif grep -q "45.155.204.190\|instagram.com\|rutor.info\|lib.rus.ec\|ntc.party\|twitch.tv\|web.telegram.org\|www.spotify.com\|store.supercell.com\|raw.githubusercontent.com\|lkfl2.nalog.ru" /etc/hosts; then
 hosts_echo="добавлены"; return 0; fi; return 1; }
 hosts_add() { printf "%b\n" "$1" | while IFS= read -r L; do grep -qxF "$L" /etc/hosts || echo "$L" >> /etc/hosts; done; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }
 ZAPRET_RESTART () { chmod +x /opt/zapret/sync_config.sh; /opt/zapret/sync_config.sh; /etc/init.d/zapret restart >/dev/null 2>&1; sleep 1; }
@@ -72,17 +72,16 @@ if command -v opkg >/dev/null 2>&1; then PKG="opkg"; GO_SUF="1"; CONFZ="/etc/opk
 DELETE="opkg remove --autoremove --force-removal-of-dependent-packages"; ARCH="$(opkg print-architecture | awk '{print $2}' | tail -n1)"; VER_SUF="r1-all"
 APK_RAS="ipk"; SUFICS="v"; TMP_FILE_GO="/tmp/tg-ws-proxy.ipk"; else PKG="apk"; GO_SUF="r1"; CONFZ="/etc/apk/repositories.d/distfeeds.list"; PKG_IS_APK=1
 UPDATE="apk update"; INSTALL="apk add --allow-untrusted"; DELETE="apk del"; ARCH="$(apk --print-arch 2>/dev/null)"; APK_RAS="apk"; VER_SUF="r1"; SUFICS=""; TMP_FILE_GO="/tmp/tg-ws-proxy.apk"; fi
-if ! command -v curl >/dev/null 2>&1; then clear; echo -e "${MAGENTA}Устанавливаем ${NC}curl"; echo -e "${CYAN}Обновляем список пакетов${NC}"; ok=0; for i in 1 2 3 4 5; do if $UPDATE >/dev/null 2>&1; then ok=1; break; fi
+if ! command -v curl >/dev/null 2>&1; then clear; echo -e "${MAGENTA}Устанавливаем ${NC}curl"; echo -e "${CYAN}Обновляем список пакетов${NC}"; ok=0; for i in 1 2 3; do if $UPDATE >/dev/null 2>&1; then ok=1; break; fi
 echo -e "${YELLOW}Обновление пакетов попытка $i не удалась${NC}"; sleep 1; done; if [ "$ok" -ne 1 ]; then echo -e "\n${RED}Не удалось обновить пакеты после 5 попыток${NC}\n"; PAUSE; exit 0; fi
-ok=0; echo -e "${CYAN}Устанавливаем ${NC}curl"; for i in 1 2 3 4 5; do if $INSTALL curl >/dev/null 2>&1; then ok=1; break; fi; echo -e "${YELLOW}Устанавливаем ${NC}curl${YELLOW} попытка ${NC}$i${YELLOW} не удалась!${NC}"; sleep 1; done
+ok=0; echo -e "${CYAN}Устанавливаем ${NC}curl"; for i in 1 2 3; do if $INSTALL curl >/dev/null 2>&1; then ok=1; break; fi; echo -e "${YELLOW}Устанавливаем ${NC}curl${YELLOW} попытка ${NC}$i${YELLOW} не удалась!${NC}"; sleep 1; done
 if [ "$ok" -ne 1 ]; then echo -e "\n${RED}Не удалось установить ${NC}curl${RED} после 5 попыток${NC}\n"; PAUSE; exit 0; fi; if ! command -v curl >/dev/null 2>&1; then echo -e "\ncurl${RED} не найден после установки${NC}\n"; PAUSE; exit 0; fi; fi
-get_ver() { URL="$1"; OUT_FILE="$2"; NAME="$3"; echo -e "${YELLOW}→${NC} Проверка $NAME"; RESULT=$(curl -sL --connect-timeout 3 --max-time 5 --retry 2 --retry-delay 2 -w "%{http_code}|%{url_effective}" -o /dev/null "$URL" 2>/dev/null)
-CURL_EXIT=$?; if [ $CURL_EXIT -ne 0 ]; then echo -e "${RED}$NAME: ошибка curl (код $CURL_EXIT)\n"; PAUSE; return 1; fi; HTTP_CODE=$(echo "$RESULT" | cut -d'|' -f1); FINAL_URL=$(echo "$RESULT" | cut -d'|' -f2)
-VERSION=$(echo "$FINAL_URL" | grep -o '[0-9][0-9.]*$'); if [ -z "$VERSION" ]; then echo -e "${RED}✗${NC} $NAME: не удалось извлечь версию (HTTP $HTTP_CODE)"; echo -e "${YELLOW}URL:${NC} $FINAL_URL\n"; PAUSE; return 1; fi; echo "$VERSION" > "$OUT_FILE"; echo -e "${GREEN}✓${NC} $NAME: $VERSION"; }
+get_ver() { URL="$1"; OUT_FILE="$2"; NAME="$3"; echo -e "${YELLOW}→${NC} Проверка $NAME"; RESULT=$(curl -sL --connect-timeout 2 --max-time 2 --retry 1 --retry-delay 1 -w "%{http_code}|%{url_effective}" -o /dev/null "$URL" 2>/dev/null)
+CURL_EXIT=$?; if [ $CURL_EXIT -ne 0 ]; then echo -e "${RED}$NAME: ошибка curl (код $CURL_EXIT)${NC}\n"; PAUSE; return 1; fi; HTTP_CODE=$(echo "$RESULT" | cut -d'|' -f1); FINAL_URL=$(echo "$RESULT" | cut -d'|' -f2)
+VERSION=$(echo "$FINAL_URL" | grep -o '[0-9][0-9.]*$'); if [ -z "$VERSION" ]; then echo -e "${RED}✗${NC} $NAME: не удалось извлечь версию (HTTP $HTTP_CODE)${NC}"; echo -e "${YELLOW}URL:${NC} $FINAL_URL\n"; PAUSE; return 1; fi; echo "$VERSION" > "$OUT_FILE"; echo -e "${GREEN}✓${NC} $NAME: $VERSION"; }
 echo -e "${CYAN}Cобираем версии:${NC}"; TMP_VER="/tmp/zapret_version"; get_ver "https://github.com/remittor/zapret-openwrt/releases/latest" "$TMP_VER" "ZAPRET"; ZAPRET_VERSION="$(cat "$TMP_VER")"
 TMP_VER_POD="/tmp/podkop_version"; get_ver "https://github.com/yandexru45/podkop-evolution/releases/latest" "$TMP_VER_POD" "PODKOP";PODKOP_LATEST_VER="$(cat "$TMP_VER_POD")"
-TMP_VER_GO="/tmp/tg_ws_proxy_go_ver"; get_ver "https://github.com/spatiumstas/tg-ws-proxy-go/releases/latest" "$TMP_VER_GO" "TG-WS"; GO_VER="$(cat "$TMP_VER_GO")"
-echo -e "${GREEN}Запускаем ${NC}Zapret Manager..."
+TMP_VER_GO="/tmp/tg_ws_proxy_go_ver"; get_ver "https://github.com/spatiumstas/tg-ws-proxy-go/releases/latest" "$TMP_VER_GO" "TG-WS"; GO_VER="$(cat "$TMP_VER_GO")"; echo -e "\n${GREEN}Запускаем ${NC}Zapret Manager..."
 URL_zms='https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh'; TMP_zms='/tmp/zms'; DST_zms='/usr/bin/zms'; curl -fsS4 --connect-timeout 1 --max-time 2 --retry 1 -o "$TMP_zms" "$URL_zms" && { [ ! -f "$DST_zms" ] || ! cmp -s "$TMP_zms" "$DST_zms"; } && mv "$TMP_zms" "$DST_zms" && chmod +x "$DST_zms"; rm -f "$TMP_zms"
 # ==========================================
 # Получение версии
@@ -413,8 +412,8 @@ add_block() { printf '%b\n' "$1" | while IFS= read -r line; do [ -z "$line" ] &&
 add_GEO_HOSTS() { echo -e "\n${MAGENTA}Заменяем hosts на GeoHide hosts${NC}"; : > /etc/hosts; echo -e "127.0.0.1\tlocalhost\n\n::1\tlocalhost ip6-localhost ip6-loopback\nff02::1 ip6-allnodes\nff02::2 ip6-allrouters" > /etc/hosts
 wget -q -U "Mozilla/5.0" -O - "$GEO_HOSTS" >> /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}заменён на ${NC}GeoHide hosts${GREEN}!${NC}\n"; PAUSE; }
 remove_block() { printf '%b\n' "$1" | while IFS= read -r line; do [ -z "$line" ] && continue; sed -i "\|^$line$|d" "$HOSTS_FILE"; done; }
-toggle_block() { if status_block "$1"; then remove_block "$1"; echo -e "\n${CYAN}Удаляем и применяем${NC}"; else add_block "$1"; echo -e "\n${CYAN}Добавляем и применяем${NC}"; fi; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "${GREEN}Готово!${NC}\n"; PAUSE; }
-toggle_all() { if status_block "$ALL_BLOCKS"; then remove_block "$ALL_BLOCKS"; echo -e "\n${CYAN}Удаляем и применяем${NC}"; else add_block "$ALL_BLOCKS"; echo -e "\n${CYAN}Добавляем и применяем${NC}"; fi; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "${GREEN}Готово!${NC}\n"; PAUSE; }
+toggle_block() { if status_block "$1"; then remove_block "$1"; echo -e "\n${CYAN}Удаляем и применяем${NC}"; else add_block "$1"; echo -e "\n${CYAN}Добавляем и применяем${NC}"; fi; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "${GREEN}Изменения применены!${NC}\n"; PAUSE; }
+toggle_all() { if status_block "$ALL_BLOCKS"; then remove_block "$ALL_BLOCKS"; echo -e "\n${CYAN}Удаляем и применяем${NC}"; else add_block "$ALL_BLOCKS"; echo -e "\n${CYAN}Добавляем и применяем${NC}"; fi; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "${GREEN}Изменения применены!${NC}\n"; PAUSE; }
 get_state() { status_block "$1" && echo "Удалить " || echo "Добавить"; }
 menu_hosts() { while true; do clear; S_ALL=$(status_block "$ALL_BLOCKS" && echo "${GREEN}Удалить все домены${NC}" || echo "${GREEN}Добавить все домены${NC}"); prin=0
 echo -e "${MAGENTA}Меню управления доменами в hosts${NC}\n"; if hosts_enabled; then echo -e "${YELLOW}Домены в hosts: ${GREEN}$hosts_echo${NC}"; prin=1; fi; [ "$prin" -eq 1 ] && echo
