@@ -420,7 +420,7 @@ echo -e "${MAGENTA}Меню управления доменами в hosts${NC}\
 echo -e "${CYAN} 0) ${GREEN}$(get_state "$NALOG")${NC} nalog.ru\n${CYAN} 1) ${GREEN}$(get_state "$RUTOR")${NC} rutor.info\n${CYAN} 2) ${GREEN}$(get_state "$NTC")${NC} ntc.party"
 echo -e "${CYAN} 3) ${GREEN}$(get_state "$INSTAGRAM")${NC} Instagram & Facebook\n${CYAN} 4) ${GREEN}$(get_state "$LIBRUSEC")${NC} lib.rus.ec\n${CYAN} 5) ${GREEN}$(get_state "$AI")${NC} AI сервисы"
 echo -e "${CYAN} 6) ${GREEN}$(get_state "$TWCH")${NC} Twitch\n${CYAN} 7) ${GREEN}$(get_state "$TGWeb")${NC} Telegram Web\n${CYAN} 8) ${GREEN}$(get_state "$SPFY")${NC} Spotify\n${CYAN} 9) ${GREEN}$(get_state "$SCell")${NC} Supercell"
-echo -e "${CYAN}10) ${GREEN}$(get_state "$GITH")${NC} githubusercontent.com\n${CYAN}11) $S_ALL\n${CYAN}12) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}GeoHide host\n${CYAN}13) ${GREEN}Восстановить ${NC}hosts"
+echo -e "${CYAN}10) ${GREEN}$(get_state "$GITH")${NC} githubusercontent.com\n${CYAN}11) $S_ALL\n${CYAN}12) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}GeoHide hosts\n${CYAN}13) ${GREEN}Восстановить ${NC}hosts"
 echo -ne "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n\n${YELLOW}Выберите пункт:${NC} ";read -r c; case "$c" in 0) toggle_block "$NALOG";; 1) toggle_block "$RUTOR";; 2) toggle_block "$NTC";; 3) toggle_block "$INSTAGRAM";;
 4) toggle_block "$LIBRUSEC";; 5) toggle_block "$AI";; 6) toggle_block "$TWCH";; 7) toggle_block "$TGWeb";; 8) toggle_block "$SPFY";; 9) toggle_block "$SCell";; 10) toggle_block "$GITH";; 11) toggle_all;; 12) add_GEO_HOSTS;; 13) hosts_reset;; *) break;; esac; done; }
 status_block() { local line; while IFS= read -r line; do [ -z "$line" ] && continue; grep -Fxq "$line" "$HOSTS_FILE" || return 1; done <<EOF
