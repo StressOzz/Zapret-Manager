@@ -363,10 +363,11 @@ tclhome.com
 tclclouds.com
 #################################### Call Of Duty
 azure.com
+azureedge.net
 demonware.net
 callofduty.com
 activision.com
-# cloudfront.net
+cloudfront.net
 #################################### Amazon
 amazon.dev
 amazon.com
