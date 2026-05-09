@@ -437,4 +437,7 @@ kraftonde.com
 pubghelper.com
 pubg1.battleye.com
 playbattlegrounds.com
+#################################### Tumblr
+tmblr.com
+tumblr.com
 ####################################
