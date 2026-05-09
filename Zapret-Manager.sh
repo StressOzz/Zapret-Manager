@@ -3,8 +3,8 @@
 # Zapret on remittor Manager by StressOzz
 # =========================================
 clear
-git="githubusercontent.com"; if ! grep -q "raw.$git" /etc/hosts; then echo -e "\033[1;36mДля корректной работы скрипта добавляем домены \033[0mGitHub \033[1;36mв \033[0m/etc/hosts\033[0m"
-printf "#$git\n185.199.109.133 raw.$git release-assets.$git\n185.199.108.133 private-user-images.$git\n" >> /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "\033[0;32mДомены \033[0mGitHub\033[0;32m добавлены!\033[0m"; fi
+git="githubusercontent.com"; if ! grep -q "raw.$git" /etc/hosts; then echo -e "\033[1;36mДля корректной работы скрипта добавляем домены \033[0mGitHub\033[1;36m в \033[0m/etc/hosts\033[0m"
+printf "#$git\n185.199.109.133 raw.$git release-assets.$git\n185.199.108.133 private-user-images.$git gist.$git avatars.$git\n" >> /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "\033[0;32mДомены \033[0mGitHub\033[0;32m добавлены!\033[0m"; fi
 ZAPRET_MANAGER_VERSION="9.6"; STR_VERSION_AUTOINSTALL="v7"
 LAN_IP=$(uci get network.lan.ipaddr 2>/dev/null | cut -d/ -f1)
 DOMAINS="rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com rr1---sn-gvnuxaxjvh-jx3l.googlevideo.com rr1---sn-gvnuxaxjvh-jx3s.googlevideo.com"
@@ -61,7 +61,8 @@ SCell="#Supercell\n103.27.157.38 accounts.supercell.com cdn.id.supercell.com cla
 SPFY="#Spotify\n45.155.204.190 api.spotify.com login5.spotify.com encore.scdn.co gew1-spclient.spotify.com spclient.wg.spotify.com
 45.155.204.190 api-partner.spotify.com aet.spotify.com www.spotify.com accounts.spotify.com open.spotify.com
 45.155.204.190 accounts.scdn.co gew1-dealer.spotify.com open-exp.spotifycdn.com www-growth.scdn.co"
-GITH="#githubusercontent.com\n185.199.109.133 raw.githubusercontent.com release-assets.githubusercontent.com\n185.199.108.133 private-user-images.githubusercontent.com"
+GITH="#githubusercontent.com\n185.199.109.133 raw.githubusercontent.com release-assets.githubusercontent.com
+185.199.108.133 private-user-images.githubusercontent.com gist.githubusercontent.com avatars.githubusercontent.com"
 ALL_BLOCKS="$AI\n$INSTAGRAM\n$NTC\n$RUTOR\n$LIBRUSEC\n$TGWeb\n$TWCH\n$SCell\n$SPFY\n$GITH"; TMP_ARCHIVE_RS="/tmp/tg-ws-proxy-rs.tar.gz"; TMP_DIR_RS="/tmp/tg-ws-proxy-rs"
 hosts_enabled() { if grep -q "dns.geohide.ru" /etc/hosts; then hosts_echo="GeoHide"; return 0
 elif grep -q "45.155.204.190\|instagram.com\|rutor.info\|lib.rus.ec\|ntc.party\|twitch.tv\|web.telegram.org\|www.spotify.com\|store.supercell.com\|raw.githubusercontent.com\|lkfl2.nalog.ru" /etc/hosts; then
