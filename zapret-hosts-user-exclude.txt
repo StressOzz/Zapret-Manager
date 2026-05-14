@@ -16,6 +16,7 @@ ottai.com
 ufanet.tv
 trovo.live
 beeline.tv
+ubuntu.com
 xsolla.com
 ip-api.com
 gstatic.com
