@@ -2,10 +2,10 @@
 # ==========================================
 # Zapret on remittor Manager by StressOzz
 # =========================================
-clear
+ZAPRET_MANAGER_VERSION="9.6"; STR_VERSION_AUTOINSTALL="v7"
+ZAPRET_VERSION="72.20260307"; GO_VER="0.7.2"; PODKOP_LATEST_VER="0.7.27"
 git="githubusercontent.com"; if ! grep -q "raw.$git" /etc/hosts; then echo -e "\033[1;36mДля корректной работы скрипта добавляем домены \033[0mGitHub\033[1;36m в \033[0m/etc/hosts\033[0m"
 printf "#$git\n185.199.109.133 raw.$git release-assets.$git\n185.199.108.133 private-user-images.$git gist.$git avatars.$git\n" >> /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "\033[0;32mДомены \033[0mGitHub\033[0;32m добавлены!\033[0m"; fi
-ZAPRET_MANAGER_VERSION="9.6"; STR_VERSION_AUTOINSTALL="v7"
 LAN_IP=$(uci get network.lan.ipaddr 2>/dev/null | cut -d/ -f1)
 DOMAINS="rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com rr1---sn-gvnuxaxjvh-jx3l.googlevideo.com rr1---sn-gvnuxaxjvh-jx3s.googlevideo.com"
 PORTS_UDP="88,1024-2407,2409-4499,4502-19293,19345-49999,50101-65535"; PORTS_TCP="2802,2302,2502,6112-6119,6695-6710,25565,27015-27030,27036-27037,50001"
@@ -79,13 +79,17 @@ if ! command -v curl >/dev/null 2>&1; then clear; echo -e "${MAGENTA}Устан�
 echo -e "${YELLOW}Обновление пакетов попытка $i не удалась${NC}"; sleep 1; done; if [ "$ok" -ne 1 ]; then echo -e "\n${RED}Не удалось обновить пакеты после 5 попыток${NC}\n"; PAUSE; exit 0; fi
 ok=0; echo -e "${CYAN}Устанавливаем ${NC}curl"; for i in 1 2 3; do if $INSTALL curl >/dev/null 2>&1; then ok=1; break; fi; echo -e "${YELLOW}Устанавливаем ${NC}curl${YELLOW} попытка ${NC}$i${YELLOW} не удалась!${NC}"; sleep 1; done
 if [ "$ok" -ne 1 ]; then echo -e "\n${RED}Не удалось установить ${NC}curl${RED} после 5 попыток${NC}\n"; PAUSE; exit 0; fi; if ! command -v curl >/dev/null 2>&1; then echo -e "\ncurl${RED} не найден после установки${NC}\n"; PAUSE; exit 0; fi; fi
-get_ver() { URL="$1"; OUT_FILE="$2"; NAME="$3"; echo -e "${YELLOW}→${NC} Проверка $NAME"; RESULT=$(curl -sL --connect-timeout 2 --max-time 2 --retry 1 --retry-delay 1 -w "%{http_code}|%{url_effective}" -o /dev/null "$URL" 2>/dev/null)
-CURL_EXIT=$?; if [ $CURL_EXIT -ne 0 ]; then echo -e "${RED}$NAME: ошибка curl (код $CURL_EXIT)${NC}\n"; PAUSE; return 1; fi; HTTP_CODE=$(echo "$RESULT" | cut -d'|' -f1); FINAL_URL=$(echo "$RESULT" | cut -d'|' -f2)
-VERSION=$(echo "$FINAL_URL" | grep -o '[0-9][0-9.]*$'); if [ -z "$VERSION" ]; then echo -e "${RED}✗${NC} $NAME: не удалось извлечь версию (HTTP $HTTP_CODE)${NC}"; echo -e "${YELLOW}URL:${NC} $FINAL_URL\n"; PAUSE; return 1; fi; echo "$VERSION" > "$OUT_FILE"; echo -e "${GREEN}✓${NC} $NAME: $VERSION"; }
-echo -e "${CYAN}Cобираем версии:${NC}"; TMP_VER="/tmp/zapret_version"; get_ver "https://github.com/remittor/zapret-openwrt/releases/latest" "$TMP_VER" "ZAPRET"; ZAPRET_VERSION="$(cat "$TMP_VER")"
-TMP_VER_POD="/tmp/podkop_version"; get_ver "https://github.com/yandexru45/podkop-evolution/releases/latest" "$TMP_VER_POD" "PODKOP";PODKOP_LATEST_VER="$(cat "$TMP_VER_POD")"
-TMP_VER_GO="/tmp/tg_ws_proxy_go_ver"; get_ver "https://github.com/spatiumstas/tg-ws-proxy-go/releases/latest" "$TMP_VER_GO" "TG-WS"; GO_VER="$(cat "$TMP_VER_GO")"; echo -e "\n${GREEN}Запускаем ${NC}Zapret Manager..."
-URL_zms='https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh'; TMP_zms='/tmp/zms'; DST_zms='/usr/bin/zms'; curl -fsS4 --connect-timeout 1 --max-time 2 --retry 1 -o "$TMP_zms" "$URL_zms" && { [ ! -f "$DST_zms" ] || ! cmp -s "$TMP_zms" "$DST_zms"; } && mv "$TMP_zms" "$DST_zms" && chmod +x "$DST_zms"; rm -f "$TMP_zms"
+
+# get_ver() { URL="$1"; OUT_FILE="$2"; NAME="$3"; echo -e "${YELLOW}→${NC} Проверка $NAME"; RESULT=$(curl -sL --connect-timeout 2 --max-time 2 --retry 1 --retry-delay 1 -w "%{http_code}|%{url_effective}" -o /dev/null "$URL" 2>/dev/null)
+# CURL_EXIT=$?; if [ $CURL_EXIT -ne 0 ]; then echo -e "${RED}$NAME: ошибка curl (код $CURL_EXIT)${NC}\n"; PAUSE; return 1; fi; HTTP_CODE=$(echo "$RESULT" | cut -d'|' -f1); FINAL_URL=$(echo "$RESULT" | cut -d'|' -f2)
+# VERSION=$(echo "$FINAL_URL" | grep -o '[0-9][0-9.]*$'); if [ -z "$VERSION" ]; then echo -e "${RED}✗${NC} $NAME: не удалось извлечь версию (HTTP $HTTP_CODE)${NC}"; echo -e "${YELLOW}URL:${NC} $FINAL_URL\n"; PAUSE; return 1; fi; echo "$VERSION" > "$OUT_FILE"; echo -e "${GREEN}✓${NC} $NAME: $VERSION"; }
+# echo -e "${CYAN}Cобираем версии:${NC}"; TMP_VER="/tmp/zapret_version"; get_ver "https://github.com/remittor/zapret-openwrt/releases/latest" "$TMP_VER" "ZAPRET"; ZAPRET_VERSION="$(cat "$TMP_VER")"
+# TMP_VER_POD="/tmp/podkop_version"; get_ver "https://github.com/yandexru45/podkop-evolution/releases/latest" "$TMP_VER_POD" "PODKOP";PODKOP_LATEST_VER="$(cat "$TMP_VER_POD")"
+# TMP_VER_GO="/tmp/tg_ws_proxy_go_ver"; get_ver "https://github.com/spatiumstas/tg-ws-proxy-go/releases/latest" "$TMP_VER_GO" "TG-WS"; GO_VER="$(cat "$TMP_VER_GO")"; echo -e "\n${GREEN}Запускаем ${NC}Zapret Manager..."
+
+echo 'sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)' > /usr/bin/zms; chmod +x /usr/bin/zms
+
+# URL_zms='https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh'; TMP_zms='/tmp/zms'; DST_zms='/usr/bin/zms'; curl -fsS4 --connect-timeout 1 --max-time 2 --retry 1 -o "$TMP_zms" "$URL_zms" && { [ ! -f "$DST_zms" ] || ! cmp -s "$TMP_zms" "$DST_zms"; } && mv "$TMP_zms" "$DST_zms" && chmod +x "$DST_zms"; rm -f "$TMP_zms"
 # ==========================================
 # Получение версии
 # ==========================================
