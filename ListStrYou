@@ -64,3 +64,8 @@ Yv19
 --dpi-desync=hostfakesplit
 --dpi-desync-hostfakesplit-mod=host=google.com
 --dpi-desync-fooling=ts
+Yv26
+--filter-tcp=443
+--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
+--dpi-desync=multidisorder
+--dpi-desync-split-pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
