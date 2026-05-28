@@ -279,3 +279,10 @@
 --dpi-desync-hostfakesplit-mod=host=mapgl.2gis.com
 --dpi-desync-badseq-increment=0
 ```
+```
+#Yv26
+--filter-tcp=443
+--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
+--dpi-desync=multidisorder
+--dpi-desync-split-pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
+```
