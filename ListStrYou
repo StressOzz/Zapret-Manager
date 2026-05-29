@@ -83,3 +83,11 @@ Yv11
 --dpi-desync=multidisorder
 --dpi-desync-split-pos=1,2,3,5,105,host+5,sld-1,endsld-5,endsld
 --dpi-desync-fooling=badsum
+Yv12
+--filter-tcp=443
+--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
+--dpi-desync=fake,multidisorder
+--dpi-desync-split-pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
+--dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
+--dpi-desync-fooling=badsum
+--dpi-desync-repeats=3
