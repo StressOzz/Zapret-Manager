@@ -27,6 +27,7 @@ godville.net
 voidboost.cc
 moondroplab.tech
 rockstargames.com
+codefusion.technology
 supporter-files.nexus-cdn.com
 #################################### VK
 vk.cc
