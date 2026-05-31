@@ -19,7 +19,7 @@ jobs:
           days-before-issue-stale: 14
           days-before-issue-close: 0
 
-          stale-issue-label: ''
+          stale-issue-label: без активности
           remove-stale-when-updated: true
 
           stale-issue-message: ''
