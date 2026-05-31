@@ -2,7 +2,7 @@ name: Close inactive issues
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # ежедневно
+    - cron: '0 0 * * *'
   workflow_dispatch:
 
 jobs:
@@ -19,12 +19,12 @@ jobs:
           days-before-issue-stale: 14
           days-before-issue-close: 0
 
-          stale-issue-message: >
-            Этот Issue был автоматически закрыт из-за отсутствия активности в течение 14 дней.
+          stale-issue-label: ''
+          remove-stale-when-updated: true
 
-          close-issue-message: >
-            Закрыто автоматически.
+          stale-issue-message: ''
+          close-issue-message: 'Закрыто автоматически из-за отсутствия активности в течение 14 дней.'
 
+          days-before-pr-stale: -1
           stale-pr-message: ''
           close-pr-message: ''
-          days-before-pr-stale: -1
