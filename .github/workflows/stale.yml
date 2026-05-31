@@ -1,0 +1,30 @@
+name: Close inactive issues
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # ежедневно
+  workflow_dispatch:
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+
+    permissions:
+      issues: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/stale@v10
+        with:
+          days-before-issue-stale: 14
+          days-before-issue-close: 0
+
+          stale-issue-message: >
+            Этот Issue был автоматически закрыт из-за отсутствия активности в течение 14 дней.
+
+          close-issue-message: >
+            Закрыто автоматически.
+
+          stale-pr-message: ''
+          close-pr-message: ''
+          days-before-pr-stale: -1
