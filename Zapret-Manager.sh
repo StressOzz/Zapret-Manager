@@ -86,7 +86,7 @@ if [ "$ok" -ne 1 ]; then echo -e "\n${RED}Не удалось установит
 # CURL_EXIT=$?; if [ $CURL_EXIT -ne 0 ]; then echo -e "${RED}$NAME: ошибка curl (код $CURL_EXIT)${NC}\n"; PAUSE; return 1; fi; HTTP_CODE=$(echo "$RESULT" | cut -d'|' -f1); FINAL_URL=$(echo "$RESULT" | cut -d'|' -f2)
 # VERSION=$(echo "$FINAL_URL" | grep -o '[0-9][0-9.]*$'); if [ -z "$VERSION" ]; then echo -e "${RED}✗${NC} $NAME: не удалось извлечь версию (HTTP $HTTP_CODE)${NC}"; echo -e "${YELLOW}URL:${NC} $FINAL_URL\n"; PAUSE; return 1; fi; echo "$VERSION" > "$OUT_FILE"; echo -e "${GREEN}✓${NC} $NAME: $VERSION"; }
 # echo -e "${CYAN}Cобираем версии:${NC}"; TMP_VER="/tmp/zapret_version"; get_ver "https://github.com/remittor/zapret-openwrt/releases/latest" "$TMP_VER" "ZAPRET"; ZAPRET_VERSION="$(cat "$TMP_VER")"
-# TMP_VER_POD="/tmp/podkop_version"; get_ver "https://github.com/yandexru45/podkop-evolution/releases/latest" "$TMP_VER_POD" "PODKOP";PODKOP_LATEST_VER="$(cat "$TMP_VER_POD")"
+# TMP_VER_POD="/tmp/podkop_version"; get_ver "https://github.com/yandexru45/netshift/releases/latest" "$TMP_VER_POD" "PODKOP";PODKOP_LATEST_VER="$(cat "$TMP_VER_POD")"
 # TMP_VER_GO="/tmp/tg_ws_proxy_go_ver"; get_ver "https://github.com/spatiumstas/tg-ws-proxy-go/releases/latest" "$TMP_VER_GO" "TG-WS"; GO_VER="$(cat "$TMP_VER_GO")"; echo -e "\n${GREEN}Запускаем ${NC}Zapret Manager..."
 
 echo 'sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)' > /usr/bin/zms; chmod +x /usr/bin/zms
@@ -638,9 +638,9 @@ then echo -e "\n${RED}Недостаточно свободного места${
 if pkg_is_installed https-dns-proxy; then echo -e "\n${RED}Обнаружен ${NC}DNS over HTTPS${RED}!"; echo -e "${YELLOW}Удалите ${NC}DNS over HTTPS\n"; PAUSE; return; fi
 [ "$ACTION" = "install" ] && echo -e "\n${MAGENTA}Устанавливаем Podkop Evolution${NC}" || echo -e "\n${MAGENTA}Обновляем Podkop Evolution${NC}"
 echo -e "${CYAN}Обновляем список пакетов${NC}"; $UPDATE >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось обновить список пакетов${NC}\n"; PAUSE; return; }
-PODKOP_INST="https://github.com/yandexru45/podkop-evolution/releases/download/$PODKOP_LATEST_VER/netshift-$SUFICS$PODKOP_LATEST_VER-$VER_SUF.$APK_RAS"
-PODKOP_LUCI="https://github.com/yandexru45/podkop-evolution/releases/download/$PODKOP_LATEST_VER/luci-app-netshift-$SUFICS$PODKOP_LATEST_VER-$VER_SUF.$APK_RAS"
-PODKOP_RUS="https://github.com/yandexru45/podkop-evolution/releases/download/$PODKOP_LATEST_VER/luci-i18n-netshift-ru-$PODKOP_LATEST_VER.$APK_RAS"
+PODKOP_INST="https://github.com/yandexru45/netshift/releases/download/$PODKOP_LATEST_VER/netshift-$SUFICS$PODKOP_LATEST_VER-$VER_SUF.$APK_RAS"
+PODKOP_LUCI="https://github.com/yandexru45/netshift/releases/download/$PODKOP_LATEST_VER/luci-app-netshift-$SUFICS$PODKOP_LATEST_VER-$VER_SUF.$APK_RAS"
+PODKOP_RUS="https://github.com/yandexru45/netshift/releases/download/$PODKOP_LATEST_VER/luci-i18n-netshift-ru-$PODKOP_LATEST_VER.$APK_RAS"
 cd "$tmpDIR"; echo -e "${CYAN}Скачиваем ${NC}Podkop Evolution"; wget -q -U "Mozilla/5.0" -O netshift.$APK_RAS "$PODKOP_INST" || { echo -e "\n${RED}Не удалось скачать $PODKOP_INST${NC}\n"; PAUSE; return; }
 wget -q -U "Mozilla/5.0" -O luci-app-netshift.$APK_RAS "$PODKOP_LUCI" || { echo -e "\n${RED}Не удалось скачать $PODKOP_LUCI${NC}\n"; PAUSE; return; }
 wget -q -U "Mozilla/5.0" -O luci-i18n-netshift-ru.$APK_RAS "$PODKOP_RUS" || { echo -e "\n${RED}Не удалось скачать $PODKOP_RUS${NC}\n"; PAUSE; return; }
