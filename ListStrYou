@@ -13,7 +13,7 @@ Yv02
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
 --dpi-desync=multidisorder
 --dpi-desync-split-pos=1,midsld,endhost-1
---dpi-desync-repeats=14
+--dpi-desync-repeats=2
 --dpi-desync-fooling=md5sig
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
 Yv03
@@ -23,7 +23,7 @@ Yv03
 --dpi-desync-fake-tls=0x00000000
 --dpi-desync-fake-tls=!
 --dpi-desync-split-pos=1,midsld
---dpi-desync-repeats=14
+--dpi-desync-repeats=2
 --dpi-desync-fooling=badseq
 --dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
 Yv04
@@ -45,7 +45,7 @@ Yv06
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
 --dpi-desync=multidisorder
 --dpi-desync-split-pos=1,midsld
---dpi-desync-repeats=14
+--dpi-desync-repeats=2
 Yv07
 --filter-tcp=443
 --hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
