@@ -11,6 +11,7 @@ okko.tv
 avito.st
 habr.com
 nexon.com
+tenor.com
 boosty.to
 ottai.com
 ufanet.tv
