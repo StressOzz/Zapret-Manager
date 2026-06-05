@@ -26,6 +26,7 @@ premier.one
 ipstream.one
 godville.net
 voidboost.cc
+mediafire.com
 moondroplab.tech
 rockstargames.com
 supporter-files.nexus-cdn.com
