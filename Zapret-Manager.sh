@@ -699,6 +699,7 @@ echo -e "${CYAN}4) ${GREEN}Интегрировать ${NC}AWG${GREEN} в ${NC}P
 # Главное меню
 # ==========================================
 show_menu() { get_versions; get_doh_status; show_current_strategy; RKN_Check; mkdir -p "$TMP_SF"; CURR=$(curr_MIR); clear; echo -e "╔═══════════════════════════════╗\n║  ${BLUE}Zapret Manager by StressOzz${NC}  ║\n╚═══════════════════════════════╝\n                             ${DGRAY}v$ZAPRET_MANAGER_VERSION${NC}"
+if [ -f /etc/init.d/zapret ] && [ -f "$CONF" ] && grep -Eq "^[[:space:]]*option DISABLE_IPV6 '1'" "$CONF" && ping -6 -c 1 -W 2 google.com >/dev/null 2>&1; then echo -e "\n${RED}Обнаружен IPv6! ${GREEN}Включите ${NC}IPv6${GREEN} в системном меню!${NC}"; fi
 if [ ! -f /etc/init.d/zapret ]; then Z_ACTION_TEXT="Установить"; Z_ACTION_FUNC="install_Zapret"; elif [ "$INSTALLED_VER" = "$ZAPRET_VERSION" ]; then Z_ACTION_TEXT="Удалить" Z_ACTION_FUNC="uninstall_zapret"; else Z_ACTION_TEXT="Обновить"; Z_ACTION_FUNC="install_Zapret"; fi
 for pkg in byedpi youtubeUnblock; do if [ "$PKG_IS_APK" -eq 1 ]; then apk info -e "$pkg" >/dev/null 2>&1 && echo -e "\n${RED}Найден установленный ${NC}$pkg${RED}!${NC}\nZapret${RED} может работать некорректно с ${NC}$pkg${RED}!${NC}"
 else opkg list-installed | grep -q "^$pkg" && echo -e "\n${RED}Найден установленный ${NC}$pkg${RED}!${NC}\nZapret${RED} может работать некорректно с ${NC}$pkg${RED}!${NC}"; fi; done
