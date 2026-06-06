@@ -4,6 +4,8 @@
 ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
 
+#malw.link
+
 ### dns.malw.link: hosts file
 # Последнее обновление: 30 мая 2026
 
