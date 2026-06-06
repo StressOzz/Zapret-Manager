@@ -4,6 +4,8 @@
 ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
 
+#mafioznik
+
 # ChatGPT, OpenAI:
 103.27.157.38 chatgpt.com
 103.27.157.38 ab.chatgpt.com
