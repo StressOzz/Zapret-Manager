@@ -437,4 +437,9 @@ playbattlegrounds.com
 #################################### Tumblr
 tmblr.com
 tumblr.com
+#################################### Postman
+postman.com
+getpostman.com
+postmanapp.com
+getpostman.com
 ####################################
