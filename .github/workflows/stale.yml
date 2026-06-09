@@ -17,15 +17,19 @@ jobs:
     steps:
       - uses: actions/stale@v10
         with:
+          # Ждем 14 дней без активности
           days-before-issue-stale: 14
-          days-before-issue-close: 0
+          # Ждем 1 день после получения метки перед закрытием (минимальное значение)
+          days-before-issue-close: 1
 
-          stale-issue-label: без активности
+          stale-issue-label: 'без активности'
+          # Эта опция уберет метку, если в issue снова начнут писать
           remove-stale-when-updated: true
 
-          stale-issue-message: ''
+          # Сообщение при закрытии (оставьте пустым, если не нужно предупреждение)
+          stale-issue-message: 'Этот issue помечен как устаревший из-за отсутствия активности в течение 14 дней. Он будет автоматически закрыт через 1 день, если не будет обновлен.'
           close-issue-message: 'Закрыто автоматически из-за отсутствия активности в течение 14 дней.'
 
+          # Отключаем для Pull Request'ов
           days-before-pr-stale: -1
-          stale-pr-message: ''
-          close-pr-message: ''
+          days-before-pr-close: -1
