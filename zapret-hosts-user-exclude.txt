@@ -1,4 +1,5 @@
 ru
+by
 рф
 su
 xn--p1ai
@@ -30,6 +31,7 @@ ipstream.one
 godville.net
 voidboost.cc
 hcaptcha.com
+canonical.com
 mediafire.com
 moondroplab.tech
 rockstargames.com
@@ -174,7 +176,6 @@ twitch.a2z.com
 twitch-shadow.net
 twitchcdn-shadow.net
 #################################### Valorant
-qq.com
 pvp.net
 vivox.com
 sd-rtn.com
@@ -326,7 +327,6 @@ msftauth.net
 xboxlive.com
 microsoft.com
 office365.com
-azureedge.net
 skypeassets.com
 windowsupdate.com
 microsoftonline.com
