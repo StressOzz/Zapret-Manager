@@ -1,3 +1,4 @@
+by
 ru
 рф
 su
@@ -19,6 +20,7 @@ ufanet.tv
 apple.com
 trovo.live
 beeline.tv
+canonical.com
 ubuntu.com
 xsolla.com
 ip-api.com
@@ -174,7 +176,6 @@ twitch.a2z.com
 twitch-shadow.net
 twitchcdn-shadow.net
 #################################### Valorant
-qq.com
 pvp.net
 vivox.com
 sd-rtn.com
@@ -371,7 +372,6 @@ tclhome.com
 tclclouds.com
 #################################### Call Of Duty
 azure.com
-azureedge.net
 demonware.net
 callofduty.com
 activision.com
