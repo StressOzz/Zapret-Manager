@@ -63,22 +63,22 @@
 - Разблокировать разрешение на **Twitch**
 - Сменить источник (выбрать зеркало) для пакетов **OpenWRT**
 - Установить **TG WS Proxy** для **Telegram**
-- Установить **Podkop Evolution**
-- Интегрировать [**VPN подпиcку**](https://github.com/StressOzz/StressKVN) или **WARP** в **Podkop Evolution**
+- Установить **NetShift**
+- Интегрировать [**VPN подпиcку**](https://github.com/StressOzz/StressKVN) или **WARP** в **NetShift**
 
 ---
 
 ## 🔹 Подготовка системы
 
 > [!IMPORTANT]
->для работы некотрых стратегий, в терминале Windows необходимо выполнить:
+>для работы некотрых стратегий, в терминале Windows необходимо один раз выполнить:
 >```
 >netsh int tcp set global timestamps=enabled
 >```
 
 - Если у Вас установлен **ByeDPI** или **youtubeUnblock** скрипт выдаст сообщение.
 - Если у Вас включён **Flow offloading** скрипт выдаст сообщение и в `Системном меню`, появится пункт **0** - **Применить FIX**.
-- [**Podkop** берёт на себя роль DNS-резолвера](https://podkop.net/docs/dns/), поэтому с установленным `DNS over HTTPS` [**Podkop не установится!**](https://podkop.net/docs/install/#nesovmestimost)
+- [**NetShift** берёт на себя роль DNS-резолвера](https://podkop.net/docs/dns/), поэтому с установленным `DNS over HTTPS` [**NetShift не установится!**](https://podkop.net/docs/install/#nesovmestimost)
 
 ---
 
@@ -186,22 +186,26 @@ zms
 │  ├─ 4 Выбрать и установить стратегию для игр
 │  ├─ 5 Включить / Выключить обход по спискам РКН
 │  ├─ 6 Обновить список исключений
+│  ├─ 7 Добавить в стратегию блок с --wssize 1:6
+│  ├─ 8 Добавить в стратегию блок с --methodeol
+│  ├─ 9 Добавить в стратегию блок с --filter-udp=443
 │  └─ Enter Выход в главное меню
 │
 ├─ 3 Меню тестирование стратегий
-│  ├─1 Тестировать стратегии v
-│  ├─2 Тестировать стратегии Flowseal
-│  ├─3 Тестировать v и Flowseal стратегии
-│  ├─4 Тестировать текущую стратегию
-│  ├─5 Тестировать стратегии по домену
-│  ├─6 Тестировать стратегии для YouTube
-│  ├─9 Результаты тестирования стратегий
-│  ├─0 Удалить результаты тестования
+│  ├─ 1 Тестировать стратегии v
+│  ├─ 2 Тестировать стратегии Flowseal
+│  ├─ 3 Тестировать v и Flowseal стратегии
+│  ├─ 4 Тестировать текущую стратегию
+│  ├─ 5 Тестировать стратегии по домену
+│  ├─ 6 Тестировать стратегии для YouTube
+│  ├─ 9 Результаты тестирования стратегий
+│  ├─ 0 Удалить результаты тестования
 │  └─ Enter Выход в главное меню
 │
 ├─ 4 Меню TG WS Proxy 
-│  ├─1 Установить / Удалить TG WS Proxy Go
-│  ├─2 Установить / Удалить TG WS Proxy Go
+│  ├─ 1 Установить / Удалить TG WS Proxy Go SOCKS5
+│  ├─ 2 Установить / Удалить TG WS Proxy Rust
+│  ├─ 3 Установить / Удалить TG WS Proxy Go MTProto
 │  └─ Enter Выход в главное меню
 │
 ├─ 5 Меню DNS over HTTPS
@@ -212,14 +216,15 @@ zms
 │  ├─ 5 Настроить dns.malw.link через Cloudflare
 │  ├─ 6 Настроить dns.mafioznik.xyz
 │  ├─ 7 Настроить dns.astracat.ru
+│  ├─ 8 Настроить dns.nullsproxy.com (Supercell)
 │  ├─ 0 Вернуть настройки DNS по умолчанию
 │  └─ Enter Выход в главное меню
 │
-├─ 6 Меню Podkop Evolution
-│  ├─ 1 Установить / Удалить / Обновить Podkop Evolution
+├─ 6 Меню NetShift
+│  ├─ 1 Установить / Удалить / Обновить NetShift
 │  ├─ 2 Установить / Удалить AWG и интерфейс AWG
-│  ├─ 3 Интегрировать VPN подписку в Podkop Evolution / Сменить VPN подписку в Podkop Evolution
-│  ├─ 4 Интегрировать AWG в Podkop
+│  ├─ 3 Интегрировать VPN подписку в NetShift / Сменить VPN подписку в NetShift
+│  ├─ 4 Интегрировать AWG в NetShift
 │  └─ Enter Выход в главное меню
 │
 ├─ 7 Меню настройки Discord
@@ -243,8 +248,12 @@ zms
 │  ├─ 7 Добавить / Удалить Telegram Web
 │  ├─ 8 Добавить / Удалить Spotify
 │  ├─ 9 Добавить / Удалить Supercell
-│  ├─10 Добавить / Удалить все домены
-│  ├─11 Восстановить hosts
+│  ├─ 10 Удалить  githubusercontent.com
+│  ├─ 11 Удалить все домены
+│  ├─ 12 Заменить hosts на GeoHide hosts
+│  ├─ 13 Заменить hosts на Mafioznik hosts
+│  ├─ 14 Заменить hosts на Malw.link hosts
+│  ├─ 15 Восстановить hosts
 │  └─Enter Выход в главное меню
 │
 ├─ 9 Удалить → установить → настроить Zapret
@@ -256,12 +265,12 @@ zms
    ├─ 2 Активировать доступ к скрипту из браузера
    ├─ 3 Включить блокировку QUIC (порты 80 и 443)
    ├─ 4 Меню выбора зеркала OpenWrt
-   │  ├─1 China
-   │  ├─2 Germany
-   │  ├─3 Belgium
-   │  ├─4 Kazakhstan
-   │  ├─5 Netherlands
-   │  ├─6 default / OpenWrt
+   │  ├─ 1 China
+   │  ├─ 2 Germany
+   │  ├─ 3 Belgium
+   │  ├─ 4 Kazakhstan
+   │  ├─ 5 Netherlands
+   │  ├─ 6 default / OpenWrt
    │  └─Enter Выход в системное меню
    │
    ├─ 5 Запустить проверку blockcheck
@@ -286,10 +295,10 @@ zms
 
 - **Zapret-OpenWrt** by [*remittor*](https://github.com/remittor)
 - **Стратегии от Flowseal** by [*Flowseal*](https://github.com/Flowseal)
+- **NetShift** by [*yandexru45*](https://github.com/yandexru45)
+- **AWG OpenWrt** by [*Slava-Shchipunov*](https://github.com/Slava-Shchipunov)
 - **TG WS Proxy Go** by [*byd0mhate*](https://github.com/d0mhate)
 - **TG WS Proxy Rust** by [*valnesfjord*](https://github.com/valnesfjord)
-- **Podkop Evolution** by [*yandexru45*](https://github.com/yandexru45)
-- **AWG OpenWrt** by [*Slava-Shchipunov*](https://github.com/Slava-Shchipunov)
 - **TG WS Proxy Go** by [*spatiumstas*](https://github.com/spatiumstas)
 
 ---
