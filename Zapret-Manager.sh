@@ -73,8 +73,8 @@ PAUSE() { echo -ne "Нажмите Enter..."; read dummy; }; BACKUP_DIR="/opt/za
 BIN_PATH_GO="/usr/bin/tg-ws-proxy-go"; INIT_PATH_GO="/etc/init.d/tg-ws-proxy-go"; BIN_PATH_RS="/usr/bin/tg-ws-proxy-rs"; INIT_PATH_RS="/etc/init.d/tg-ws-proxy-rs"
 if command -v opkg >/dev/null 2>&1; then PKG="opkg"; GO_SUF="1"; CONFZ="/etc/opkg/distfeeds.conf"; PKG_IS_APK=0; UPDATE="opkg update"; INSTALL="opkg install"
 DELETE="opkg remove --autoremove --force-removal-of-dependent-packages"; ARCH="$(opkg print-architecture | awk '{print $2}' | tail -n1)"; VER_SUF="r1-all"
-APK_RAS="ipk"; SUFICS="v"; TMP_FILE_GO="/tmp/tg-ws-proxy.ipk"; else PKG="apk"; GO_SUF="r1"; CONFZ="/etc/apk/repositories.d/distfeeds.list"; PKG_IS_APK=1
-UPDATE="apk update"; INSTALL="apk add --allow-untrusted"; DELETE="apk del"; ARCH="$(apk --print-arch 2>/dev/null)"; APK_RAS="apk"; VER_SUF="r1"; SUFICS=""; TMP_FILE_GO="/tmp/tg-ws-proxy.apk"; fi
+APK_RAS="ipk"; TMP_FILE_GO="/tmp/tg-ws-proxy.ipk"; else PKG="apk"; GO_SUF="r1"; CONFZ="/etc/apk/repositories.d/distfeeds.list"; PKG_IS_APK=1
+UPDATE="apk update"; INSTALL="apk add --allow-untrusted"; DELETE="apk del"; ARCH="$(apk --print-arch 2>/dev/null)"; APK_RAS="apk"; VER_SUF="r1"; TMP_FILE_GO="/tmp/tg-ws-proxy.apk"; fi
 if ! command -v curl >/dev/null 2>&1; then clear; echo -e "${MAGENTA}Устанавливаем ${NC}curl"; echo -e "${CYAN}Обновляем список пакетов${NC}"; ok=0; for i in 1 2 3; do if $UPDATE >/dev/null 2>&1; then ok=1; break; fi
 echo -e "${YELLOW}Обновление пакетов попытка $i не удалась${NC}"; sleep 1; done; if [ "$ok" -ne 1 ]; then echo -e "\n${RED}Не удалось обновить пакеты!${NC}\n"; PAUSE; fi
 ok=0; echo -e "${CYAN}Устанавливаем ${NC}curl"; for i in 1 2 3; do if $INSTALL curl >/dev/null 2>&1; then ok=1; break; fi; echo -e "${YELLOW}Устанавливаем ${NC}curl${YELLOW} попытка ${NC}$i${YELLOW} не удалась!${NC}"; sleep 1; done
@@ -99,8 +99,7 @@ command -v netshift >/dev/null 2>&1 && INST_VER_POD=$(netshift show_version 2>/d
 # Установка Zapret
 # ==========================================
 install_pkg() { local display_name="$1"; local pkg_file="$2"; echo -e "${CYAN}Устанавливаем ${NC}$display_name"; $INSTALL $pkg_file >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось установить $display_name!${NC}\n"; PAUSE; return 1; }; }
-install_Zapret() { get_versions
-LOCAL_ARCH=$(awk -F\' '/DISTRIB_ARCH/ {print $2}' /etc/openwrt_release); LATEST_URL="https://github.com/remittor/zapret-openwrt/releases/download/v${ZAPRET_VERSION}/zapret_v${ZAPRET_VERSION}_${LOCAL_ARCH}.zip"
+install_Zapret() { get_versions; LOCAL_ARCH=$(awk -F\' '/DISTRIB_ARCH/ {print $2}' /etc/openwrt_release); LATEST_URL="https://github.com/remittor/zapret-openwrt/releases/download/v${ZAPRET_VERSION}/zapret_v${ZAPRET_VERSION}_${LOCAL_ARCH}.zip"
 mkdir -p "$TMP_SF"; local NO_PAUSE=$1; [ "$INSTALLED_VER" = "$ZAPRET_VERSION" ] && { echo -e "\n${GREEN}Zapret уже установлен!${NC}\n"; [ "$NO_PAUSE" != "1" ] && PAUSE; return; }; [ "$NO_PAUSE" != "1" ] && echo; echo -e "${MAGENTA}Устанавливаем Zapret${NC}"
 if [ -f /etc/init.d/zapret ]; then echo -e "${CYAN}Останавливаем ${NC}zapret"; /etc/init.d/zapret stop >/dev/null 2>&1; for pid in $(pgrep -f /opt/zapret 2>/dev/null); do kill -9 "$pid" 2>/dev/null; done; fi; echo -e "${CYAN}Обновляем список пакетов${NC}"
 $UPDATE >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка при обновлении списка пакетов!${NC}\n"; PAUSE; return; }
@@ -646,8 +645,8 @@ then echo -e "\n${RED}Недостаточно свободного места${
 if pkg_is_installed https-dns-proxy; then echo -e "\n${RED}Обнаружен ${NC}DNS over HTTPS${RED}!"; echo -e "${YELLOW}Удалите ${NC}DNS over HTTPS\n"; PAUSE; return; fi
 [ "$ACTION" = "install" ] && echo -e "\n${MAGENTA}Устанавливаем NetShift${NC}" || echo -e "\n${MAGENTA}Обновляем NetShift${NC}"
 echo -e "${CYAN}Обновляем список пакетов${NC}"; $UPDATE >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось обновить список пакетов${NC}\n"; PAUSE; return; }
-PODKOP_INST="https://github.com/yandexru45/netshift/releases/download/$PODKOP_LATEST_VER/netshift-$SUFICS$PODKOP_LATEST_VER-$VER_SUF.$APK_RAS"
-PODKOP_LUCI="https://github.com/yandexru45/netshift/releases/download/$PODKOP_LATEST_VER/luci-app-netshift-$SUFICS$PODKOP_LATEST_VER-$VER_SUF.$APK_RAS"
+PODKOP_INST="https://github.com/yandexru45/netshift/releases/download/$PODKOP_LATEST_VER/netshift-$PODKOP_LATEST_VER-$VER_SUF.$APK_RAS"
+PODKOP_LUCI="https://github.com/yandexru45/netshift/releases/download/$PODKOP_LATEST_VER/luci-app-netshift-$PODKOP_LATEST_VER-$VER_SUF.$APK_RAS"
 PODKOP_RUS="https://github.com/yandexru45/netshift/releases/download/$PODKOP_LATEST_VER/luci-i18n-netshift-ru-$PODKOP_LATEST_VER.$APK_RAS"
 cd "$tmpDIR"; echo -e "${CYAN}Скачиваем ${NC}NetShift"; wget -q -U "Mozilla/5.0" -O netshift.$APK_RAS "$PODKOP_INST" || { echo -e "\n${RED}Не удалось скачать $PODKOP_INST${NC}\n"; PAUSE; return; }
 wget -q -U "Mozilla/5.0" -O luci-app-netshift.$APK_RAS "$PODKOP_LUCI" || { echo -e "\n${RED}Не удалось скачать $PODKOP_LUCI${NC}\n"; PAUSE; return; }
