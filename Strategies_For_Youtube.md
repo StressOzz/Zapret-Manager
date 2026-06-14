@@ -294,3 +294,15 @@
 --dpi-desync-split-pos=1,2,3,5,105,host+5,sld-1,endsld-5,endsld
 --dpi-desync-fooling=badsum
 ```
+```
+#Yv27 (Yv11)
+--filter-tcp=443
+--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt
+--dpi-desync=fake,multisplit
+--dpi-desync-fake-tls=0x00000000
+--dpi-desync-fake-tls=!
+--dpi-desync-split-pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1
+--dpi-desync-repeats=2
+--dpi-desync-fooling=badseq
+--dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
+```
