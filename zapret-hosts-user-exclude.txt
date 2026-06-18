@@ -35,6 +35,7 @@ canonical.com
 mediafire.com
 moondroplab.tech
 rockstargames.com
+docs.altlinux.org
 supporter-files.nexus-cdn.com
 #################################### VK
 vk.cc
