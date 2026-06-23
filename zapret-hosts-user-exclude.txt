@@ -5,6 +5,9 @@ su
 xn--p1ai
 xn--80asehdb
 #################################### Разное
+feralhosting.com
+box.ca
+whatbox.ca
 hf.co
 2ip.io
 qwen.ai
