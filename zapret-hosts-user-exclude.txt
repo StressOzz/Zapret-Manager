@@ -5,6 +5,7 @@ su
 xn--p1ai
 xn--80asehdb
 #################################### Разное
+opencity.pro
 feralhosting.com
 box.ca
 whatbox.ca
