@@ -237,6 +237,7 @@ xiaomi.cn
 mipay.com
 youpin.cn
 zmifi.com
+70mai.com
 mi-idc.com
 mi-img.com
 mijia.tech
