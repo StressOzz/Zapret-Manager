@@ -5,6 +5,7 @@ su
 xn--p1ai
 xn--80asehdb
 #################################### Разное
+gravatar.com
 msi.com
 battleye.b-cdn.net
 battleye.com
