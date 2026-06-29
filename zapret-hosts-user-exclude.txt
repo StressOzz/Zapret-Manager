@@ -5,6 +5,7 @@ su
 xn--p1ai
 xn--80asehdb
 #################################### Разное
+vivoglobal.com
 gravatar.com
 msi.com
 battleye.b-cdn.net
