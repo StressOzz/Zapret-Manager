@@ -1,8 +1,11 @@
 ru
 by
-рф
 su
 xn--p1ai
+xn--p1acf
+xn--80aswg
+xn--d1acj3b
+xn--80adxhks
 xn--80asehdb
 #################################### Разное
 vivoglobal.com
@@ -460,4 +463,10 @@ postmanapp.com
 radmin.com
 famatech.com
 radmin-vpn.com
-####################################
+#################################### DNS
+dns.adguard-dns.com
+dns.comss.one
+controld.com
+joindns4.eu
+quad9.net
+#################################### 
