@@ -388,11 +388,11 @@ callofduty.com
 activision.com
 cloudfront.net
 #################################### Amazon
-amazon.dev
-amazon.com
-amazonaws.com
-amazontrust.com
-media-amazon.com
+#amazon.dev
+#amazon.com
+#amazonaws.com
+#amazontrust.com
+#media-amazon.com
 #################################### Akamai
 akamai.net
 akamaihd.net
