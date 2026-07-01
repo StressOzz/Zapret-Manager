@@ -14,6 +14,7 @@ box.ca
 2ip.io
 msi.com
 qwen.ai
+1drv.ms
 iiko.it
 okko.tv
 avito.st
@@ -34,6 +35,7 @@ yandex.com
 gstatic.com
 lichess.org
 premier.one
+teclast.com
 gravatar.com
 battleye.com
 opencity.pro
