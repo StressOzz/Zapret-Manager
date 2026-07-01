@@ -3,19 +3,16 @@ by
 рф
 su
 xn--p1ai
+xn--p1acf
+xn--80aswg
+xn--d1acj3b
+xn--80adxhks
 xn--80asehdb
 #################################### Разное
-vivoglobal.com
-gravatar.com
-msi.com
-battleye.b-cdn.net
-battleye.com
-opencity.pro
-feralhosting.com
-box.ca
-whatbox.ca
 hf.co
+box.ca
 2ip.io
+msi.com
 qwen.ai
 iiko.it
 okko.tv
@@ -27,6 +24,7 @@ boosty.to
 ottai.com
 ufanet.tv
 apple.com
+whatbox.ca
 trovo.live
 beeline.tv
 ubuntu.com
@@ -36,15 +34,21 @@ yandex.com
 gstatic.com
 lichess.org
 premier.one
+gravatar.com
+battleye.com
+opencity.pro
 ipstream.one
 godville.net
 voidboost.cc
 hcaptcha.com
 canonical.com
 mediafire.com
+vivoglobal.com
+feralhosting.com
 moondroplab.tech
 rockstargames.com
 docs.altlinux.org
+battleye.b-cdn.net
 supporter-files.nexus-cdn.com
 #################################### VK
 vk.cc
@@ -324,10 +328,14 @@ quovadisglobal.com
 jupiterlauncher.com
 anticheatexpert.com
 #################################### Microsoft
+sfx.ms
+msn.com
 live.com
 lync.com
+live.net
 skype.com
 microsoft
+fabric.io
 msauth.net
 office.net
 office.com
@@ -336,10 +344,12 @@ mojang.com
 windows.net
 msftauth.net
 xboxlive.com
+onedrive.com
 microsoft.com
 office365.com
 skypeassets.com
 windowsupdate.com
+microsoft-tst.com
 microsoftonline.com
 microsoftonline-p.com
 minecraftservices.com
@@ -460,4 +470,16 @@ postmanapp.com
 radmin.com
 famatech.com
 radmin-vpn.com
-####################################
+#################################### DNS
+quad9.net
+joindns4.eu
+controld.com
+dns.comss.one
+dns.adguard-dns.com
+#################################### Black Desert Online
+wellbia.com
+bdocodex.com
+pearl-bdo.com
+pearlabyss.com
+playblackdesert.com
+#################################### 
