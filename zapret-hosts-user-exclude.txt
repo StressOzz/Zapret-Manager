@@ -14,9 +14,9 @@ box.ca
 2ip.io
 msi.com
 qwen.ai
-1drv.ms
 iiko.it
 okko.tv
+ktalk.ru
 avito.st
 habr.com
 nexon.com
@@ -332,6 +332,7 @@ anticheatexpert.com
 #################################### Microsoft
 sfx.ms
 msn.com
+1drv.ms
 live.com
 lync.com
 live.net
