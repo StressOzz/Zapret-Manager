@@ -211,15 +211,22 @@ zms
   ├─ 7 Выбрать и установить панель для Mihomo
   ├─ 8 Включить / Выключить автоперезапуск Mihomo
   └─ Enter Выход в главное меню
+
+─ 4 Меню NetShift
+  ├─ 1 Установить / Удалить / Обновить NetShift
+  ├─ 2 Установить / Удалить AWG и интерфейс AWG
+  ├─ 3 Интегрировать VPN подписку в NetShift / Сменить VPN подписку в NetShift
+  ├─ 4 Интегрировать AWG в NetShift
+  └─ Enter Выход в главное меню
   
-─ 4 Меню TG WS Proxy 
+─ 5 Меню TG WS Proxy 
   ├─ 1 Установить / Удалить TG WS Proxy Go SOCKS5
   ├─ 2 Установить / Удалить TG WS Proxy Rust
   ├─ 3 Установить / Удалить TG WS Proxy Go MTProto
   ├─ 4 Удалить все TG WS Proxy
   └─ Enter Выход в главное меню
 
-─ 5 Меню DNS over HTTPS
+─ 6 Меню DNS over HTTPS
   ├─ 1 Установить / Удалить DNS over HTTPS
   ├─ 2 Настроить Comss DNS
   ├─ 3 Настроить Xbox DNS
@@ -229,13 +236,6 @@ zms
   ├─ 7 Настроить dns.astracat.ru
   ├─ 8 Настроить dns.nullsproxy.com (Supercell)
   ├─ 0 Вернуть настройки DNS по умолчанию
-  └─ Enter Выход в главное меню
-
-─ 6 Меню NetShift
-  ├─ 1 Установить / Удалить / Обновить NetShift
-  ├─ 2 Установить / Удалить AWG и интерфейс AWG
-  ├─ 3 Интегрировать VPN подписку в NetShift / Сменить VPN подписку в NetShift
-  ├─ 4 Интегрировать AWG в NetShift
   └─ Enter Выход в главное меню
 
 ─ 7 Меню настройки Discord
