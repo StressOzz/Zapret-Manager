@@ -319,12 +319,15 @@ huaweicloud-dns.cn
 huaweicloud-dns.com
 huaweicloud-dns.org
 #################################### Delta Force
+gtimg.com
 volces.com
 wetest.net
+tencent.com
 intlgame.com
 fleetlogd.com
 dgameglobal.com
 tdatamaster.com
+tencent-cloud.com
 playdeltaforce.com
 quovadisglobal.com
 jupiterlauncher.com
