@@ -79,7 +79,7 @@ APK_RAS="ipk"; TMP_FILE_GO="/tmp/tg-ws-proxy.ipk"; else PKG="apk"; GO_SUF="r1"; 
 UPDATE="apk update"; INSTALL="apk add --allow-untrusted"; DELETE="apk del"; ARCH="$(apk --print-arch 2>/dev/null)"; APK_RAS="apk"; VER_SUF="r1"; TMP_FILE_GO="/tmp/tg-ws-proxy.apk"; fi
 if ! command -v curl >/dev/null 2>&1; then clear; echo -e "${MAGENTA}Устанавливаем ${NC}curl"; echo -e "${CYAN}Обновляем список пакетов${NC}"; if ! $UPDATE >/dev/null 2>&1; then echo -e "\n${RED}Не удалось обновить пакеты!${NC}\n"
 PAUSE; fi; echo -e "${CYAN}Устанавливаем ${NC}curl"; if ! $INSTALL curl >/dev/null 2>&1; then echo -e "\n${RED}Не удалось установить ${NC}curl!${NC}\n"; PAUSE; fi; fi
-ZAPRET_VERSION="72.20260307"; PODKOP_LATEST_VER="0.9.2"; GO_VER="0.9.1"
+ZAPRET_VERSION="72.20260307"; PODKOP_LATEST_VER="0.9.3"; GO_VER="0.9.1"
 get_ver() { URL="$1"; OUT_FILE="$2"; NAME="$3"; RESULT=$(curl -sIL --connect-timeout 2 --max-time 2 --retry 1 -w "%{url_effective}" -o /dev/null "$URL" 2>/dev/null); if [ $? -ne 0 ] || [ -z "$RESULT" ]; then
 echo -e "${RED}$NAME: ошибка curl${NC}"; return 1; fi; VERSION="${RESULT##*/}"; VERSION="${VERSION#v}"; if [ -z "$VERSION" ]; then echo -e "$NAME - ${RED}не удалось извлечь версию${NC}"
 echo -e "${YELLOW}URL:${NC} $RESULT"; return 1; fi; echo "$VERSION" > "$OUT_FILE"; echo -e "$NAME: ${GREEN}$VERSION${NC}"; }
@@ -140,7 +140,7 @@ awk -v new="$new_fileD" 'BEGIN {blk=0} /^.*--filter-l7=discord,stun/ {blk=1} blk
 select_Dv() { DVS=$(set | grep -E '^Dv[0-9]+=' | sed 's/=.*//' | sort -V); COUNT_dv=$(echo "$DVS" | wc -l); echo; echo -en "${YELLOW}Введите версию стратегии для discord.media (${NC}1-$COUNT_dv${YELLOW}):${NC} "; read CHOICE_DV </dev/tty
 case "$CHOICE_DV" in ''|*[!0-9]*|0) return 1;; esac; SELECTED_dv="Dv$CHOICE_DV"; echo "$DVS" | grep -qx "$SELECTED_dv" || return 1; NEW_NUM="$CHOICE_DV"; NEW_STRAT=$(eval echo \"\$$SELECTED_dv\"); }
 switch_Dv() { select_Dv || return 1; grep -q -E '^[[:space:]]*--filter-tcp=2053,2083,2087,2096,8443' "$CONF" || { echo -e "\n${RED}Стратегия не подходит!${NC}\n"; PAUSE; return 1; }; START=$(grep -n -E '^[[:space:]]*--filter-tcp=2053,2083,2087,2096,8443' "$CONF" | cut -d: -f1)
-END=$(tail -n +"$START" "$CONF" | grep -n -m1 -E '^--new$|^'\''$' | cut -d: -f1); END=$((START + END - 1)); sed -i "${START},$((END-1))d" "$CONF"; LINE=$START; echo "$NEW_STRAT" | while IFS= read -r l; do sed -i "${LINE}i$l" "$CONF"; LINE=$((LINE + 1)); done
+END=$(tail -n +"$START" "$CONF" | grep -n -m1 -E '^--new$|^#|^'\''$' | cut -d: -f1); END=$((START + END - 1)); sed -i "${START},$((END-1))d" "$CONF"; LINE=$START; echo "$NEW_STRAT" | while IFS= read -r l; do sed -i "${LINE}i$l" "$CONF"; LINE=$((LINE + 1)); done
 if grep -q -E '^#[[:space:]]*Dv' "$CONF"; then sed -i "s/^#[[:space:]]*Dv[0-9]\+/#Dv$NEW_NUM/" "$CONF"; else sed -i "$START i#Dv$NEW_NUM" "$CONF"; fi; echo -e "\n${MAGENTA}Меняем стратегию для discord.media${NC}"; ZAPRET_RESTART; echo -e "${GREEN}Стратегия ${NC}Dv$NEW_NUM${GREEN} применена!${NC}\n"; PAUSE; }
 toggle_finland_hosts() { if grep -q "$Fin_IP_Dis" /etc/hosts; then sed -i "/$Fin_IP_Dis/d" /etc/hosts; echo -e "\n${MAGENTA}Удаляем Финские IP${NC}"; /etc/init.d/dnsmasq restart 2>/dev/null
 echo -e "${GREEN}Финские ${NC}IP${GREEN} удалены${NC}\n"; else seq 10000 10199 | awk '{print "104.25.158.178 finland"$1".discord.media"}' | grep -vxFf /etc/hosts >> /etc/hosts; echo -e "\n${MAGENTA}Добавляем Финские IP${NC}"; /etc/init.d/dnsmasq restart 2>/dev/null
