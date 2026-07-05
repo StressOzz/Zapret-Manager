@@ -91,6 +91,8 @@ echo 'sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/
 git="githubusercontent.com"; if ! grep -q "raw.$git" /etc/hosts; then echo -e "\n\033[1;36mДля корректной работы скрипта добавляем домены \033[0mGitHub\033[1;36m в \033[0m/etc/hosts\033[0m"
 printf "#$git\n185.199.109.133 raw.$git release-assets.$git\n185.199.108.133 private-user-images.$git gist.$git avatars.$git\n" >> /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1; fi
 
+[ -d /opt/zapret ] && [ ! -f /opt/zapret/files/fake/quic_initial_dbankcloud_ru.bin ] && { echo -e "${CYAN}Скачиваем ${NC}quic_initial_dbankcloud_ru.bin"; wget -q -U "Mozilla/5.0" -O /opt/zapret/files/fake/quic_initial_dbankcloud_ru.bin https://github.com/StressOzz/Zapret-Manager/raw/refs/heads/files/quic_initial_dbankcloud_ru.bin || { echo -e "\n${RED}Не удалось загрузить файл ${NC}quic_initial_dbankcloud_ru.bin${NC}\n"; }; }
+
 # ==========================================
 # Получение версии
 # ==========================================
