@@ -344,6 +344,7 @@ msn.com
 live.com
 lync.com
 live.net
+xbox.com
 skype.com
 microsoft
 fabric.io
@@ -359,6 +360,7 @@ onedrive.com
 microsoft.com
 office365.com
 skypeassets.com
+xboxservices.com
 windowsupdate.com
 microsoft-tst.com
 microsoftonline.com
