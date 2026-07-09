@@ -586,14 +586,12 @@ echo -en "\n${YELLOW}Выберите зеркало: ${NC}"; read -r z; case "$
 # МЕНЮ TG WS Proxy
 # ==========================================
 # УСТАНОВКА RUST
-# get_arch_RS() { case "$ARCH" in aarch64*) echo "tg-ws-proxy-aarch64-unknown-linux-musl.tar.gz" ;; x86_64) echo "tg-ws-proxy-x86_64-unknown-linux-musl.tar.gz" ;; arm*) echo "tg-ws-proxy-armv7-unknown-linux-musleabihf.tar.gz" ;; mipsel*) echo "tg-ws-proxy-mipsel-unknown-linux-musl.tar.gz" ;; mips*) echo "tg-ws-proxy-mips-unknown-linux-musl.tar.gz" ;; *) echo -e "\n${RED}Архитектура не поддерживается: ${NC}$ARCH\n"; PAUSE; return 1 ;; esac }
-# delete_TG_RS() { echo -e "\n${MAGENTA}Удаляем TG WS Proxy Rust${NC}"; /etc/init.d/tg-ws-proxy-rs stop >/dev/null 2>&1; /etc/init.d/tg-ws-proxy-rs disable >/dev/null 2>&1; rm -rf "$BIN_PATH_RS" "$INIT_PATH_RS"; echo -e "TG WS Proxy Rust ${GREEN}удалён!${NC}\n"; PAUSE; }
-# install_TG_RS() { echo -e "\n${MAGENTA}Устанавливаем TG WS Proxy Rust${NC}"; ARCH_FILE_RS="$(get_arch_RS)" || { echo -e "\n${RED}Архитектура не поддерживается:${NC} $ARCH\n"; PAUSE; return 1; }; echo -e "${CYAN}Скачиваем и устанавливаем${NC} $ARCH_FILE_RS"
-# LATEST_TAG_RS="$(curl -Ls -o /dev/null -w '%{url_effective}' https://github.com/valnesfjord/tg-ws-proxy-rs/releases/latest | sed 's#.*/tag/##')"; [ -z "$LATEST_TAG_RS" ] && { echo -e "\n${RED}Не удалось получить версию${NC} TG WS Proxy Rust\n"; PAUSE; return 1; }; DOWNLOAD_URL_RS="https://github.com/valnesfjord/tg-ws-proxy-rs/releases/download/$LATEST_TAG_RS/$ARCH_FILE_RS"
-# curl -L --fail -o "$TMP_ARCHIVE_RS" "$DOWNLOAD_URL_RS" >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка скачивания${NC}\n"; PAUSE; return 1; }; rm -rf "$TMP_DIR_RS"; mkdir -p "$TMP_DIR_RS"; tar -xzf "$TMP_ARCHIVE_RS" -C "$TMP_DIR_RS" || { echo -e "\n${RED}Ошибка распаковки${NC}\n"; PAUSE; return 1; }; mv "$TMP_DIR_RS"/tg-ws-proxy* "$BIN_PATH_RS"; rm -rf "$TMP_DIR_RS"; rm -rf "$TMP_ARCHIVE_RS"; chmod +x "$BIN_PATH_RS"
-# printf '#!/bin/sh /etc/rc.common\nSTART=99\nUSE_PROCD=1\n\nstart_service() {\n    procd_open_instance\n    procd_set_param command /usr/bin/tg-ws-proxy-rs --host 0.0.0.0 --port 2443 --secret %s --default-domains --cf-balance --cf-priority\n    procd_set_param respawn\n    procd_close_instance\n}\n' "$SECRET" > /etc/init.d/tg-ws-proxy-rs
-# chmod +x "$INIT_PATH_RS"; /etc/init.d/tg-ws-proxy-rs enable; /etc/init.d/tg-ws-proxy-rs start; if pidof tg-ws-proxy-rs >/dev/null 2>&1; then echo -e "${GREEN}Сервис ${NC}TG WS Proxy Rust${GREEN} запущен!${NC}\n"; else echo -e "\n${RED}Сервис TG WS Proxy Rust не запущен!${NC}\n"; fi; PAUSE; }
-
+get_arch_RS() { case "$ARCH" in aarch64*) echo "aarch64" ;; x86_64) echo "x86_64" ;; arm*) echo "armv7" ;; mipsel*) echo "mipsel" ;; mips*) echo "mips" ;; *) echo -e "\n${RED}Архитектура не поддерживается:${NC} $ARCH\n"; PAUSE; return 1 ;; esac; }
+delete_TG_RS() { echo -e "\n${MAGENTA}Удаляем TG WS Proxy Rust${NC}"; /etc/init.d/tg-ws-proxy-rs stop >/dev/null 2>&1; /etc/init.d/tg-ws-proxy-rs disable >/dev/null 2>&1; rm -rf "$BIN_PATH_RS" "$INIT_PATH_RS"; echo -e "TG WS Proxy Rust ${GREEN}удалён!${NC}\n"; PAUSE; }
+install_TG_RS() { echo -e "\n${MAGENTA}Устанавливаем TG WS Proxy Rust${NC}"; ARCH_FILE_RS="$(get_arch_RS)" || { echo -e "\n${RED}Архитектура не поддерживается:${NC} $ARCH\n"; PAUSE; return 1; }; echo -e "${CYAN}Скачиваем и устанавливаем${NC} tg-ws-proxy-rs-$ARCH_FILE_RS"
+DOWNLOAD_URL_RS="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/files/tg_ws_proxy_rs/tg-ws-proxy-rs-$ARCH_FILE_RS"; curl -L --fail -o "$BIN_PATH_RS" "$DOWNLOAD_URL_RS" >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка скачивания${NC}\n"; PAUSE; return 1; }; chmod +x "$BIN_PATH_RS"
+printf '#!/bin/sh /etc/rc.common\nSTART=99\nUSE_PROCD=1\n\nstart_service() {\n    procd_open_instance\n    procd_set_param command /usr/bin/tg-ws-proxy-rs --host 0.0.0.0 --port 2443 --secret %s --default-domains --cf-balance --cf-priority\n    procd_set_param respawn\n    procd_close_instance\n}\n' "$SECRET" > /etc/init.d/tg-ws-proxy-rs
+chmod +x "$INIT_PATH_RS"; /etc/init.d/tg-ws-proxy-rs enable; /etc/init.d/tg-ws-proxy-rs start; if pidof tg-ws-proxy-rs >/dev/null 2>&1; then echo -e "${GREEN}Сервис ${NC}TG WS Proxy Rust${GREEN} запущен!${NC}\n"; else echo -e "\n${RED}Сервис TG WS Proxy Rust не запущен!${NC}\n"; fi; PAUSE; }
 # УСТАНОВКА GO
 get_arch_GO() { case "$ARCH" in aarch64*) echo "tg-ws-proxy-openwrt-aarch64" ;; arm*) echo "tg-ws-proxy-openwrt-armv7" ;; mipsel*) echo "tg-ws-proxy-openwrt-mipsel_24kc" ;; mips*) echo "tg-ws-proxy-openwrt-mips_24kc" ;; x86_64) echo "tg-ws-proxy-openwrt-x86_64" ;; *) echo "Неизвестная архитектура: $ARCH"; return 1 ;; esac }
 delete_TG_GO() { echo -e "\n${MAGENTA}Удаляем TG WS Proxy Go SOCKS5${NC}"; /etc/init.d/tg-ws-proxy-go stop >/dev/null 2>&1; /etc/init.d/tg-ws-proxy-go disable >/dev/null 2>&1; rm -rf "$BIN_PATH_GO" "$INIT_PATH_GO"; echo -e "TG WS Proxy Go SOCKS5 ${GREEN}удалён!${NC}\n"; PAUSE; }
@@ -623,17 +621,11 @@ echo -e "\n${YELLOW}Настройки ${CYAN}TG WS Proxy Rust${YELLOW}:${NC}\n$
 if pidof tg-ws-proxy >/dev/null 2>&1 && [ -f "/etc/init.d/tg-ws-proxy" ]; then SECRET_CONF="$(grep '^SECRET=' $SECRET_FILE 2>/dev/null | cut -d'=' -f2)"; echo -e "\n${YELLOW}Настройки ${CYAN}TG WS Proxy Go MTProto${YELLOW}:${NC}"; echo -e "${YELLOW}Тип прокси:${NC} MTProto"
 echo -e "${YELLOW}Хост:${NC} $LAN_IP"; echo -e "${YELLOW}Порт:${NC} 1443"; echo -e "${YELLOW}Ключ:${NC} dd$SECRET_CONF"; echo -e "${YELLOW}Ссылка для подключения:${NC}"; echo -e "tg://proxy?server=$LAN_IP&port=1443&secret=dd$SECRET_CONF"; fi
 echo -e "\n${CYAN}1)${GREEN} $( [ -f "$BIN_PATH_GO" ] && [ -f "$INIT_PATH_GO" ] && echo -e "Удалить ${NC}TG WS Proxy Go SOCKS5" || echo "Установить ${NC}TG WS Proxy Go SOCKS5" )"
-
-# echo -e "${CYAN}2)${GREEN} $( [ -f "$BIN_PATH_RS" ] && [ -f "$INIT_PATH_RS" ] && echo -e "Удалить ${NC}TG WS Proxy Rust" || echo "Установить ${NC}TG WS Proxy Rust" )"
-
-if [ "$GO_ACTION" = "install" ]; then echo -e "${CYAN}2)${GREEN} Установить ${NC}TG WS Proxy Go MTProto"; elif [ "$GO_ACTION" = "update" ]; then echo -e "${CYAN}2)${GREEN} Обновить ${NC}TG WS Proxy Go MTProto${NC}"; else echo -e "${CYAN}3)${GREEN} Удалить ${NC}TG WS Proxy Go MTProto${NC}"; fi
-echo -e "${CYAN}3)${GREEN} Удалить все ${NC}TG WS Proxy\n${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n"; echo -en "${YELLOW}Выберите пункт: ${NC}"; read choice; case "$choice" in 1) if [ -f "$BIN_PATH_GO" ] && [ -f "$INIT_PATH_GO" ]; then delete_TG_GO; else install_TG_GO; fi;;
-
-# 2) if [ -f "$BIN_PATH_RS" ] && [ -f "$INIT_PATH_RS" ]; then delete_TG_RS; else install_TG_RS; fi;; 
-
-2) if [ "$GO_ACTION" = "install" ] || [ "$GO_ACTION" = "update" ]; then install_update_TG_PKG; else remove_TG_PKG; fi ;;
-3) echo -e "\n${MAGENTA}Удаляeм все TG WS Proxy${NC}"; for s in /etc/init.d/tg-ws*; do [ -e "$s" ] || continue; "$s" stop >/dev/null 2>&1; "$s" disable >/dev/null 2>&1; done; apk del tg-ws* >/dev/null 2>&1 || opkg remove tg-ws* >/dev/null 2>&1; rm -rf /usr/bin/tg-ws* /etc/init.d/tg-ws* /etc/tg-ws* /etc/config/tg-ws*
-echo -e "${GREEN}Все ${NC}TG WS Proxy ${GREEN}удалены!${NC}\n";PAUSE ;; *) break ;; esac; done; }
+echo -e "${CYAN}2)${GREEN} $( [ -f "$BIN_PATH_RS" ] && [ -f "$INIT_PATH_RS" ] && echo -e "Удалить ${NC}TG WS Proxy Rust" || echo "Установить ${NC}TG WS Proxy Rust" )"
+if [ "$GO_ACTION" = "install" ]; then echo -e "${CYAN}3)${GREEN} Установить ${NC}TG WS Proxy Go MTProto"; elif [ "$GO_ACTION" = "update" ]; then echo -e "${CYAN}3)${GREEN} Обновить ${NC}TG WS Proxy Go MTProto${NC}"; else echo -e "${CYAN}3)${GREEN} Удалить ${NC}TG WS Proxy Go MTProto${NC}"; fi
+echo -e "${CYAN}4)${GREEN} Удалить все ${NC}TG WS Proxy\n${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n"; echo -en "${YELLOW}Выберите пункт: ${NC}"; read choice; case "$choice" in 1) if [ -f "$BIN_PATH_GO" ] && [ -f "$INIT_PATH_GO" ]; then delete_TG_GO; else install_TG_GO; fi;;
+2) if [ -f "$BIN_PATH_RS" ] && [ -f "$INIT_PATH_RS" ]; then delete_TG_RS; else install_TG_RS; fi;; 3) if [ "$GO_ACTION" = "install" ] || [ "$GO_ACTION" = "update" ]; then install_update_TG_PKG; else remove_TG_PKG; fi ;; 4) echo -e "\n${MAGENTA}Удаляeм все TG WS Proxy${NC}"
+for s in /etc/init.d/tg-ws*; do [ -e "$s" ] || continue; "$s" stop >/dev/null 2>&1; "$s" disable >/dev/null 2>&1; done; apk del tg-ws* >/dev/null 2>&1 || opkg remove tg-ws* >/dev/null 2>&1; rm -rf /usr/bin/tg-ws* /etc/init.d/tg-ws* /etc/tg-ws* /etc/config/tg-ws*; echo -e "${GREEN}Все ${NC}TG WS Proxy ${GREEN}удалены!${NC}\n";PAUSE ;; *) break ;; esac; done; }
 # ==========================================
 # PODKOP EVOLUTION и AWG
 # ==========================================
