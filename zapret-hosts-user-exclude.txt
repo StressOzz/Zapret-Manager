@@ -9,8 +9,6 @@ xn--d1acj3b
 xn--80adxhks
 xn--80asehdb
 #################################### Разное
-playfabapi.com
-steamonline.com
 hf.co
 box.ca
 2ip.io
@@ -38,6 +36,7 @@ gstatic.com
 lichess.org
 premier.one
 teclast.com
+wws-gs2.com
 gravatar.com
 battleye.com
 opencity.pro
