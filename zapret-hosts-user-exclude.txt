@@ -16,6 +16,7 @@ msi.com
 qwen.ai
 iiko.it
 okko.tv
+ripe.net
 ktalk.ru
 avito.st
 habr.com
@@ -37,6 +38,7 @@ lichess.org
 premier.one
 teclast.com
 wws-gs2.com
+dropbox.com
 gravatar.com
 battleye.com
 opencity.pro
@@ -360,6 +362,7 @@ xboxlive.com
 onedrive.com
 microsoft.com
 office365.com
+sharepoint.com
 skypeassets.com
 xboxservices.com
 windowsupdate.com
