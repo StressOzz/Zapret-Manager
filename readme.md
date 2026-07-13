@@ -25,6 +25,11 @@
 > git="githubusercontent.com"; grep -q "raw.$git" /etc/hosts || { printf "#$git\n185.199.109.133 raw.$git release-assets.$git\n185.199.108.133 private-user-images.$git gist.$git avatars.$git\n" >> /etc/hosts; /etc/init.d/dnsmasq restart 2>/dev/null; }; echo -e "\033[0;32mOK\033[0m"
 > ```
 
+Чтобы удалить эту настройку, в **SSH** выполните:
+```
+sed -i '/#githubusercontent.com/,+2d' /etc/hosts; /etc/init.d/dnsmasq restart 2>/dev/null; echo -e "\033[0;32mOK\033[0m"
+```
+
 ---
 
 <table>
@@ -49,7 +54,7 @@
 - [Подготовка системы](#-подготовка-системы)
 - [Запуск менеджера](#-запуск-менеджера)
 - [Быстрый старт](#-быстрый-старт)
-- [Настройка Telegram](#-настройка-telegram)
+- [Настройка Telegram](#-telegram)
 - [Cтратегии](#-стратегии)
 - [Mixomo](#-mixomo)
 - [Дерево меню Zapret Manager](#-дерево-меню-zapret-manager)
@@ -80,10 +85,11 @@
 - Разблокировать **Telegram WEB**, **rutor.info**, **ntc.party**, **lib.rus.ec**, **Instagram***
 - Разблокировать разрешение на **Twitch**
 - Сменить источник (выбрать зеркало) для пакетов **OpenWRT**
-- Установить **TG WS Proxy** для **Telegram**
-- Установить **NetShift**
-- Установить **Mixomo**
-- Интегрировать [**VPN подпиcку**](https://github.com/StressOzz/StressKVN) или **WARP** в **NetShift** и **Mixomo**
+- Установить различные **TG WS Proxy** для **Telegram**
+- Установить **NetShift** - **https://github.com/yandexru45/netshift**
+- Установить **Mixomo** - **https://github.com/Internet-Helper/mixomo-openwrt**
+- Интегрировать [**VPN подпиcку**](https://github.com/StressOzz/StressKVN) в **NetShift** и **Mixomo**
+- Сгенерировать **WARP** и интегрировать его в **Mixomo**
 
 ---
 
