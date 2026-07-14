@@ -310,7 +310,7 @@ sed -i '/^--new$/ { N; /^\--new\n$/d; }' "$OUT"; rm -rf "$TMP_SF/zapret-discord-
 # ==========================================
 # Меню стратегий
 # ==========================================
-ADD_GP_DOMAINS() { printf '%s\n' "gvt1.com" "googleplay.com" "play.google.com" "beacons.gvt2.com" "play.googleapis.com" "play-fe.googleapis.com" "lh3.googleusercontent.com" "android.clients.google.com" "connectivitycheck.gstatic.com" "play-lh.googleusercontent.com" "play-games.googleusercontent.com" "prod-lt-playstoregatewayadapter-pa.googleapis.com" | grep -Fxv -f "$fileGP" 2>/dev/null >> "$fileGP"; }
+ADD_GP_DOMAINS() { printf '%s\n' "gvt1.com" "googleplay.com" "play.google.com" "beacons.gvt2.com" "play.googleapis.com" "play-fe.googleapis.com" "lh3.googleusercontent.com" "android.clients.google.com" "connectivitycheck.gstatic.com" "play-lh.googleusercontent.com" "play-games.googleusercontent.com" "prod-lt-playstoregatewayadapter-pa.googleapis.com" "youtubei.youtube.com" | grep -Fxv -f "$fileGP" 2>/dev/null >> "$fileGP"; }
 manage_block() { action="$1"; f1="$2"; f2="$3"; if [ "$action" = "add" ]; then echo -e "\n${MAGENTA}Добавляем блок с ${f2}\n${CYAN}Добавляем блок в стратегию\nПерезапускаем ${NC}Zapret"; last_line=$(grep -n "^'$" "$CONF" | tail -n1 | cut -d: -f1)
 [ -n "$last_line" ] && sed -i "${last_line},\$d" "$CONF"; printf "%s\n" "--new" "$f1" "$f2" "'" >> "$CONF"; ZAPRET_RESTART; echo -e "${GREEN}Блок с ${NC}${f2}${GREEN} добавлен!${NC}"
 echo -e "\n${YELLOW}Блок может влиять на скорость и стабильность интернета!${NC}\n"; PAUSE; fi; if [ "$action" = "remove" ]; then echo -e "\n${MAGENTA}Удаляем блок с ${f2}${NC}\n${CYAN}Удаляем блок из стратегию\nПерезапускаем ${NC}Zapret"
