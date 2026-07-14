@@ -578,7 +578,7 @@ echo -en "\n${YELLOW}Выберите зеркало: ${NC}"; read -r z; case "$
 # МЕНЮ TG WS Proxy
 # ==========================================
 # УСТАНОВКА RUST
-get_arch_RS() { case "$ARCH" in aarch64*) echo "aarch64" ;; arm*) echo "armv7" ;; mipsel*) echo "mipsel" ;; mips*) echo "mips" ;; *) echo -e "\n${RED}Архитектура не поддерживается:${NC} $ARCH\n"; PAUSE; return 1 ;; esac; }
+get_arch_RS() { case "$ARCH" in aarch64*) echo "aarch64" ;; x86_64) echo "x86_64" ;; arm*) echo "armv7" ;; mipsel*) echo "mipsel" ;; mips*) echo "mips" ;; *) echo -e "\n${RED}Архитектура не поддерживается:${NC} $ARCH\n"; PAUSE; return 1 ;; esac; }
 delete_TG_RS() { echo -e "\n${MAGENTA}Удаляем TG WS Proxy Rust${NC}"; /etc/init.d/tg-ws-proxy-rs stop >/dev/null 2>&1; /etc/init.d/tg-ws-proxy-rs disable >/dev/null 2>&1; rm -rf "$BIN_PATH_RS" "$INIT_PATH_RS"; echo -e "TG WS Proxy Rust ${GREEN}удалён!${NC}\n"; PAUSE; }
 install_TG_RS() { echo -e "\n${MAGENTA}Устанавливаем TG WS Proxy Rust${NC}"; ARCH_FILE_RS="$(get_arch_RS)" || { echo -e "\n${RED}Архитектура не поддерживается:${NC} $ARCH\n"; PAUSE; return 1; }; echo -e "${CYAN}Скачиваем и устанавливаем${NC} tg-ws-proxy-rs-$ARCH_FILE_RS"
 DOWNLOAD_URL_RS="https://github.com/DaveFromSheffield/rezerv/raw/refs/heads/main/files/tg-ws-proxy-rs/tg-ws-proxy-rs-$ARCH_FILE_RS"; curl -L --fail -o "$BIN_PATH_RS" "$DOWNLOAD_URL_RS" >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка скачивания${NC}\n"; PAUSE; return 1; }; chmod +x "$BIN_PATH_RS"
