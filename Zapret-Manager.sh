@@ -69,7 +69,7 @@ SPFY="#Spotify\n45.155.204.190 api.spotify.com login5.spotify.com encore.scdn.co
 GITH_RAW="#githubusercontent.com\n185.199.109.133 raw.githubusercontent.com release-assets.githubusercontent.com
 185.199.108.133 private-user-images.githubusercontent.com gist.githubusercontent.com avatars.githubusercontent.com"
 GITH="#github.com\n140.82.114.3 github.com\n185.199.110.154 github.githubassets.com\n185.199.110.133 camo.githubassets.com"
-ALL_BLOCKS="$AI\n$INSTAGRAM\n$NTC\n$RUTOR\n$LIBRUSEC\n$TGWeb\n$TWCH\n$SCell\n$SPFY"; TMP_ARCHIVE_RS="/tmp/tg-ws-proxy-rs.tar.gz"; TMP_DIR_RS="/tmp/tg-ws-proxy-rs"
+ALL_BLOCKS="$AI\n$INSTAGRAM\n$NTC\n$RUTOR\n$LIBRUSEC\n$TGWeb\n$TWCH\n$SCell\n$SPFY\n$GITH_RAW"; TMP_ARCHIVE_RS="/tmp/tg-ws-proxy-rs.tar.gz"; TMP_DIR_RS="/tmp/tg-ws-proxy-rs"
 hosts_enabled() { if grep -q "### dns.malw.link" /etc/hosts; then hosts_echo="Malw.link"; return 0; elif grep -q "#mafioznik" /etc/hosts; then hosts_echo="Mafioznik"; return 0; elif grep -q "### dns.geohide.ru" /etc/hosts; then hosts_echo="GeoHide"; return 0
 elif grep -q "45.155.204.190\|instagram.com\|rutor.info\|lib.rus.ec\|ntc.party\|twitch.tv\|web.telegram.org\|www.spotify.com\|store.supercell.com\|raw.githubusercontent.com\|lkfl2.nalog.ru" /etc/hosts; then hosts_echo="добавлены"; return 0; fi; return 1; }
 hosts_add() { printf "%b\n" "$1" | while IFS= read -r L; do grep -qxF "$L" /etc/hosts || echo "$L" >> /etc/hosts; done; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }
