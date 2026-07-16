@@ -19,7 +19,7 @@
 ---
 
 > [!IMPORTANT]
-> Если отсутствует доступ к github.com, выполните в SSH следующую команду:
+> Если отсутствует доступ к **github.com**, выполните в **SSH** следующую команду:
 > ```
 > git="github.com"; grep -q "^140.82.114.3 $git" /etc/hosts || { printf "#$git\n140.82.114.3 $git\n185.199.110.154 github.githubassets.com\n185.199.110.133 camo.githubassets.com\n" >> /etc/hosts; /etc/init.d/dnsmasq restart 2>/dev/null; }; echo -e "\033[0;32mOK\033[0m"
 > ```
@@ -30,7 +30,7 @@ sed -i '/#github.com/,+3d' /etc/hosts; /etc/init.d/dnsmasq restart 2>/dev/null; 
 ```
 
 > [!IMPORTANT]
-> При возникновении проблем с запуском скрипта или его функций выполните в **SSH** следующую команду:
+> При возникновении проблем с запуском скрипта или его функций, выполните в **SSH** следующую команду:
 > ```
 > git="githubusercontent.com"; grep -q "raw.$git" /etc/hosts || { printf "#$git\n185.199.109.133 raw.$git release-assets.$git\n185.199.108.133 private-user-images.$git gist.$git avatars.$git\n" >> /etc/hosts; /etc/init.d/dnsmasq restart 2>/dev/null; }; echo -e "\033[0;32mOK\033[0m"
 > ```
