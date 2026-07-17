@@ -68,6 +68,7 @@ vk.team
 vkgo.app
 skbx.pro
 youla.io
+nyphy.io
 mycdn.me
 mradx.net
 vk-cdn.me
