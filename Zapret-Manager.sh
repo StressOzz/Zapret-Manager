@@ -635,7 +635,7 @@ echo -en "${CYAN}Устанавливаем ${NC}NetShift\n${YELLOW}Подожд
 $INSTALL ./luci-app-netshift.$APK_RAS >/dev/null 2>&1 || { echo -e "\n\n${RED}Не удалось установить:\n${NC}$PODKOP_LUCI\n"; PAUSE; return; }
 $INSTALL ./luci-i18n-netshift-ru.$APK_RAS >/dev/null 2>&1 || { echo -e "\n\n${RED}Не удалось установить:\n${NC}$PODKOP_RUS\n"; PAUSE; return; }; rm -rf "$tmpDIR"
 echo -e "\nNetShift ${GREEN}$( [ "$ACTION" = "install" ] && echo "установлен" || echo "обновлён" )!${NC}\n"; PAUSE; else PODKOP_DELETE; fi; }
-PODKOP_DELETE() { echo -e "\n${MAGENTA}Удаляем старую версию NetShift${NC}"; echo -e "${CYAN}Останавливаем сервисы${NC}"; netshift stop >/dev/null 2>&1; netshift disable >/dev/null 2>&1; sing-box stop >/dev/null 2>&1; sing-box disable >/dev/null 2>&1
+PODKOP_DELETE() { echo -e "\n${MAGENTA}Удаляем NetShift${NC}"; echo -e "${CYAN}Останавливаем сервисы${NC}"; netshift stop >/dev/null 2>&1; netshift disable >/dev/null 2>&1; sing-box stop >/dev/null 2>&1; sing-box disable >/dev/null 2>&1
 echo -e "${CYAN}Удаляем пакеты ${NC}NetShift"; $DELETE luci-i18n-netshift-ru luci-app-netshift netshift >/dev/null 2>&1; echo -e "${CYAN}Удаляем пакеты ${NC}sing-box"; $DELETE sing-box >/dev/null 2>&1
 echo -e "${GREEN}Старая версия ${NC}NetShift${GREEN} удалена!${NC}"; [ "$ACTION" != "update" ] && { rm -rf /etc/config/netshift* /usr/bin/netshift /etc/config/sing-box* /etc/sing-box >/dev/null 2>&1; echo; PAUSE; }; }
 install_AWG() { OWRT=$(grep '^DISTRIB_RELEASE=' /etc/openwrt_release | cut -d"'" -f2); ARCHAWG="$(grep DISTRIB_ARCH /etc/openwrt_release | cut -d"'" -f2)_$(grep DISTRIB_TARGET /etc/openwrt_release | cut -d"'" -f2 | tr '/' '_')"; if ! pkg_is_installed amneziawg-tools; then rm -rf "$tmpDIR"; mkdir -p "$tmpDIR"
