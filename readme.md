@@ -377,11 +377,13 @@ zms
 
 # Благодарности:
 
+- **Zapret** by [*bol-van*](https://github.com/bol-van)
 - **Zapret-OpenWrt** by [*remittor*](https://github.com/remittor)
 - **Стратегии от Flowseal** by [*Flowseal*](https://github.com/Flowseal)
 - **NetShift** by [*yandexru45*](https://github.com/yandexru45)
 - **Mixomo** by [*Internet Helper*](https://github.com/Internet-Helper)
 - **MagiTrickle** by [*Ponywka*](https://github.com/Ponywka)
+- **HevSocks5Tunnel** by [*hev*](https://github.com/heiher)
 - **AWG OpenWrt** by [*Slava-Shchipunov*](https://github.com/Slava-Shchipunov)
 - **TG WS Proxy SOCKS5** by [*byd0mhate*](https://github.com/d0mhate)
 - **TG WS Proxy Rust** by [*valnesfjord*](https://github.com/valnesfjord)
