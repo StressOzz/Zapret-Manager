@@ -328,9 +328,10 @@ zms
   ├─ 11 Добавить / Удалить  github.com
   ├─ 12 Удалить все домены
   ├─ 13 Заменить hosts на GeoHide hosts
-  ├─ 14 Заменить hosts на Mafioznik hosts
-  ├─ 15 Заменить hosts на Malw.link hosts
-  ├─ 16 Восстановить hosts
+  ├─ 14 Заменить hosts на GeoHide hosts + Xbox DNS для OpenAI
+  ├─ 15 Заменить hosts на Mafioznik hosts
+  ├─ 16 Заменить hosts на Malw.link hosts
+  ├─ 17 Восстановить hosts
   └─Enter Выход в главное меню
 
 ─ 9 Удалить → установить → настроить Zapret
