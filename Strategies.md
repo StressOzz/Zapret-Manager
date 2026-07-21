@@ -103,6 +103,18 @@
 --dpi-desync-badseq-increment=0
 ```
 ---
+# v10
+```
+--filter-tcp=443
+--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
+--dpi-desync=fake,split2
+--dpi-desync-split-pos=2
+--dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin
+--dpi-desync-hostfakesplit-mod=host=maxcdn.bootstrapcdn.com
+--dpi-desync-fake-tls-mod=rnd,sni=maxcdn.bootstrapcdn.com
+--dpi-desync-fooling=ts
+```
+---
 # Стратегия для игр
 
 - в **NFQWS_PORTS_UDP** добавить `1024-65535`
