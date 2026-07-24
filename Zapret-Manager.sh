@@ -10,7 +10,7 @@ URL_ITDOG="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads
 URL_OLD="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/MagiTrickle/configOLD.yaml"
 CRON_FILE="/etc/crontabs/root"; CONFIGMIX="/etc/mihomo/config.yaml"; LAN_IP=$(uci get network.lan.ipaddr 2>/dev/null | cut -d/ -f1)
 DOMAINS="youtube.com rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com rr1---sn-gvnuxaxjvh-jx3l.googlevideo.com rr4---sn-4g5e6nze.googlevideo.com rr2---sn-4g5edn6k.googlevideo.com rr1---sn-aj5go5-53.googlevideo.com rr4---sn-5go7yner.googlevideo.com rr3---sn-ug5onuxaxjvh-n8v6.googlevideo.com rr1---sn-ug5onuxaxjvh-p5ge.googlevideo.com"
-PORTS_UDP="88,1024-2407,2409-4499,4502-19293,19345-49999,50101-65535"; PORTS_TCP="2802,2302,2502,3074,3724,3478-3480,6000-8000,8085,8090,8100,8903,8904,25565,27015-27037,50001,60442"
+PORTS_UDP="88,1024-2407,2409-4499,4502-19293,19345-49999,50101-65535"; PORTS_TCP="2802,2302,2502,3074,3478-3480,3724,6000-8000,8085,8090,8100,8903,8904,25565,27015-27037,50001,60442"
 GREEN="\033[1;32m"; RED="\033[1;31m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 CONF="/etc/config/zapret"; CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"; HOSTLIST_FILE="/opt/zapret/ipset/zapret-hosts-user.txt"; fileGP="/opt/zapret/ipset/zapret-hosts-google.txt"
 STR_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/ListStrYou"
