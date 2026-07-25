@@ -2,7 +2,7 @@
 # ==========================================
 # Zapret Manager by StressOzz
 # =========================================
-ZAPRET_MANAGER_VERSION="9.78"; STR_VERSION_AUTOINSTALL="v7"
+ZAPRET_MANAGER_VERSION="9.79"; STR_VERSION_AUTOINSTALL="v7"
 CRON_CMD="/etc/init.d/mihomo restart"; CONFIGPATH="/etc/magitrickle/state/config.yaml"
 FLOWSEAL_STR_ZIP="https://github.com/Flowseal/zapret-discord-youtube/archive/refs/heads/main.zip"
 URL_DEFAULT="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/MagiTrickle/config.yaml"
@@ -10,12 +10,13 @@ URL_ITDOG="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads
 URL_OLD="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/MagiTrickle/configOLD.yaml"
 CRON_FILE="/etc/crontabs/root"; CONFIGMIX="/etc/mihomo/config.yaml"; LAN_IP=$(uci get network.lan.ipaddr 2>/dev/null | cut -d/ -f1)
 DOMAINS="youtube.com rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com rr1---sn-gvnuxaxjvh-jx3l.googlevideo.com rr4---sn-4g5e6nze.googlevideo.com rr2---sn-4g5edn6k.googlevideo.com rr1---sn-aj5go5-53.googlevideo.com rr4---sn-5go7yner.googlevideo.com rr3---sn-ug5onuxaxjvh-n8v6.googlevideo.com rr1---sn-ug5onuxaxjvh-p5ge.googlevideo.com"
-PORTS_UDP="88,1024-2407,2409-4499,4502-19293,19345-49999,50101-65535"; PORTS_TCP="2802,2302,2502,3074,3478-3480,3724,6000-8000,8085,8090,8100,8903,8904,25565,27015-27037,50001,60442"
+PORTS_UDP="88,1024-2407,2409-4499,4502-19293,19345-49999,50101-65535"; PORTS_TCP="2802,2302,2502,3724,6000-8000,8085,8090,8100,8903,8904,25565,27015-27030,27036-27037,50001,60442"
 GREEN="\033[1;32m"; RED="\033[1;31m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 CONF="/etc/config/zapret"; CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"; HOSTLIST_FILE="/opt/zapret/ipset/zapret-hosts-user.txt"; fileGP="/opt/zapret/ipset/zapret-hosts-google.txt"
 STR_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/ListStrYou"
 GEO_HOSTS="https://raw.githubusercontent.com/Internet-Helper/GeoHideDNS/refs/heads/main/hosts/hosts"
 TMP_SF="/tmp/zapret_temp"; HOSTS_FILE="/etc/hosts"; TMP_LIST="$TMP_SF/zapret_yt_list.txt"; tmpDIR="/tmp/PodkopAWG"
+GV_XTREME_FILE="/opt/zapret/tmp/GvXtreme"; GV_XTREME_PORTS="80,88,444-65535"; GV_XTREME_NFQWS_PORTS="80,88,443-65535"
 IF_NAME="AWG"; PROTO="amneziawg"; DEV_NAME="amneziawg0"; BASE_URL="https://github.com/Slava-Shchipunov/awg-openwrt/releases/download/"
 SAVED_STR="$TMP_SF/StrYou.txt"; HOSTS_USER="$TMP_SF/hosts-user.txt"; OUT_DPI="$TMP_SF/dpi_urls.txt"; OUT="$TMP_SF/str_flow.txt"; ZIP="$TMP_SF/repo.zip"
 BACKUP_FILE="/opt/zapret/tmp/hosts_temp.txt"; STR_FILE="$TMP_SF/str_test.txt"; TEMP_FILE="$TMP_SF/str_temp.txt"
@@ -182,6 +183,13 @@ sed -i "/DISABLE_CUSTOM/s/'1'/'0'/" $CONF; ZAPRET_RESTART; [ "$NO_PAUSE" != "1" 
 # ==========================================
 # FIX GAME
 # ==========================================
+Gv_Xtreme() { if ! grep -q '^#Gv[0-9]\+' "$CONF"; then echo -e "\n${RED}Игровая стратегия ${NC}Gv${RED} не найдена!${NC}\n";	PAUSE; return; fi; mkdir -p "$(dirname "$GV_XTREME_FILE")"; if grep -q "^#Gv[0-9]\+Xtreme$" "$CONF"; then [ ! -f "$GV_XTREME_FILE" ] && { echo -e "\n${RED}Файл восстановления не найден!${NC}\n"; PAUSE; return; }
+echo -e "\n${CYAN}Отключаем ${NC}Xtreme ${CYAN}режим${NC}"; OLD_GV=$(sed -n '1p' "$GV_XTREME_FILE"); OLD_UDP=$(sed -n '2p' "$GV_XTREME_FILE"); OLD_TCP=$(sed -n '3p' "$GV_XTREME_FILE"); OLD_TCP_OPTION=$(sed -n '4p' "$GV_XTREME_FILE"); OLD_UDP_OPTION=$(sed -n '5p' "$GV_XTREME_FILE")
+awk -v gv="$OLD_GV" -v udp="$OLD_UDP" -v tcp="$OLD_TCP" '/^#Gv[0-9]+Xtreme$/ {print gv; restore=1; next} restore && /^--filter-udp=/ {print udp; next} restore && /^--filter-tcp=/ {print tcp; restore=0; next} {print}' "$CONF" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"
+[ -n "$OLD_TCP_OPTION" ] && sed -i "s|^[[:space:]]*option NFQWS_PORTS_TCP .*|$OLD_TCP_OPTION|" "$CONF"; [ -n "$OLD_UDP_OPTION" ] && sed -i "s|^[[:space:]]*option NFQWS_PORTS_UDP .*|$OLD_UDP_OPTION|" "$CONF"; rm -f "$GV_XTREME_FILE"; ZAPRET_RESTART; echo -e "Xtreme${GREEN} режим отключён!${NC}\n"; PAUSE; return; fi; echo -e "\n${CYAN}Включаем ${NC}Xtreme ${CYAN}режим${NC}"
+awk '/^#Gv[0-9]+$/ {gv=$0; found=1; next} found && /^--filter-udp=/ {udp=$0} found && /^--filter-tcp=/ {tcp=$0} /^[[:space:]]*option NFQWS_PORTS_TCP / {tcp_option=$0} /^[[:space:]]*option NFQWS_PORTS_UDP / {udp_option=$0} END {print gv; print udp; print tcp; print tcp_option; print udp_option}' "$CONF" > "$GV_XTREME_FILE"
+sed -i -e "s|^[[:space:]]*option NFQWS_PORTS_TCP .*|	option NFQWS_PORTS_TCP '$GV_XTREME_NFQWS_PORTS'|" -e "s|^[[:space:]]*option NFQWS_PORTS_UDP .*|	option NFQWS_PORTS_UDP '$GV_XTREME_NFQWS_PORTS'|" "$CONF"; sed -i "s/^#\(Gv[0-9]\+\)$/#\1Xtreme/" "$CONF"
+awk -v ports="$GV_XTREME_PORTS" '/^#Gv[0-9]+Xtreme$/ {gv=1; print; next} gv && /^--filter-udp=/ {print "--filter-udp=" ports; next} gv && /^--filter-tcp=/ {print "--filter-tcp=" ports; gv=0; next} {print}' "$CONF" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"; ZAPRET_RESTART; echo -e "Xtreme${GREEN} режим включён!${NC}\n"; PAUSE; }
 remove_ports_if_present() { local OPTION="$1"; local PORTS="$2"; for p in $(echo "$PORTS" | tr ',' ' '); do sed -i "\#option $OPTION '#s#,$p##g" "$CONF"; done; sed -i "\#option $OPTION '#s#,,#,#g; s#,\$##" "$CONF"; }
 add_ports_if_missing() { local OPTION="$1"; local PORTS="$2"; for p in $(echo "$PORTS" | tr ',' ' '); do grep -q "option $OPTION '.*\b$p\b" "$CONF" || sed -i "\#option $OPTION '#s#'\$#,$p'#" "$CONF"; done; }
 strategy_TCP_common() { printf "%s\n" "--new" "--filter-tcp=$PORTS_TCP" "--dpi-desync-any-protocol=1" "--dpi-desync-cutoff=n5" "--dpi-desync=multisplit" "--dpi-desync-split-seqovl=582" "--dpi-desync-split-pos=1" "--dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/stun.bin"; }
@@ -196,8 +204,9 @@ echo -en "${CYAN}Enter) ${GREEN}Выход в меню стратегий${NC}\n
 awk -v new="$new_file" 'BEGIN{gv=0} /^#Gv/{gv=1} gv && /^--dpi-desync-fake-unknown-udp=/{sub(/\/opt\/zapret\/files\/fake\/[^ ]+/, "/opt/zapret/files/fake/" new); gv=0} {print}' "$CONF" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"; ZAPRET_RESTART; echo -e "fake ${GREEN}изменён на ${NC}${new_file}${GREEN}!${NC}\n"; PAUSE; }
 fix_GAME() { local NO_PAUSE=$1; [ ! -f /etc/init.d/zapret ] && { echo -e "\n${RED}Zapret не установлен!${NC}\n"; PAUSE; return; }; local CURRENT_GAME=""; for i in 1 2 3 4; do grep -q "^#Gv$i" "$CONF" && CURRENT_GAME="Gv$i"; done
 if [ -n "$NO_PAUSE" ]; then GAME_CHOICE="$NO_PAUSE"; else echo -e "\n${MAGENTA}Меню управления стратегией для игр${NC}"; for i in $(seq 1 4); do if [ "$CURRENT_GAME" = "Gv$i" ]; then echo -e "${CYAN}$i) ${GREEN}Удалить ${NC}Gv$i"; else echo -e "${CYAN}$i) ${GREEN}Установить ${NC}Gv$i"; fi; done
-echo -e "${CYAN}5) ${GREEN}Выбрать и установить ${NC}fake${GREEN} для игровой стратегии\n${CYAN}Enter) ${GREEN}Выход в меню стратегий"; echo -en "\n${YELLOW}Выберите пункт: ${NC}"; read GAME_CHOICE; fi; if [ "$GAME_CHOICE" = "5" ]; then GV_FAKE; return; fi; case "$GAME_CHOICE" in 1|2|3|4) ;; *) return;; esac; LAST_QUOTE=$(grep -n "^'\$" "$CONF" | tail -n1 | cut -d: -f1)
-if grep -q "^#Gv" "$CONF"; then Gv_LINE=$(grep -n "^#Gv" "$CONF" | tail -n1 | cut -d: -f1); sed -i "${Gv_LINE},${LAST_QUOTE}d" "$CONF"; elif [ -n "$LAST_QUOTE" ]; then sed -i "${LAST_QUOTE},\$d" "$CONF"; fi
+grep -q "^#Gv[0-9]\+Xtreme" "$CONF" && XTREME_TXT="${GREEN}Отключить ${NC}Xtreme${GREEN} режим${NC}" ||	XTREME_TXT="${GREEN}Включить ${NC}Xtreme${GREEN} режим${NC}"; echo -e "${CYAN}5) $XTREME_TXT\n${CYAN}6) ${GREEN}Выбрать и сменить ${NC}fake${GREEN} для игровой стратегии${NC}"
+echo -en "${CYAN}Enter) ${GREEN}Выход в меню стратегий\n\n${YELLOW}Выберите пункт: ${NC}"; read GAME_CHOICE; fi; if [ "$GAME_CHOICE" = "6" ]; then GV_FAKE; return; fi; if [ "$GAME_CHOICE" = "5" ]; then Gv_Xtreme; return; fi
+case "$GAME_CHOICE" in 1|2|3|4) ;; *) return;; esac; LAST_QUOTE=$(grep -n "^'\$" "$CONF" | tail -n1 | cut -d: -f1); if grep -q "^#Gv" "$CONF"; then Gv_LINE=$(grep -n "^#Gv" "$CONF" | tail -n1 | cut -d: -f1); sed -i "${Gv_LINE},${LAST_QUOTE}d" "$CONF"; elif [ -n "$LAST_QUOTE" ]; then sed -i "${LAST_QUOTE},\$d" "$CONF"; fi
 if [ "$CURRENT_GAME" = "Gv$GAME_CHOICE" ]; then remove_ports_if_present NFQWS_PORTS_UDP "$PORTS_UDP"; remove_ports_if_present NFQWS_PORTS_TCP "$PORTS_TCP"; echo "'" >> "$CONF"; echo -e "\n${CYAN}Удаляем стратегию для игр ${NC}"; ZAPRET_RESTART
 echo -e "${GREEN}Стратегия для игр удалена!${NC}\n"; [ -z "$NO_PAUSE" ] && PAUSE; return; fi; if [ "$GAME_CHOICE" -eq 1 ]; then STRATEGY="$(strategy_Gv1; strategy_TCP_common)"; else STRATEGY="$(strategy_Gv "$GAME_CHOICE"; strategy_TCP_common)"; fi
 echo "$STRATEGY" | sed '/^$/d' >> "$CONF"; echo "'" >> "$CONF"; add_ports_if_missing NFQWS_PORTS_UDP "$PORTS_UDP"; add_ports_if_missing NFQWS_PORTS_TCP "$PORTS_TCP"
@@ -712,7 +721,7 @@ if [ -n "$DOH_STATUS" ]; then if [ "$PKG_IS_APK" -eq 1 ]; then apk info -e https
 pkg_is_installed netshift && PODKOP_VER && echo -e "${YELLOW}NetShift:${NC}            $PODKOP_STATUS"; if web_is_enabled; then echo -e "${YELLOW}Доступ из браузера:${NC}  $LAN_IP:7681"; fi; quic_is_blocked && if quic_is_blocked; then echo -e "${YELLOW}Блокировка QUIC:${NC}     ${GREEN}включена${NC}"; fi; if grep -q 'ct original packets ge 30 flow offload @ft;' /usr/share/firewall4/templates/ruleset.uc
 then echo -e "${YELLOW}Flow Offloading FIX:${NC} ${GREEN}включён${NC}"; fi; if [ "$CURR" != "default / OpenWrt" ]; then echo -e "${YELLOW}Зеркало OpenWRT:${NC}     $CURR"; fi; if [ -f /etc/init.d/zapret ] && [ -f "$CONF" ] && grep -Eq "^[[:space:]]*option DISABLE_IPV6 '0'" "$CONF"; then echo -e "${YELLOW}IPv6 в Zapret:       ${GREEN}включён${NC}"; fi; INFO_ZPR_STR; }
 INFO_ZPR_STR() { if [ -f "$CONF" ]; then line=$(grep -m1 '^#general' "$CONF"); GEN="${line:+${line#?} / }"; current="$ver$( [ -n "$ver" ] && [ -n "$yv_ver" ] && echo " / " )$yv_ver"; DV=$(grep -o -E '^#Dv[0-9][0-9]*' "$CONF" | sed 's/^#[[:space:]]*/\/ /' | head -n1)
-GV=$(grep -o -E '^#Gv[0-9][0-9]*' "$CONF" | sed 's/^#/\/ /' | head -n1); UPD=$(grep -q '^#udp443' "$CONF" && echo '/ udp443'); WS=$(grep -q -- '--wssize 1:6' "$CONF" && echo '/ wssize'); ME=$(grep -q -- '--methodeol' "$CONF" && echo '/ methodeol'); if [ -n "$current" ]
+GV=$(grep -m1 '^#Gv' "$CONF" | sed 's/^#/\/ /'); UPD=$(grep -q '^#udp443' "$CONF" && echo '/ udp443'); WS=$(grep -q -- '--wssize 1:6' "$CONF" && echo '/ wssize'); ME=$(grep -q -- '--methodeol' "$CONF" && echo '/ methodeol'); if [ -n "$current" ]
 then echo -e "${YELLOW}Стратегия Zapret:${NC}    ${CYAN}${GEN}$current${DV:+ $DV}${GV:+ $GV}${UPD:+ $UPD}${WS:+ $WS}${ME:+ $ME}${RKN_STATUS:+ $RKN_STATUS}${NC}"; elif [ -n "$RKN_STATUS" ]
 then echo -e "${YELLOW}Стратегия Zapret:${NC}    ${CYAN}${GEN}РКН${DV:+ $DV}${GV:+ $GV}${UPD:+ $UPD}${WS:+ $WS}${ME:+ $ME}${NC}"; elif [ -n "$line" ]; then echo -e "${YELLOW}Стратегия Zapret:${NC}    ${CYAN}${line#?}${GV:+ $GV}${NC}"; fi; fi; }
 # ==========================================
