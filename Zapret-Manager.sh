@@ -183,7 +183,7 @@ sed -i "/DISABLE_CUSTOM/s/'1'/'0'/" $CONF; ZAPRET_RESTART; [ "$NO_PAUSE" != "1" 
 # ==========================================
 # FIX GAME
 # ==========================================
-Gv_Xtreme() { if ! grep -q '^#Gv[0-9]\+' "$CONF"; then echo -e "\n${RED}Игровая стратегия ${NC}Gv${RED} не найдена!${NC}\n";	PAUSE; return; fi; mkdir -p "$(dirname "$GV_XTREME_FILE")"; if grep -q "^#Gv[0-9]\+Xtreme$" "$CONF"; then [ ! -f "$GV_XTREME_FILE" ] && { echo -e "\n${RED}Файл восстановления не найден!${NC}\n"; PAUSE; return; }
+Gv_Xtreme() { if ! grep -q '^#Gv[0-9]\+' "$CONF"; then echo -e "\n${RED}Игровая стратегия ${NC}Gv${RED} не найдена!${NC}\n"; PAUSE; return; fi; mkdir -p "$(dirname "$GV_XTREME_FILE")"; if grep -q "^#Gv[0-9]\+Xtreme$" "$CONF"; then [ ! -f "$GV_XTREME_FILE" ] && { echo -e "\n${RED}Файл восстановления не найден!${NC}\n"; PAUSE; return; }
 echo -e "\n${CYAN}Отключаем ${NC}Xtreme ${CYAN}режим${NC}"; OLD_GV=$(sed -n '1p' "$GV_XTREME_FILE"); OLD_UDP=$(sed -n '2p' "$GV_XTREME_FILE"); OLD_TCP=$(sed -n '3p' "$GV_XTREME_FILE"); OLD_TCP_OPTION=$(sed -n '4p' "$GV_XTREME_FILE"); OLD_UDP_OPTION=$(sed -n '5p' "$GV_XTREME_FILE")
 awk -v gv="$OLD_GV" -v udp="$OLD_UDP" -v tcp="$OLD_TCP" '/^#Gv[0-9]+Xtreme$/ {print gv; restore=1; next} restore && /^--filter-udp=/ {print udp; next} restore && /^--filter-tcp=/ {print tcp; restore=0; next} {print}' "$CONF" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"
 [ -n "$OLD_TCP_OPTION" ] && sed -i "s|^[[:space:]]*option NFQWS_PORTS_TCP .*|$OLD_TCP_OPTION|" "$CONF"; [ -n "$OLD_UDP_OPTION" ] && sed -i "s|^[[:space:]]*option NFQWS_PORTS_UDP .*|$OLD_UDP_OPTION|" "$CONF"; rm -f "$GV_XTREME_FILE"; ZAPRET_RESTART; echo -e "Xtreme${GREEN} режим отключён!${NC}\n"; PAUSE; return; fi; echo -e "\n${CYAN}Включаем ${NC}Xtreme ${CYAN}режим${NC}"
@@ -372,7 +372,7 @@ echo -e "\n${CYAN}Применяем стратегию: ${NC}$SELECTED_NAME"; S
 awk '{if(skip){if($0=="--new"||$0~/\047/){skip=0;next}if($0~/^[[:space:]]*$/)next;next}if($0=="--filter-tcp=443"){getline n;if(n=="--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt"){skip=1;next}else{print $0;print n;next}}if($0=="--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt")has_google=1;if($0~/^[[:space:]]*#Yv/)next;print}' "$OLD_STR" > "$NEW_STR"
 awk 'BEGIN{inserted=0;has_google=0} $0=="--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt"{has_google=1} $0=="--new"&&!inserted{while((getline l<"'"$SAVED_STR"'")>0) if(l!~/^[[:space:]]*$/) print l; print "--new"; inserted=1; next} $0~/^[[:space:]]*option NFQWS_OPT \047$/&&!has_google&&!inserted{print; print "#'"$SELECTED_NAME"'"; while((getline l<"'"$SAVED_STR"'")>0) if(l!~/^[[:space:]]*$/) print l; print "--new"; inserted=1; next} {print}' "$NEW_STR" > "$FINAL_STR"
 cat "$FINAL_STR" >> "$CONF"; awk '{if($0=="--new"){if(prev!="--new")print}else print;prev=$0}' "$CONF" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"; grep -q "^[[:space:]]*' *\$" "$CONF" || echo "'" >> "$CONF"; ADD_GP_DOMAINS; ZAPRET_RESTART; echo -e "${GREEN}Стратегия применена!${NC}\n"
-grep -Fq "=ts" "$CONF" && echo -e "${YELLOW}Для работы этой стратегии, в терминале Windows нужно выполнить:${NC}\nnetsh int tcp set global timestamps=enabled\n"; PAUSE; }
+grep -Fq "=ts" "$CONF" && echo -e "${YELLOW}Для работы этой стратегии, в терминале Windows нужно один раз выполнить:${NC}\nnetsh int tcp set global timestamps=enabled\n"; PAUSE; }
 # ==========================================
 # DNS over HTTPS
 # ==========================================
