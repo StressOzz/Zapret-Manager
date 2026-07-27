@@ -110,6 +110,11 @@ sed -i '/#githubusercontent.com/,+2d' /etc/hosts; /etc/init.d/dnsmasq restart 2>
 >```
 >netsh int tcp set global timestamps=enabled
 >```
+>
+>для пользователей Linux:
+>```
+>sysctl -w net.ipv4.tcp_timestamps=1
+>```
 
 - Если у Вас установлен **ByeDPI** или **youtubeUnblock** скрипт выдаст сообщение.
 - Если у Вас включён **Flow offloading** скрипт выдаст сообщение и в `Системном меню`, появится пункт **0** - **Применить FIX**.
