@@ -20,7 +20,7 @@
 --dpi-desync-fooling=ts
 --dpi-desync-repeats=8
 --dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/stun.bin
---dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com"
+--dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com
 ```
 ---
 # v3
