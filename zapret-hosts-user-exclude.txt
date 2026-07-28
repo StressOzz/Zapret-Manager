@@ -80,6 +80,7 @@ vk-cdn.net
 vk.company
 vklive.app
 vkuser.net
+vknext.net
 bizmrg.com
 userapi.com
 vk-apps.com
