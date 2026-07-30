@@ -295,7 +295,6 @@ miot-spec.org
 miot-spec.com
 xiaomiwear.com
 xiaomimimo.com
-dreamehome.com
 xiaomiprint.com
 xiaomidns.com.cn
 xiaomiinc.com.cn
@@ -306,8 +305,6 @@ xiaoaiassist.com
 xiaomi-mijia.com
 xiaomifactory.com
 airstarfinance.net
-dreame-technology.cn
-dreame-technology.com
 #################################### Picooc
 picoocru.com
 picooc-g.com
@@ -530,4 +527,7 @@ digital-cdn.net
 #################################### Dreame
 dreame.tech
 dreametech.com
+dreamehome.com
+dreame-technology.cn
+dreame-technology.com
 ####################################
