@@ -527,4 +527,7 @@ cdn2site.com
 nearcache.net
 staticpop.net
 digital-cdn.net
+#################################### Dreame
+dreame.tech
+dreametech.com
 ####################################
