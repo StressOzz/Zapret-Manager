@@ -151,7 +151,7 @@ zms
 
 ## 🔹 Быстрый старт
 
-**Пункт 9** - **Удалить → установить → настроить Zapret**
+**Пункт f** - **Удалить → установить → настроить Zapret**
 
 Установка **Zapret** под ключ:
 - Удаляет Zapret
@@ -173,8 +173,6 @@ zms
 - [Cтратегии используемые в скрипте](https://github.com/StressOzz/Zapret-Manager/blob/main/Strategies.md)
 
 ## 🔹 Telegram
-
-**Пункт 5** -  установка или удаление **TG WS Proxy**
 
 В **Telegram Desktop**:
 - Настройки **→** Продвинутые настройки **→** Тип соеденения **→** Добавить прокси
@@ -379,10 +377,6 @@ zms
 ```
 
 </details>
-
----
-
-[![Star History Chart](https://api.star-history.com/svg?repos=StressOzz/Zapret-Manager&type=date&legend=top-left)](https://www.star-history.com/#StressOzz/Zapret-Manager&type=date&legend=top-left)
 
 ---
 
