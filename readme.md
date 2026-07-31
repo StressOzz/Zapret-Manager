@@ -98,6 +98,7 @@ sed -i '/#githubusercontent.com/,+2d' /etc/hosts; /etc/init.d/dnsmasq restart 2>
 - Установить различные **TG WS Proxy** для **Telegram**
 - Установить **NetShift** - **https://github.com/yandexru45/netshift**
 - Установить **Mixomo** - **https://github.com/Internet-Helper/mixomo-openwrt**
+- Установить **splify** - **https://github.com/xyzmean/splify**
 - Интегрировать [**VPN подпиcку**](https://github.com/StressOzz/StressKVN) в **NetShift** и **Mixomo**
 - Сгенерировать **WARP** и интегрировать его в **Mixomo**
 
@@ -264,7 +265,18 @@ zms
   ├─ 9 Добавить в стратегию блок с --filter-udp=443
   └─ Enter Выход в главное меню
 
-─ 3 Меню Mixomo
+- 3 Меню splify
+  ├─ 1 Установить / Обновить splify
+  ├─ 2 Удалить splify
+  ├─ 3 Сгенерировать и применить WARP
+  │  ├─ 1 Использовать engage.cloudflareclient.com:4500
+  │  └─ 2 Подобрать endpoint автоматически
+  ├─ 4 Перезапустить splify
+  └─  Enter Выход в главное меню
+
+
+
+─ 4 Меню Mixomo
   ├─ 1 Установить Mixomo
   ├─ 2 Удалить Mixomo
   ├─ 3 Сменить список MagiTrickle
@@ -276,21 +288,22 @@ zms
   ├─ 9 Обновить MagiTrickle
   └─ Enter Выход в главное меню
 
-─ 4 Меню NetShift
+─ 5 Меню NetShift
   ├─ 1 Установить / Удалить / Обновить NetShift
-  ├─ 2 Установить / Удалить AWG и интерфейс AWG
-  ├─ 3 Интегрировать VPN подписку в NetShift / Сменить VPN подписку в NetShift
-  ├─ 4 Интегрировать AWG в NetShift
+  ├─ 2 Установить / Удалить AmneziaWG
+  ├─ 3 Установить / Удалить интерфейс AWG
+  ├─ 4 Интегрировать VPN подписку в NetShift / Сменить VPN подписку в NetShift
+  ├─ 5 Интегрировать AWG в NetShift
   └─ Enter Выход в главное меню
   
-─ 5 Меню TG WS Proxy 
+─ 6 Меню TG WS Proxy 
   ├─ 1 Установить / Удалить TG WS Proxy Go SOCKS5
   ├─ 2 Установить / Удалить TG WS Proxy Rust
   ├─ 3 Установить / Удалить TG WS Proxy Go MTProto
   ├─ 4 Удалить все TG WS Proxy
   └─ Enter Выход в главное меню
 
-─ 6 Меню DNS over HTTPS
+─ 7 Меню DNS over HTTPS
   ├─ 1 Установить / Удалить DNS over HTTPS
   ├─ 2 Настроить Comss DNS
   ├─ 3 Настроить Xbox DNS
@@ -302,7 +315,7 @@ zms
   ├─ 0 Вернуть настройки DNS по умолчанию
   └─ Enter Выход в главное меню
 
-─ 7 Меню настройки Discord
+─ 8 Меню настройки Discord
   ├─ 1 Установить скрипт 50-stun4all
   ├─ 2 Установить скрипт 50-quic4all
   ├─ 3 Установить скрипт 50-discord-media
@@ -318,7 +331,7 @@ zms
   │  
   └─ Enter Выход в главное меню
 
-─ 8 Меню управления доменами в hosts
+─ 9 Меню управления доменами в hosts
   ├─  0 Добавить / Удалить nalog.ru
   ├─  1 Добавить / Удалить rutor.info
   ├─  2 Добавить / Удалить ntc.party
@@ -331,14 +344,15 @@ zms
   ├─  9 Добавить / Удалить Supercell
   ├─ 10 Добавить / Удалить githubusercontent.com
   ├─ 11 Добавить / Удалить  github.com
-  ├─ 12 Удалить все домены
-  ├─ 13 Заменить hosts на GeoHide hosts
-  ├─ 14 Заменить hosts на Mafioznik hosts
-  ├─ 15 Заменить hosts на Malw.link hosts
-  ├─ 16 Восстановить hosts
+  ├─ 12 Добавить / Удалить  Ubisoft
+  ├─ 13 Добавить / Удалить все домены
+  ├─ 14 Заменить hosts на GeoHide hosts
+  ├─ 15 Заменить hosts на Mafioznik hosts
+  ├─ 16 Заменить hosts на Malw.link hosts
+  ├─ 17 Восстановить hosts
   └─Enter Выход в главное меню
 
-─ 9 Удалить → установить → настроить Zapret
+─ f/F/А/а Удалить → установить → настроить Zapret
 
 ─ 0 Системное меню
   ├─ 1 Показать системную информацию
@@ -361,7 +375,7 @@ zms
   ├─ 0 Применить FIX для Flow Offloading
   └─ Enter Выход в главное меню
 
-─ s/S Запустить / Остановить Zapret
+─ s/S/Ы/ы Запустить / Остановить Zapret
 ```
 
 </details>
@@ -395,6 +409,7 @@ zms
 - **Zapret-OpenWrt** by [*remittor*](https://github.com/remittor)
 - **Стратегии от Flowseal** by [*Flowseal*](https://github.com/Flowseal)
 - **NetShift** by [*yandexru45*](https://github.com/yandexru45)
+- **splify** - by [*xyzmean*](https://github.com/xyzmean/)
 - **Mixomo** by [*Internet Helper*](https://github.com/Internet-Helper)
 - **MagiTrickle** by [*Ponywka*](https://github.com/Ponywka)
 - **HevSocks5Tunnel** by [*hev*](https://github.com/heiher)
