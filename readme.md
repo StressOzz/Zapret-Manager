@@ -229,6 +229,25 @@ zms
 
 ---
 
+## 🔹 Тест стратегии из **/root/custom_test.txt**
+
+В `Меню тестирования стратегий` - **7) Тестировать стратегии из /root/custom_test.txt**
+
+Каждая стратегия должна начинаться со строки **#Название**
+Пример содержимого `/root/custom_test.txt`:
+```
+#Strategy1
+--filter-tcp=443
+--dpi-desync=fake
+. . .
+#Strategy2
+--filter-tcp=443
+--dpi-desync=multidisorder
+. . .
+```
+
+---
+
 ## 🔹 Дерево меню Zapret Manager
 
 
