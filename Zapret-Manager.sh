@@ -14,7 +14,7 @@ DOMAINS="youtube.com rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com rr1---sn-gvnuxaxjv
 PORTS_UDP="88,1024-2407,2409-4499,4502-19293,19345-49999,50101-65535"; PORTS_TCP="2802,2302,2502,3724,6000-8000,8085,8090,8100,8903,8904,25565,27015-27030,27036-27037,50001,60442"
 GREEN="\033[1;32m"; RED="\033[1;31m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 CONF="/etc/config/zapret"; CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"; HOSTLIST_FILE="/opt/zapret/ipset/zapret-hosts-user.txt"; fileGP="/opt/zapret/ipset/zapret-hosts-google.txt"
-STR_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/TestStrYoutube"
+STR_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/StrYoutube"
 GEO_HOSTS="https://raw.githubusercontent.com/Internet-Helper/GeoHideDNS/refs/heads/main/hosts/hosts"
 TMP_SF="/tmp/zapret_temp"; HOSTS_FILE="/etc/hosts"; TMP_LIST="$TMP_SF/zapret_yt_list.txt"; tmpDIR="/tmp/PodkopAWG"
 GV_XTREME_FILE="/opt/zapret/tmp/GvXtreme"; GV_XTREME_PORTS="80,88,444-65535"; GV_XTREME_NFQWS_PORTS="80,88,443-65535"
