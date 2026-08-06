@@ -68,7 +68,7 @@ SCell="#Supercell\n103.27.157.38 accounts.supercell.com cdn.id.supercell.com cla
 185.246.223.127 game.brawlstarsgame.com\n62.133.62.97 game.clashroyaleapp.com\n193.23.209.189 gamea.clashofclans.com\n108.61.167.26 game.squadbustersgame.com"
 SPFY="#Spotify\n95.182.120.241 api.spotify.com login5.spotify.com encore.scdn.co gew1-spclient.spotify.com spclient.wg.spotify.com
 95.182.120.241 api-partner.spotify.com aet.spotify.com www.spotify.com accounts.spotify.com open.spotify.com
-95.182.120.241 accounts.scdn.co gew1-dealer.spotify.com open-exp.spotifycdn.com www-growth.scdn.co"
+95.182.120.241 accounts.scdn.co gew1-dealer.spotify.com open-exp.spotifycdn.com www-growth.scdn.co"; TAPEop="#tapeop.dev\n216.24.57.251 www.tapeop.dev tapeop.dev\n216.24.57.3 www.tapeop.dev tapeop.dev"
 GITH_RAW="#githubusercontent.com\n185.199.109.133 raw.githubusercontent.com release-assets.githubusercontent.com
 185.199.108.133 private-user-images.githubusercontent.com gist.githubusercontent.com avatars.githubusercontent.com"
 GITH="#github.com\n140.82.114.3 github.com\n185.199.110.154 github.githubassets.com\n185.199.110.133 camo.githubassets.com"
@@ -554,14 +554,15 @@ echo -e "${MAGENTA}Меню управления доменами в hosts${NC}\
 echo -e "${CYAN} 0) ${GREEN}$(get_state "$NALOG")${NC} nalog.ru\n${CYAN} 1) ${GREEN}$(get_state "$RUTOR")${NC} rutor.info\n${CYAN} 2) ${GREEN}$(get_state "$NTC")${NC} ntc.party"
 echo -e "${CYAN} 3) ${GREEN}$(get_state "$INSTAGRAM")${NC} Instagram & Facebook\n${CYAN} 4) ${GREEN}$(get_state "$LIBRUSEC")${NC} lib.rus.ec\n${CYAN} 5) ${GREEN}$(get_state "$AI")${NC} AI сервисы"
 echo -e "${CYAN} 6) ${GREEN}$(get_state "$TWCH")${NC} Twitch\n${CYAN} 7) ${GREEN}$(get_state "$TGWeb")${NC} Telegram Web\n${CYAN} 8) ${GREEN}$(get_state "$SPFY")${NC} Spotify\n${CYAN} 9) ${GREEN}$(get_state "$SCell")${NC} Supercell"
-echo -e "${CYAN}10) ${GREEN}$(get_state "$GITH_RAW")${NC} githubusercontent.com\n${CYAN}11) ${GREEN}$(get_state "$GITH")${NC} github.com\n${CYAN}12) ${GREEN}$(get_state "$USoft")${NC} Ubisoft\n${CYAN}13) $S_ALL\n${CYAN}14) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}GeoHide hosts"
-echo -e "${CYAN}15) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}Mafioznik hosts\n${CYAN}16) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}Malw.link hosts\n${CYAN}17) ${GREEN}Восстановить ${NC}hosts"
+echo -e "${CYAN}10) ${GREEN}$(get_state "$GITH_RAW")${NC} githubusercontent.com\n${CYAN}11) ${GREEN}$(get_state "$GITH")${NC} github.com\n${CYAN}12) ${GREEN}$(get_state "$USoft")${NC} Ubisoft"
+echo -e "${CYAN}13) ${GREEN}$(get_state "$TAPEop")${NC} tapeop.dev\n${CYAN}14) $S_ALL\n${CYAN}15) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}GeoHide hosts"
+echo -e "${CYAN}16) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}Mafioznik hosts\n${CYAN}17) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}Malw.link hosts\n${CYAN}18) ${GREEN}Восстановить ${NC}hosts"
 echo -ne "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n\n${YELLOW}Выберите пункт:${NC} ";read -r c; case "$c" in 0) toggle_block "$NALOG";; 1) toggle_block "$RUTOR";; 2) toggle_block "$NTC";; 3) toggle_block "$INSTAGRAM";;
 4) toggle_block "$LIBRUSEC";; 5) toggle_block "$AI";; 6) toggle_block "$TWCH";; 7) toggle_block "$TGWeb";; 8) toggle_block "$SPFY";; 9) toggle_block "$SCell";; 10) toggle_block "$GITH_RAW";; 11) toggle_block "$GITH";;
-12) toggle_block "$USoft";; 13) toggle_all;; 14) add_GEO_HOSTS;; 15) echo -e "\n${MAGENTA}Заменяем hosts на Mafioznik hosts${NC}"; wget -qO /etc/hosts https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/hosts_mafioznik.txt >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось скачать файл hosts${NC}\n"; PAUSE; }
-/etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}заменён на ${NC}Mafioznik hosts${GREEN}!${NC}\n"; PAUSE;; 16) echo -e "\n${MAGENTA}Заменяем hosts на Malw.link hosts${NC}"
+12) toggle_block "$USoft";; 13) toggle_block "$TAPEop";; 14) toggle_all;; 15) add_GEO_HOSTS;; 16) echo -e "\n${MAGENTA}Заменяем hosts на Mafioznik hosts${NC}"; wget -qO /etc/hosts https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/hosts_mafioznik.txt >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось скачать файл hosts${NC}\n"; PAUSE; }
+/etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}заменён на ${NC}Mafioznik hosts${GREEN}!${NC}\n"; PAUSE;; 17) echo -e "\n${MAGENTA}Заменяем hosts на Malw.link hosts${NC}"
 wget -qO /etc/hosts https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/hosts_malw.link.txt >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось скачать файл hosts${NC}\n"; PAUSE; }
-/etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}заменён на ${NC}Malw.link hosts${GREEN}!${NC}\n"; PAUSE;; 17) hosts_reset;; *) break;; esac; done; }
+/etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}заменён на ${NC}Malw.link hosts${GREEN}!${NC}\n"; PAUSE;; 18) hosts_reset;; *) break;; esac; done; }
 status_block() { local line; while IFS= read -r line; do [ -z "$line" ] && continue; grep -Fxq "$line" "$HOSTS_FILE" || return 1; done <<EOF
 $(printf '%b\n' "$1")
 EOF
