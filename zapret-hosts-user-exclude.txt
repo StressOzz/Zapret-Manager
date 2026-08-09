@@ -50,6 +50,7 @@ ipstream.one
 godville.net
 voidboost.cc
 hcaptcha.com
+kaspersky.com
 canonical.com
 mediafire.com
 vivoglobal.com
