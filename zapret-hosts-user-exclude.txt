@@ -49,6 +49,7 @@ opencity.pro
 ipstream.one
 godville.net
 voidboost.cc
+voidboost.one
 hcaptcha.com
 kaspersky.com
 canonical.com
