@@ -15,10 +15,7 @@ CRON_CMD="/etc/init.d/mihomo restart"; CONFIGPATH="/etc/magitrickle/state/config
 BASE_URL="https://github.com/Slava-Shchipunov/awg-openwrt/releases/download/"
 FLOWSEAL_STR_ZIP="https://github.com/Flowseal/zapret-discord-youtube/archive/refs/heads/main.zip"
 GEO_HOSTS="https://raw.githubusercontent.com/Internet-Helper/GeoHideDNS/refs/heads/main/hosts/hosts"
-# STR_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/StrYoutube"
-
-STR_URL="https://raw.githubusercontent.com/StressOzz/Test/refs/heads/main/str"
-
+STR_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/StrYoutube"
 RAW="https://raw.githubusercontent.com/hyperion-cs/dpi-checkers/refs/heads/main/ru/tcp-16-20/suite.v2.json"
 RKN_URL="https://raw.githubusercontent.com/IndeecFOX/zapret4rocket/refs/heads/master/extra_strats/TCP/RKN/List.txt"
 URL_OLD="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/MagiTrickle/configOLD.yaml"
