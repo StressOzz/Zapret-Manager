@@ -2,27 +2,37 @@
 # ==========================================
 # Zapret Manager by StressOzz
 # =========================================
-ZAPRET_MANAGER_VERSION="9.81"; STR_VERSION_AUTOINSTALL="v7"
+ZAPRET_MANAGER_VERSION="9.82"; STR_VERSION_AUTOINSTALL="v7"
 
-ZAPRET_VERSION="72.20260307"; PODKOP_LATEST_VER="0.9.6"; TG_MTProto="0.9.3"; MT_VERSION="0.8.2"
+ZAPRET_VERSION="72.20260307"; PODKOP_LATEST_VER="0.9.6"; TG_MTProto="0.9.3"; MT_VERSION="0.8.2"; ZAPRET2_VERSION="1.0.3"
 SPL_VER="26.8.1.3"; TG_GO_VERSION="1.4.1"; TG_RS_VERSION="2.2.4"; BYEDPI_LATEST_VER="0.17.3"
+
+echo 'sh <(wget -q -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)' > /usr/bin/zms; chmod +x /usr/bin/zms
+echo 'sh <(wget -q -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh) "$@"' > /usr/bin/zmsA; chmod +x /usr/bin/zmsA
 
 OWRTAWG=$(grep '^DISTRIB_RELEASE=' /etc/openwrt_release | cut -d"'" -f2); ARCHAWG="$(grep DISTRIB_ARCH /etc/openwrt_release | cut -d"'" -f2)_$(grep DISTRIB_TARGET /etc/openwrt_release | cut -d"'" -f2 | tr '/' '_')" 
 CRON_CMD="/etc/init.d/mihomo restart"; CONFIGPATH="/etc/magitrickle/state/config.yaml"; PACKAGES_UPDATED=0
+BASE_URL="https://github.com/Slava-Shchipunov/awg-openwrt/releases/download/"
 FLOWSEAL_STR_ZIP="https://github.com/Flowseal/zapret-discord-youtube/archive/refs/heads/main.zip"
+GEO_HOSTS="https://raw.githubusercontent.com/Internet-Helper/GeoHideDNS/refs/heads/main/hosts/hosts"
+# STR_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/StrYoutube"
+
+STR_URL="https://raw.githubusercontent.com/StressOzz/Test/refs/heads/main/str"
+
+RAW="https://raw.githubusercontent.com/hyperion-cs/dpi-checkers/refs/heads/main/ru/tcp-16-20/suite.v2.json"
+RKN_URL="https://raw.githubusercontent.com/IndeecFOX/zapret4rocket/refs/heads/master/extra_strats/TCP/RKN/List.txt"
+URL_OLD="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/MagiTrickle/configOLD.yaml"
 URL_DEFAULT="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/MagiTrickle/config.yaml"
 URL_ITDOG="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/MagiTrickle/configAD.yaml"
-URL_OLD="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/MagiTrickle/configOLD.yaml"
+EXCLUDE_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/zapret-hosts-user-exclude.txt"
 CRON_FILE="/etc/crontabs/root"; CONFIGMIX="/etc/mihomo/config.yaml"; LAN_IP=$(uci get network.lan.ipaddr 2>/dev/null | cut -d/ -f1)
-DOMAINS="youtube.com rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com rr1---sn-gvnuxaxjvh-jx3l.googlevideo.com rr4---sn-4g5e6nze.googlevideo.com rr1---sn-aj5go5-53.googlevideo.com rr4---sn-5go7yner.googlevideo.com rr3---sn-ug5onuxaxjvh-n8v6.googlevideo.com rr1---sn-ug5onuxaxjvh-p5ge.googlevideo.com"
+DOMAINS="youtu.be youtube.com i.ytimg.com i9.ytimg.com yt3.ggpht.com yt4.ggpht.com googleapis.com jnn-pa.googleapis.com googleusercontent.com signaler-pa.youtube.com youtubei.googleapis.com manifest.googlevideo.com yt3.googleusercontent.com rr4---sn-4g5e6nze.googlevideo.com rr4---sn-5go7yner.googlevideo.com rr4---sn-q4flrnsl.googlevideo.com rr5---sn-n8v7knez.googlevideo.com rr2---sn-q4fl6ndl.googlevideo.com rr1---sn-q4fl6n6y.googlevideo.com rr1---sn-aj5go5-53.googlevideo.com rr1---sn-4axm-n8vs.googlevideo.com rr14---sn-n8v7kn7r.googlevideo.com rr16---sn-axq7sn76.googlevideo.com rr4---sn-jvhnu5g-c35d.googlevideo.com rr1---sn-8ph2xajvh-5xge.googlevideo.com rr1---sn-xguxaxjvh-gufl.googlevideo.com rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com rr1---sn-gvnuxaxjvh-jx3l.googlevideo.com rr1---sn-gvnuxaxjvh-o8ge.googlevideo.com rr5---sn-gvnuxaxjvh-n8vk.googlevideo.com rr10---sn-gvnuxaxjvh-304z.googlevideo.com rr12---sn-gvnuxaxjvh-bvwz.googlevideo.com rr3---sn-ug5onuxaxjvh-n8v6.googlevideo.com rr1---sn-ug5onuxaxjvh-p5ge.googlevideo.com rr1---sn-ug5onuxaxjvh-p3ul.googlevideo.com rr1---sn-ug5onuxaxjvh-n8v6.googlevideo.com rr1---sn-u5uuxaxjvhg0-ocje.googlevideo.com"
 PORTS_UDP="88,1024-2407,2409-4499,4502-19293,19345-49999,50101-65535"; PORTS_TCP="2802,2302,2502,3724,6000-8000,8085,8090,8100,8903,8904,25565,27015-27030,27036-27037,50001,60442"
 GREEN="\033[1;32m"; RED="\033[1;31m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 CONF="/etc/config/zapret"; CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"; HOSTLIST_FILE="/opt/zapret/ipset/zapret-hosts-user.txt"; fileGP="/opt/zapret/ipset/zapret-hosts-google.txt"
-STR_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/StrYoutube"
-GEO_HOSTS="https://raw.githubusercontent.com/Internet-Helper/GeoHideDNS/refs/heads/main/hosts/hosts"
 TMP_SF="/tmp/zapret_temp"; HOSTS_FILE="/etc/hosts"; TMP_LIST="$TMP_SF/zapret_yt_list.txt"; tmpDIR="/tmp/PodkopAWG"
 GV_XTREME_FILE="/opt/zapret/tmp/GvXtreme"; GV_XTREME_PORTS="80,88,444-65535"; GV_XTREME_NFQWS_PORTS="80,88,443-65535"
-IF_NAME="AWG"; PROTO="amneziawg"; DEV_NAME="amneziawg0"; BASE_URL="https://github.com/Slava-Shchipunov/awg-openwrt/releases/download/"
+IF_NAME="AWG"; PROTO="amneziawg"; DEV_NAME="amneziawg0"
 SAVED_STR="$TMP_SF/StrYou.txt"; HOSTS_USER="$TMP_SF/hosts-user.txt"; OUT_DPI="$TMP_SF/dpi_urls.txt"; OUT="$TMP_SF/str_flow.txt"; ZIP="$TMP_SF/repo.zip"
 BACKUP_FILE="/opt/zapret/tmp/hosts_temp.txt"; STR_FILE="$TMP_SF/str_test.txt"; TEMP_FILE="$TMP_SF/str_temp.txt"
 RESULTS="/opt/zapret/tmp/zapret_bench.txt"; BACK="$TMP_SF/zapret_back.txt"; TMP_RES="$TMP_SF/zapret_results_all.$$"
@@ -30,11 +40,8 @@ FINAL_STR="$TMP_SF/StrFINAL.txt"; NEW_STR="$TMP_SF/StrNEW.txt"; OLD_STR="$TMP_SF
 ARCH_FULL="$(cat /etc/openwrt_release | grep DISTRIB_ARCH | cut -d"'" -f2)"; MODEL="$(cat /tmp/sysinfo/model 2>/dev/null)"
 RES1="/opt/zapret/tmp/results_flowseal.txt"; RES2="/opt/zapret/tmp/results_versions.txt"; RES3="/opt/zapret/tmp/results_all.txt"
 RES_CUSTOM="/opt/zapret/tmp/results_custom.txt"; CUSTOM_STR_FILE="/root/custom_test.txt"; CUSTOM_RESULTS="$RES_CUSTOM"; CUSTOM_BACK="$TMP_SF/zapret_custom_backup.conf"
-RES_DOMAIN="/opt/zapret/tmp/results_domain.txt"; Fin_IP_Dis="104\.25\.158\.178 finland[0-9]\{5\}\.discord\.media"; PARALLEL=8
-RAW="https://raw.githubusercontent.com/hyperion-cs/dpi-checkers/refs/heads/main/ru/tcp-16-20/suite.v2.json"
+RES_DOMAIN="/opt/zapret/tmp/results_domain.txt"; RES_YOUTUBE="/opt/zapret/tmp/results_youtube.txt"; Fin_IP_Dis="104\.25\.158\.178 finland[0-9]\{5\}\.discord\.media"; PARALLEL=8
 EXCLUDE_FILE="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"; fileDoH="/etc/config/https-dns-proxy"
-RKN_URL="https://raw.githubusercontent.com/IndeecFOX/zapret4rocket/refs/heads/master/extra_strats/TCP/RKN/List.txt"
-EXCLUDE_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/zapret-hosts-user-exclude.txt"
 INSTAGRAM="#Instagram&Facebook\n57.144.222.34 instagram.com www.instagram.com\n157.240.9.174 instagram.com www.instagram.com\n157.240.245.174 instagram.com www.instagram.com b.i.instagram.com z-p42-chat-e2ee-ig.facebook.com help.instagram.com
 157.240.205.174 instagram.com www.instagram.com\n57.144.244.192 static.cdninstagram.com graph.instagram.com i.instagram.com api.instagram.com edge-chat.instagram.com\n31.13.66.63 scontent.cdninstagram.com scontent-hel3-1.cdninstagram.com
 57.144.244.1 facebook.com www.facebook.com fb.com fbsbx.com\n57.144.244.128 static.xx.fbcdn.net scontent.xx.fbcdn.net\n31.13.67.20 scontent-hel3-1.xx.fbcdn.net"
@@ -104,24 +111,25 @@ if ! curl --version >/dev/null 2>&1; then clear; echo -e "curl ${RED}отсут�
 $DELETE curl libcurl >/dev/null 2>&1; echo -e "${CYAN}Обновляем список пакетов${NC}"; if ! $UPDATE >/dev/null 2>&1; then echo -e "\n${RED}Ошибка обновления списка пакетов!!${NC}\n"; else PACKAGES_UPDATED=1; fi
 echo -e "${CYAN}Устанавливаем ${NC}curl"; if ! $INSTALL libcurl curl >/dev/null 2>&1; then echo -e "\n${RED}Не удалось установить curl!${NC}\n"; PAUSE; fi; fi
 
+get_zapret2_ver() { if [ "$PKG_IS_APK" -eq 1 ]; then IDX_URL2="https://packages.routerich.ru/25.12/mediatek/filogic/routerich/"; FNAME2=$(curl -s --connect-timeout 3 --max-time 5 "$IDX_URL2" | grep -o "zapret2-[0-9][^\"]*\.apk" | head -n1)
+else IDX_URL2="https://packages.routerich.ru/24.10/mediatek/filogic/routerich/"; FNAME2=$(curl -s --connect-timeout 3 --max-time 5 "$IDX_URL2" | grep -o "zapret2_[0-9][^\"]*_aarch64_cortex-a53\.ipk" | head -n1); fi
+VER2=$(echo "$FNAME2" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)*-r[0-9]+' | sed 's/-r[0-9]*$//'); if [ -z "$VER2" ]; then echo -e "Zapret2: ${RED}ошибка получения версии${NC}"; return 1; fi; echo "$VER2" > "$TMP_VER_Z2"; echo -e "Zapret2: ${GREEN}$VER2${NC}"; }
+
 get_ver() { URL="$1"; OUT_FILE="$2"; NAME="$3"; RESULT=$(curl -sIL --connect-timeout 3 --max-time 4 --retry 1 -w "%{url_effective}" -o /dev/null "$URL" 2>/dev/null)
 if [ $? -ne 0 ] || [ -z "$RESULT" ]; then echo -e "$NAME: ${RED}ошибка получения версии${NC}"; return 1; fi; VERSION="${RESULT##*/}"; VERSION="${VERSION#v}"; [ "$NAME" = "ByeDPI" ] && VERSION="${VERSION%%-*}"
 if [ -z "$VERSION" ]; then echo -e "$NAME - ${RED}не удалось извлечь версию${NC}"; echo -e "${YELLOW}URL:${NC} $RESULT"; return 1; fi; echo "$VERSION" > "$OUT_FILE"; echo -e "$NAME: ${GREEN}$VERSION${NC}"; }
 
 clear; echo -e "${CYAN}Cобираем версии:${NC}"
 TMP_VER="/tmp/zapret_version"; TMP_VER_POD="/tmp/podkop_version"; TMP_VER_TG_MT="/tmp/tg_ws_proxy_MTp_ver"; TMP_VER_TG_GO="/tmp/tg_ws_proxy_GO_ver"
-TMP_VER_TG_RS="/tmp/tg_ws_proxy_RS_ver"; TMP_MAG_VER="/tmp/MagiTrickle_version"; TMP_VER_SPL="/tmp/splify_version"; TMP_VER_BYEDPI="/tmp/byedpi_version"
+TMP_VER_TG_RS="/tmp/tg_ws_proxy_RS_ver"; TMP_MAG_VER="/tmp/MagiTrickle_version"; TMP_VER_SPL="/tmp/splify_version"; TMP_VER_BYEDPI="/tmp/byedpi_version"; TMP_VER_Z2="/tmp/zapret2_version"
 # get_ver "https://github.com/MagiTrickle/MagiTrickle/releases/latest" "$TMP_MAG_VER" "MagiTrickle" &
 # get_ver "https://github.com/spatiumstas/tg-ws-proxy-go/releases/latest" "$TMP_VER_TG_MT" "TG-WS Proxy MTProto" &
 get_ver "https://github.com/DPITrickster/ByeDPI-OpenWrt/releases/latest" "$TMP_VER_BYEDPI" "ByeDPI" & get_ver "https://github.com/yandexru45/netshift/releases/latest" "$TMP_VER_POD" "NetShift" &
 get_ver "https://github.com/remittor/zapret-openwrt/releases/latest" "$TMP_VER" "Zapret" & get_ver "https://github.com/xyzmean/splify/releases/latest" "$TMP_VER_SPL" "splify" &
-get_ver "https://github.com/d0mhate/-tg-ws-proxy-Manager-go/releases/latest" "$TMP_VER_TG_GO" "TG-WS Proxy SOCKS5" & get_ver "https://github.com/valnesfjord/tg-ws-proxy-rs/releases/latest" "$TMP_VER_TG_RS" "TG-WS Proxy Rust" & wait
-[ -s "$TMP_MAG_VER" ] && MT_VERSION="$(cat "$TMP_MAG_VER")"; [ -s "$TMP_VER_BYEDPI" ] && BYEDPI_LATEST_VER="$(cat "$TMP_VER_BYEDPI" | sed 's/^v//' | cut -d'-' -f1)"
+get_ver "https://github.com/d0mhate/-tg-ws-proxy-Manager-go/releases/latest" "$TMP_VER_TG_GO" "TG-WS Proxy SOCKS5" & get_ver "https://github.com/valnesfjord/tg-ws-proxy-rs/releases/latest" "$TMP_VER_TG_RS" "TG-WS Proxy Rust" & get_zapret2_ver & wait
+[ -s "$TMP_MAG_VER" ] && MT_VERSION="$(cat "$TMP_MAG_VER")"; [ -s "$TMP_VER_BYEDPI" ] && BYEDPI_LATEST_VER="$(cat "$TMP_VER_BYEDPI" | sed 's/^v//' | cut -d'-' -f1)"; [ -s "$TMP_VER_Z2" ] && ZAPRET2_VERSION="$(cat "$TMP_VER_Z2")"
 [ -s "$TMP_VER" ] && ZAPRET_VERSION="$(cat "$TMP_VER")"; [ -s "$TMP_VER_POD" ] && PODKOP_LATEST_VER="$(cat "$TMP_VER_POD")"; [ -s "$TMP_VER_TG_MT" ] && TG_MTProto="$(cat "$TMP_VER_TG_MT")"
 [ -s "$TMP_VER_SPL" ] && SPL_VER="$(cat "$TMP_VER_SPL")"; [ -s "$TMP_VER_TG_GO" ] && TG_GO_VERSION="$(cat "$TMP_VER_TG_GO")"; [ -s "$TMP_VER_TG_RS" ] && TG_RS_VERSION="$(cat "$TMP_VER_TG_RS")"
-
-echo 'sh <(wget -q -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)' > /usr/bin/zms; chmod +x /usr/bin/zms
-echo 'sh <(wget -q -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh) "$@"' > /usr/bin/zmsA; chmod +x /usr/bin/zmsA
 
 # git="githubusercontent.com"; if ! grep -q "raw.$git" /etc/hosts; then echo -e "\n\033[1;36mДля корректной работы скрипта добавляем домены \033[0mGitHub\033[1;36m в \033[0m/etc/hosts\033[0m"
 # printf "#$git\n185.199.109.133 raw.$git release-assets.$git\n185.199.108.133 private-user-images.$git gist.$git avatars.$git\n" >> /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1; fi
@@ -132,8 +140,35 @@ do [ -d /opt/zapret ] && [ ! -f "/opt/zapret/files/fake/$f" ] && { [ "$MSG" = 0 
 ADD_FAKE_FLOW
 
 # ==========================================
+#ZAPRET2
+# ==========================================
+ZAPRET2_ARCH_SUFFIX="aarch64_cortex-a53"
+if [ "$PKG_IS_APK" -eq 1 ]; then ZAPRET2_BASE_URL="https://packages.routerich.ru/25.12/mediatek/filogic/routerich/"; else ZAPRET2_BASE_URL="https://packages.routerich.ru/24.10/mediatek/filogic/routerich/"; fi; ZAPRET2_TMP_DIR="/tmp/routerich"; ZAPRET2_CACHE_FILE="$ZAPRET2_TMP_DIR/index.html"
+zapret2_update_cache() { mkdir -p "$ZAPRET2_TMP_DIR"; curl -L -s --connect-timeout 10 "$ZAPRET2_BASE_URL" -o "$ZAPRET2_CACHE_FILE"; }
+zapret2_remote_file() { [ -f "$ZAPRET2_CACHE_FILE" ] || zapret2_update_cache; if [ "$PKG_IS_APK" -eq 1 ]; then grep -o "zapret2-[0-9][^\"]*\.${RAZ}" "$ZAPRET2_CACHE_FILE" | head -n1; else grep -o "zapret2_[0-9][^\"]*_${ZAPRET2_ARCH_SUFFIX}\.${RAZ}" "$ZAPRET2_CACHE_FILE" | head -n1; fi; }
+zapret2_remote_luci_file() { [ -f "$ZAPRET2_CACHE_FILE" ] || zapret2_update_cache; if [ "$PKG_IS_APK" -eq 1 ]; then grep -o "luci-app-zapret2-[0-9][^\"]*\.${RAZ}" "$ZAPRET2_CACHE_FILE" | head -n1; else grep -o "luci-app-zapret2_[0-9][^\"]*_all\.${RAZ}" "$ZAPRET2_CACHE_FILE" | head -n1; fi; }
+zapret2_local_version() { if [ "$PKG_IS_APK" -eq 1 ]; then apk list --installed 2>/dev/null | grep "^zapret2" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)*-r[0-9]+' | head -n1 | sed 's/-r[0-9]*$//'; else opkg list-installed 2>/dev/null | grep "^zapret2 -" | awk '{print $3}' | sed 's/-r[0-9]*$//'; fi; }
+zapret2_luci_installed() { if [ "$PKG_IS_APK" -eq 1 ]; then apk list --installed 2>/dev/null | grep -q "^luci-app-zapret2"; else opkg list-installed 2>/dev/null | grep -q "luci-app-zapret2"; fi; }
+install_zapret2() { [ "$(grep '^DISTRIB_ARCH=' /etc/openwrt_release | cut -d"'" -f2)" = "aarch64_cortex-a53" ] || { echo -e "\n${RED}Архитектура не поддерживается!"; PAUSE; return 1; }
+if [ -f /etc/init.d/zapret ]; then echo -e "\n${RED}Установлен ${NC}Zapret${RED}!${NC}"; echo -e "${YELLOW}Установка ${NC}Zapret2${YELLOW} невозможна!${NC}\n"; PAUSE; return 1; fi
+echo -e "\n${MAGENTA}Устанавливаем Zapret2${NC}"; rm -rf "$ZAPRET2_TMP_DIR"; mkdir -p "$ZAPRET2_TMP_DIR"; zapret2_update_cache; MAIN_FILE2="$(zapret2_remote_file)"; LUCI_FILE2="$(zapret2_remote_luci_file)"
+if [ -z "$MAIN_FILE2" ]; then echo -e "\n${RED}Не удалось найти пакет ${NC}zapret2\n"; PAUSE; return 1; fi; update_packages || return 1
+echo -e "${CYAN}Скачиваем ${NC}$MAIN_FILE2"; curl -L -s --connect-timeout 10 "${ZAPRET2_BASE_URL}${MAIN_FILE2}" -o "$ZAPRET2_TMP_DIR/$MAIN_FILE2" || { echo -e "\n${RED}Не удалось скачать ${NC}$MAIN_FILE2\n"; PAUSE; return 1; }
+if [ -n "$LUCI_FILE2" ]; then echo -e "${CYAN}Скачиваем ${NC}$LUCI_FILE2"; curl -L -s --connect-timeout 10 "${ZAPRET2_BASE_URL}${LUCI_FILE2}" -o "$ZAPRET2_TMP_DIR/$LUCI_FILE2"; fi
+echo -e "${CYAN}Устанавливаем ${NC}Zapret2"; $INSTALL "$ZAPRET2_TMP_DIR"/*.${RAZ} >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось установить ${NC}Zapret2\n"; rm -rf "$ZAPRET2_TMP_DIR"; PAUSE; return 1; }
+rm -rf "$ZAPRET2_TMP_DIR"; echo -e "${CYAN}Добавляем домены в исключения${NC}"; wget -q -U "Mozilla/5.0" -O /opt/zapret2/ipset/zapret_hosts_user_exclude.txt "$EXCLUDE_URL" || echo -e "${RED}Не удалось загрузить exclude файл${NC}"
+echo -e "${CYAN}Включаем стратегию по умолчанию${NC}"; sed -i "/config strategy 'default'/,/config /s/option enabled '0'/option enabled '1'/" /etc/config/zapret2 >/dev/null 2>&1
+echo -e "${CYAN}Запускаем ${NC}Zapret2"; /etc/init.d/zapret2 enable >/dev/null 2>&1; /etc/init.d/zapret2 restart >/dev/null 2>&1; echo -e "Zapret2 ${GREEN}установлен!${NC}\n"; PAUSE; }
+remove_zapret2() { echo -e "\n${MAGENTA}Удаляем Zapret2${NC}"; echo -e "${CYAN}Останавливаем ${NC}zapret2"; /etc/init.d/zapret2 stop >/dev/null 2>&1
+echo -e "${CYAN}Удаляем пакеты${NC}"; $DELETE luci-app-zapret2 >/dev/null 2>&1; $DELETE zapret2 >/dev/null 2>&1; echo -e "${CYAN}Удаляем файлы${NC}"; rm -f /etc/config/zapret2; rm -rf /opt/zapret2; echo -e "Zapret2 ${GREEN}удалён!${NC}\n"; PAUSE; }
+# ==========================================
 # Автоподбор
 # ==========================================
+AUTO_MODE_FILE="$TMP_SF/auto_best_mode"
+get_auto_best_mode() { if [ -f "$AUTO_MODE_FILE" ]; then MODE_VAL=$(cat "$AUTO_MODE_FILE" 2>/dev/null); fi; case "$MODE_VAL" in 1|2|3) echo "$MODE_VAL" ;; *) echo 3 ;; esac; }
+auto_best_mode_text() { case "$(get_auto_best_mode)" in 1) echo "v" ;; 2) echo "Flowseal" ;; *) echo "v + Flowseal" ;; esac; }
+set_auto_best_mode() { echo -e "\n${MAGENTA}Выберите стратегии для автоподбора${NC}"; echo -e "${CYAN}1) ${GREEN}Стратегии ${NC}v\n${CYAN}2) ${GREEN}Стратегии ${NC}Flowseal\n${CYAN}3) ${GREEN}Стратегии ${NC}v ${GREEN}+ ${NC}Flowseal"
+echo -ne "${CYAN}Enter) ${GREEN}Оставить текущую${NC}\n\n${YELLOW}Выберите пункт:${NC} "; read -r choiceMode; case "$choiceMode" in 1|2|3) mkdir -p "$TMP_SF"; echo "$choiceMode" > "$AUTO_MODE_FILE"; echo -e "\n${GREEN}Выбраны стратегии: ${NC}$(auto_best_mode_text)\n"; PAUSE;; *) return ;; esac; }
 sync_ntp() { echo -e "\n${MAGENTA}Синхронизируем время через NTP${NC}"; if command -v ntpd >/dev/null 2>&1; then ntpd -n -q -p 0.openwrt.pool.ntp.org -p 1.openwrt.pool.ntp.org >/dev/null 2>&1
 else /etc/init.d/sysntpd restart >/dev/null 2>&1; sleep 3; fi; command -v hwclock >/dev/null 2>&1 && hwclock -w >/dev/null 2>&1; echo -e "${GREEN}Время синхронизировано!${NC}\n"; PAUSE; }
 set_timezone() { CUR_TZ=$(uci -q get system.@system[0].zonename); echo -e "\n${MAGENTA}Выберите часовой пояс${NC}\n ${CYAN}1) ${GREEN}Калининград  ${NC}(UTC+2)\n ${CYAN}2) ${GREEN}Москва       ${NC}(UTC+3)"
@@ -146,19 +181,27 @@ uci set system.@system[0].timezone="$TZSTR"; uci set system.@system[0].zonename=
 TIME_MENU() { while true; do clear; echo -e "${MAGENTA}Меню настройки времени${NC}\n"; echo -e "${YELLOW}Текущее время:${NC} ${CYAN}$(date '+%Y-%m-%d %H:%M:%S')${NC}"; TZ_CUR=$(uci -q get system.@system[0].zonename)
 [ -n "$TZ_CUR" ] && echo -e "${YELLOW}Часовой пояс:${NC} ${CYAN}$TZ_CUR${NC}"; echo -e "\n${CYAN}1) ${GREEN}Синхронизировать время через ${NC}NTP\n${CYAN}2) ${GREEN}Установить часовой пояс${NC}"
 echo -ne "${CYAN}Enter) ${GREEN}Выход в меню автоподбора стратегий${NC}\n\n${YELLOW}Выберите пункт:${NC} "; read -r choiceTM; case "$choiceTM" in 1) sync_ntp ;; 2) set_timezone ;; *) return ;; esac; done; }
-extract_yv_block() { awk '/^#Yv[0-9]/ { found=1 } found { print; if ($0 == "--new") exit }' "$1"; }
-extract_gv_block() { awk '/^#Gv[0-9]/ { found=1; print; next } found { if ($0 ~ /^#/ || $0 == "'"'"'") exit; print }' "$1"; }
-extract_dv_block() { awk '/^#Dv[0-9]/ { found=1; print; next } found { if ($0 ~ /^#/ || $0 == "'"'"'") exit; print }' "$1"; }
 auto_best_running() { [ -f "$AUTO_LOCK" ] || return 1; _lock_pid=$(head -n1 "$AUTO_LOCK" 2>/dev/null); if [ -n "$_lock_pid" ] && kill -0 "$_lock_pid" 2>/dev/null; then return 0; fi; rm -f "$AUTO_LOCK"; return 1; }
 sort_results_desc() { local in="$1" out="$2" tmp="$TMP_SF/sort_res.$$"; awk -F'[/ ]' '{ for (i = 1; i <= NF; i++) { if ($i ~ /^[0-9]+$/) { print $i, $0; break } } }' "$in" | sort -k1,1 -nr | cut -d' ' -f2- > "$tmp"; mv "$tmp" "$out"; }
 auto_best_stop_cleanup() { { echo ""; echo "=== $(date '+%Y-%m-%d %H:%M:%S') Автоподбор остановлен пользователем ==="; if [ -f "$AUTO_BACK" ]; then echo "Восстанавливаем предыдущую конфигурацию"
 mv -f "$AUTO_BACK" "$CONF"; ZAPRET_RESTART; echo "Конфигурация восстановлена"; else echo "Файл резервной конфигурации не найден, восстановление невозможно"; fi; } >> "$AUTO_LOG" 2>&1; }
 stop_auto_best() { touch "$AUTO_STOP_FLAG"; echo -en "${CYAN}Завершаем текущий автоподбор${NC}"; _i=0; while auto_best_running && [ "$_i" -lt 90 ]; do sleep 1; _i=$((_i + 1)); [ $((_i % 5)) -eq 0 ]; done
 echo; if auto_best_running; then PID=$(head -n1 "$AUTO_LOCK" 2>/dev/null); [ -n "$PID" ] && kill -KILL "$PID" 2>/dev/null; rm -f "$AUTO_LOCK"; if [ -f "$AUTO_BACK" ]; then mv -f "$AUTO_BACK" "$CONF"; ZAPRET_RESTART; fi; fi; rm -f "$AUTO_STOP_FLAG"; }
+restore_dv_number() { local NUM="$1"; [ -z "$NUM" ] && return; discord_str_add; [ "$NUM" = "1" ] && return; local NEW_STRAT; NEW_STRAT=$(eval echo \"\$Dv$NUM\"); [ -z "$NEW_STRAT" ] && return; grep -q -E '^[[:space:]]*--filter-tcp=2053,2083,2087,2096,8443' "$CONF" || return
+local START END LINE; START=$(grep -n -E '^[[:space:]]*--filter-tcp=2053,2083,2087,2096,8443' "$CONF" | cut -d: -f1); END=$(tail -n +"$START" "$CONF" | grep -n -m1 -E '^--new$|^#|^'\''$' | cut -d: -f1); END=$((START + END - 1))
+sed -i "${START},$((END-1))d" "$CONF"; LINE=$START; echo "$NEW_STRAT" | while IFS= read -r l; do sed -i "${LINE}i$l" "$CONF"; LINE=$((LINE + 1)); done; if grep -q -E '^#[[:space:]]*Dv' "$CONF"; then sed -i "s/^#[[:space:]]*Dv[0-9]\+/#Dv$NUM/" "$CONF"; else sed -i "${START}i#Dv$NUM" "$CONF"; fi; }
+restore_yv_number() { local NUM="$1"; if [ -z "$NUM" ] || [ "$NUM" = "08" ]; then ADD_Yv; return; fi; local SELECTED_NAME="#Yv$NUM"; curl -fsSL "$STR_URL" -o "$TMP_LIST" || { ADD_Yv; return; }; grep -qxF "$SELECTED_NAME" "$TMP_LIST" || { ADD_Yv; return; }
+local SAVED="$TMP_SF/restore_yv_str" NEW_TMP="$TMP_SF/restore_yv_new" FINAL_TMP="$TMP_SF/restore_yv_final" FLAG=0; : > "$SAVED"; while IFS= read -r LINE; do [ "$LINE" = "$SELECTED_NAME" ] && FLAG=1 && continue
+case "$LINE" in \#Yv[0-9]*) FLAG=0 ;; esac; [ "$FLAG" -eq 1 ] && printf "%b\n" "$LINE" >> "$SAVED"; done < "$TMP_LIST"; sed -i "/^[[:space:]]*#Yv[0-9]\+/d" "$CONF"
+awk '{if(skip){if($0=="--new"||$0~/\047/){skip=0;next}if($0~/^[[:space:]]*$/)next;next}if($0=="--filter-tcp=443"){getline n;if(n=="--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt"){skip=1;next}else{print $0;print n;next}}if($0=="--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt")has_google=1;print}' "$CONF" > "$NEW_TMP"
+awk -v sel="$SELECTED_NAME" -v savedfile="$SAVED" 'BEGIN{inserted=0;has_google=0} $0=="--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt"{has_google=1} $0~/^[[:space:]]*option NFQWS_OPT '\''$/&&!has_google&&!inserted{print;print sel;while((getline l<savedfile)>0)if(l!~/^[[:space:]]*$/)print l;print "--new";inserted=1;next} {print}' "$NEW_TMP" > "$FINAL_TMP"
+grep -q "^[[:space:]]*'[[:space:]]*\$" "$FINAL_TMP" || echo "'" >> "$FINAL_TMP"; mv "$FINAL_TMP" "$CONF"; }
 auto_apply_best_strategy() { echo $$ > "$AUTO_LOCK"; rm -f "$AUTO_STOP_FLAG"; trap 'rm -f "$AUTO_LOCK"' EXIT; mkdir -p "$TMP_SF" "/opt/zapret/tmp"; : > "$AUTO_LOG"; { echo "===> Автоподбор стратегии запущен <==="; if [ ! -f /etc/init.d/zapret ]; then echo "Zapret не установлен, выход"; exit 0; fi
-STR_FILE_AUTO="$TMP_SF/str_auto.txt"; TEMP_FILE_AUTO="$TMP_SF/str_temp_auto.txt"; : > "$STR_FILE_AUTO"; cp "$CONF" "$AUTO_BACK"; ORIG_YV_BLOCK=""; ORIG_GV_BLOCK=""; ORIG_DV_BLOCK=""; grep -q "^#Yv[0-9]" "$AUTO_BACK" && ORIG_YV_BLOCK=$(extract_yv_block "$AUTO_BACK")
-grep -q "^#Gv[0-9]" "$AUTO_BACK" && ORIG_GV_BLOCK=$(extract_gv_block "$AUTO_BACK"); grep -q "^#Dv[0-9]" "$AUTO_BACK" && ORIG_DV_BLOCK=$(extract_dv_block "$AUTO_BACK"); echo "Собираем Flowseal стратегии"; download_strategies 1; cat "$OUT" >> "$STR_FILE_AUTO"
-echo "Собираем v стратегии"; for N in $(seq 1 100); do strategy_v"$N" >> "$STR_FILE_AUTO" 2>/dev/null || break; done; sed -i '/#Y/d' "$STR_FILE_AUTO"; prepare_urls || { echo "Не удалось получить список для теста"; mv -f "$AUTO_BACK" "$CONF"; exit 1; }
+STR_FILE_AUTO="$TMP_SF/str_auto.txt"; TEMP_FILE_AUTO="$TMP_SF/str_temp_auto.txt"; : > "$STR_FILE_AUTO"; cp "$CONF" "$AUTO_BACK"; ORIG_YV_NUM=$(grep -o '^#Yv[0-9]\+' "$AUTO_BACK" | head -n1 | sed 's/#Yv//')
+ORIG_DV_NUM=$(grep -o '^#Dv[0-9]\+' "$AUTO_BACK" | head -n1 | sed 's/#Dv//'); ORIG_GV_NUM=$(grep -o '^#Gv[0-9]\+$' "$AUTO_BACK" | head -n1 | sed 's/#Gv//'); MODE_SEL=$(get_auto_best_mode); case "$MODE_SEL" in
+1) echo "Тестируем стратегии: v" ;; 2) echo "Тестируем стратегии: Flowseal" ;; *) echo "Тестируем стратегии: v + Flowseal" ;; esac; if [ "$MODE_SEL" != "1" ]; then echo "Собираем Flowseal стратегии"; download_strategies 1; cat "$OUT" >> "$STR_FILE_AUTO"; fi
+if [ "$MODE_SEL" != "2" ]; then echo "Собираем v стратегии"; for N in $(seq 1 100); do strategy_v"$N" >> "$STR_FILE_AUTO" 2>/dev/null || break; done; fi; sed -i '/#Y/d' "$STR_FILE_AUTO"
+if [ ! -s "$STR_FILE_AUTO" ]; then echo "Не удалось собрать ни одной стратегии для теста (проверьте выбранный режим)"; mv -f "$AUTO_BACK" "$CONF"; exit 1; fi; prepare_urls || { echo "Не удалось получить список для теста"; mv -f "$AUTO_BACK" "$CONF"; exit 1; }
 URLS="$(cat "$OUT_DPI")"; TOTAL=$(grep -c "|" "$OUT_DPI"); TOTAL_STR=$(grep -c '^#' "$STR_FILE_AUTO"); echo "Найдено стратегий: $TOTAL_STR"; echo "Доменов для теста: $TOTAL"; RESULTS="$AUTO_RESULTS"; MODE="normal"; : > "$AUTO_RESULTS"; check_zpr_off
 if [ -f "$AUTO_STOP_FLAG" ]; then echo "Автоподбор остановлен пользователем"; rm -f "$AUTO_STOP_FLAG"; mv -f "$AUTO_BACK" "$CONF"; ZAPRET_RESTART; echo "Конфигурация восстановлена"; rm -f "$OUT_DPI"; exit 0; fi
 LINES=$(grep -n '^#' "$STR_FILE_AUTO" | cut -d: -f1); CUR=0; echo "$LINES" | while read -r START; do CUR=$((CUR + 1)); if [ -f "$AUTO_STOP_FLAG" ]; then echo "===> Получен сигнал остановки, прерываем тестирование"; break; fi
@@ -170,14 +213,12 @@ sort_results_desc "$AUTO_RESULTS" "$AUTO_RESULTS"; echo ""; echo "Результ
 if [ -z "$BEST_LINE" ]; then echo "Не удалось определить лучшую стратегию, восстанавливаем прежнюю"; mv -f "$AUTO_BACK" "$CONF"; ZAPRET_RESTART; rm -f "$OUT_DPI"; exit 1; fi
 BEST_NAME=$(echo "$BEST_LINE" | cut -d'→' -f1 | sed 's/[[:space:]]*$//'); echo "Лучшая стратегия: $BEST_LINE"; mv -f "$AUTO_BACK" "$CONF"; START=$(grep -nxF "#${BEST_NAME}" "$STR_FILE_AUTO" | head -n1 | cut -d: -f1)
 if [ -n "$START" ]; then NEXT=$(echo "$LINES" | awk -v s="$START" '$1>s{print;exit}'); if [ -z "$NEXT" ]; then sed -n "${START},\$p" "$STR_FILE_AUTO" > "$TEMP_FILE_AUTO"; else sed -n "${START},$((NEXT-1))p" "$STR_FILE_AUTO" > "$TEMP_FILE_AUTO"; fi
-BLOCK=$(cat "$TEMP_FILE_AUTO"); sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" "$CONF"; { echo "  option NFQWS_OPT '"; case "$BEST_NAME" in v[0-9]*) [ -n "$ORIG_YV_BLOCK" ] && echo "$ORIG_YV_BLOCK";; esac; echo "$BLOCK"; echo "'"; } >> "$CONF"
+BLOCK=$(cat "$TEMP_FILE_AUTO"); sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" "$CONF"; { echo "  option NFQWS_OPT '"; echo "$BLOCK"; echo "'"; } >> "$CONF"
 if ! grep -q "option NFQWS_PORTS_UDP.*19294-19344,50000-50100" "$CONF"; then sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'\$/,19294-19344,50000-50100'/" "$CONF"; fi; if ! grep -q "option NFQWS_PORTS_TCP.*2053,2083,2087,2096,8443" "$CONF"
-then sed -i "/^[[:space:]]*option NFQWS_PORTS_TCP '/s/'\$/,2053,2083,2087,2096,8443'/" "$CONF"; fi; discord_str_add; case "$BEST_NAME" in v[0-9]*) if [ -n "$ORIG_DV_BLOCK" ]; then DV_MARKER_LINE=$(grep -n "^#Dv[0-9]" "$CONF" | tail -n1 | cut -d: -f1)
-LAST_QUOTE_LINE=$(grep -n "^'\$" "$CONF" | tail -n1 | cut -d: -f1); if [ -n "$DV_MARKER_LINE" ] && [ -n "$LAST_QUOTE_LINE" ] && [ "$LAST_QUOTE_LINE" -gt "$DV_MARKER_LINE" ]; then sed -i "${DV_MARKER_LINE},${LAST_QUOTE_LINE}d" "$CONF"; printf "%s\n" "$ORIG_DV_BLOCK" >> "$CONF"
-echo "'" >> "$CONF"; fi; fi;; esac; case "$BEST_NAME" in v[0-9]*) if [ -n "$ORIG_GV_BLOCK" ]; then LAST_QUOTE_LINE=$(grep -n "^'\$" "$CONF" | tail -n1 | cut -d: -f1); if [ -n "$LAST_QUOTE_LINE" ]; then sed -i "${LAST_QUOTE_LINE}d" "$CONF"; printf "%s\n" "$ORIG_GV_BLOCK" >> "$CONF"
-echo "'" >> "$CONF"; fi; fi;; esac; ADD_Yv; if grep -q '^#general' "$CONF"; then sed -i '/--new/{N;/--filter-tcp=2802/{s/--new/#Gv0\n--new/;};}' "$CONF"; fi; ZAPRET_RESTART; echo "Стратегия '$BEST_NAME' применена и сохранена"
-[ -n "$ORIG_YV_BLOCK" ] && case "$BEST_NAME" in v[0-9]*) echo "Оригинальный блок Yv перенесён";; esac; [ -n "$ORIG_DV_BLOCK" ] && case "$BEST_NAME" in v[0-9]*) echo "Оригинальный блок Dv перенесён";; esac
-[ -n "$ORIG_GV_BLOCK" ] && case "$BEST_NAME" in v[0-9]*) echo "Оригинальный блок Gv перенесён";; esac; else echo "Не удалось повторно найти блок стратегии '$BEST_NAME', конфиг восстановлен без применения"; fi; rm -f "$OUT_DPI"; } >> "$AUTO_LOG" 2>&1; }
+then sed -i "/^[[:space:]]*option NFQWS_PORTS_TCP '/s/'\$/,2053,2083,2087,2096,8443'/" "$CONF"; fi; IS_GENERAL=0; grep -q '^#general' "$CONF" && IS_GENERAL=1; [ -n "$ORIG_YV_NUM" ] && restore_yv_number "$ORIG_YV_NUM"
+[ -n "$ORIG_DV_NUM" ] && restore_dv_number "$ORIG_DV_NUM"; case "$ORIG_GV_NUM" in 1|2|3|4) NEED_GV=1 ;; *) NEED_GV=0 ;; esac; [ "$IS_GENERAL" = "1" ] && sed -i '/--new/{N;/--filter-tcp=2802/{s/--new/#Gv0\n--new/;};}' "$CONF"
+[ "$NEED_GV" = "1" ] && fix_GAME "$ORIG_GV_NUM"; ZAPRET_RESTART; echo "Стратегия '$BEST_NAME' применена и сохранена"; [ -n "$ORIG_YV_NUM" ] && echo "Стратегия для YouTube восстановлена: Yv$ORIG_YV_NUM"
+[ -n "$ORIG_DV_NUM" ] && echo "Стратегия для discord.media восстановлена: Dv$ORIG_DV_NUM"; [ "$NEED_GV" = "1" ] && echo "Игровая стратегия восстановлена: Gv$ORIG_GV_NUM"; else echo "Не удалось повторно найти блок стратегии '$BEST_NAME', конфиг восстановлен без применения"; fi; rm -f "$OUT_DPI"; } >> "$AUTO_LOG" 2>&1; }
 auto_best_cron_line() { grep -F "$AUTO_CRON_CMD" "$CRON_FILE" 2>/dev/null | head -n1; }; LINECR=$(auto_best_cron_line); HOURC=$(echo "$LINECR" | awk '{print $2}')
 set_auto_best_time() { CUR_YEAR=$(date '+%Y'); if [ "$CUR_YEAR" -lt 2020 ]; then echo -e "\n${RED}Внимание! Время на роутере выглядит неверным:${NC}$(date '+%Y-%m-%d %H:%M:%S')${RED}!${NC}"; echo -e "${YELLOW}Расписание будет работать некорректно!${NC}"
 echo -e "${YELLOW}Сначала настройте время!${NC}\n"; PAUSE; return; fi; echo -ne "\n${YELLOW}Введите час автозапуска (${NC}0-23${YELLOW}):${NC} "; read -r HOUR; case "$HOUR" in ''|*[!0-9]*) echo -e "\n${RED}Введите число от ${NC}0${RED} до ${NC}23\n"; PAUSE; return ;; esac
@@ -185,23 +226,27 @@ echo -e "${YELLOW}Сначала настройте время!${NC}\n"; PAUSE; 
 echo "0 $HOUR * * * $AUTO_CRON_CMD >/dev/null 2>&1" >> "$CRON_FILE"; /etc/init.d/cron restart >/dev/null 2>&1; echo -e "\n${GREEN}Автоподбор запланирован ежедневно в ${NC}$(printf "%02d" "$HOUR"):00${GREEN}!${NC}\n"; PAUSE; }
 disable_auto_best() { sed -i "\|$AUTO_CRON_CMD|d" "$CRON_FILE"; /etc/init.d/cron restart >/dev/null 2>&1; echo -e "\n${GREEN}Автоподбор отключен!${NC}\n"; PAUSE; }
 run_auto_best_background() { echo -e "\n${MAGENTA}Запускаем автоподбор в фоне${NC}"; rm -f "$AUTO_LOCK"; $AUTO_CRON_CMD >/dev/null 2>&1 & echo -en "${CYAN}Запускаем фоновое выполнение${NC}"; _i=0; while [ ! -f "$AUTO_LOCK" ] && [ "$_i" -lt 20 ]; do sleep 1; _i=$((_i + 1)); done; echo; if auto_best_running; then echo -e "${GREEN}Автоподбор в фоне запущен!${NC}\n"; else echo -e "${YELLOW}Процесс запускается медленнее обычного, статус обновится при следующем открытии меню${NC}\n"; fi; PAUSE; }
-AUTO_BEST_MENU() { [ ! -f /etc/init.d/zapret ] && { echo -e "\n${RED}Zapret не установлен!${NC}\n"; PAUSE; return; }; if ! ( [ "$PKG_IS_APK" = "1" ] && apk info -e zoneinfo-core zoneinfo-europe zoneinfo-asia >/dev/null 2>&1 || opkg status zoneinfo-core zoneinfo-europe zoneinfo-asia >/dev/null 2>&1 )
-then echo -e "\n${MAGENTA}Устанавливаем пакеты с часовыми поясами${NC}"; update_packages; $INSTALL zoneinfo-core zoneinfo-europe zoneinfo-asia >/dev/null 2>&1; echo -e "${GREEN}Пакеты с часовыми поясами установлены${NC}\n"; PAUSE; fi
-while true; do clear; echo -e "${MAGENTA}Меню автоподбора стратегий по расписанию${NC}\n"; echo -e "${YELLOW}Текущее время на роутере:${NC} ${CYAN}$(date '+%H:%M:%S')${NC}"; if auto_best_running; then RUNNING=1
-echo -e "${YELLOW}Автоподбор в фоне:${NC} ${GREEN}выполняется${NC}"; else RUNNING=0; fi; LINE=$(auto_best_cron_line); if [ -n "$LINE" ]; then HOUR=$(echo "$LINE" | awk '{print $2}')
-echo -e "${YELLOW}Автоподбор стратегий:${NC} ${GREEN}ежедневно в ${NC}$(printf "%02d" "$HOUR"):00${NC}"; else echo -e "${YELLOW}Автоподбор стратегий:${NC} ${RED}отключен${NC}"; fi
-echo -e "\n${CYAN}1) ${GREEN}$( [ -n "$LINE" ] && echo "Изменить время автоподбора по расписанию" || echo "Включить автоподбор по расписанию" )${NC}"; [ -n "$LINE" ] && echo -e "${CYAN}2) ${GREEN}Отключить автоподбор по расписанию${NC}"
-if [ "$RUNNING" = "1" ]; then echo -e "${CYAN}3) ${GREEN}Остановить автоподбор в фоне${NC}"; else echo -e "${CYAN}3) ${GREEN}Запустить автоподбор в фоне${NC}"; fi; [ -s "$AUTO_RESULTS" ] && echo -e "${CYAN}4) ${GREEN}Показать результаты последнего теста${NC}"
-[ -f "$AUTO_LOG" ] && echo -e "${CYAN}5) ${GREEN}Показать полный лог последнего теста${NC}"; echo -e "${CYAN}6) ${GREEN}Настроить время на роутере${NC}"; if [ -s "$AUTO_RESULTS" ] || [ -f "$AUTO_LOG" ]; then echo -e "${CYAN}7) ${GREEN}Удалить результаты теста и лог${NC}"; fi
-echo -ne "${CYAN}Enter) ${GREEN}Выход в меню тестирования${NC}\n\n${YELLOW}Выберите пункт:${NC} "; read -r choiceAB; case "$choiceAB" in 1) set_auto_best_time ;; 2) [ -n "$LINE" ] && disable_auto_best ;;
-3) if [ "$RUNNING" = "1" ]; then echo -e "\n${MAGENTA}Останавливаем автоподбор${NC}"; stop_auto_best; echo -e "${GREEN}Автоподбор в фоне остановлен!${NC}\n"; PAUSE; else run_auto_best_background; fi ;;
-4) [ -s "$AUTO_RESULTS" ] && show_single_result "$AUTO_RESULTS" ;; 5) [ -f "$AUTO_LOG" ] && { clear; cat "$AUTO_LOG"; echo; PAUSE; } ;; 6) TIME_MENU ;;
-7) echo -e "\n${GREEN}Результаты теста и лог удалены!${NC}\n"; rm -rf "$AUTO_RESULTS" "$AUTO_BACK" "$AUTO_LOG" "$AUTO_LOCK"; PAUSE ;; *) return ;; esac; done; }
+AUTO_BEST_MENU() { [ ! -f /etc/init.d/zapret ] && { echo -e "\n${RED}Zapret не установлен!${NC}\n"; PAUSE; return; }
+while true; do clear; echo -e "${MAGENTA}Меню автоподбора стратегий по расписанию${NC}\n"; echo -e "${YELLOW}Текущее время на роутере:${NC} ${CYAN}$(date '+%H:%M:%S')${NC}"; if auto_best_running; then RUNNING=1; echo -e "${YELLOW}Автоподбор в фоне:${NC} ${GREEN}выполняется${NC}"; else RUNNING=0; fi
+LINE=$(auto_best_cron_line); if [ -n "$LINE" ]; then HOUR=$(echo "$LINE" | awk '{print $2}'); echo -e "${YELLOW}Автоподбор стратегий:${NC} ${GREEN}ежедневно в ${NC}$(printf "%02d" "$HOUR"):00${NC}"
+else echo -e "${YELLOW}Автоподбор стратегий:${NC} ${RED}отключен${NC}"; fi; echo -e "${YELLOW}Тестируемые стратегии:${NC} $(auto_best_mode_text)"; echo ""; N=1
+echo -e "${CYAN}${N}) ${GREEN}$( [ -n "$LINE" ] && echo "Изменить время автоподбора по расписанию" || echo "Включить автоподбор по расписанию" )${NC}"; OPT_TIME=$N; N=$((N+1))
+if [ -n "$LINE" ]; then echo -e "${CYAN}${N}) ${GREEN}Отключить автоподбор по расписанию${NC}"; OPT_DISABLE=$N; N=$((N+1)); else OPT_DISABLE=""; fi
+if [ "$RUNNING" = "1" ]; then echo -e "${CYAN}${N}) ${GREEN}Остановить автоподбор в фоне${NC}"; else echo -e "${CYAN}${N}) ${GREEN}Запустить автоподбор в фоне${NC}"; fi; OPT_RUN=$N; N=$((N+1))
+if [ -s "$AUTO_RESULTS" ]; then echo -e "${CYAN}${N}) ${GREEN}Показать результаты последнего теста${NC}"; OPT_RESULTS=$N; N=$((N+1)); else OPT_RESULTS=""; fi
+if [ -f "$AUTO_LOG" ]; then echo -e "${CYAN}${N}) ${GREEN}Показать полный лог последнего теста${NC}"; OPT_LOG=$N; N=$((N+1)); else OPT_LOG=""; fi
+echo -e "${CYAN}${N}) ${GREEN}Настроить время на роутере${NC}"; OPT_TZ=$N; N=$((N+1)); echo -e "${CYAN}${N}) ${GREEN}Выбрать стратегии для автоподбора${NC}"; OPT_MODE=$N; N=$((N+1))
+if [ -s "$AUTO_RESULTS" ] || [ -f "$AUTO_LOG" ]; then echo -e "${CYAN}${N}) ${GREEN}Удалить результаты теста и лог${NC}"; OPT_CLEAR=$N; N=$((N+1)); else OPT_CLEAR=""; fi
+echo -ne "${CYAN}Enter) ${GREEN}Выход в меню тестирования стратегий${NC}\n\n${YELLOW}Выберите пункт:${NC} "; read -r choiceAB; if [ "$choiceAB" = "$OPT_TIME" ]; then set_auto_best_time
+elif [ -n "$OPT_DISABLE" ] && [ "$choiceAB" = "$OPT_DISABLE" ]; then disable_auto_best; elif [ "$choiceAB" = "$OPT_RUN" ]; then if [ "$RUNNING" = "1" ]; then echo -e "\n${MAGENTA}Останавливаем автоподбор${NC}"; stop_auto_best; echo -e "${GREEN}Автоподбор в фоне остановлен!${NC}\n"; PAUSE
+else run_auto_best_background; fi; elif [ -n "$OPT_RESULTS" ] && [ "$choiceAB" = "$OPT_RESULTS" ]; then show_single_result "$AUTO_RESULTS"; elif [ -n "$OPT_LOG" ] && [ "$choiceAB" = "$OPT_LOG" ]; then
+clear; cat "$AUTO_LOG"; echo; PAUSE; elif [ "$choiceAB" = "$OPT_TZ" ]; then TIME_MENU; elif [ "$choiceAB" = "$OPT_MODE" ]; then set_auto_best_mode; elif [ -n "$OPT_CLEAR" ] && [ "$choiceAB" = "$OPT_CLEAR" ]; then
+echo -e "\n${GREEN}Результаты теста и лог удалены!${NC}\n"; rm -rf "$AUTO_RESULTS" "$AUTO_BACK" "$AUTO_LOG" "$AUTO_LOCK"; PAUSE; else return; fi; done; }
 # ==========================================
 # splify
 # ==========================================
 # ──────────────────────────── 1. environment checks ────────────────────────
-ZAVISIM() { if ! command -v "jq" >/dev/null 2>&1; then echo -e "${CYAN}Ставим зависимость ${NC}jq";  update_packages || return 1; $INSTALL jq >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка при установки!${NC}\n"; PAUSE; return 1; }; fi; }
+ZAVISIM() { local NEED=""; command -v jq >/dev/null 2>&1 || NEED="$NEED jq"; command -v wg >/dev/null 2>&1 || NEED="$NEED wireguard-tools"; [ -z "$NEED" ] && return 0; echo -e "\n${MAGENTA}Ставим зависимости для генерации${NC}"; update_packages || return 1; echo -e "${CYAN}Ставим зависимости${NC}"; $INSTALL $NEED >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка при установке!${NC}\n"; PAUSE; return 1; }; }
 # ──────────────────────────── 2. install splify packages ───────────────────
 install_splify() { ZAVISIM; SPL_SPL="https://github.com/xyzmean/splify/releases/download/v$SPL_VER/splify-$SPL_VER-1_$SPL_SUF.$RAZ"; SPL_LUCI="https://github.com/xyzmean/splify/releases/download/v$SPL_VER/luci-app-splify-$SPL_VER-1_$SPL_SUF.$RAZ"
 SPL_RUS="https://github.com/xyzmean/splify/releases/download/v$SPL_VER/luci-i18n-splify-ru-$SPL_VER-1_$SPL_SUF.$RAZ"; echo -e "${CYAN}Скачиваем ${NC}splify"; wget -q -U "Mozilla/5.0" -O "$TMP_SF/splify.$RAZ" "$SPL_SPL" || { echo -e "\n${RED}Не удалось скачать:\n${NC}$SPL_SPL\n"; PAUSE; return 1; }
@@ -219,7 +264,7 @@ then _best=$(sort -n "$_pings" | head -n 1); _best_ping=$(echo "$_best" | awk '{
 WARP_EP="${_best_ip}:4500"; else WARP_EP="engage.cloudflareclient.com:4500"; echo -e "\n${CYAN}Подбор не удался!\nИспользуем ${NC}endpoint${CYAN}:${NC} $WARP_EP"; fi; }
 choose_endpoint() { echo -e "\n${MAGENTA}Меню выбора endpoint${NC}"; echo -e "${CYAN}1) ${GREEN}Использовать${NC} engage.cloudflareclient.com:4500\n${CYAN}2) ${GREEN}Подобрать ${NC}endpoint${GREEN} автоматически\n${CYAN}3) ${GREEN}Выход в меню splify${NC}"; echo -en "${YELLOW}Выберите пункт (${NC}Enter = 1${YELLOW}): ${NC}"; read -r choiceWRP; case "$choiceWRP" in 3) continue;; 2) find_best_endpoint ;; *) WARP_EP="engage.cloudflareclient.com:4500"; echo -e "\n${CYAN}Используем ${NC}endpoint${CYAN}:${NC} $WARP_EP" ;; esac; }
 register_request() { curl -fsSL --max-time 30 -X POST "${W1%/}/api/reg" -H "Content-Type: application/json" -H "Accept: application/json" -d "{\"key\":\"$PUB\",\"install_id\":\"\",\"fcm_token\":\"\",\"model\":\"PC\",\"locale\":\"en_US\",\"tos\":\"$TOS\",\"type\":\"Android\"}" -o "$REG" >/dev/null 2>&1; }
-register_warp() { [ -d "$TMP_SPL" ] || mkdir -p "$TMP_SPL"; REG="$TMP_SPL/reg.json"; rm -f "$REG"; echo -e "${MAGENTA}Генерируем WARP${NC}"; if command -v awg >/dev/null 2>&1; then GEN=awg; else GEN=wg; fi; PRIV="$("$GEN" genkey)"; PUB="$(printf '%s\n' "$PRIV" | "$GEN" pubkey)"
+register_warp() { [ -d "$TMP_SPL" ] || mkdir -p "$TMP_SPL"; REG="$TMP_SPL/reg.json"; rm -f "$REG"; echo -e "\n${MAGENTA}Генерируем WARP${NC}"; if command -v awg >/dev/null 2>&1; then GEN=awg; else GEN=wg; fi; PRIV="$("$GEN" genkey 2>/dev/null)"; PUB="$(printf '%s\n' "$PRIV" | "$GEN" pubkey 2>/dev/null)"
 TOS="$(date -u +%Y-%m-%dT%H:%M:%S.000000000Z)"; echo -e "${CYAN}Регистрируем устройство${NC}"; if register_request && jq -e '.config.peers[0].public_key' "$REG" >/dev/null 2>&1; then echo -e "${CYAN}Используем основной сервер${NC}"; else echo -e "${CYAN}Используем резервный сервер${NC}"
 if ! curl -fsSL --max-time 60 "$II" -o "$REG" >/dev/null 2>&1; then echo -e "${RED}Не удалось получить WARP${NC}"; PAUSE; return 1; fi; if ! jq -e '.result.config.peers[0].public_key' "$REG" >/dev/null 2>&1; then echo -e "${RED}Резервный источник вернул неверный формат${NC}"; PAUSE; return 1; fi
 PRIV="$(jq -r '.result.key' "$REG")"; WARP_PEER="$(jq -r '.result.config.peers[0].public_key' "$REG")"; WARP_V4="$(jq -r '.result.config.interface.addresses.v4' "$REG")"; WARP_V6="$(jq -r '.result.config.interface.addresses.v6 // empty' "$REG")"; fi; if [ -z "$WARP_PEER" ]
@@ -282,13 +327,14 @@ echo -e "${CYAN}Удаляем данные ${NC}splify"; rm -rf /etc/splify* /e
 # Получение версии
 # ==========================================
 get_versions() { if [ "$PKG_IS_APK" -eq 1 ]; then INSTALLED_VER=$(apk info -v 2>/dev/null | grep '^zapret-' | head -n1 | cut -d'-' -f2 | sed 's/-r[0-9]\+$//'); else INSTALLED_VER=$(opkg list-installed zapret 2>/dev/null | awk '{sub(/-r[0-9]+$/, "", $3); print $3}'); fi
-command -v netshift >/dev/null 2>&1 && INST_VER_POD=$(netshift show_version 2>/dev/null) && VER_POD=$(netshift show_version 2>/dev/null); NFQ_RUN=$(pgrep -f nfqws 2>/dev/null | wc -l); NFQ_RUN=${NFQ_RUN:-0}; NFQ_ALL=$(/etc/init.d/zapret info 2>/dev/null | grep -o 'instance[0-9]\+' | wc -l)
+INSTALLED_VER2="$(zapret2_local_version)"; command -v netshift >/dev/null 2>&1 && INST_VER_POD=$(netshift show_version 2>/dev/null) && VER_POD=$(netshift show_version 2>/dev/null); NFQ_RUN=$(pgrep -f nfqws 2>/dev/null | wc -l); NFQ_RUN=${NFQ_RUN:-0}; NFQ_ALL=$(/etc/init.d/zapret info 2>/dev/null | grep -o 'instance[0-9]\+' | wc -l)
 NFQ_ALL=${NFQ_ALL:-0}; NFQ_STAT=""; if [ "$NFQ_ALL" -gt 0 ]; then [ "$NFQ_RUN" -eq "$NFQ_ALL" ] && NFQ_CLR="$GREEN" || NFQ_CLR="$RED"; NFQ_STAT="${NFQ_CLR}[${NFQ_RUN}/${NFQ_ALL}]${NC}"; fi; }
 # ==========================================
 # Установка Zapret
 # ==========================================
 install_pkg() { local display_name="$1"; local pkg_file="$2"; echo -e "${CYAN}Устанавливаем ${NC}$display_name"; $INSTALL $pkg_file >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось установить: ${NC}$display_name\n"; PAUSE; return 1; }; }
-install_Zapret() { get_versions; LATEST_URL="https://github.com/remittor/zapret-openwrt/releases/download/v${ZAPRET_VERSION}/zapret_v${ZAPRET_VERSION}_${LOCAL_ARCH}.zip"
+install_Zapret() { if [ -f /etc/init.d/zapret2 ]; then echo -e "\n${RED}Установлен ${NC}Zapret2${RED}!${NC}"; echo -e "${YELLOW}Установка ${NC}Zapret${YELLOW} невозможна!${NC}\n"; PAUSE; return 1; fi
+get_versions; LATEST_URL="https://github.com/remittor/zapret-openwrt/releases/download/v${ZAPRET_VERSION}/zapret_v${ZAPRET_VERSION}_${LOCAL_ARCH}.zip"
 mkdir -p "$TMP_SF"; local NO_PAUSE=$1; [ "$INSTALLED_VER" = "$ZAPRET_VERSION" ] && { echo -e "\n${GREEN}Zapret уже установлен!${NC}\n"; [ "$NO_PAUSE" != "1" ] && PAUSE; return; }; [ "$NO_PAUSE" != "1" ] && echo; echo -e "${MAGENTA}Устанавливаем Zapret${NC}"
 if [ -f /etc/init.d/zapret ]; then echo -e "${CYAN}Останавливаем ${NC}zapret"; /etc/init.d/zapret stop >/dev/null 2>&1; for pid in $(pgrep -f /opt/zapret 2>/dev/null); do kill -9 "$pid" 2>/dev/null; done; fi;  update_packages || return
 rm -f "$TMP_SF"/* 2>/dev/null; cd "$TMP_SF" || return; FILE_NAME=$(basename "$LATEST_URL"); if ! command -v unzip >/dev/null 2>&1; then echo -e "${CYAN}Устанавливаем ${NC}unzip";  update_packages || return; $INSTALL unzip >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось установить ${NC}unzip\n"; PAUSE; return; }; fi
@@ -418,6 +464,23 @@ nft list tables 2>/dev/null | awk '{print $2}' | grep -E '(zapret|ZAPRET)' | whi
 # ==========================================
 # Тест стратегии для Ютуб
 # ==========================================
+YOUTUBE_TEST_MENU() { echo -e "\n${MAGENTA}Выберите способ тестирования стратегий${NC}"; echo -e "${CYAN}1) ${GREEN}Тестировать каждую стратегию отдельно${NC}"; echo -e "${CYAN}2) ${GREEN}Тестировать все стратегии сразу${NC}"
+echo -ne "${CYAN}Enter) ${GREEN}Выход в меню тестирования стратегий${NC}\n\n${YELLOW}Выберите пункт:${NC} "; read -r yt_choice; case "$yt_choice" in 1) auto_stryou ;; 2) run_test_youtube_all ;; *) return ;; esac; }
+run_test_youtube_all() { echo -e "\n${MAGENTA}Выберите источник стратегий:${NC}"; echo -e "${CYAN}1) ${GREEN}Встроенные стратегии ${NC}Yv"; echo -e "${CYAN}2) ${GREEN}Стратегии из ${NC}/root/custom_test.txt"
+echo -ne "${CYAN}Enter) ${GREEN}Выход в меню тестирования стратегий${NC}\n\n${YELLOW}Выберите пункт:${NC} "; read -r SRC; mkdir -p "$TMP_SF"; : > "$STR_FILE"; case "$SRC" in
+1) curl -fsSL "$STR_URL" -o "$STR_FILE" || { echo -e "\n${RED}Не удалось скачать список стратегий!${NC}\n"; PAUSE; return 1; } ;;
+2) if [ ! -s "$CUSTOM_STR_FILE" ]; then echo -e "\n${RED}Файл ${NC}$CUSTOM_STR_FILE${RED} не найден!${NC}\n"; PAUSE; return 1; fi; cp "$CUSTOM_STR_FILE" "$STR_FILE"; sed -i 's/\r$//' "$STR_FILE"
+sed -i '/^[[:space:]]*$/d' "$STR_FILE"; sed -i 's/^[[:space:]]*//;s/[[:space:]]*$//' "$STR_FILE" ;; *) return ;; esac
+clear; echo -e "${MAGENTA}Тестирование всех стратегий YouTube${NC}\n\n${CYAN}Собираем стратегии для теста${NC}"; cp "$CONF" "$BACK"; run_test_core_youtube "$RES_YOUTUBE"; }
+run_test_core_youtube() { local RESULTS="$1"; URLS=""; for d in $DOMAINS; do URLS="${URLS}${d}|https://${d}/
+"; done; TOTAL=$(echo $DOMAINS | wc -w); TOTAL_STR=$(grep -c '^#' "$STR_FILE"); echo -e "${CYAN}Найдено стратегий: ${NC}$TOTAL_STR"; echo -e "${CYAN}Доменов для теста:${NC} $TOTAL"; : > "$RESULTS"; check_zpr_off; LINES=$(grep -n '^#' "$STR_FILE" | cut -d: -f1); CUR=0
+echo "$LINES" | while read START; do CUR=$((CUR+1)); NEXT=$(echo "$LINES" | awk -v s="$START" '$1>s{print;exit}'); if [ -z "$NEXT" ]; then
+sed -n "${START},\$p" "$STR_FILE" > "$TEMP_FILE"; else sed -n "${START},$((NEXT-1))p" "$STR_FILE" > "$TEMP_FILE"; fi; BLOCK=$(cat "$TEMP_FILE"); NAME=$(head -n1 "$TEMP_FILE"); NAME="${NAME#\#}"
+awk -v block="$BLOCK" 'BEGIN{skip=0} /option NFQWS_OPT '\''/ {printf "\toption NFQWS_OPT '\''\n%s\n'\''\n", block; skip=1; next} skip && /^'\''$/ {skip=0; next} !skip {print}' "$CONF" > "${CONF}.tmp"
+echo -e "\n${CYAN}Тестируем стратегию: ${YELLOW}${NAME}${NC} ($CUR/$TOTAL_STR)"; ZAPRET_RESTART; OK=0; LOG_TMP="/tmp/zapret_log_yt_${CUR}"; : > "$LOG_TMP"; check_all_urls
+if [ "$OK" -eq "$TOTAL" ]; then COLOR="${GREEN}"; elif [ "$OK" -ge $((TOTAL/2)) ]; then COLOR="${YELLOW}"; else COLOR="${RED}"; fi; echo -e "${CYAN}Результат теста: ${COLOR}$OK/$TOTAL${NC}"; echo -e "${NAME} → ${OK}/${TOTAL}" >> "$RESULTS"; done
+sort -t'/' -k1 -nr "$RESULTS" -o "$RESULTS"; mv -f "$BACK" "$CONF"; ZAPRET_RESTART; BEST_LINE=$(grep -v '^Контрольный тест' "$RESULTS" | head -n1)
+[ -n "$BEST_LINE" ] && echo -e "\n${GREEN}Лучшая стратегия для YouTube: ${NC}${BEST_LINE}"; show_single_result "$RESULTS"; }
 auto_stryou() { awk '/^[[:space:]]*option NFQWS_OPT '\''/{flag=1} flag{print}' "$CONF" > "$OLD_STR"; echo -e "\n${MAGENTA}Выберите источник стратегий:${NC}"; echo -e "${CYAN}1) ${GREEN}Встроенные стратегии ${NC}Yv"; echo -e "${CYAN}2) ${GREEN}Стратегии из ${NC}/root/custom_test.txt"
 echo -ne "${CYAN}Enter) ${GREEN}Выход в меню тестирования стратегий${NC}\n\n${YELLOW}Выберите пункт:${NC} "; read -r SRC; case "$SRC" in 1) curl -fsSL "$STR_URL" -o "$TMP_LIST" || { echo -e "\n${RED}Не удалось скачать список стратегий!${NC}\n"; PAUSE; return 1; } ;;
 2) if [ ! -s "$CUSTOM_STR_FILE" ]; then echo -e "\n${RED}Файл ${NC}$CUSTOM_STR_FILE${RED} не найден!${NC}\n"; PAUSE; return 1; fi; cp "$CUSTOM_STR_FILE" "$TMP_LIST"; cp "$CUSTOM_STR_FILE" "$TMP_LIST"; sed -i 's/\r$//' "$TMP_LIST"
@@ -720,16 +783,15 @@ clear; mkdir -p "$TMP_SF"; echo -e "${MAGENTA}Тестирование поль�
 OLD_STR_FILE="$STR_FILE"; OLD_RESULTS="$RESULTS"; OLD_BACK="$BACK"; OLD_MODE="$MODE"; STR_FILE="$CUSTOM_STR_FILE"; RESULTS="$CUSTOM_RESULTS"; BACK="$CUSTOM_BACK"; MODE="custom"; cp "$CONF" "$CUSTOM_BACK"; run_test_core "$CUSTOM_RESULTS"; STR_FILE="$OLD_STR_FILE"; RESULTS="$OLD_RESULTS"; BACK="$OLD_BACK"; MODE="$OLD_MODE"; rm -f "$OUT_DPI"; [ -f "$CUSTOM_BACK" ] && mv -f "$CUSTOM_BACK" "$CONF"; ZAPRET_RESTART; }
 TEST_menu() { [ ! -f /etc/init.d/zapret ] && { echo -e "\n${RED}Zapret не установлен!${NC}\n"; PAUSE; return; }; while true; do show_current_strategy; RKN_Check; MODE="normal"; clear; echo -e "${MAGENTA}Меню тестирования стратегий${NC}\n"; 
 INFO_ZPR_STR; STATUS_V=""; STATUS_FLOW=""; STATUS_DOMAIN=""; if [ -s "$RES3" ]; then STATUS_V="${GREEN}v${NC}"; STATUS_FLOW="${GREEN}Flowseal${NC}"; elif [ -s "$RES2" ] || [ -s "$RES1" ]; then [ -s "$RES2" ] && STATUS_V="${GREEN}v${NC}" || STATUS_V="${RED}v${NC}"
-[ -s "$RES1" ] && STATUS_FLOW="${GREEN}Flowseal${NC}" || STATUS_FLOW="${RED}Flowseal${NC}"; else STATUS_V="${RED}v${NC}"; STATUS_FLOW="${RED}Flowseal${NC}"; fi; [ -s "$RES_DOMAIN" ] && STATUS_DOMAIN="${GREEN}Domain${NC}" || STATUS_DOMAIN="${RED}Domain${NC}"; [ -s "$RES_CUSTOM" ] && STATUS_CUSTOM="${GREEN}Custom${NC}" || STATUS_CUSTOM="${RED}Custom${NC}"
-[ -f /root/custom_test.txt ] && echo -e "${YELLOW}/root/custom_test.txt:  ${GREEN}присутствует${NC}"; echo -e "${YELLOW}Тест пройден:${NC} ${STATUS_V} | ${STATUS_FLOW} | ${STATUS_DOMAIN} | ${STATUS_CUSTOM}"
+[ -s "$RES1" ] && STATUS_FLOW="${GREEN}Flowseal${NC}" || STATUS_FLOW="${RED}Flowseal${NC}"; else STATUS_V="${RED}v${NC}"; STATUS_FLOW="${RED}Flowseal${NC}"; fi; [ -s "$RES_DOMAIN" ] && STATUS_DOMAIN="${GREEN}Domain${NC}" || STATUS_DOMAIN="${RED}Domain${NC}"; [ -s "$RES_CUSTOM" ] && STATUS_CUSTOM="${GREEN}Custom${NC}" || STATUS_CUSTOM="${RED}Custom${NC}"; [ -s "$RES_YOUTUBE" ] && STATUS_YOUTUBE="${GREEN}YouTube${NC}" || STATUS_YOUTUBE="${RED}YouTube${NC}"
+[ -f /root/custom_test.txt ] && echo -e "${YELLOW}/root/custom_test.txt:  ${GREEN}присутствует${NC}"; echo -e "${YELLOW}Тест пройден:${NC} ${STATUS_V} | ${STATUS_FLOW} | ${STATUS_DOMAIN} | ${STATUS_CUSTOM} | ${STATUS_YOUTUBE}"
 echo -e "\n${CYAN}1) ${GREEN}Тестирование стратегий ${NC}v ${GREEN}/${NC} Flowseal${NC}\n${CYAN}2) ${GREEN}Тестировать ${NC}текущую${GREEN} стратегию ${NC}\n${CYAN}3) ${GREEN}Тестировать стратегии ${NC}по домену${NC}"
 echo -e "${CYAN}4) ${GREEN}Тестировать стратегии для ${NC}YouTube\n${CYAN}5) ${GREEN}Тестировать стратегии из ${NC}/root/custom_test.txt\n${CYAN}6) ${GREEN}Меню автоподбора стратегий по расписанию${NC}"
 if [ -s "$RES_DOMAIN" ]; then echo -e "${CYAN}7) ${GREEN}Результаты тестирования ${NC}по домену"; fi; if [ -s "$RES1" ] || [ -s "$RES2" ] || [ -s "$RES3" ]; then echo -e "${CYAN}8) ${GREEN}Результаты тестирования стратегий${NC}"; fi
-if [ -s "$RES_CUSTOM" ]; then echo -e "${CYAN}0) ${GREEN}Результаты тестирования ${NC}Custom${GREEN} стратегий${NC}"; fi
-if [ -s "$RES1" ] || [ -s "$RES2" ] || [ -s "$RES3" ] || [ -s "$RES_DOMAIN" ] || [ -s "$RES_CUSTOM" ]; then echo -e "${CYAN}9) ${GREEN}Удалить результаты тестирования${NC}"; fi
-echo -ne "${CYAN}Enter) ${GREEN}Выход в меню стратегий${NC}\n\n${YELLOW}Выберите пункт:${NC} ";read -r t; case "$t" in
-1) TEST_STRATEGY_MENU;; 2) check_current_strategy;; 3) run_test_by_domain;; 4) auto_stryou;; 5) TEST_CUSTOM;; 6) AUTO_BEST_MENU;; 0) show_single_result "$RES_CUSTOM";;
-7) show_domain_results;; 8) show_test_results;;  9) rm -f /opt/zapret/tmp/results*; echo -e "\n${GREEN}Результаты тестирования удалены!${NC}\n"; PAUSE;; *) break;; esac; done; }
+if [ -s "$RES_YOUTUBE" ]; then echo -e "${CYAN}9) ${GREEN}Результаты тестирования ${NC}YouTube"; fi; if [ -s "$RES_CUSTOM" ]; then echo -e "${CYAN}0) ${GREEN}Результаты тестирования ${NC}Custom${GREEN} стратегий${NC}"; fi
+if [ -s "$RES1" ] || [ -s "$RES2" ] || [ -s "$RES3" ] || [ -s "$RES_DOMAIN" ] || [ -s "$RES_CUSTOM" ] || [ -s "$RES_YOUTUBE" ]; then echo -e "${CYAN}10) ${GREEN}Удалить результаты тестирования${NC}"; fi
+echo -ne "${CYAN}Enter) ${GREEN}Выход в меню стратегий${NC}\n\n${YELLOW}Выберите пункт:${NC} ";read -r t; case "$t" in 1) TEST_STRATEGY_MENU;; 2) check_current_strategy;; 3) run_test_by_domain;; 4) YOUTUBE_TEST_MENU;; 5) TEST_CUSTOM;; 6) AUTO_BEST_MENU;; 0) show_single_result "$RES_CUSTOM";; 9) show_single_result "$RES_YOUTUBE";;
+7) show_domain_results;; 8) show_test_results;;  10) rm -f /opt/zapret/tmp/results*; echo -e "\n${GREEN}Результаты тестирования удалены!${NC}\n"; PAUSE;; *) break;; esac; done; }
 TEST_STRATEGY_MENU() { echo -e "\n${MAGENTA}Выберите стратегии для тестирования${NC}"; echo -e "${CYAN}1) ${GREEN}Тестировать стратегии ${NC}v\n${CYAN}2) ${GREEN}Тестировать стратегии ${NC}Flowseal"
 echo -e "${CYAN}3) ${GREEN}Тестировать ${NC}v${GREEN} и ${NC}Flowseal${GREEN} стратегии${NC}\n${CYAN}Enter) ${GREEN}Выход в меню тестирования стратегий${NC}\n"; echo -ne "${YELLOW}Выберите пункт:${NC} "
 read -r t; case "$t" in 1) rm -f "$RES3"; run_test_versions ;; 2) rm -f "$RES3"; run_test_flowseal ;; 3) rm -f "$RES1" "$RES2" "$RES3"; run_all_tests ;; *) return ;; esac; }
@@ -917,6 +979,8 @@ else echo -e "\n${RED}Удаление невозможно!${NC}"; echo -e "Amn
 # ==========================================
 INFO_ZPR() { if [ -f /etc/init.d/zapret ]; then /etc/init.d/zapret status >/dev/null 2>&1 && ZAPRET_STATUS="${GREEN}запущен${NC} $NFQ_STAT" || ZAPRET_STATUS="${RED}остановлен${NC}"; if [ "$INSTALLED_VER" = "$ZAPRET_VERSION" ]; then echo -e "${YELLOW}Zapret:${NC}              ${GREEN}$INSTALLED_VER${NC} / $ZAPRET_STATUS"
 else echo -e "${YELLOW}Zapret:${NC}              ${RED}$INSTALLED_VER (версия устарела)${NC} / $ZAPRET_STATUS"; fi; else echo -e "${YELLOW}Zapret:${NC}              ${RED}не установлен${NC}"; fi
+if [ -f /etc/init.d/zapret2 ]; then /etc/init.d/zapret2 status >/dev/null 2>&1 && ZAPRET2_STATUS="${GREEN}запущен${NC}" || ZAPRET2_STATUS="${RED}остановлен${NC}"; if [ "$INSTALLED_VER2" = "$ZAPRET2_VERSION" ]; then echo -e "${YELLOW}Zapret2:${NC}             ${GREEN}$INSTALLED_VER2${NC} / $ZAPRET2_STATUS"
+else echo -e "${YELLOW}Zapret2:${NC}             ${RED}$INSTALLED_VER2 (версия устарела)${NC} / $ZAPRET2_STATUS"; fi; fi
 SPL_V_VER; [ -n "$SPL_INST_VER" ] && { [ "$SPL_VER" = "$SPL_INST_VER" ] && echo -e "${YELLOW}splify:${NC}              ${GREEN}$SPL_INST_VER${NC}" || echo -e "${YELLOW}splify:${NC}              ${RED}$SPL_INST_VER (версия устарела)${NC}"; }
 case "$(/etc/init.d/mihomo status 2>/dev/null)" in running) echo -e "${YELLOW}Mixomo:              ${GREEN}запущен${NC}" ;; inactive) echo -e "${YELLOW}Mixomo:              ${RED}остановлен${NC}" ;; esac
 get_TG_versions; TGSTATUS=""; if pidof tg-ws-proxy-go >/dev/null 2>&1; then if [ -n "$INSTALLED_VER_GO" ] && [ -n "$TG_GO_VERSION" ] && [ "$INSTALLED_VER_GO" != "$TG_GO_VERSION" ]; then TGSTATUS="${TGSTATUS:+$TGSTATUS/}${RED}SOCKS5 NEW${GREEN}"
@@ -990,21 +1054,22 @@ echo -e "${CYAN}Enter) ${GREEN}Выход в главное меню\n"; echo -n
 7) check_mihomo || continue; UI_INSTALL ;; 8) check_mihomo || continue; MIXOMO_RESTART ;; 9) check_mihomo || continue; ARCH_MT=$(grep "^OPENWRT_ARCH=" /etc/os-release | cut -d'"' -f2); FILE_MT="/tmp/magitrickle.$RAZ"; URL_MT="https://github.com/MagiTrickle/MagiTrickle/releases/download/${MT_VERSION}/magitrickle_${MT_VERSION}-${SUF_MT}1_openwrt_${ARCH_MT}.$RAZ"
 echo -e "\n${MAGENTA}Обновляем MagiTrickle\n${CYAN}Скачиваем\n${NC}$URL_MT"; curl -Lf --connect-timeout 6 --retry 3 --retry-delay 1 -o "$FILE_MT" "$URL_MT" >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка скачивания${NC}\n"; PAUSE; return 1; };  update_packages || return 1
 echo -e "${CYAN}Обновляем ${NC}MagiTrickle"; $INSTALL "$FILE_MT" >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка установки${NC} $(basename "$URL_MT")\n"; rm -f "$FILE_MT"; PAUSE; return 1; }; /etc/init.d/magitrickle enable >/dev/null 2>&1; /etc/init.d/magitrickle restart >/dev/null 2>&1; echo -e "MagiTrickle ${GREEN}обновлён!${NC}\n"; rm -f "$FILE_MT"; PAUSE ;; *) return ;; esac; done; }
-MIX_GEN_MENU() { while true; do echo -e "\n${MAGENTA}Меню генерации WARP${NC}"; echo -e "${CYAN}1) ${GREEN}Сгенерировать ${NC}WARP ${GREEN}при помощи ${NC}wgcli.vercel.app"; echo -e "${CYAN}2) ${GREEN}Сгенерировать ${NC}WARP ${GREEN}при помощи ${NC}api.cloudflareclient.com"
+MIX_GEN_MENU() { while true; do echo -e "\n${MAGENTA}Меню генерации WARP${NC}"; echo -e "${CYAN}1) ${GREEN}Сгенерировать ${NC}WARP ${GREEN}при помощи ${NC}Proxy"; echo -e "${CYAN}2) ${GREEN}Сгенерировать ${NC}WARP ${GREEN}при помощи ${NC}api.cloudflareclient"
 echo -e "${CYAN}Enter) ${GREEN}Выход в меню Mixomo${NC}"; echo -ne "${YELLOW}Выберите пункт: ${NC}"; read choiceMG; case "$choiceMG" in 1) ZAVISIM; register_warp || continue; choose_endpoint || continue; WARP_TO_ROOT; echo; PAUSE; break ;; 2) if pkg_is_installed splify
-then echo -e "\n${RED}Генерация ${NC}WARP${RED} при установленном ${NC}splify${RED} невозможна!${NC}"; echo -e "${YELLOW}Используйте генерацию при помощи ${NC}wgcli.vercel.app${NC}!\n"; else sh <(wget -q -O - https://raw.githubusercontent.com/StressOzz/Mixomo-Manager/main/gen_WARP.sh); echo; fi; PAUSE; break ;;*) break ;; esac; done; }
+then echo -e "\n${RED}Генерация ${NC}WARP${RED} при установленном ${NC}splify${RED} невозможна!${NC}"; echo -e "${YELLOW}Используйте генерацию при помощи ${NC}Proxy${NC}!\n"; else sh <(wget -q -O - https://raw.githubusercontent.com/StressOzz/Mixomo-Manager/main/gen_WARP.sh); echo; fi; PAUSE; break ;;*) break ;; esac; done; }
 # ==========================================
 # Главное меню
 # ==========================================
 show_menu() { get_versions; get_doh_status; show_current_strategy; RKN_Check; mkdir -p "$TMP_SF"; CURR=$(curr_MIR); clear; echo -e "╔═══════════════════════════════╗\n║  ${BLUE}Zapret Manager by StressOzz${NC}  ║\n╚═══════════════════════════════╝\n"
 if [ -f /etc/init.d/zapret ] && [ -f "$CONF" ] && grep -Eq "^[[:space:]]*option DISABLE_IPV6 '1'" "$CONF" && ping -6 -c 1 -W 2 google.com >/dev/null 2>&1; then echo -e "${RED}Обнаружен IPv6! ${GREEN}Включите ${NC}IPv6${GREEN} в системном меню!${NC}\n"; fi
 if [ ! -f /etc/init.d/zapret ]; then Z_ACTION_TEXT="Установить"; Z_ACTION_FUNC="install_Zapret"; elif [ "$INSTALLED_VER" = "$ZAPRET_VERSION" ]; then Z_ACTION_TEXT="Удалить" Z_ACTION_FUNC="uninstall_zapret"; else Z_ACTION_TEXT="Обновить"; Z_ACTION_FUNC="install_Zapret"; fi
+if [ ! -f /etc/init.d/zapret2 ]; then Z2_ACTION_TEXT="Установить"; Z2_ACTION_FUNC="install_zapret2"; elif [ "$INSTALLED_VER2" = "$ZAPRET2_VERSION" ]; then Z2_ACTION_TEXT="Удалить"; Z2_ACTION_FUNC="remove_zapret2"; else Z2_ACTION_TEXT="Обновить"; Z2_ACTION_FUNC="install_zapret2"; fi
 for pkg in byedpi youtubeUnblock; do if [ "$PKG_IS_APK" -eq 1 ]; then apk info -e "$pkg" >/dev/null 2>&1 && echo -e "${RED}Найден установленный ${NC}$pkg${RED}!${NC}\nZapret${RED} может работать некорректно с ${NC}$pkg${RED}!${NC}\n"
 else opkg list-installed | grep -q "^$pkg" && echo -e "${RED}Найден установленный ${NC}$pkg${RED}!${NC}\nZapret${RED} может работать некорректно с ${NC}$pkg${RED}!${NC}\n"; fi; done; pgrep -f "/opt/zapret" >/dev/null 2>&1 && str_stp_zpr="Остановить" || str_stp_zpr="Запустить"
 if uci get firewall.@defaults[0].flow_offloading 2>/dev/null | grep -q '^1$' || uci get firewall.@defaults[0].flow_offloading_hw 2>/dev/null | grep -q '^1$'; then if ! grep -q 'meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;' /usr/share/firewall4/templates/ruleset.uc
 then echo -e "${RED}Включён ${NC}Flow Offloading${RED}!${NC}\n${NC}Zapret${RED} некорректно работает с включённым ${NC}Flow Offloading${RED}!\nПримените ${NC}FIX${RED} в системном меню!\n${NC}"; fi; fi; INFO_ZPR
-echo -e "\n${CYAN}1) ${GREEN}$Z_ACTION_TEXT${NC} Zapret\n${CYAN}2) ${GREEN}Меню стратегий${NC}\n${CYAN}3) ${GREEN}Меню ${NC}splify\n${CYAN}4) ${GREEN}Меню ${NC}Mixomo\n${CYAN}5) ${GREEN}Меню ${NC}NetShift\n${CYAN}6) ${GREEN}Меню ${NC}TG WS Proxy\n${CYAN}7) ${GREEN}Меню ${NC}DNS over HTTPS\n${CYAN}8) ${GREEN}Меню настройки ${NC}Discord\n${CYAN}9) ${GREEN}Меню управления доменами в ${NC}hosts"
-echo -e "${CYAN}f) ${GREEN}Удалить ${NC}→${GREEN} установить ${NC}→${GREEN} настроить${NC} Zapret\n${CYAN}0) ${GREEN}Системное меню${NC}\n${CYAN}s) ${GREEN}$str_stp_zpr ${NC}Zapret" ; echo -ne "${CYAN}Enter) ${GREEN}Выход${NC}\n\n${YELLOW}Выберите пункт:${NC} " && read choice
+echo -e "\n${CYAN}1) ${GREEN}$Z_ACTION_TEXT${NC} Zapret\n${CYAN}2) ${GREEN}$Z2_ACTION_TEXT${NC} Zapret2\n${CYAN}3) ${GREEN}Меню стратегий${NC} Zapret\n${CYAN}4) ${GREEN}Меню ${NC}splify\n${CYAN}5) ${GREEN}Меню ${NC}Mixomo\n${CYAN}6) ${GREEN}Меню ${NC}NetShift\n${CYAN}7) ${GREEN}Меню ${NC}TG WS Proxy\n${CYAN}8) ${GREEN}Меню ${NC}DNS over HTTPS\n${CYAN}9) ${GREEN}Меню настройки ${NC}Discord\n${CYAN}0) ${GREEN}Меню управления доменами в ${NC}hosts"
+echo -e "${CYAN}f) ${GREEN}Удалить ${NC}→${GREEN} установить ${NC}→${GREEN} настроить${NC} Zapret\n${CYAN}m) ${GREEN}Системное меню${NC}" ; echo -ne "${CYAN}Enter) ${GREEN}Выход${NC}\n\n${YELLOW}Выберите пункт:${NC} " && read choice
 case "$choice" in 999) echo; uninstall_zapret "1"; install_Zapret "1"; curl -fsSL https://raw.githubusercontent.com/StressOzz/Test/refs/heads/main/zapret -o "$CONF"; hosts_add "$ALL_BLOCKS"; rm -f "$EXCLUDE_FILE"; wget -q -U "Mozilla/5.0" -O "$EXCLUDE_FILE" "$EXCLUDE_URL"; ZAPRET_RESTART; PAUSE;;
-f|F|а|А) zapret_key;; s|S|ы|Ы) pgrep -f /opt/zapret >/dev/null 2>&1 && stop_zapret || start_zapret;; 1) $Z_ACTION_FUNC;; 2) menu_str;; 3) SPL_MENU ;; 4) MIXOMO_MENU;; 5) PODKOP_menu ;; 6) menu_TG;; 7) DoH_menu;; 8) Discord_menu;; 9) menu_hosts;; 0) sys_menu;; r|R|к|К) show_menu;; *) echo; exit 0;; esac; }
+2) $Z2_ACTION_FUNC;; f|F|а|А) zapret_key;; 1) $Z_ACTION_FUNC;; 3) menu_str;; 4) SPL_MENU ;; 5) MIXOMO_MENU;; 6) PODKOP_menu ;; 7) menu_TG;; 8) DoH_menu;; 9) Discord_menu;; 0) menu_hosts;; m|M|ь|Ь) sys_menu;; r|R|к|К) show_menu;; *) echo; exit 0;; esac; }
 case "$1" in --auto-best) auto_apply_best_strategy; exit 0 ;; esac; while true; do show_menu; done
