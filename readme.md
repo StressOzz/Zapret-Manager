@@ -78,7 +78,6 @@ sed -i '/#githubusercontent.com/,+2d' /etc/hosts; /etc/init.d/dnsmasq restart 2>
 - [Настройка Telegram](#-telegram)
 - [Cтратегии](#-стратегии)
 - [Mixomo](#-mixomo)
-- [Дерево меню Zapret Manager](#-дерево-меню-zapret-manager)
 - [Благодарности](#благодарности)
 - [Поддержать проект](https://github.com/StressOzz)
 
@@ -107,10 +106,10 @@ sed -i '/#githubusercontent.com/,+2d' /etc/hosts; /etc/init.d/dnsmasq restart 2>
 - Разблокировать разрешение на **Twitch**
 - Сменить источник (выбрать зеркало) для пакетов **OpenWRT**
 - Установить различные **TG WS Proxy** для **Telegram**
-- Установить **NetShift** - **https://github.com/yandexru45/netshift**
-- Установить **Mixomo** - **https://github.com/Internet-Helper/mixomo-openwrt**
-- Установить **splify** - **https://github.com/xyzmean/splify**
-- Установить **Zapret2 Routerich Edition** - **https://github.com/routerich**
+- Установить [**NetShift**](https://github.com/yandexru45/netshift)
+- Установить [**Mixomo**](https://github.com/Internet-Helper/mixomo-openwrt)
+- Установить [**splify**](https://github.com/xyzmean/splify)
+- Установить [**Zapret2 Routerich Edition**](https://github.com/routerich)
 - Интегрировать [**VPN подпиcку**](https://github.com/StressOzz/StressKVN) в **NetShift** и **Mixomo**
 - Сгенерировать **WARP** и интегрировать его в **Mixomo**
 - Запустить автоподбор стратегий по расписанию
