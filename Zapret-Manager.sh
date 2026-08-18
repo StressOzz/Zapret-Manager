@@ -470,16 +470,15 @@ if /etc/init.d/zapret2 status >/dev/null 2>&1; then echo -e "Zapret2 ${GREEN}з�
 # ==========================================
 # Удаление Zapret
 # ==========================================
-pkg_remove() { local pkg_name="$1"; $DELETE $pkg_name >/dev/null 2>&1; }
-uninstall_zapret() { local NO_PAUSE=$1; [ "$NO_PAUSE" != "1" ] && echo; echo -e "${MAGENTA}Удаляем Zapret${NC}\n${CYAN}Останавливаем ${NC}zapret"; /etc/init.d/zapret stop >/dev/null 2>&1; echo -e "${CYAN}Убиваем процессы${NC}"
-for pid in $(pgrep -f /opt/zapret 2>/dev/null); do kill -9 "$pid" 2>/dev/null; done; echo -e "${CYAN}Удаляем пакеты${NC}"; pkg_remove zapret; pkg_remove luci-app-zapret; echo -e "${CYAN}Удаляем временные файлы${NC}"
-rm -rf /opt/zapret $CONF /etc/firewall.zapret /etc/init.d/zapret /tmp/*zapret* /var/run/*zapret* /tmp/*.ipk /tmp/*.zip 2>/dev/null; crontab -l 2>/dev/null | grep -v -i -E "zapret|/usr/bin/zmsA --auto-best" | crontab - 2>/dev/null; /etc/init.d/cron restart >/dev/null 2>&1
+uninstall_zapret() { local NO_PAUSE=$1; [ "$NO_PAUSE" != "1" ] && echo; echo -e "${MAGENTA}Удаляем Zapret${NC}\n${CYAN}Останавливаем ${NC}zapret"; /etc/init.d/zapret stop >/dev/null 2>&1; /etc/init.d/zapret disable >/dev/null 2>&1; echo -e "${CYAN}Убиваем процессы${NC}"
+for pid in $(pgrep -f /opt/zapret 2>/dev/null); do kill -9 "$pid" 2>/dev/null; done; echo -e "${CYAN}Удаляем пакеты${NC}"; $DELETE luci-app-zapret >/dev/null 2>&1; $DELETE zapret >/dev/null 2>&1; echo -e "${CYAN}Удаляем временные файлы${NC}"
+rm -rf /opt/zapret $CONF /etc/firewall.zapret /etc/init.d/zapret /tmp/*.ipk /tmp/*.zip 2>/dev/null; crontab -l 2>/dev/null | grep -v -i -E "zapret|/usr/bin/zmsA --auto-best" | crontab - 2>/dev/null; /etc/init.d/cron restart >/dev/null 2>&1
 nft list tables 2>/dev/null | awk '{print $2}' | grep -E '(zapret|ZAPRET)' | while read t; do [ -n "$t" ] && nft delete table "$t" 2>/dev/null; done; rm -rf -- "$TMP_SF" tmp/zapret* ; echo -e "Zapret ${GREEN}удалён!${NC}\n"; [ "$NO_PAUSE" != "1" ] && PAUSE; }
 uninstall_zapret_all() { local NO_PAUSE=$1; [ "$NO_PAUSE" != "1" ] && echo; echo -e "${MAGENTA}Удаляем Zapret и Zapret2${NC}"
 echo -e "${CYAN}Останавливаем службы${NC}"; /etc/init.d/zapret stop >/dev/null 2>&1; /etc/init.d/zapret2 stop >/dev/null 2>&1; /etc/init.d/zapret disable >/dev/null 2>&1; /etc/init.d/zapret2 disable >/dev/null 2>&1
 echo -e "${CYAN}Убиваем процессы${NC}"; for pid in $(pgrep -f /opt/zapret 2>/dev/null); do kill -9 "$pid" 2>/dev/null; done; for pid in $(pgrep -f /opt/zapret2 2>/dev/null); do kill -9 "$pid" 2>/dev/null; done; for pid in $(pgrep -f nfqws 2>/dev/null); do kill -9 "$pid" 2>/dev/null; done
-echo -e "${CYAN}Удаляем пакеты${NC}"; pkg_remove zapret; pkg_remove luci-app-zapret; pkg_remove luci-i18n-zapret-ru; pkg_remove zapret2; pkg_remove luci-app-zapret2; pkg_remove luci-i18n-zapret2-ru
-echo -e "${CYAN}Удаляем папки и конфиги${NC}"; rm -rf /opt/zapret /opt/zapret2 2>/dev/null; rm -f /etc/config/zapret /etc/config/zapret2 2>/dev/null; rm -f /etc/firewall.zapret /etc/firewall.zapret2 2>/dev/null; rm -f /etc/init.d/zapret /etc/init.d/zapret2 2>/dev/null
+echo -e "${CYAN}Удаляем пакеты${NC}"; $DELETE zapret >/dev/null 2>&1; $DELETE luci-app-zapret >/dev/null 2>&1; $DELETE zapret2 >/dev/null 2>&1; $DELETE luci-app-zapret2 >/dev/null 2>&1
+echo -e "${CYAN}Удаляем папки и конфиги${NC}"; rm -rf /opt/zapret /opt/zapret2 2>/dev/null; rm -f /etc/config/zapret /etc/config/zapret2 2>/dev/null; rm -f /etc/firewall.zapret /etc/firewall.zapret2 2>/dev/null; rm -f /etc/init.d/zapret /etc/init.d/zapret2 2>/dev/null; rm -rf /tmp/*zapret*
 echo -e "${CYAN}Удаляем временные файлы, логи и резервные копии${NC}"; rm -rf /tmp/*zapret* /tmp/zapret_temp /tmp/routerich 2>/dev/null; rm -rf /var/run/*zapret* 2>/dev/null; rm -rf "$TMP_SF" 2>/dev/null; rm -f /tmp/*.ipk /tmp/*.apk /tmp/*.zip 2>/dev/null; rm -rf "$BACKUP_DIR" 2>/dev/null
 echo -e "${CYAN}Очищаем cron${NC}"; crontab -l 2>/dev/null | grep -v -i -E "zapret|/usr/bin/zmsA --auto-best" | crontab - 2>/dev/null; sed -i "\|$AUTO_CRON_CMD|d" "$CRON_FILE" 2>/dev/null; /etc/init.d/cron restart >/dev/null 2>&1
 echo -e "${CYAN}Удаляем nftables таблицы${NC}"; nft list tables 2>/dev/null | awk '{print $2}' | grep -Ei '^(zapret|zapret2)$' | while read -r t; do [ -n "$t" ] && nft delete table "$t" 2>/dev/null; done
@@ -658,7 +657,7 @@ doh_queryCF=$(printf "%s\n" "" "config https-dns-proxy" "	option resolver_url 'h
 # Доступ из браузера
 # ==========================================
 web_is_enabled() { command -v ttyd >/dev/null 2>&1 && uci -q get ttyd.@ttyd[0].command | grep -q "/usr/bin/zms"; }
-toggle_web() { if web_is_enabled; then echo -e "\n${MAGENTA}Удаляем доступ из браузера${NC}"; $DELETE luci-app-ttyd ttyd >/dev/null 2>&1; rm -f /etc/config/ttyd
+toggle_web() { if web_is_enabled; then echo -e "\n${MAGENTA}Удаляем доступ из браузера${NC}"; $DELETE luci-app-ttyd >/dev/null 2>&1; $DELETE ttyd >/dev/null 2>&1; rm -f /etc/config/ttyd /etc/init.d/ttyd
 echo -e "${GREEN}Доступ удалён!${NC}\n"; PAUSE; else echo -e "\n${MAGENTA}Активируем доступ из браузера${NC}"; update_packages || return 1
 echo -e "${CYAN}Устанавливаем ${NC}ttyd"; $INSTALL ttyd >/dev/null 2>&1; $INSTALL luci-app-ttyd >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка при установке ttyd!${NC}\n"; PAUSE; return; }; echo -e "${CYAN}Настраиваем ${NC}ttyd"; sed -i 's#/bin/login#-t fontSize=15 sh /usr/bin/zms#' /etc/config/ttyd; /etc/init.d/ttyd restart >/dev/null 2>&1; if pidof ttyd >/dev/null
 then echo -e "${GREEN}Служба запущена!${NC}\n\n${YELLOW}Доступ из браузера: ${NC}$LAN_IP:7681\n"; PAUSE; else echo -e "\n${RED}Ошибка! Служба не запущена!${NC}\n"; PAUSE; fi; fi; }
