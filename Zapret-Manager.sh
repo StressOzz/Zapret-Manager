@@ -77,6 +77,15 @@ SCell="#Supercell\n103.27.157.38 accounts.supercell.com cdn.id.supercell.com cla
 SPFY="#Spotify\n95.182.120.241 api.spotify.com login5.spotify.com encore.scdn.co gew1-spclient.spotify.com spclient.wg.spotify.com
 95.182.120.241 api-partner.spotify.com aet.spotify.com www.spotify.com accounts.spotify.com open.spotify.com
 95.182.120.241 accounts.scdn.co gew1-dealer.spotify.com open-exp.spotifycdn.com www-growth.scdn.co"; TAPEop="#tapeop.dev\n216.24.57.251 www.tapeop.dev tapeop.dev\n216.24.57.3 www.tapeop.dev tapeop.dev"
+SPFYEXT="#SpotifyEXT\n95.182.120.241 spotify.com www.spotify.com accounts.spotify.com login.spotify.com login5.spotify.com login.app.spotify.com auth.spotify.com account.spotify.com api.spotify.com api-partner.spotify.com spclient.wg.spotify.com gew1-spclient.spotify.com
+95.182.120.241 guc3-spclient.spotify.com gae2-spclient.spotify.com gue1-spclient.spotify.com gnl-spclient.spotify.com spclient.spotify.com ap-gew1.spotify.com ap-gue1.spotify.com ap-gae2.spotify.com ap-gew4.spotify.com ap-sto3.spotify.com
+95.182.120.241 ap-guc3.spotify.com ap.spotify.com apresolve.spotify.com aet.spotify.com gew1-dealer.g2.spotify.com guc3-dealer.g2.spotify.com gue1-dealer.g2.spotify.com dealer.spotify.com dealer-wg.spotify.com edge-web.dual-gslb.spotify.com
+95.182.120.241 client.spotify.com web-partner.spotify.com connect.spotify.com gce.spotify.com clienttoken.spotify.com exp.wg.spotify.com pixel.spotify.com pixel-static.spotify.com image-upload.spotify.com content.spotify.com analytics.spotify.com
+95.182.120.241 crashdump.spotify.com log.spotify.com logger.spotify.com metrics.spotify.com desktop.spotify.com audio-fa-tls13.spotifycdn.com heads-fa-tls13.spotifycdn.com heads4-fa-tls13.spotifycdn.com image-cdn-fa.spotifycdn.com
+95.182.120.241 concerts.spotifycdn.com mrkt.spotifycdn.com pickasso.spotifycdn.com podz-content.spotifycdn.com seed-mix-image.spotifycdn.com thisis-images.spotifycdn.com wap.spotifycdn.com web-sdk-assets.spotifycdn.com spotifycdn.com spotifycdn.net
+35.186.224.24 open.spotify.com\n162.159.141.124 audio4-fa-tls13.spotifycdn.com audio-cf.spotifycdn.com open-exp.spotifycdn.com\n23.36.163.34 audio-ak-spotify-com.akamaized.net\n2.16.168.44 audio4-ak-spotify-com.akamaized.net
+199.232.210.248 scdn.co i.scdn.co line-up.scdn.co mosaic.scdn.co daily-mix.scdn.co lineup-images.scdn.co encore.scdn.co image-cdn-fa.scdn.co accounts.scdn.co www.scdn.co www-growth.scdn.co av.scdn.co seafoam.scdn.co
+23.48.23.145 heads-ak-spotify-com.akamaized.net\n45.155.204.190 xpui.app.spotify.com"
 GITH_RAW="#githubusercontent.com\n185.199.109.133 raw.githubusercontent.com release-assets.githubusercontent.com
 185.199.108.133 private-user-images.githubusercontent.com gist.githubusercontent.com avatars.githubusercontent.com"
 GITH="#github.com\n140.82.114.3 github.com\n185.199.110.154 github.githubassets.com\n185.199.110.133 camo.githubassets.com"
@@ -717,16 +726,16 @@ menu_hosts() { while true; do clear; S_ALL=$(status_block "$ALL_BLOCKS" && echo 
 echo -e "${MAGENTA}Меню управления доменами в hosts${NC}\n"; if hosts_enabled; then echo -e "${YELLOW}Домены в hosts: ${GREEN}$hosts_echo${NC}"; prin=1; fi; [ "$prin" -eq 1 ] && echo
 echo -e "${CYAN} 0) ${GREEN}$(get_state "$NALOG")${NC} nalog.ru\n${CYAN} 1) ${GREEN}$(get_state "$RUTOR")${NC} rutor.info\n${CYAN} 2) ${GREEN}$(get_state "$NTC")${NC} ntc.party"
 echo -e "${CYAN} 3) ${GREEN}$(get_state "$INSTAGRAM")${NC} Instagram & Facebook\n${CYAN} 4) ${GREEN}$(get_state "$LIBRUSEC")${NC} lib.rus.ec\n${CYAN} 5) ${GREEN}$(get_state "$AI")${NC} AI сервисы"
-echo -e "${CYAN} 6) ${GREEN}$(get_state "$TWCH")${NC} Twitch\n${CYAN} 7) ${GREEN}$(get_state "$TGWeb")${NC} Telegram Web\n${CYAN} 8) ${GREEN}$(get_state "$SPFY")${NC} Spotify\n${CYAN} 9) ${GREEN}$(get_state "$SCell")${NC} Supercell"
-echo -e "${CYAN}10) ${GREEN}$(get_state "$GITH_RAW")${NC} githubusercontent.com\n${CYAN}11) ${GREEN}$(get_state "$GITH")${NC} github.com\n${CYAN}12) ${GREEN}$(get_state "$USoft")${NC} Ubisoft"
-echo -e "${CYAN}13) ${GREEN}$(get_state "$TAPEop")${NC} tapeop.dev\n${CYAN}14) $S_ALL\n${CYAN}15) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}GeoHide hosts"
-echo -e "${CYAN}16) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}Mafioznik hosts\n${CYAN}17) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}Malw.link hosts\n${CYAN}18) ${GREEN}Восстановить ${NC}hosts"
+echo -e "${CYAN} 6) ${GREEN}$(get_state "$TWCH")${NC} Twitch\n${CYAN} 7) ${GREEN}$(get_state "$TGWeb")${NC} Telegram Web\n${CYAN} 8) ${GREEN}$(get_state "$SPFY")${NC} Spotify\n${CYAN} 9) ${GREEN}$(get_state "$SPFYEXT")${NC} Spotify extended"
+echo -e "${CYAN}10) ${GREEN}$(get_state "$SCell")${NC} Supercell\n${CYAN}11) ${GREEN}$(get_state "$GITH_RAW")${NC} githubusercontent.com\n${CYAN}12) ${GREEN}$(get_state "$GITH")${NC} github.com\n${CYAN}13) ${GREEN}$(get_state "$USoft")${NC} Ubisoft"
+echo -e "${CYAN}14) ${GREEN}$(get_state "$TAPEop")${NC} tapeop.dev\n${CYAN}15) $S_ALL\n${CYAN}16) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}GeoHide hosts"
+echo -e "${CYAN}17) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}Mafioznik hosts\n${CYAN}18) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}Malw.link hosts\n${CYAN}19) ${GREEN}Восстановить ${NC}hosts"
 echo -ne "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n\n${YELLOW}Выберите пункт:${NC} ";read -r c; case "$c" in 0) toggle_block "$NALOG";; 1) toggle_block "$RUTOR";; 2) toggle_block "$NTC";; 3) toggle_block "$INSTAGRAM";;
-4) toggle_block "$LIBRUSEC";; 5) toggle_block "$AI";; 6) toggle_block "$TWCH";; 7) toggle_block "$TGWeb";; 8) toggle_block "$SPFY";; 9) toggle_block "$SCell";; 10) toggle_block "$GITH_RAW";; 11) toggle_block "$GITH";;
-12) toggle_block "$USoft";; 13) toggle_block "$TAPEop";; 14) toggle_all;; 15) add_GEO_HOSTS;; 16) echo -e "\n${MAGENTA}Заменяем hosts на Mafioznik hosts${NC}"; wget -qO /etc/hosts https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/hosts_mafioznik.txt >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось скачать файл hosts${NC}\n"; PAUSE; }
-/etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}заменён на ${NC}Mafioznik hosts${GREEN}!${NC}\n"; PAUSE;; 17) echo -e "\n${MAGENTA}Заменяем hosts на Malw.link hosts${NC}"
+4) toggle_block "$LIBRUSEC";; 5) toggle_block "$AI";; 6) toggle_block "$TWCH";; 7) toggle_block "$TGWeb";; 8) toggle_block "$SPFY";; 9) toggle_block "$SPFYEXT";; 10) toggle_block "$SCell";; 11) toggle_block "$GITH_RAW";; 12) toggle_block "$GITH";;
+13) toggle_block "$USoft";; 14) toggle_block "$TAPEop";; 15) toggle_all;; 16) add_GEO_HOSTS;; 17) echo -e "\n${MAGENTA}Заменяем hosts на Mafioznik hosts${NC}"; wget -qO /etc/hosts https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/hosts_mafioznik.txt >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось скачать файл hosts${NC}\n"; PAUSE; }
+/etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}заменён на ${NC}Mafioznik hosts${GREEN}!${NC}\n"; PAUSE;; 18) echo -e "\n${MAGENTA}Заменяем hosts на Malw.link hosts${NC}"
 wget -qO /etc/hosts https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/hosts_malw.link.txt >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось скачать файл hosts${NC}\n"; PAUSE; }
-/etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}заменён на ${NC}Malw.link hosts${GREEN}!${NC}\n"; PAUSE;; 18) hosts_reset;; *) break;; esac; done; }
+/etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}заменён на ${NC}Malw.link hosts${GREEN}!${NC}\n"; PAUSE;; 19) hosts_reset;; *) break;; esac; done; }
 status_block() { local line; while IFS= read -r line; do [ -z "$line" ] && continue; grep -Fxq "$line" "$HOSTS_FILE" || return 1; done <<EOF
 $(printf '%b\n' "$1")
 EOF
