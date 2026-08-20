@@ -1002,7 +1002,7 @@ if [ -f /etc/config/netshift ] && grep -q "^[[:space:]]*option subscription_url"
 echo -e "${CYAN}6) ${GREEN}Интегрировать ${NC}AWG${GREEN} в ${NC}NetShift"; echo -e "${CYAN}7) ${GREEN}Интегрировать ${NC}ByeDPI${GREEN} в ${NC}NetShift"; if pkg_is_installed byedpi; then echo -e "${CYAN}8) ${GREEN}Изменить стратегию ${NC}ByeDPI"; fi
 echo -e "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}"; echo -ne "\n${YELLOW}Выберите пункт:${NC} "; read -r choicePOD; case "$choicePOD" in 1) PODKOP_INSTALL ;; 2) BYEDPI_INSTALL ;;
 3) if pkg_is_installed amneziawg-tools && pkg_is_installed luci-proto-amneziawg && pkg_is_installed kmod-amneziawg; then if ! pkg_is_installed splify; then AWG_DELETE
-else echo -e "\n${RED}Удаление невозможно!${NC}"; echo -e "AmneziaWG ${YELLOW}используется в ${NC}splify\n"; PAUSE; fi; else install_AWG; echo -e "\nAmneziaWG ${GREEN}установлен!${NC}"; fi ;;
+else echo -e "\n${RED}Удаление невозможно!${NC}"; echo -e "AmneziaWG ${YELLOW}используется в ${NC}splify\n"; PAUSE; fi; else install_AWG; echo -e "\nAmneziaWG ${GREEN}установлен!${NC}\n"; PAUSE; fi ;;
 4) if uci -q get network.AWG >/dev/null 2>&1; then INT_DELETE; else install_AWG_INTER; echo -e "\n\nИнтерфейс AWG ${GREEN}установлен!${NC}\n"; fi ;; 5) PODKOP_VPN ;; 6) integration_AWG ;; 7) BYEDPI_NETSHIFT ;; 8) if pkg_is_installed byedpi; then fix_strategy; fi ;; *) return ;; esac; done; }
 # ==========================================
 # Информация
