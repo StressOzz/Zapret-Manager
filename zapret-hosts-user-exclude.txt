@@ -35,6 +35,8 @@ ubuntu.com
 xsolla.com
 ip-api.com
 yandex.com
+yandex.org
+yandex.net
 gstatic.com
 lichess.org
 premier.one
@@ -43,6 +45,7 @@ wws-gs2.com
 dropbox.com
 genesis.com
 carcade.com
+duolingo.com
 map-care.com
 gravatar.com
 battleye.com
