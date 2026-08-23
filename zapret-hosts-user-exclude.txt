@@ -45,6 +45,7 @@ wws-gs2.com
 dropbox.com
 genesis.com
 carcade.com
+midnight.im
 duolingo.com
 map-care.com
 gravatar.com
@@ -53,8 +54,8 @@ opencity.pro
 ipstream.one
 godville.net
 voidboost.cc
-voidboost.one
 hcaptcha.com
+voidboost.one
 kaspersky.com
 canonical.com
 mediafire.com
