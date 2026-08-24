@@ -510,12 +510,6 @@ postmanapp.com
 radmin.com
 famatech.com
 radmin-vpn.com
-#################################### DNS
-quad9.net
-joindns4.eu
-controld.com
-dns.comss.one
-dns.adguard-dns.com
 #################################### Black Desert Online
 wellbia.com
 bdocodex.com
