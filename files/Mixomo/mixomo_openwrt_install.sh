@@ -1273,12 +1273,15 @@ EOF
     /etc/init.d/firewall restart 2>/dev/null || true
     sleep 1
 
-    echo "Настройка UCI-сервиса hev-socks5-tunnel"
-    uci set hev-socks5-tunnel.config.enabled='1'
-    uci set hev-socks5-tunnel.config.configfile='/etc/hev-socks5-tunnel/main.yml'
-    uci commit hev-socks5-tunnel
-    /etc/init.d/hev-socks5-tunnel restart
-    sleep 2
+echo "Настройка UCI-сервиса hev-socks5-tunnel"
+if ! uci -q get hev-socks5-tunnel.@instance[0] >/dev/null 2>&1; then
+    uci add hev-socks5-tunnel instance >/dev/null
+fi
+uci set hev-socks5-tunnel.@instance[0].enabled='1'
+uci set hev-socks5-tunnel.@instance[0].conffile='/etc/hev-socks5-tunnel/main.yml'
+uci commit hev-socks5-tunnel
+/etc/init.d/hev-socks5-tunnel restart
+sleep 2
 
     echo "Настройка сетевого интерфейса"
     uci set network.Mihomo=interface
