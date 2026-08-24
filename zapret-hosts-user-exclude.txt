@@ -9,6 +9,7 @@ xn--d1acj3b
 xn--80adxhks
 xn--80asehdb
 #################################### Разное
+z.ai 
 hf.co
 box.ca
 2ip.io
@@ -37,6 +38,7 @@ ip-api.com
 yandex.com
 yandex.org
 yandex.net
+chatglm.cn
 gstatic.com
 lichess.org
 premier.one
