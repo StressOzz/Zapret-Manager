@@ -9,10 +9,11 @@ xn--d1acj3b
 xn--80adxhks
 xn--80asehdb
 #################################### Разное
-z.ai 
+z.ai
 hf.co
 box.ca
 2ip.io
+uc.zone
 msi.com
 qwen.ai
 iiko.it
