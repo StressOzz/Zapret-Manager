@@ -1,0 +1,692 @@
+
+config zapret2 'main'
+	option enabled '1'
+	option debug '0'
+	option scripts '1'
+	option postnat '1'
+	option enable_ipv6 '0'
+	option filter_ttl_expired_icmp '1'
+	option flowoffload 'donttouch'
+	option mode_filter 'none'
+	option desync_mark '0x40000000'
+	option desync_mark_postnat '0x20000000'
+	option qnum '300'
+	option ws_user 'daemon'
+	option nfqws_ports_tcp '80,443'
+	option nfqws_ports_udp '443'
+	option nfqws_tcp_pkt_out '25'
+	option nfqws_tcp_pkt_in '5'
+	option nfqws_udp_pkt_out '5'
+	option nfqws_udp_pkt_in '3'
+	option lua_gc '600'
+	option ctrack_timeouts '60:300:60:60'
+	option set_maxelem '522288'
+	option gzip_lists '1'
+	option mdig_threads '30'
+	option autohostlist_retrans_threshold '3'
+	option autohostlist_fail_threshold '3'
+	option autohostlist_fail_time '60'
+	option autohostlist_debuglog '0'
+	option autohostlist_incoming_maxseq '4096'
+	option autohostlist_retrans_maxseq '32768'
+	option autohostlist_retrans_reset '1'
+	option autohostlist_udp_in '1'
+	option autohostlist_udp_out '4'
+
+config list 'list_hosts_auto'
+	option path '/opt/zapret2/ipset/zapret_hosts_auto.txt'
+
+config list 'list_hosts_user'
+	option path '/opt/zapret2/ipset/zapret_hosts_user.txt'
+
+config list 'list_hosts_user_exclude'
+	option path '/opt/zapret2/ipset/zapret_hosts_user_exclude.txt'
+
+config list 'list_hosts_youtube'
+	option path '/opt/zapret2/ipset/zapret_hosts_youtube.txt'
+
+config list 'list_zapret_ip_exclude'
+	option path '/opt/zapret2/ipset/zapret-ip-exclude.txt'
+
+config list 'list_zapret_ip_exclude6'
+	option path '/opt/zapret2/ipset/zapret-ip-exclude6.txt'
+
+config list 'list_hosts_discord'
+	option path '/opt/zapret2/ipset/zapret_hosts_discord.txt'
+
+config blob 'blob_dht_find_node'
+	option path '/opt/zapret2/files/fake/dht_find_node.bin'
+	option enabled '0'
+
+config blob 'blob_dht_get_peers'
+	option path '/opt/zapret2/files/fake/dht_get_peers.bin'
+	option enabled '0'
+
+config blob 'blob_discord_ip_discovery_with_port'
+	option path '/opt/zapret2/files/fake/discord-ip-discovery-with-port.bin'
+	option enabled '0'
+
+config blob 'blob_discord_ip_discovery_without_port'
+	option path '/opt/zapret2/files/fake/discord-ip-discovery-without-port.bin'
+	option enabled '0'
+
+config blob 'blob_dtls_clienthello_w3_org'
+	option path '/opt/zapret2/files/fake/dtls_clienthello_w3_org.bin'
+	option enabled '0'
+
+config blob 'blob_http_iana_org'
+	option path '/opt/zapret2/files/fake/http_iana_org.bin'
+	option enabled '0'
+
+config blob 'blob_isakmp_initiator_request'
+	option path '/opt/zapret2/files/fake/isakmp_initiator_request.bin'
+	option enabled '0'
+
+config blob 'blob_quic_3'
+	option path '/opt/zapret2/files/fake/quic_3.bin'
+	option enabled '0'
+
+config blob 'blob_quic_4'
+	option path '/opt/zapret2/files/fake/quic_4.bin'
+	option enabled '0'
+
+config blob 'blob_quic_initial_facebook_com'
+	option path '/opt/zapret2/files/fake/quic_initial_facebook_com.bin'
+	option enabled '0'
+
+config blob 'blob_quic_initial_facebook_com_quiche'
+	option path '/opt/zapret2/files/fake/quic_initial_facebook_com_quiche.bin'
+	option enabled '0'
+
+config blob 'blob_quic_initial_rr1___sn_xguxaxjvh_n8me_googlevideo_com_kyber_1'
+	option path '/opt/zapret2/files/fake/quic_initial_rr1---sn-xguxaxjvh-n8me_googlevideo_com_kyber_1.bin'
+	option enabled '0'
+
+config blob 'blob_quic_initial_rr1___sn_xguxaxjvh_n8me_googlevideo_com_kyber_2'
+	option path '/opt/zapret2/files/fake/quic_initial_rr1---sn-xguxaxjvh-n8me_googlevideo_com_kyber_2.bin'
+	option enabled '0'
+
+config blob 'blob_quic_initial_rr2___sn_gvnuxaxjvh_o8ge_googlevideo_com'
+	option path '/opt/zapret2/files/fake/quic_initial_rr2---sn-gvnuxaxjvh-o8ge_googlevideo_com.bin'
+	option enabled '0'
+
+config blob 'blob_quic_initial_rutracker_org'
+	option path '/opt/zapret2/files/fake/quic_initial_rutracker_org.bin'
+	option enabled '0'
+
+config blob 'blob_quic_initial_rutracker_org_kyber_1'
+	option path '/opt/zapret2/files/fake/quic_initial_rutracker_org_kyber_1.bin'
+	option enabled '0'
+
+config blob 'blob_quic_initial_rutracker_org_kyber_2'
+	option path '/opt/zapret2/files/fake/quic_initial_rutracker_org_kyber_2.bin'
+	option enabled '0'
+
+config blob 'blob_quic_initial_vk_com'
+	option path '/opt/zapret2/files/fake/quic_initial_vk_com.bin'
+	option enabled '0'
+
+config blob 'blob_quic_initial_www_google_com'
+	option path '/opt/zapret2/files/fake/quic_initial_www_google_com.bin'
+	option enabled '0'
+
+config blob 'blob_quic_short_header'
+	option path '/opt/zapret2/files/fake/quic_short_header.bin'
+	option enabled '0'
+
+config blob 'blob_rdp'
+	option path '/opt/zapret2/files/fake/rdp.bin'
+	option enabled '0'
+
+config blob 'blob_sip'
+	option path '/opt/zapret2/files/fake/sip.bin'
+	option enabled '0'
+
+config blob 'blob_stun'
+	option path '/opt/zapret2/files/fake/stun.bin'
+	option enabled '1'
+
+config blob 'blob_tls_clienthello_escapefromtarkov_com'
+	option path '/opt/zapret2/files/fake/tls_clienthello_escapefromtarkov_com.bin'
+	option enabled '0'
+
+config blob 'blob_tls_clienthello_gosuslugi_ru'
+	option path '/opt/zapret2/files/fake/tls_clienthello_gosuslugi_ru.bin'
+	option enabled '1'
+
+config blob 'blob_tls_clienthello_iana_org'
+	option path '/opt/zapret2/files/fake/tls_clienthello_iana_org.bin'
+	option enabled '0'
+
+config blob 'blob_tls_clienthello_iana_org_bigsize'
+	option path '/opt/zapret2/files/fake/tls_clienthello_iana_org_bigsize.bin'
+	option enabled '0'
+
+config blob 'blob_tls_clienthello_rutracker_org_kyber'
+	option path '/opt/zapret2/files/fake/tls_clienthello_rutracker_org_kyber.bin'
+	option enabled '0'
+
+config blob 'blob_tls_clienthello_sberbank_ru'
+	option path '/opt/zapret2/files/fake/tls_clienthello_sberbank_ru.bin'
+	option enabled '0'
+
+config blob 'blob_tls_clienthello_t2_ru'
+	option path '/opt/zapret2/files/fake/tls_clienthello_t2_ru.bin'
+	option enabled '1'
+
+config blob 'blob_tls_clienthello_vk_com'
+	option path '/opt/zapret2/files/fake/tls_clienthello_vk_com.bin'
+	option enabled '1'
+
+config blob 'blob_tls_clienthello_vk_com_kyber'
+	option path '/opt/zapret2/files/fake/tls_clienthello_vk_com_kyber.bin'
+	option enabled '0'
+
+config blob 'blob_tls_clienthello_www_4pda_to'
+	option path '/opt/zapret2/files/fake/tls_clienthello_www_4pda_to.bin'
+	option enabled '1'
+
+config blob 'blob_tls_clienthello_www_google_com'
+	option path '/opt/zapret2/files/fake/tls_clienthello_www_google_com.bin'
+	option enabled '1'
+
+config blob 'blob_tls_clienthello_www_max_ru'
+	option path '/opt/zapret2/files/fake/tls_clienthello_www_max_ru.bin'
+	option enabled '0'
+
+config blob 'blob_wireguard_initiation'
+	option path '/opt/zapret2/files/fake/wireguard_initiation.bin'
+	option enabled '0'
+
+config blob 'blob_wireguard_response'
+	option path '/opt/zapret2/files/fake/wireguard_response.bin'
+	option enabled '0'
+
+config blob 'blob_zero_256'
+	option path '/opt/zapret2/files/fake/zero_256.bin'
+	option enabled '0'
+
+config blob 'blob_zero_512'
+	option path '/opt/zapret2/files/fake/zero_512.bin'
+	option enabled '0'
+
+config blob 'blob_zero_1024'
+	option path '/opt/zapret2/files/fake/zero_1024.bin'
+	option enabled '0'
+
+config blob 'blob_bgp_open'
+	option path '/opt/zapret2/files/fake/bgp_open.bin'
+	option enabled '0'
+
+config blob 'blob_bitcoin'
+	option path '/opt/zapret2/files/fake/bitcoin.bin'
+	option enabled '0'
+
+config blob 'blob_dns'
+	option path '/opt/zapret2/files/fake/dns.bin'
+	option enabled '0'
+
+config blob 'blob_dtls_serverhello'
+	option path '/opt/zapret2/files/fake/dtls_serverhello.bin'
+	option enabled '0'
+
+config blob 'blob_ntp4'
+	option path '/opt/zapret2/files/fake/ntp4.bin'
+	option enabled '0'
+
+config blob 'blob_quic2_example_com'
+	option path '/opt/zapret2/files/fake/quic2_example_com.bin'
+	option enabled '0'
+
+config blob 'blob_quic_initial_dbankcloud_ru'
+	option path '/opt/zapret2/files/fake/quic_initial_dbankcloud_ru.bin'
+	option enabled '0'
+
+config blob 'blob_rtsp_options'
+	option path '/opt/zapret2/files/fake/rtsp_options.bin'
+	option enabled '0'
+
+config blob 'blob_sip_register'
+	option path '/opt/zapret2/files/fake/sip_register.bin'
+	option enabled '0'
+
+config blob 'blob_smtp_ehlo'
+	option path '/opt/zapret2/files/fake/smtp_ehlo.bin'
+	option enabled '0'
+
+config blob 'blob_snmp_get_next_request'
+	option path '/opt/zapret2/files/fake/snmp_get_next_request.bin'
+	option enabled '0'
+
+config blob 'blob_tls_alert'
+	option path '/opt/zapret2/files/fake/tls_alert.bin'
+	option enabled '0'
+
+config blob 'blob_tls_clienthello_google_com_tlsrec'
+	option path '/opt/zapret2/files/fake/tls_clienthello_google_com_tlsrec.bin'
+	option enabled '0'
+
+config blob 'blob_tls_serverhello_google_com_tls13'
+	option path '/opt/zapret2/files/fake/tls_serverhello_google_com_tls13.bin'
+	option enabled '0'
+
+config luascript 'lua_zapret_obfs'
+	option path '/opt/zapret2/lua/zapret-obfs.lua'
+	option enabled '0'
+
+config luascript 'lua_zapret_pcap'
+	option path '/opt/zapret2/lua/zapret-pcap.lua'
+	option enabled '0'
+
+config luascript 'lua_zapret_tests'
+	option path '/opt/zapret2/lua/zapret-tests.lua'
+	option enabled '0'
+
+config luascript 'lua_zapret_wgobfs'
+	option path '/opt/zapret2/lua/zapret-wgobfs.lua'
+	option enabled '0'
+
+config strategy 'Yv_circular'
+	option enabled '1'
+	option port '443'
+	list filter_l3 'ipv4'
+	list filter_l7 'tls'
+	list hostlist 'list_hosts_youtube'
+	option script '--out-range=-s34228
+--payload=tls_client_hello
+--in-range=-s5556 --lua-desync=circular:fails=3:maxtime=60
+--in-range=x
+--lua-desync=multidisorder:pos=7,sld+1:ip_autottl=2,2-12:strategy=1
+--lua-desync=multidisorder:pos=1,midsld,endhost-1:tcp_md5:strategy=2
+--lua-desync=fake:blob=0x00000000:tcp_seq=-10000:tcp_ack=-66000:repeats=2:tls_mod=rnd,dupsid,sni=www.google.com:strategy=3
+--lua-desync=multisplit:pos=1,midsld:strategy=3
+--lua-desync=multidisorder:pos=1,midsld:strategy=4
+--lua-desync=multidisorder:pos=2,5,105,host+5,sld-1,endsld-5,endsld:strategy=5
+--lua-desync=multidisorder:pos=1,midsld:strategy=6
+--lua-desync=fake:blob=0x00000000:tcp_seq=-10000:tcp_ack=-66000:strategy=7
+--lua-desync=fake:blob=0x0F0F0F0F:tcp_seq=-10000:tcp_ack=-66000:strategy=7
+--lua-desync=fake:blob=blob_tls_clienthello_www_google_com:optional:tcp_seq=-10000:tcp_ack=-66000:tls_mod=rnd,dupsid,sni=fonts.google.com:strategy=7
+--lua-desync=multidisorder:pos=10,midsld:seqovl=336:seqovl_pattern=blob_tls_clienthello_www_google_com:strategy=7
+--lua-desync=hostfakesplit:host=google.com:tcp_ts=-600000:strategy=8
+--lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1:strategy=9
+--lua-desync=multidisorder:pos=1,2,3,5,105,host+5,sld-1,endsld-5,endsld:strategy=10
+--lua-desync=fake:blob=0x00000000:tcp_seq=-10000:tcp_ack=-66000:repeats=2:tls_mod=rnd,dupsid,sni=www.google.com:strategy=11
+--lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1:strategy=11:final'
+	list protocol 'tcp'
+
+config strategy 'Youtube_UDP'
+	option enabled '1'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'udp'
+	list filter_l7 'quic'
+	list hostlist 'list_hosts_youtube'
+	option script '--payload=quic_initial
+--lua-desync=fake:blob=fake_default_quic:repeats=2'
+
+config strategy 'Discord_circular'
+	option enabled '1'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list filter_l7 'discord'
+	list hostlist 'list_hosts_discord'
+	option script '--payload=tls_client_hello
+--in-range=-s5556
+--lua-desync=circular:fails=3:maxtime=60:nld=2
+--in-range=x
+--lua-desync=fake:blob=fake_default_tls:tcp_flags_set=SYN:strategy=1
+--lua-desync=multidisorder:pos=2,midsld:seqovl=1:seqovl_pattern=fake_default_tls:strategy=1
+--lua-desync=fake:blob=fake_default_tls:badsum:tcp_seq=10000000:repeats=1:strategy=2
+--lua-desync=multisplit:blob=fake_default_tls:badsum:tcp_ack=-66000:pos=2:nodrop:strategy=2:final'
+
+config strategy 'V_circular'
+	option enabled '1'
+	option port '443'
+	list filter_l3 'ipv4'
+	list filter_l7 'tls'
+	option script '--out-range=-s34228
+--payload=tls_client_hello
+--in-range=-s5556 --lua-desync=circular:fails=3:maxtime=60
+--in-range=x
+--lua-desync=multisplit:pos=2:seqovl=681:seqovl_pattern=blob_stun:strategy=1
+--lua-desync=fake:blob=blob_tls_clienthello_www_google_com:optional:tcp_ts=-600000:repeats=8:tls_mod=rnd,dupsid,sni=www.google.com:strategy=2
+--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=blob_stun:strategy=2
+--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-600000:tcp_md5:repeats=4:strategy=3
+--lua-desync=multisplit:pos=1:seqovl=582:seqovl_pattern=blob_stun:strategy=4
+--lua-desync=fake:blob=blob_stun:tcp_seq=0:tcp_ack=-66000:badsum:strategy=5
+--lua-desync=fakeddisorder:pos=1:pattern=blob_tls_clienthello_www_google_com:tcp_seq=0:tcp_ack=-66000:badsum:strategy=5
+--lua-desync=hostfakesplit:midhost=host-2:host=i2.photo.2gis.com:tcp_seq=0:tcp_ack=-66000:badsum:strategy=6
+--lua-desync=fake:blob=blob_stun:tcp_seq=-10000:tcp_ack=-66000:badsum:repeats=8:strategy=7
+--lua-desync=multisplit:pos=1:seqovl=654:seqovl_pattern=blob_stun:strategy=7
+--lua-desync=fake:blob=blob_tls_clienthello_www_4pda_to:optional:tcp_ts=-600000:strategy=8
+--lua-desync=hostfakesplit:host=ozon.ru:tcp_seq=0:tcp_ack=-66000:badsum:strategy=9
+--lua-desync=fake:blob=blob_tls_clienthello_www_google_com:optional:tcp_ts=-600000:tls_mod=rnd,sni=maxcdn.bootstrapcdn.com:strategy=10
+--lua-desync=multisplit:pos=2:strategy=10:final'
+	list protocol 'tcp'
+	list hostlist_exclude 'list_hosts_user_exclude'
+
+config strategy 'Youtube_circular'
+	option port '443'
+	list filter_l3 'ipv4'
+	list filter_l7 'tls'
+	list hostlist 'list_hosts_youtube'
+	option script '--out-range=-s34228
+--payload=tls_client_hello
+--in-range=-s5556 --lua-desync=circular:fails=3:maxtime=60
+--in-range=x
+--lua-desync=hostfakesplit:host=google.com:tcp_ts=-600000:strategy=1
+--lua-desync=fake:blob=0x0F0F0F0F:tcp_seq=-10000:tcp_ack=-66000:badsum:strategy=2
+--lua-desync=fake:blob=blob_tls_clienthello_www_google_com:optional:tcp_seq=-10000:tcp_ack=-66000:badsum:tls_mod=rnd,dupsid,sni=ggpht.com:strategy=2
+--lua-desync=multisplit:pos=2,sld:seqovl=620:seqovl_pattern=blob_tls_clienthello_www_google_com:strategy=2
+--lua-desync=multidisorder:pos=1,midsld:strategy=3
+--lua-desync=tls_client_hello_clone:blob=cloned_tls:fallback=fake_default_tls:strategy=4
+--lua-desync=fake:blob=cloned_tls:optional:tcp_seq=10000000:tcp_ack=-66000:repeats=2:tls_mod=rnd,dupsid,sni=fonts.google.com:strategy=4
+--lua-desync=multidisorder:pos=1:seqovl=681:seqovl_pattern=blob_tls_clienthello_www_google_com:strategy=4
+--lua-desync=fake:blob=0x00000000:tcp_seq=-10000:tcp_ack=-66000:strategy=5
+--lua-desync=fake:blob=0x0F0F0F0F:tcp_seq=-10000:tcp_ack=-66000:strategy=5
+--lua-desync=fake:blob=blob_tls_clienthello_www_google_com:optional:tcp_seq=-10000:tcp_ack=-66000:tls_mod=rnd,dupsid,sni=fonts.google.com:strategy=5
+--lua-desync=multidisorder:pos=10,midsld:seqovl=336:seqovl_pattern=blob_tls_clienthello_www_google_com:strategy=5
+--lua-desync=multisplit:pos=1,sniext+1:seqovl=1:strategy=6
+--lua-desync=fakeddisorder:pos=method+2:tcp_md5:strategy=7
+--lua-desync=tls_client_hello_clone:blob=cloned_tls:fallback=fake_default_tls:strategy=8
+--lua-desync=fake:blob=cloned_tls:optional:tcp_ts=-600000:tls_mod=rnd,dupsid,sni=www.google.com:strategy=8
+--lua-desync=hostfakesplit:ip_id=zero:host=www.google.com:altorder=1:tcp_ts=-600000:strategy=8
+--lua-desync=hostfakesplit:host=google.com:tcp_ts=-600000:strategy=9
+--lua-desync=fake:blob=blob_tls_clienthello_www_google_com:optional:tcp_ts=-600000:repeats=6:strategy=10
+--lua-desync=fakedsplit:ip_id=zero:pattern=0x00:tcp_ts=-600000:strategy=10
+--lua-desync=fake:blob=blob_tls_clienthello_www_google_com:optional:tcp_ts=-600000:repeats=8:strategy=11
+--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=blob_tls_clienthello_www_google_com:ip_id=zero:strategy=11
+--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=blob_tls_clienthello_www_google_com:ip_id=zero:strategy=12
+--lua-desync=multisplit:pos=1,sniext+1:seqovl=1:strategy=13
+--lua-desync=multisplit:seqovl=681:seqovl_pattern=blob_tls_clienthello_www_google_com:strategy=14
+--lua-desync=fake:blob=blob_tls_clienthello_www_google_com:optional:tcp_seq=0:tcp_ack=-66000:badsum:tls_mod=rnd,dupsid,sni=fonts.google.com:strategy=15
+--lua-desync=fake:blob=0x0F0F0F0F:tcp_seq=0:tcp_ack=-66000:badsum:tls_mod=none:strategy=15
+--lua-desync=fakeddisorder:pos=10,midsld:seqovl=336:seqovl_pattern=blob_tls_clienthello_gosuslugi_ru:pattern=blob_tls_clienthello_vk_com:tcp_seq=0:tcp_ack=-66000:badsum:strategy=15
+--lua-desync=multidisorder:pos=7,sld+1:nodrop:strategy=16
+--lua-desync=multidisorder:pos=1,midsld,endhost-1:strategy=17
+--lua-desync=fake:blob=0x00000000:tcp_seq=-10000:tcp_ack=-66000:repeats=2:strategy=18
+--lua-desync=fake:blob=fake_default_tls:tcp_seq=-10000:tcp_ack=-66000:repeats=2:tls_mod=rnd,dupsid,sni=www.google.com:strategy=18
+--lua-desync=multisplit:pos=1,midsld:strategy=18
+--lua-desync=multidisorder:pos=1,midsld:strategy=19
+--lua-desync=multisplit:pos=1,2:seqovl=4:seqovl_pattern=blob_tls_clienthello_www_google_com:strategy=20
+--lua-desync=multidisorder:pos=2,5,105,host+5,sld-1,endsld-5,endsld:strategy=21
+--lua-desync=fake:blob=0x0F0F0F0F:tcp_seq=-10000:tcp_ack=-66000:badsum:strategy=22
+--lua-desync=fake:blob=blob_tls_clienthello_www_google_com:optional:tcp_seq=-10000:tcp_ack=-66000:badsum:tls_mod=rnd,dupsid,sni=ggpht.com:strategy=22
+--lua-desync=multisplit:pos=2,sld:seqovl=2108:seqovl_pattern=blob_tls_clienthello_www_google_com:strategy=22:final'
+	list protocol 'tcp'
+	option enabled '0'
+
+config strategy 'Routerich_circular'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list filter_l7 'tls'
+	option script '--out-range=-s34228
+--payload=tls_client_hello
+--in-range=-s5556 --lua-desync=circular:fails=3:maxtime=60
+--in-range=x
+--lua-desync=hostfakesplit:midhost=host-2:host=rzd.ru:tcp_seq=0:tcp_ack=-66000:badsum:strategy=1
+--lua-desync=multisplit:seqovl=681:seqovl_pattern=blob_stun:strategy=2
+--lua-desync=fake:blob=blob_tls_clienthello_www_google_com:optional:tcp_seq=0:tcp_ack=-66000:badsum:tls_mod=rnd,dupsid,sni=fonts.google.com:strategy=3
+--lua-desync=fake:blob=0x0F0F0F0F:tcp_seq=0:tcp_ack=-66000:badsum:tls_mod=none:strategy=3
+--lua-desync=fakeddisorder:pos=10,midsld:seqovl=336:seqovl_pattern=blob_tls_clienthello_gosuslugi_ru:pattern=blob_tls_clienthello_vk_com:tcp_seq=0:tcp_ack=-66000:badsum:strategy=3
+--lua-desync=fake:blob=blob_tls_clienthello_t2_ru:optional:tcp_seq=0:tcp_ack=-66000:badsum:tls_mod=rnd,dupsid,sni=m.ok.ru:strategy=4
+--lua-desync=fake:blob=0x0F0F0F0F:tcp_seq=0:tcp_ack=-66000:badsum:tls_mod=none:strategy=4
+--lua-desync=fakeddisorder:pos=10,midsld:seqovl=336:seqovl_pattern=blob_tls_clienthello_gosuslugi_ru:pattern=blob_tls_clienthello_vk_com:tcp_seq=0:tcp_ack=-66000:badsum:strategy=4
+--lua-desync=fake:blob=0x0F0F0F0F:tcp_seq=-10000:tcp_ack=-66000:strategy=5
+--lua-desync=fake:blob=blob_tls_clienthello_www_google_com:optional:tcp_seq=-10000:tcp_ack=-66000:tls_mod=rnd,dupsid,sni=google.com:strategy=5
+--lua-desync=multisplit:pos=2,sld:seqovl=2108:seqovl_pattern=blob_tls_clienthello_www_google_com:strategy=5
+--lua-desync=fake:blob=blob_stun:optional:tcp_seq=0:tcp_ack=-66000:badsum:tls_mod=none:strategy=6
+--lua-desync=fakeddisorder:pos=1:pattern=blob_tls_clienthello_www_google_com:tcp_seq=0:tcp_ack=-66000:badsum:strategy=6
+--lua-desync=multisplit:pos=1,sniext+1:seqovl=1:strategy=7
+--lua-desync=fake:blob=0x0F0F0F0F:tcp_seq=-10000:tcp_ack=-66000:badsum:strategy=8
+--lua-desync=fake:blob=blob_tls_clienthello_www_google_com:optional:tcp_seq=-10000:tcp_ack=-66000:badsum:tls_mod=rnd,dupsid,sni=ggpht.com:strategy=8
+--lua-desync=multisplit:pos=2,sld:seqovl=620:seqovl_pattern=blob_tls_clienthello_www_google_com:strategy=8
+--lua-desync=hostfakesplit:host=mapgl.2gis.com:tcp_seq=0:tcp_ack=-66000:badsum:strategy=9
+--lua-desync=fake:blob=blob_tls_clienthello_www_4pda_to:optional:tcp_ts=-600000:tls_mod=none:strategy=10
+--lua-desync=fake:blob=blob_stun:optional:tcp_seq=0:tcp_ack=-66000:badsum:strategy=11
+--lua-desync=multisplit:pos=1:seqovl=654:seqovl_pattern=blob_stun:strategy=11
+--lua-desync=hostfakesplit:midhost=host-2:host=i2.photo.2gis.com:tcp_seq=0:tcp_ack=-66000:badsum:strategy=12
+--lua-desync=multisplit:pos=1:seqovl=582:seqovl_pattern=blob_stun:strategy=13:final'
+	list protocol 'tcp'
+	list hostlist_exclude 'list_hosts_user_exclude'
+
+config strategy 'DoH_DNS'
+	option enabled '0'
+	option port '53'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'unknown'
+	list filter_l7 'dns'
+	option script '--out-range=-n2
+--lua-desync=fake:blob=quic_initial_www_google_com:repeats=4'
+
+config strategy 'DoH_TLS'
+	option enabled '0'
+	option port '853'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	option script '--hostlist-domains=dns.adguard-dns.com,cloudflare-dns.com,one.one.one.one,dns.alidns.com,dns.quad9.net
+--lua-desync=multisplit:seqovl=8:seqovl_pattern=0x000100502112A442'
+
+config strategy 'v1'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist_exclude 'list_hosts_user_exclude'
+	option script '--payload=tls_client_hello
+--lua-desync=multisplit:pos=2:seqovl=681:seqovl_pattern=blob_stun'
+
+config strategy 'v2'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist_exclude 'list_hosts_user_exclude'
+	option script '--payload=tls_client_hello
+--lua-desync=fake:blob=blob_tls_clienthello_www_google_com:optional:tcp_ts=-600000:repeats=8:tls_mod=rnd,dupsid,sni=www.google.com
+--lua-desync=multisplit:pos=1:seqovl=681:seqovl_pattern=blob_stun'
+
+config strategy 'v3'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist_exclude 'list_hosts_user_exclude'
+	option script '--payload=tls_client_hello
+--lua-desync=hostfakesplit:host=ozon.ru:tcp_ts=-600000:tcp_md5:repeats=4'
+
+config strategy 'v4'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist_exclude 'list_hosts_user_exclude'
+	option script '--payload=tls_client_hello
+--lua-desync=multisplit:pos=1:seqovl=582:seqovl_pattern=blob_stun'
+
+config strategy 'v5'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist_exclude 'list_hosts_user_exclude'
+	option script '--payload=tls_client_hello
+--lua-desync=fake:blob=blob_stun:tcp_seq=0:tcp_ack=-66000:badsum
+--lua-desync=fakeddisorder:pos=1:pattern=blob_tls_clienthello_www_google_com:tcp_seq=0:tcp_ack=-66000:badsum'
+
+config strategy 'v6'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist_exclude 'list_hosts_user_exclude'
+	option script '--payload=tls_client_hello
+--lua-desync=hostfakesplit:midhost=host-2:host=i2.photo.2gis.com:tcp_seq=0:tcp_ack=-66000:badsum'
+
+config strategy 'v7'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist_exclude 'list_hosts_user_exclude'
+	option script '--payload=tls_client_hello
+--lua-desync=fake:blob=blob_stun:tcp_seq=-10000:tcp_ack=-66000:badsum:repeats=8
+--lua-desync=multisplit:pos=1:seqovl=654:seqovl_pattern=blob_stun'
+
+config strategy 'v8'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist_exclude 'list_hosts_user_exclude'
+	option script '--payload=tls_client_hello
+--lua-desync=fake:blob=blob_tls_clienthello_www_4pda_to:optional:tcp_ts=-600000'
+
+config strategy 'v9'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist_exclude 'list_hosts_user_exclude'
+	option script '--payload=tls_client_hello
+--lua-desync=hostfakesplit:host=ozon.ru:tcp_seq=0:tcp_ack=-66000:badsum'
+
+config strategy 'v10'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist_exclude 'list_hosts_user_exclude'
+	option script '--payload=tls_client_hello
+--lua-desync=fake:blob=blob_tls_clienthello_www_google_com:optional:tcp_ts=-600000:tls_mod=rnd,sni=maxcdn.bootstrapcdn.com
+--lua-desync=multisplit:pos=2'
+
+config strategy 'Yv01'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist 'list_hosts_youtube'
+	option script '--payload=tls_client_hello
+--lua-desync=multidisorder:pos=7,sld+1:ip_autottl=2,2-12'
+
+config strategy 'Yv02'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist 'list_hosts_youtube'
+	option script '--payload=tls_client_hello
+--lua-desync=multidisorder:pos=1,midsld,endhost-1:tcp_md5'
+
+config strategy 'Yv03'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist 'list_hosts_youtube'
+	option script '--payload=tls_client_hello
+--lua-desync=fake:blob=0x00000000:tcp_seq=-10000:tcp_ack=-66000:repeats=2:tls_mod=rnd,dupsid,sni=www.google.com
+--lua-desync=multisplit:pos=1,midsld'
+
+config strategy 'Yv04'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist 'list_hosts_youtube'
+	option script '--payload=tls_client_hello
+--lua-desync=multidisorder:pos=1,midsld'
+
+config strategy 'Yv05'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist 'list_hosts_youtube'
+	option script '--payload=tls_client_hello
+--lua-desync=multidisorder:pos=2,5,105,host+5,sld-1,endsld-5,endsld'
+
+config strategy 'Yv06'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist 'list_hosts_youtube'
+	option script '--payload=tls_client_hello
+--lua-desync=multidisorder:pos=1,midsld'
+
+config strategy 'Yv07'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist 'list_hosts_youtube'
+	option script '--payload=tls_client_hello
+--lua-desync=fake:blob=0x00000000:tcp_seq=-10000:tcp_ack=-66000
+--lua-desync=fake:blob=0x0F0F0F0F:tcp_seq=-10000:tcp_ack=-66000
+--lua-desync=fake:blob=blob_tls_clienthello_www_google_com:optional:tcp_seq=-10000:tcp_ack=-66000:tls_mod=rnd,dupsid,sni=fonts.google.com
+--lua-desync=multidisorder:pos=10,midsld:seqovl=336:seqovl_pattern=blob_tls_clienthello_www_google_com'
+
+config strategy 'Yv08'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist 'list_hosts_youtube'
+	option script '--payload=tls_client_hello
+--lua-desync=hostfakesplit:host=google.com:tcp_ts=-600000'
+
+config strategy 'Yv09'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist 'list_hosts_youtube'
+	option script '--payload=tls_client_hello
+--lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1'
+
+config strategy 'Yv10'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist 'list_hosts_youtube'
+	option script '--payload=tls_client_hello
+--lua-desync=multidisorder:pos=1,2,3,5,105,host+5,sld-1,endsld-5,endsld'
+
+config strategy 'Yv11'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist 'list_hosts_youtube'
+	option script '--payload=tls_client_hello
+--lua-desync=fake:blob=0x00000000:tcp_seq=-10000:tcp_ack=-66000:repeats=2:tls_mod=rnd,dupsid,sni=www.google.com
+--lua-desync=multisplit:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1'
