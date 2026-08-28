@@ -119,7 +119,7 @@ sed -i '/#githubusercontent.com/,+2d' /etc/hosts; /etc/init.d/dnsmasq restart 2>
 ## 🔹 Подготовка системы
 
 > [!IMPORTANT]
->для работы некотрых стратегий, в терминале Windows необходимо один раз выполнить:
+>для работы некоторых стратегий, в терминале Windows необходимо один раз выполнить:
 >```
 >netsh int tcp set global timestamps=enabled
 >```
@@ -138,13 +138,15 @@ sed -i '/#githubusercontent.com/,+2d' /etc/hosts; /etc/init.d/dnsmasq restart 2>
 ## 🔹 Запуск менеджера
 
 Подключитесь по **SSH** к роутеру и выполните команду:
-
+> [!IMPORTANT]
+> Если у Вас доступен **raw.githubusercontent.com**:
 ```
-sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)
+wget -qO - 'https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh' | sh
 ```
-или
+> [!IMPORTANT]
+> Если у Вас **НЕ** доступен **raw.githubusercontent.com**:
 ```
-wget -O /tmp/Zapret-Manager.sh https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh && sh /tmp/Zapret-Manager.sh
+wget -qO - 'https://gh-proxy.org/https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh' | sh
 ```
 
 После запуска скрипта по команде выше, скрипт можно запускать в **SSH** командой:
