@@ -8,7 +8,7 @@ ZAPRET_MANAGER_VERSION="9.84"; STR_VERSION_AUTOINSTALL="v7"
 GREEN="\033[1;32m"; RED="\033[1;31m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
 GH_RAW_HOST="https://raw.githubusercontent.com"; GH_MAIN_HOST="https://github.com"; GH_PROXY="https://gh-proxy.org/"; GH_CHECK_URL="${GH_RAW_HOST}/StressOzz/Zapret-Manager/refs/heads/main/Zapret-Manager.sh"
-echo -e "${CYAN}Проверяем доступность ${NC}raw.githubusercontent.com"; if wget -q -T 2 -O /dev/null "$GH_CHECK_URL" 2>/dev/null; then GH_OK=1; GH_RAW="$GH_RAW_HOST"
+echo -e "${CYAN}Проверяем доступность ${NC}raw.githubusercontent.com"; if wget -q -T 4 -O /dev/null "$GH_CHECK_URL" 2>/dev/null; then GH_OK=1; GH_RAW="$GH_RAW_HOST"
 GH_MAIN="$GH_MAIN_HOST"; echo -e "raw.githubusercontent.com ${GREEN}доступен!${NC}\n"; else GH_OK=0; GH_RAW="${GH_PROXY}${GH_RAW_HOST}"; GH_MAIN="${GH_PROXY}${GH_MAIN_HOST}"
 echo -e "raw.githubusercontent.com ${RED}недоступен${CYAN} — ${YELLOW}используем прокси!${NC}\n"; fi
 
@@ -121,14 +121,38 @@ DELETE="opkg remove"; ARCH="$(opkg print-architecture | awk '{print $2}' | tail 
 RAZ="ipk"; TMP_FILE_GO="/tmp/tg-ws-proxy.ipk"; else PKG="apk"; GO_SUF="r1"; CONFZ="/etc/apk/repositories.d/distfeeds.list"; PKG_IS_APK=1; SPL_SUF="noarch"; RELEASE_TAG="v${BYEDPI_LATEST_VER}-25.12"
 UPDATE="apk update"; INSTALL="apk add --allow-untrusted"; DELETE="apk del"; ARCH="$(apk --print-arch 2>/dev/null)"; RAZ="apk"; VER_SUF="r1"; SUF_MT="r"; TMP_FILE_GO="/tmp/tg-ws-proxy.apk"; fi
 
-MIRROR=""; CURRENT_MIRROR=$(head -n1 "$CONFZ" | sed 's|https://||;s|/releases/.*||'); echo -e "${CYAN}Проверяем доступность ${NC}$CURRENT_MIRROR"
-if ! wget -q --spider --timeout=2 "https://$CURRENT_MIRROR/releases/" >/dev/null 2>&1; then echo -e "$CURRENT_MIRROR ${RED}недоступен!${NC}"
-if wget -q --spider --timeout=2 "https://mirror-03.infra.openwrt.org/releases/" >/dev/null 2>&1; then MIRROR="mirror-03.infra.openwrt.org"
-elif wget -q --spider --timeout=2 "https://ftp.snt.utwente.nl/pub/software/openwrt/releases/" >/dev/null 2>&1; then MIRROR="ftp.snt.utwente.nl/pub/software/openwrt"
-elif wget -q --spider --timeout=2 "https://mirror.berlin.freifunk.net/downloads.openwrt.org/releases/" >/dev/null 2>&1; then MIRROR="mirror.berlin.freifunk.net/downloads.openwrt.org"
-elif wget -q --spider --timeout=2 "https://mirror.sjtu.edu.cn/openwrt/releases/" >/dev/null 2>&1; then MIRROR="mirror.sjtu.edu.cn/openwrt"; fi
-if [ -n "$MIRROR" ]; then echo -e "${CYAN}Переключаемся на ${NC}$MIRROR"; sed -i "s|https://.*/releases/|https://$MIRROR/releases/|g" "$CONFZ"
-else echo -e "${RED}Резервные зеркала недоступны!${NC}"; fi; else echo -e "$CURRENT_MIRROR ${GREEN}доступен!${NC}"; fi
+MIRROR=""
+CURRENT_MIRROR=$(head -n1 "$CONFZ" | awk '{print $NF}' | sed 's|https://||;s|/releases/.*||')
+
+if grep -qE 'mirror-03\.infra\.openwrt\.org|ftp\.snt\.utwente\.nl/pub/software/openwrt|mirror\.berlin\.freifunk\.net/downloads\.openwrt|mirror\.sjtu\.edu\.cn/openwrt|downloads\.openwrt\.org' "$CONFZ"; then
+
+    echo -e "${CYAN}Проверяем доступность ${NC}$CURRENT_MIRROR"
+
+    if ! wget -q --spider --timeout=2 "https://$CURRENT_MIRROR/releases/" >/dev/null 2>&1; then
+        echo -e "$CURRENT_MIRROR ${RED}недоступен!${NC}"
+
+        if wget -q --spider --timeout=3 "https://mirror-03.infra.openwrt.org/releases/" >/dev/null 2>&1; then
+            MIRROR="mirror-03.infra.openwrt.org"
+        elif wget -q --spider --timeout=3 "https://ftp.snt.utwente.nl/pub/software/openwrt/releases/" >/dev/null 2>&1; then
+            MIRROR="ftp.snt.utwente.nl/pub/software/openwrt"
+        elif wget -q --spider --timeout=3 "https://mirror.berlin.freifunk.net/downloads.openwrt/releases/" >/dev/null 2>&1; then
+            MIRROR="mirror.berlin.freifunk.net/downloads.openwrt"
+        elif wget -q --spider --timeout=3 "https://mirror.sjtu.edu.cn/openwrt/releases/" >/dev/null 2>&1; then
+            MIRROR="mirror.sjtu.edu.cn/openwrt"
+        elif wget -q --spider --timeout=3 "https://downloads.openwrt.org/releases/" >/dev/null 2>&1; then
+            MIRROR="downloads.openwrt.org"
+        fi
+
+        if [ -n "$MIRROR" ]; then
+            echo -e "${CYAN}Переключаемся на ${NC}$MIRROR"
+            sed -i "s|https://.*/releases/|https://$MIRROR/releases/|g" "$CONFZ"
+        else
+            echo -e "${RED}Резервные зеркала недоступны!${NC}"
+        fi
+    else
+        echo -e "$CURRENT_MIRROR ${GREEN}доступен!${NC}"
+    fi
+fi
 
 update_packages(){ [ "$PACKAGES_UPDATED" = "1" ] && return 0; echo -e "${CYAN}Обновляем список пакетов${NC}"; $UPDATE >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка обновления списка пакетов!${NC}\n"; PAUSE; return 1; }; PACKAGES_UPDATED=1; }
 
@@ -136,13 +160,42 @@ if ! curl --version >/dev/null 2>&1; then echo -e "\ncurl ${RED}отсутств
 $DELETE curl libcurl >/dev/null 2>&1; echo -e "${CYAN}Обновляем список пакетов${NC}"; if ! $UPDATE >/dev/null 2>&1; then echo -e "\n${RED}Ошибка обновления списка пакетов!${NC}\n"; else PACKAGES_UPDATED=1; fi
 echo -e "${CYAN}Устанавливаем ${NC}curl"; if ! $INSTALL libcurl curl >/dev/null 2>&1; then echo -e "\n${RED}Не удалось установить curl!${NC}\n"; PAUSE; fi; fi
 
-get_zapret2_ver() { if [ "$PKG_IS_APK" -eq 1 ]; then IDX_URL2="https://packages.routerich.ru/25.12/mediatek/filogic/routerich/"; FNAME2=$(curl -s --connect-timeout 3 --max-time 5 "$IDX_URL2" | grep -o "zapret2-[0-9][^\"]*\.apk" | head -n1)
-else IDX_URL2="https://packages.routerich.ru/24.10/mediatek/filogic/routerich/"; FNAME2=$(curl -s --connect-timeout 3 --max-time 5 "$IDX_URL2" | grep -o "zapret2_[0-9][^\"]*_aarch64_cortex-a53\.ipk" | head -n1); fi
-VER2=$(echo "$FNAME2" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)*-r[0-9]+' | sed 's/-r[0-9]*$//'); if [ -z "$VER2" ]; then echo -e "Zapret2: ${RED}ошибка получения версии${NC}"; return 1; fi; echo "$VER2" > "$TMP_VER_Z2"; echo -e "Zapret2: ${GREEN}$VER2${NC}"; }
+get_zapret2_ver() {
+    if [ "$PKG_IS_APK" -eq 1 ]; then
+        IDX_URL2="https://packages.routerich.ru/25.12/mediatek/filogic/routerich/"
+        PATTERN='zapret2-[0-9][^"]*\.apk'
+    else
+        IDX_URL2="https://packages.routerich.ru/24.10/mediatek/filogic/routerich/"
+        PATTERN='zapret2_[0-9][^"]*_aarch64_cortex-a53\.ipk'
+    fi
 
+    FNAME2=""
+
+    for i in 1 2 3; do
+        FNAME2=$(curl -fsS --connect-timeout 3 --max-time 5 "$IDX_URL2" 2>/dev/null |
+            grep -oE "$PATTERN" | head -n1)
+
+        [ -n "$FNAME2" ] && break
+        sleep 1
+    done
+
+    VER2=$(printf '%s\n' "$FNAME2" |
+        grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)*-r[0-9]+' |
+        sed 's/-r[0-9]*$//')
+
+    if [ -z "$VER2" ]; then
+        echo -e "Zapret2: ${RED}ошибка получения версии${NC}"
+        return 1
+    fi
+
+    echo "$VER2" > "$TMP_VER_Z2"
+    echo -e "Zapret2: ${GREEN}$VER2${NC}"
+}
 get_ver() { URL="$1"; OUT_FILE="$2"; NAME="$3"; RESULT=$(curl -sIL --connect-timeout 3 --max-time 4 --retry 1 -w "%{url_effective}" -o /dev/null "$URL" 2>/dev/null)
 if [ $? -ne 0 ] || [ -z "$RESULT" ]; then echo -e "$NAME: ${RED}ошибка получения версии${NC}"; return 1; fi; VERSION="${RESULT##*/}"; VERSION="${VERSION#v}"; [ "$NAME" = "ByeDPI" ] && VERSION="${VERSION%%-*}"
 if [ -z "$VERSION" ]; then echo -e "$NAME - ${RED}не удалось извлечь версию${NC}"; echo -e "${YELLOW}URL:${NC} $RESULT"; return 1; fi; echo "$VERSION" > "$OUT_FILE"; echo -e "$NAME: ${GREEN}$VERSION${NC}"; }
+
+rm -f "$TMP_VER" "$TMP_VER_POD" "$TMP_VER_TG_MT" "$TMP_VER_TG_GO" "$TMP_VER_TG_RS" "$TMP_MAG_VER" "$TMP_VER_SPL" "$TMP_VER_BYEDPI" "$TMP_VER_Z2"
 
 echo -e "\n${CYAN}Cобираем версии:${NC}"
 TMP_VER="/tmp/zapret_version"; TMP_VER_POD="/tmp/podkop_version"; TMP_VER_TG_MT="/tmp/tg_ws_proxy_MTp_ver"; TMP_VER_TG_GO="/tmp/tg_ws_proxy_GO_ver"
@@ -991,7 +1044,7 @@ printf "%s\n" "option update_interval '1d'" "option download_lists_via_proxy '0'
 printf "%s\n" "option interface 'AWG'" "option domain_resolver_enabled '0'" "list community_lists 'geoblock'" "list community_lists 'block'" "list community_lists 'porn'" "list community_lists 'news'" "list community_lists 'anime'" "list community_lists 'youtube'" "list community_lists 'discord'" "list community_lists 'meta'" "list community_lists 'twitter'" >> /etc/config/netshift
 printf "%s\n" "list community_lists 'hdrezka'" "list community_lists 'tiktok'" "list community_lists 'telegram'" "list community_lists 'cloudflare'" "list community_lists 'google_ai'" "list community_lists 'google_play'" "list community_lists 'hodca'" "list community_lists 'roblox'" "list community_lists 'hetzner'" "list community_lists 'ovh'" >> /etc/config/netshift
 printf "%s\n" "list community_lists 'digitalocean'" "list community_lists 'cloudfront'" "option user_domain_list_type 'disabled'" "option user_subnet_list_type 'disabled'" "option mixed_proxy_enabled '0'" >> /etc/config/netshift
-echo -e "${CYAN}Запускаем ${NC}NetShift${NC}"; netshift enable >/dev/null 2>&1; echo -e "${CYAN}Обновляем списки${NC}"; netshift list_update >/dev/null 2>&1; echo -en "${CYAN}Перезапускаем сервис${NC}\n${YELLOW}Подождите...${NC}"
+echo -e "${CYAN}Запускаем ${NC}NetShift${NC}"; netshift enable >/dev/null 2>&1; echo -en "${CYAN}Перезапускаем сервис${NC}\n${YELLOW}Подождите...${NC}"
 netshift restart >/dev/null 2>&1; echo -e "\nAWG ${GREEN}интегрирован в ${NC}NetShift${GREEN}!${NC}\n"; echo -e "${YELLOW}Необходимо в ${NC}LuCI${YELLOW} в интерфейс ${NC}AWG${YELLOW} загрузить файл ${NC}*.conf${YELLOW}:${NC}"
 echo -e "${NC}Network ${GREEN}→${NC} Interfaces ${GREEN}→${NC} AWG ${GREEN}→${NC} Edit ${GREEN}→${NC} Load configuration… ${GREEN}→${NC} Save ${GREEN}→${NC} Save & Apply\n"; PAUSE; }
 PODKOP_VPN() { if ! pkg_is_installed netshift; then echo -e "\n${RED}NetShift не установлен!${NC}\n"; PAUSE; return; fi; echo -e "\n${MAGENTA}Интегрируем VPN подписку в NetShift${NC}"; echo -ne "\n${YELLOW}Введите ссылку на подписку (${NC}https://...${YELLOW}): ${NC}"
@@ -1004,7 +1057,7 @@ printf "%s\n" "option subscription_group_by_countries '0'" "option urltest_check
 printf "%s\n" "list community_lists 'porn'" "list community_lists 'news'" "list community_lists 'anime'" "list community_lists 'discord'" "list community_lists 'meta'" "list community_lists 'twitter'" "list community_lists 'hdrezka'" "list community_lists 'tiktok'" "list community_lists 'telegram'" "list community_lists 'cloudflare'" >> /etc/config/netshift
 printf "%s\n" "list community_lists 'google_ai'" "list community_lists 'google_play'" "list community_lists 'hodca'" "list community_lists 'roblox'" "list community_lists 'hetzner'" "list community_lists 'ovh'" "list community_lists 'digitalocean'" "list community_lists 'cloudfront'" "option user_domain_list_type 'disabled'" >> /etc/config/netshift
 printf "%s\n" "option user_subnet_list_type 'disabled'" "option mixed_proxy_enabled '0'" "option resolve_real_ip_for_routing '0'" "list subscription_filter_exclude_keywords '⬇️'" "list subscription_filter_exclude_keywords 'LTE'" "list subscription_filter_exclude_keywords '🇪🇺'" "list subscription_filter_exclude_keywords 'Мобильный'" "list subscription_filter_exclude_keywords 'SS'" "list subscription_filter_exclude_keywords 'Авто'" >> /etc/config/netshift
-fi; echo -e "${CYAN}Запускаем ${NC}NetShift${NC}"; netshift enable >/dev/null 2>&1; echo -e "${CYAN}Обновляем списки${NC}"; netshift list_update >/dev/null 2>&1; echo -en "${CYAN}Перезапускаем сервис${NC}\n${YELLOW}Подождите...${NC}"; netshift restart >/dev/null 2>&1; echo -e "\nVPN подписка ${GREEN}интегрирована в ${NC}NetShift${GREEN}!${NC}\n"; PAUSE; }
+fi; echo -e "${CYAN}Запускаем ${NC}NetShift${NC}"; netshift enable >/dev/null 2>&1; echo -en "${CYAN}Перезапускаем сервис${NC}\n${YELLOW}Подождите...${NC}"; netshift restart >/dev/null 2>&1; echo -e "\nVPN подписка ${GREEN}интегрирована в ${NC}NetShift${GREEN}!${NC}\n"; PAUSE; }
 BYEDPI_STATUS() { if pkg_is_installed byedpi; then if [ "$PKG_IS_APK" -eq 1 ]; then LOCAL_BYEDPI="$(apk list -I 2>/dev/null | grep '^byedpi-' | head -1 | sed -E 's/^byedpi-//;s/-r[0-9]+.*//')"; else LOCAL_BYEDPI="$(opkg list-installed 2>/dev/null | awk '$1=="byedpi" {print $3}' | sed 's/-r[0-9]\+$//')"; fi; [ "$LOCAL_BYEDPI" = "$BYEDPI_LATEST_VER" ] && BYEDPI_STATUS="${GREEN}${LOCAL_BYEDPI}${NC}" || BYEDPI_STATUS="${RED}${LOCAL_BYEDPI} (версия устарела)${NC}"; else BYEDPI_STATUS="${RED}не установлен${NC}"; fi; }
 BYEDPI_SAVE_DNS_STATE() { if [ ! -f "$BYEDPI_DNS_BACKUP" ]; then { echo "LOCALUSE=$(uci -q get dhcp.@dnsmasq[0].localuse 2>/dev/null || echo "__UNSET__")"; echo "SERVER=$(uci -q get dhcp.@dnsmasq[0].server 2>/dev/null || echo "__UNSET__")"
 echo "NORESOLV=$(uci -q get dhcp.@dnsmasq[0].noresolv 2>/dev/null || echo "__UNSET__")"; echo "NETSHIFT_NORESOLV=$(uci -q get dhcp.@dnsmasq[0].netshift_noresolv 2>/dev/null || echo "__UNSET__")"; } > "$BYEDPI_DNS_BACKUP"; fi; }
@@ -1021,8 +1074,8 @@ BYEDPI_NETSHIFT() { if ! pkg_is_installed byedpi; then echo -e "\nByeDPI${RED} �
 rm -f /tmp/byedpi_dns_backup; BYEDPI_SAVE_DNS_STATE; echo -e "${CYAN}Отключаем локальный ${NC}DNS"; uci set dhcp.@dnsmasq[0].localuse='0'; uci commit dhcp; echo -e "${CYAN}Перезапускаем ${NC}dnsmasq"; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "${CYAN}Настраиваем стратегию ${NC}ByeDPI"
 if [ -f /etc/config/byedpi ]; then sed -i "s|option cmd_opts .*|	option cmd_opts '-d1 -s1+s -d3+s -s6+s -d9+s -s12+s -d15+s -s20+s -d25+s -s30+s -d35+s -a1'|" /etc/config/byedpi; fi; echo -e "${CYAN}Меняем конфигурацию в ${NC}NetShift"
 printf "config settings 'settings'\n\toption dns_type 'doh'\n\toption dns_server '8.8.8.8'\n\toption bootstrap_dns_server '77.88.8.8'\n\toption dns_rewrite_ttl '60'\n\tlist source_network_interfaces 'br-lan'\n\toption enable_output_network_interface '0'\n\toption enable_badwan_interface_monitoring '0'\n\toption enable_yacd '0'\n\toption disable_quic '0'\n\toption update_interval '1d'\n\toption download_lists_via_proxy '0'\n\toption dont_touch_dhcp '0'\n\toption config_path '/etc/sing-box/config.json'\n\toption cache_path '/tmp/sing-box/cache.db'\n\toption log_level 'warn'\n\toption exclude_ntp '0'\n\toption shutdown_correctly '0'\n\toption block_doh '0'\n\toption enable_ipv6 '0'\n\toption dns_via_outbound '0'\n\nconfig section 'ByeDPI'\n\toption connection_type 'proxy'\n\toption proxy_config_type 'outbound'\n\toption enable_udp_over_tcp '0'\n\toption global_proxy '0'\n\toption outbound_json '{\n\"type\": \"socks\",\n\"server\": \"127.0.0.1\",\n\"server_port\": 1080\n}'\n\toption user_domain_list_type 'disabled'\n\toption user_subnet_list_type 'disabled'\n\toption mixed_proxy_enabled '0'\n\toption resolve_real_ip_for_routing '0'\n\tlist community_lists 'youtube'\n" > /etc/config/netshift
-echo -e "${CYAN}Запускаем ${NC}ByeDPI"; /etc/init.d/byedpi enable >/dev/null 2>&1; /etc/init.d/byedpi restart >/dev/null 2>&1; echo -e "${CYAN}Запускаем ${NC}NetShift"; netshift enable >/dev/null 2>&1; echo -e "${CYAN}Обновляем списки${NC}"
-netshift list_update >/dev/null 2>&1; echo -e "${CYAN}Перезапускаем ${NC}NetShift"; netshift restart >/dev/null 2>&1; echo -e "ByeDPI ${GREEN}интегрирован в ${NC}NetShift${GREEN}!${NC}"
+echo -e "${CYAN}Запускаем ${NC}ByeDPI"; /etc/init.d/byedpi enable >/dev/null 2>&1; /etc/init.d/byedpi restart >/dev/null 2>&1; echo -e "${CYAN}Запускаем ${NC}NetShift"; netshift enable >/dev/null 2>&1
+echo -e "${CYAN}Перезапускаем ${NC}NetShift"; netshift restart >/dev/null 2>&1; echo -e "ByeDPI ${GREEN}интегрирован в ${NC}NetShift${GREEN}!${NC}"
 echo -ne "\n${YELLOW}Для работы ${NC}ByeDPI${YELLOW} необходимо перезагрузить роутер!\nПерезагрузить сейчас? (${NC}y/N${YELLOW}): ${NC}"; read -r REBOOT_CHOICE; case "$REBOOT_CHOICE" in y|Y) echo -e "\n${GREEN}Перезагрузка роутера!${NC}"; reboot; exit 0 ;; *) echo -e "\n${YELLOW}Перезагрузка отложена!${NC}\n"; PAUSE ;; esac; }
 fix_strategy() { echo -e "\n${MAGENTA}Изменение стратегии ByeDPI${NC}"; if [ ! -f /etc/config/byedpi ]; then echo -e "\n${RED}ByeDPI не установлен!${NC}\n"; PAUSE; return; fi; CURRENT_STRATEGY="$(grep "option cmd_opts" /etc/config/byedpi | sed -E "s/.*'(.+)'/\1/")"
 [ -z "$CURRENT_STRATEGY" ] && CURRENT_STRATEGY="(не задана)"; echo -e "${GREEN}Текущая стратегия:${NC} $CURRENT_STRATEGY"; echo -ne "\n${YELLOW}Введите новую стратегию (Enter — оставить текущую):${NC} "; read -r NEW_STRATEGY; echo; if [ -z "$NEW_STRATEGY" ]
