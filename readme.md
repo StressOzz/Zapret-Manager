@@ -141,12 +141,12 @@ sed -i '/#githubusercontent.com/,+2d' /etc/hosts; /etc/init.d/dnsmasq restart 2>
 > [!IMPORTANT]
 > Если у Вас доступен **raw.githubusercontent.com**:
 ```
-wget -qO - 'https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh' | sh
+sh <(wget -qO - 'https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh')
 ```
 > [!IMPORTANT]
 > Если у Вас **НЕ** доступен **raw.githubusercontent.com**:
 ```
-wget -qO - 'https://gh-proxy.org/https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh' | sh
+sh <(wget -qO - 'https://gh-proxy.org/https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh')
 ```
 
 После запуска скрипта по команде выше, скрипт можно запускать в **SSH** командой:
