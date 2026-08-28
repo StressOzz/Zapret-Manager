@@ -127,8 +127,7 @@ if wget -q --spider --timeout=2 "https://mirror-03.infra.openwrt.org/releases/" 
 elif wget -q --spider --timeout=2 "https://ftp.snt.utwente.nl/pub/software/openwrt/releases/" >/dev/null 2>&1; then MIRROR="ftp.snt.utwente.nl/pub/software/openwrt"
 elif wget -q --spider --timeout=2 "https://mirror.berlin.freifunk.net/downloads.openwrt.org/releases/" >/dev/null 2>&1; then MIRROR="mirror.berlin.freifunk.net/downloads.openwrt.org"
 elif wget -q --spider --timeout=2 "https://mirror.sjtu.edu.cn/openwrt/releases/" >/dev/null 2>&1; then MIRROR="mirror.sjtu.edu.cn/openwrt"; fi
-
-if [ -n "$MIRROR" ]; then echo -e "${CYAN}Переключаемся на ${NC}$MIRROR\n"; sed -i "s|https://.*/releases/|https://$MIRROR/releases/|g" "$CONFZ"
+if [ -n "$MIRROR" ]; then echo -e "${CYAN}Переключаемся на ${NC}$MIRROR"; sed -i "s|https://.*/releases/|https://$MIRROR/releases/|g" "$CONFZ"
 else echo -e "${RED}Резервные зеркала недоступны!${NC}"; fi; else echo -e "$CURRENT_MIRROR ${GREEN}доступен!${NC}"; fi
 
 update_packages(){ [ "$PACKAGES_UPDATED" = "1" ] && return 0; echo -e "${CYAN}Обновляем список пакетов${NC}"; $UPDATE >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка обновления списка пакетов!${NC}\n"; PAUSE; return 1; }; PACKAGES_UPDATED=1; }
