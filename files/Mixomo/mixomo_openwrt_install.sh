@@ -11,6 +11,7 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
+clear
 
 GH_RAW_HOST="https://raw.githubusercontent.com"; GH_MAIN_HOST="https://github.com"; GH_PROXY="https://gh-proxy.org/"; GH_CHECK_URL="${GH_RAW_HOST}/StressOzz/Zapret-Manager/refs/heads/main/Zapret-Manager.sh"
 echo -e "${CYAN}Проверяем доступность ${NC}raw.githubusercontent.com"; if wget -q -T 2 -O /dev/null "$GH_CHECK_URL" 2>/dev/null; then GH_OK=1; GH_RAW="$GH_RAW_HOST"
@@ -1406,7 +1407,6 @@ finalize_install() {
 }
 
 main() {
-    clear
     log_done "=== Mixomo OpenWrt от Internet Helper (StressOzz Remix) ==="
     echo ""
 
