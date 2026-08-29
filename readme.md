@@ -10,6 +10,8 @@
 
 </div>
 
+<p align="center"><a href="https://t.me/stressozz_manager"><img src="https://img.shields.io/badge/Community-Telegram-2CA5E0?style=for-the-badge&logo=telegram"></a>
+
 ---
 
 ### **StressKVN** - умный VPN для стабильного доступа в любых условиях
