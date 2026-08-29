@@ -407,13 +407,13 @@ clear; echo -e "${MAGENTA}Запускаем официальный устано
 echo -e "${YELLOW}При выборе движка выбирайте ${NC}1\n"
 sh -c "$(wget -qO- https://gitlab.com/xyzmean/splify2/-/raw/main/install.sh)"; echo; PAUSE ;;
 4) echo -e "\n${MAGENTA}Удаляем splify2${NC}"
-"/etc/init.d/steer" stop >/dev/null 2>&1
-"/etc/init.d/steer" disable >/dev/null 2>&1
+/etc/init.d/steer stop >/dev/null 2>&1
+/etc/init.d/steer disable >/dev/null 2>&1
 $DELETE steer-extended >/dev/null 2>&1
 $DELETE steer >/dev/null 2>&1
 $DELETE luci-app-splify2 >/dev/null 2>&1
-rm -f /etc/config/steer* /etc/config/splify2* 2>/dev/null; rm -f /etc/init.d/steer; rm -rf /tmp/*steer*; rm -rf /tmp/*splify2*
-echo -e "splify2 ${GREEN}удалён!${NC}\n"; PAUSE;
+rm -rf /etc/config/steer* /etc/config/splify2* /etc/init.d/steer /tmp/*steer* /tmp/*splify2* /etc/steer* /etc/splify2* 2>/dev/null
+echo -e "splify2 ${GREEN}удалён!${NC}\n"; PAUSE
 ;;
 5) if [ -z "$SPL_INST_VER" ]; then echo -e "\nsplify ${RED}не установлен!${NC}\n"
 else register_warp || continue; choose_endpoint || continue; create_warp_iface || continue; WARP_TO_ROOT; register_in_splify; restart_splify; echo -e "\nWARP ${GREEN}изменён!${NC}\n"; fi; PAUSE ;;
