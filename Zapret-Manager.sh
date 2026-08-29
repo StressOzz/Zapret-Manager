@@ -124,15 +124,20 @@ UPDATE="apk update"; INSTALL="apk add --allow-untrusted"; DELETE="apk del"; ARCH
 MIRROR=""
 CURRENT_MIRROR=$(head -n1 "$CONFZ" | awk '{print $NF}' | sed 's|https://||;s|/releases/.*||')
 
-if grep -qE 'mirror-03\.infra\.openwrt\.org|ftp\.snt\.utwente\.nl/pub/software/openwrt|mirror\.berlin\.freifunk\.net/downloads\.openwrt|mirror\.sjtu\.edu\.cn/openwrt|downloads\.openwrt\.org' "$CONFZ"; then
-
+if grep -qE 'mirror-03\.infra\.openwrt\.org|ftp\.snt\.utwente\.nl/pub/software/openwrt|mirror\.berlin\.freifunk\.net/downloads\.openwrt|mirror\.sjtu\.edu\.cn/openwrt|ftp\.halifax\.rwth-aachen\.de/openwrt|mirror\.accum\.se/mirror/openwrt|downloads\.openwrt\.org' "$CONFZ"; then
     echo -e "${CYAN}Проверяем доступность ${NC}$CURRENT_MIRROR"
 
     if ! wget -q --spider --timeout=2 "https://$CURRENT_MIRROR/releases/" >/dev/null 2>&1; then
         echo -e "$CURRENT_MIRROR ${RED}недоступен!${NC}"
-
-        if wget -q --spider --timeout=3 "https://mirror-03.infra.openwrt.org/releases/" >/dev/null 2>&1; then
-            MIRROR="mirror-03.infra.openwrt.org"
+        echo -e "${CYAN}Подбираем зеркало ${NC}OpenWRT"
+        
+        if wget -q --spider --timeout=3 "https://mirror-03.infra.openwrt.org" >/dev/null 2>&1; then
+            MIRROR="mirror-03.infra.openwrt.org"          
+        elif wget -q --spider --timeout=3 "https://ftp.halifax.rwth-aachen.de/openwrt/releases/" >/dev/null 2>&1; then
+            MIRROR="ftp.halifax.rwth-aachen.de/openwrt"
+        elif wget -q --spider --timeout=3 "https://mirror.accum.se/mirror/openwrt.org/releases/" >/dev/null 2>&1; then
+            MIRROR="mirror.accum.se/mirror/openwrt.org"
+            
         elif wget -q --spider --timeout=3 "https://ftp.snt.utwente.nl/pub/software/openwrt/releases/" >/dev/null 2>&1; then
             MIRROR="ftp.snt.utwente.nl/pub/software/openwrt"
         elif wget -q --spider --timeout=3 "https://mirror.berlin.freifunk.net/downloads.openwrt/releases/" >/dev/null 2>&1; then
@@ -142,7 +147,7 @@ if grep -qE 'mirror-03\.infra\.openwrt\.org|ftp\.snt\.utwente\.nl/pub/software/o
         elif wget -q --spider --timeout=3 "https://downloads.openwrt.org/releases/" >/dev/null 2>&1; then
             MIRROR="downloads.openwrt.org"
         fi
-
+        
         if [ -n "$MIRROR" ]; then
             echo -e "${CYAN}Переключаемся на ${NC}$MIRROR"
             sed -i "s|https://.*/releases/|https://$MIRROR/releases/|g" "$CONFZ"
@@ -933,20 +938,21 @@ sed -i "s|https://.*/releases/|https://$NEW_BASE/releases/|g" "$CONFZ"; echo -e 
 if ! $UPDATE >/dev/null 2>&1; then echo -e "\n${RED}Ошибка обновления списка пакетов!${NC}\n${GREEN}Зеркало сброшено на ${NC}default ${GREEN}/${NC} OpenWrt${GREEN}!${NC}\n"
 sed -i "s|https://.*/releases/|https://downloads.openwrt.org/releases/|g" "$CONFZ"; PAUSE; return 1; fi; echo -e "${GREEN}Пакеты обновлены! Зеркало работает!${NC}\n"; PAUSE; }
 
-
 curr_MIR() { if [ -f "$CONFZ" ]; then URL=$(head -n1 "$CONFZ"); case "$URL" in
 *mirror-03.infra.openwrt.org*) echo "infra.openwrt.org" ;;
 *tiguinet.net*) echo "Belgium" ;;
 *utwente.nl*) echo "Netherlands" ;;
 *freifunk.net*) echo "Germany" ;;
+*rwth-aachen.de*) echo "Germany (RWTH Aachen)" ;;
 *ps.kz*) echo "Kazakhstan" ;;
 *sjtu.edu.cn*) echo "China" ;;
+*accum.se*) echo "Sweden" ;;
 *downloads.openwrt.org*) echo "default / OpenWrt" ;;
 *) echo "неизвестное" ;;
 esac; else echo "файл не найден"; fi; }
 
 menu_MIR() { while true; do clear; CURR=$(curr_MIR); echo -e "${MAGENTA}Меню выбора зеркала OpenWrt${NC}\n\n${YELLOW}Используется зеркало: ${GREEN}$CURR${NC}\n\n${CYAN}1)${NC} infra.openwrt.org\n${CYAN}2)${NC} China"
-echo -e "${CYAN}3)${NC} Germany\n${CYAN}4)${NC} Belgium\n${CYAN}5)${NC} Kazakhstan\n${CYAN}6)${NC} Netherlands\n${CYAN}7)${NC} default / OpenWrt${NC}"
+echo -e "${CYAN}3)${NC} Germany\n${CYAN}4)${NC} Belgium\n${CYAN}5)${NC} Kazakhstan\n${CYAN}6)${NC} Netherlands\n${CYAN}7)${NC} Germany (RWTH Aachen)\n${CYAN}8)${NC} Sweden\n${CYAN}9)${NC} default / OpenWrt${NC}"
 echo -en "\n${YELLOW}Выберите зеркало: ${NC}"; read -r z; case "$z" in
 1) set_mirror "mirror-03.infra.openwrt.org" ;;
 2) set_mirror "mirror.sjtu.edu.cn/openwrt" ;;
@@ -954,7 +960,9 @@ echo -en "\n${YELLOW}Выберите зеркало: ${NC}"; read -r z; case "$
 4) set_mirror "mirror.tiguinet.net/openwrt" ;;
 5) set_mirror "mirror.ps.kz/openwrt" ;;
 6) set_mirror "ftp.snt.utwente.nl/pub/software/openwrt" ;;
-7) set_mirror "downloads.openwrt.org" ;;
+7) set_mirror "ftp.halifax.rwth-aachen.de/openwrt" ;;
+8) set_mirror "mirror.accum.se/mirror/openwrt.org" ;;
+9) set_mirror "downloads.openwrt.org" ;;
 *) break ;;
 esac; done; }
 
