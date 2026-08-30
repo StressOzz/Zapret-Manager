@@ -127,8 +127,14 @@ sh <(wget -qO - 'https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main
 > [!IMPORTANT]
 > Если у Вас **НЕ** доступен **raw.githubusercontent.com**:
 ```
+sh <(wget -O - https://gh-proxy.org/https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)
+```
+или
+```
 rm -f /tmp/ZMS.sh && wget -T 10 -O /tmp/ZMS.sh "https://v4.gh-proxy.org/https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh" && sh /tmp/ZMS.sh
 ```
+
+---
 
 После запуска скрипта по команде выше, скрипт можно запускать в **SSH** командой:
 ```
