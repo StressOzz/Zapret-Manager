@@ -162,7 +162,7 @@ fi
 update_packages(){ [ "$PACKAGES_UPDATED" = "1" ] && return 0; echo -e "${CYAN}Обновляем список пакетов${NC}"; $UPDATE >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка обновления списка пакетов!${NC}\n"; PAUSE; return 1; }; PACKAGES_UPDATED=1; }
 
 if ! curl --version >/dev/null 2>&1; then echo -e "\ncurl ${RED}отсутствует ${NC}или${RED} работает некорректно${NC}\n"; echo -e "${MAGENTA}Устанавливаем ${NC}curl"
-$DELETE curl libcurl >/dev/null 2>&1; echo -e "${CYAN}Обновляем список пакетов${NC}"; if ! $UPDATE >/dev/null 2>&1; then echo -e "\n${RED}Ошибка обновления списка пакетов!${NC}\n"; else PACKAGES_UPDATED=1; fi
+$DELETE curl libcurl >/dev/null 2>&1; if ! update_packages; then echo -e "\n${RED}Ошибка обновления списка пакетов!${NC}\n"; else PACKAGES_UPDATED=1; fi
 echo -e "${CYAN}Устанавливаем ${NC}curl"; if ! $INSTALL libcurl curl >/dev/null 2>&1; then echo -e "\n${RED}Не удалось установить curl!${NC}\n"; PAUSE; fi; fi
 
 get_zapret2_ver() {
@@ -964,8 +964,8 @@ ok=$((ok+1)); else right_status="[${RED}FAIL${NC}]"; fi; checked=$((checked+1));
 
 set_mirror() { NEW_BASE="$1"; echo -e "\n${CYAN}Проверяем доступность ${NC}$NEW_BASE"
 if ! wget -q --spider --timeout=5 "https://$NEW_BASE/releases/" >/dev/null 2>&1; then echo -e "${RED}Зеркало недоступно!${NC}\n"; PAUSE; return 1; fi
-sed -i "s|https://.*/releases/|https://$NEW_BASE/releases/|g" "$CONFZ"; echo -e "${GREEN}Зеркало доступно!${NC}\n${CYAN}Обновляем список пакетов${NC}"
-if ! $UPDATE >/dev/null 2>&1; then echo -e "\n${RED}Ошибка обновления списка пакетов!${NC}\n${GREEN}Зеркало сброшено на ${NC}default ${GREEN}/${NC} OpenWrt${GREEN}!${NC}\n"
+sed -i "s|https://.*/releases/|https://$NEW_BASE/releases/|g" "$CONFZ"; echo -e "${GREEN}Зеркало доступно!${NC}"
+if ! update_packages; then echo -e "\n${RED}Ошибка обновления списка пакетов!${NC}\n${GREEN}Зеркало сброшено на ${NC}default ${GREEN}/${NC} OpenWrt${GREEN}!${NC}\n"
 sed -i "s|https://.*/releases/|https://downloads.openwrt.org/releases/|g" "$CONFZ"; PAUSE; return 1; fi; echo -e "${GREEN}Пакеты обновлены! Зеркало работает!${NC}\n"; PAUSE; }
 
 curr_MIR() { if [ -f "$CONFZ" ]; then URL=$(head -n1 "$CONFZ"); case "$URL" in
@@ -1267,6 +1267,72 @@ ip=$(sed -n "${num}p" "$IDX_LIST"); if [ -z "$ip" ]; then rm -f "$DEV_LIST" "$ID
 else CURRENT_EXCL=$(printf '%s\n%s\n' "$CURRENT_EXCL" "$ip"); ACTION_MSG="${GREEN}IP ${NC}${ip}${GREEN} добавлен в исключения!${NC}"; fi; CHANGED=1; done ;; esac; CURRENT_EXCL=$(echo "$CURRENT_EXCL" | grep -v '^$' | sort -u)
 if [ -n "$CURRENT_EXCL" ]; then FORMATTED=$(echo "$CURRENT_EXCL" | tr '\n' ',' | sed 's/,$//' | sed 's/,/, /g'); { echo "EXCEPT_SRC='{ $FORMATTED }'"; echo "nft insert rule inet zapret postrouting_hook index 0 \\"; echo "  ip saddr \$EXCEPT_SRC meta mark set meta mark \\| 0x40000000"; } > "$EXCL_FILE"; else : > "$EXCL_FILE"; fi
 echo -e "\n${CYAN}Применяем и перезапускаем ${NC}Zapret"; ZAPRET_RESTART; echo -e "\n${ACTION_MSG}\n"; PAUSE; rm -f "$DEV_LIST" "$IDX_LIST"; done; }
+
+# ==========================================
+# Package Installer
+# ==========================================
+PAKET_INSTALL() {
+clear
+echo -e "${MAGENTA}Установка пакетов из ${NC}/root/\n"
+
+FILES=$(find /root -maxdepth 1 -type f -name "*.${RAZ}" | sort)
+[ -z "$FILES" ] && {
+    echo -e "${RED}Файлы ${NC}*.${RAZ}${RED} не найдены в${NC} /root\n"
+    PAUSE
+    return
+}
+
+echo -e "${YELLOW}Найденные пакеты ${NC}*.${RAZ}${YELLOW}:${NC}\n"
+
+OLD_IFS=$IFS
+IFS='
+'
+set -- $FILES
+IFS=$OLD_IFS
+TOTAL=$#
+
+i=1
+for f in "$@"; do
+    echo -e "${CYAN}$i) ${GREEN}$(basename "$f")${NC}"
+    i=$((i + 1))
+done
+
+echo -ne "\n${YELLOW}Введите порядок установки (${NC}например: 2 1 3${YELLOW}):${NC} "
+read ORDER
+echo
+
+update_packages
+
+for n in $ORDER; do
+    case "$n" in
+        ''|*[!0-9]*)
+            echo -e "${RED}Неверный номер:${NC} $n\n"
+            continue
+            ;;
+    esac
+    if [ "$n" -lt 1 ] || [ "$n" -gt "$TOTAL" ]; then
+        echo -e "${RED}Неверный номер:${NC} $n\n"
+        continue
+    fi
+
+    eval "FILE=\$$n"
+    if [ -f "$FILE" ]; then
+        NAME=$(basename "$FILE")
+        echo -e "${CYAN}Устанавливаем: ${NC}$NAME"
+        $INSTALL "$FILE" >/dev/null 2>&1 || {
+            echo -e "\n${RED}Ошибка установки${NC} $NAME\n"
+            PAUSE
+            return
+        }
+        echo -e "$NAME ${GREEN}установлен!${NC}\n"
+    else
+        echo -e "${RED}Файл не найден:${NC} $FILE\n"
+    fi
+done
+
+echo -e "${GREEN}Установка завершена!${NC}\n"
+PAUSE
+}
 # ==========================================
 # Главное меню
 # ==========================================
@@ -1283,7 +1349,7 @@ then echo -e "${RED}Включён ${NC}Flow Offloading${RED}!${NC}\n${NC}Zapret
 INFO_ZPR; if grep -qE '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' "$EXCL_FILE" 2>/dev/null; then echo -e "${YELLOW}Исключённые IP:      ${RED}есть${NC}"; fi
 echo -e "\n${CYAN}1) ${GREEN}$Z_ACTION_TEXT${NC} Zapret\n${CYAN}2) ${GREEN}$Z2_ACTION_TEXT${NC} Zapret2\n${CYAN}3) ${GREEN}Меню стратегий${NC} Zapret\n${CYAN}4) ${GREEN}Меню ${NC}splify\n${CYAN}5) ${GREEN}Меню ${NC}Mixomo\n${CYAN}6) ${GREEN}Меню ${NC}NetShift\n${CYAN}7) ${GREEN}Меню ${NC}TG WS Proxy\n${CYAN}8) ${GREEN}Меню ${NC}DNS over HTTPS\n${CYAN}9) ${GREEN}Меню настройки ${NC}Discord\n${CYAN}0) ${GREEN}Меню управления доменами в ${NC}hosts"
 echo -e "${CYAN}f) ${GREEN}Удалить ${NC}→${GREEN} установить ${NC}→${GREEN} настроить${NC} Zapret\n${CYAN}m) ${GREEN}Системное меню${NC}"; [ "$SHOW_S" = "1" ] && echo -e "${CYAN}s) ${GREEN}$S_ACTION${NC} $S_NAME"
-[ "$SHOW_S" = "2" ] && echo -e "${CYAN}s1) ${GREEN}$S1_ACTION${NC} Zapret\n${CYAN}s2) ${GREEN}$S2_ACTION${NC} Zapret2"; echo -ne "${CYAN}Enter) ${GREEN}Выход${NC}\n\n${YELLOW}Выберите пункт:${NC} " && read choice
+[ "$SHOW_S" = "2" ] && echo -e "${CYAN}s1) ${GREEN}$S1_ACTION${NC} Zapret\n${CYAN}s2) ${GREEN}$S2_ACTION${NC} Zapret2"; echo -e "${CYAN}i) ${GREEN}Установить пакеты из ${NC}/root/"; echo -ne "${CYAN}Enter) ${GREEN}Выход${NC}\n\n${YELLOW}Выберите пункт:${NC} " && read choice
 case "$choice" in 999) echo; uninstall_zapret "1"; install_Zapret "1"; curl -fsSL ${GH_RAW}/StressOzz/Test/refs/heads/main/zapret -o "$CONF"; hosts_add "$ALL_BLOCKS"; rm -f "$EXCLUDE_FILE"; wget -q -U "Mozilla/5.0" -O "$EXCLUDE_FILE" "$EXCLUDE_URL"; ZAPRET_RESTART; PAUSE;;
-2) $Z2_ACTION_FUNC;; s|S|ы|Ы) toggle_zapret;; f|F|а|А) zapret_key;; s1|S1|ы1|Ы1) toggle_zapret1_only;; s2|S2|ы2|Ы2) toggle_zapret2_only;; 1) $Z_ACTION_FUNC;; 3) menu_str;; 4) SPL_MENU ;; 5) MIXOMO_MENU;; 6) PODKOP_menu ;; 7) menu_TG;; 8) DoH_menu;; 9) Discord_menu;; 0) menu_hosts;; m|M|ь|Ь) sys_menu;; r|R|к|К) show_menu;; *) echo; exit 0;; esac; }
+2) $Z2_ACTION_FUNC;; I|i|ш|Ш) PAKET_INSTALL;; s|S|ы|Ы) toggle_zapret;; f|F|а|А) zapret_key;; s1|S1|ы1|Ы1) toggle_zapret1_only;; s2|S2|ы2|Ы2) toggle_zapret2_only;; 1) $Z_ACTION_FUNC;; 3) menu_str;; 4) SPL_MENU ;; 5) MIXOMO_MENU;; 6) PODKOP_menu ;; 7) menu_TG;; 8) DoH_menu;; 9) Discord_menu;; 0) menu_hosts;; m|M|ь|Ь) sys_menu;; r|R|к|К) show_menu;; *) echo; exit 0;; esac; }
 case "$1" in --auto-best) auto_apply_best_strategy; exit 0 ;; esac; while true; do show_menu; done
