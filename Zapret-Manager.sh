@@ -199,7 +199,9 @@ if [ -z "$VERSION" ]; then echo -e "$NAME - ${RED}не удалось извле
 
 rm -f "$TMP_VER" "$TMP_VER_POD" "$TMP_VER_TG_MT" "$TMP_VER_TG_GO" "$TMP_VER_TG_RS" "$TMP_MAG_VER" "$TMP_VER_SPL" "$TMP_VER_BYEDPI" "$TMP_VER_Z2"
 
-echo -e "\n${CYAN}Cобираем версии:${NC}"
+# echo
+
+echo -e "${CYAN}Cобираем версии:${NC}"
 TMP_VER="/tmp/zapret_version"; TMP_VER_POD="/tmp/podkop_version"; TMP_VER_TG_MT="/tmp/tg_ws_proxy_MTp_ver"; TMP_VER_TG_GO="/tmp/tg_ws_proxy_GO_ver"
 TMP_VER_TG_RS="/tmp/tg_ws_proxy_RS_ver"; TMP_MAG_VER="/tmp/MagiTrickle_version"; TMP_VER_SPL="/tmp/splify_version"; TMP_VER_BYEDPI="/tmp/byedpi_version"; TMP_VER_Z2="/tmp/zapret2_version"
 # get_ver "https://github.com/MagiTrickle/MagiTrickle/releases/latest" "$TMP_MAG_VER" "MagiTrickle" &
@@ -1069,8 +1071,8 @@ echo -e "${NC}Network ${GREEN}→${NC} Interfaces ${GREEN}→${NC} AWG ${GREEN}�
 AWG_DELETE(){ echo -e "\n${MAGENTA}Удаляем AmneziaWG${NC}"; $DELETE luci-i18n-amneziawg-ru >/dev/null 2>&1; $DELETE luci-proto-amneziawg >/dev/null 2>&1; $DELETE amneziawg-tools >/dev/null 2>&1; $DELETE kmod-amneziawg >/dev/null 2>&1; echo -e "AmneziaWG ${GREEN}удалён!${NC}\n"; PAUSE; }
 INT_DELETE(){ echo -e "\n${MAGENTA}Удаляем ${NC}интерфейс AWG"; uci delete network.AWG >/dev/null 2>&1; uci commit network >/dev/null 2>&1; for peer in $(uci show network | grep "interface='AWG'" | cut -d. -f2); do uci delete network.$peer; done; uci commit network >/dev/null 2>&1; echo -en "${CYAN}Перезапускаем сеть${NC}"; /etc/init.d/network restart; /etc/init.d/ttyd restart >/dev/null 2>&1; echo -e "интерфейс AWG ${GREEN}удалён!${NC}\n"; PAUSE; }
 install_AWG() { echo -e "\n${MAGENTA}Устанавливаем AmneziaWG${NC}"; rm -rf "$tmpDIR"; mkdir -p "$tmpDIR"; update_packages || return 1
-AWG_kmod="${GH_MAIN}/Slava-Shchipunov/awg-openwrt/releases/download/v$OWRTAWG/kmod-amneziawg_v${OWRTAWG}_$ARCHAWG.$RAZ"; AWG_tools="${GH_MAIN}/Slava-Shchipunov/awg-openwrt/releases/download/v$OWRTAWG/amneziawg-tools_v${OWRTAWG}_$ARCHAWG.$RAZ"
-AWG_luci="${GH_MAIN}/Slava-Shchipunov/awg-openwrt/releases/download/v$OWRTAWG/luci-proto-amneziawg_v${OWRTAWG}_$ARCHAWG.$RAZ"; AWG_ru="${GH_MAIN}/Slava-Shchipunov/awg-openwrt/releases/download/v$OWRTAWG/luci-i18n-amneziawg-ru_v${OWRTAWG}_$ARCHAWG.$RAZ"; cd "$tmpDIR"
+AWG_kmod="${GH_MAIN}/2Grey/awg-openwrt/releases/download/v$OWRTAWG/kmod-amneziawg_v${OWRTAWG}_$ARCHAWG.$RAZ"; AWG_tools="${GH_MAIN}/2Grey/awg-openwrt/releases/download/v$OWRTAWG/amneziawg-tools_v${OWRTAWG}_$ARCHAWG.$RAZ"
+AWG_luci="${GH_MAIN}/2Grey/awg-openwrt/releases/download/v$OWRTAWG/luci-proto-amneziawg_v${OWRTAWG}_$ARCHAWG.$RAZ"; AWG_ru="${GH_MAIN}/2Grey/awg-openwrt/releases/download/v$OWRTAWG/luci-i18n-amneziawg-ru_v${OWRTAWG}_$ARCHAWG.$RAZ"; cd "$tmpDIR"
 echo -e "${CYAN}Скачиваем ${NC}AWG"; wget -q -U "Mozilla/5.0" -O AWG_kmod.$RAZ "$AWG_kmod" >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось скачать:\n${NC}$AWG_kmod\n"; PAUSE; return 1; }; wget -q -U "Mozilla/5.0" -O AWG_tools.$RAZ "$AWG_tools" >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось скачать:\n${NC}$AWG_tools\n"; PAUSE; return 1; }; wget -q -U "Mozilla/5.0" -O AWG_luci.$RAZ "$AWG_luci" >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось скачать:\n${NC}$AWG_luci\n"; PAUSE; return 1; }
 wget -q -U "Mozilla/5.0" -O AWG_ru.$RAZ "$AWG_ru" >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось скачать:\n${NC}$AWG_ru\n"; PAUSE; return 1; }; echo -e "${CYAN}Устанавливаем ${NC}AWG"; $INSTALL ./AWG_kmod.$RAZ >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось установить:\n${NC}$AWG_kmod\n"; PAUSE; return 1; }; $INSTALL ./AWG_tools.$RAZ >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось установить:\n${NC}$AWG_tools\n"; PAUSE; return 1; }
 $INSTALL ./AWG_luci.$RAZ >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось установить:\n${NC}$AWG_luci\n"; PAUSE; return 1; }; $INSTALL ./AWG_ru.$RAZ >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось установить:\n${NC}$AWG_ru\n"; PAUSE; return 1; }; rm -rf "$tmpDIR"; }
