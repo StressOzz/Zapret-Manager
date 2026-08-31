@@ -986,7 +986,8 @@ esac; else echo "файл не найден"; fi; }
 
 menu_MIR() { while true; do clear; CURR=$(curr_MIR); echo -e "${MAGENTA}Меню выбора зеркала OpenWrt${NC}\n\n${YELLOW}Используется зеркало: ${GREEN}$CURR${NC}\n\n${CYAN}1)${NC} infra.openwrt.org\n${CYAN}2)${NC} China"
 echo -e "${CYAN}3)${NC} Germany\n${CYAN}4)${NC} Belgium\n${CYAN}5)${NC} Kazakhstan\n${CYAN}6)${NC} Netherlands\n${CYAN}7)${NC} Germany (RWTH Aachen)\n${CYAN}8)${NC} Sweden\n${CYAN}9)${NC} default / OpenWrt${NC}"
-echo -en "\n${YELLOW}Выберите зеркало: ${NC}"; read -r z; case "$z" in
+echo -e "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n"
+echo -en "${YELLOW}Выберите зеркало: ${NC}"; read -r z; case "$z" in
 1) set_mirror "mirror-03.infra.openwrt.org" ;;
 2) set_mirror "mirror.sjtu.edu.cn/openwrt" ;;
 3) set_mirror "mirror.berlin.freifunk.net/downloads.openwrt.org" ;;
