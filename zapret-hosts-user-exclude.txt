@@ -49,6 +49,7 @@ dropbox.com
 genesis.com
 carcade.com
 midnight.im
+easy4ip.com
 duolingo.com
 map-care.com
 gravatar.com
@@ -64,12 +65,17 @@ kaspersky.com
 canonical.com
 mediafire.com
 vivoglobal.com
+dolynkcloud.com
+libreoffice.org
+easy4ipcloud.com
 feralhosting.com
 moondroplab.tech
+dahuasecurity.com
 rockstargames.com
 docs.altlinux.org
 battleye.b-cdn.net
 download.nvidia.com
+documentfoundation.org
 supporter-files.nexus-cdn.com
 #################################### VK
 vk.cc
