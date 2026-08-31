@@ -271,7 +271,7 @@ zms
 - **Mixomo** by [*Internet Helper*](https://github.com/Internet-Helper)
 - **MagiTrickle** by [*Ponywka*](https://github.com/Ponywka)
 - **HevSocks5Tunnel** by [*hev*](https://github.com/heiher)
-- **AWG OpenWrt** by [*Slava-Shchipunov*](https://github.com/Slava-Shchipunov)
+- **AWG OpenWrt** by [*2Grey*](https://github.com/2Grey)
 - **TG WS Proxy SOCKS5** by [*byd0mhate*](https://github.com/d0mhate)
 - **TG WS Proxy Rust** by [*valnesfjord*](https://github.com/valnesfjord)
 - **TG WS Proxy MTProto** by [*spatiumstas*](https://github.com/spatiumstas)
