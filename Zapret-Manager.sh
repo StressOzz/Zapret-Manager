@@ -995,10 +995,27 @@ echo -en "${YELLOW}Выберите зеркало: ${NC}"; read -r z; case "$z"
 9) set_mirror "downloads.openwrt.org" ;;
 *) break ;;
 esac; done; }
-
 # ==========================================
 # МЕНЮ TG WS Proxy
 # ==========================================
+restart_all_TG() {
+    echo -e "\n${MAGENTA}Перезапускаем все TG WS Proxy${NC}"
+    for s in /etc/init.d/tg-ws-proxy /etc/init.d/tg-ws-proxy-go /etc/init.d/tg-ws-proxy-rs; do
+        [ -x "$s" ] || continue
+        "$s" restart >/dev/null 2>&1
+    done
+    sleep 1
+    STATUS_LINE=""
+    pidof tg-ws-proxy    >/dev/null 2>&1 && STATUS_LINE="${STATUS_LINE:+$STATUS_LINE, }MTProto"
+    pidof tg-ws-proxy-go >/dev/null 2>&1 && STATUS_LINE="${STATUS_LINE:+$STATUS_LINE, }SOCKS5"
+    pidof tg-ws-proxy-rs >/dev/null 2>&1 && STATUS_LINE="${STATUS_LINE:+$STATUS_LINE, }Rust"
+    if [ -n "$STATUS_LINE" ]; then
+        echo -e "TG WS Proxy ${GREEN}перезапущены!${NC}\n"
+    else
+        echo -e "${YELLOW}Ни один TG WS Proxy не установлен или не запущен.${NC}\n"
+    fi
+    PAUSE
+}
 # УСТАНОВКА RUST
 get_arch_RS() { case "$ARCH" in aarch64*) echo "tg-ws-proxy-aarch64-unknown-linux-musl" ;; x86_64) echo "tg-ws-proxy-x86_64-unknown-linux-musl" ;; arm*) echo "tg-ws-proxy-armv7-unknown-linux-musleabihf" ;; mipsel*) echo "tg-ws-proxy-mipsel-unknown-linux-musl" ;; mips*) echo "tg-ws-proxy-mips-unknown-linux-musl" ;; *) echo -e "\n${RED}Архитектура не поддерживается: ${NC}$ARCH\n"; PAUSE; return 1 ;; esac; }
 delete_TG_RS() { echo -e "\n${MAGENTA}Удаляем TG WS Proxy Rust${NC}"; /etc/init.d/tg-ws-proxy-rs stop >/dev/null 2>&1; /etc/init.d/tg-ws-proxy-rs disable >/dev/null 2>&1; rm -f "$BIN_PATH_RS" "$INIT_PATH_RS" "$BIN_VER_RS"; echo -e "TG WS Proxy Rust ${GREEN}удалён!${NC}\n"; PAUSE; }
@@ -1036,10 +1053,10 @@ then SECRET_CONF="$(grep '^SECRET=' "$SECRET_FILE" 2>/dev/null | cut -d'=' -f2)"
 echo -e "${YELLOW}Ссылка для подключения:${NC}\ntg://proxy?server=$LAN_IP&port=1443&secret=dd$SECRET_CONF"; fi; case "$GO_ACTION" in install) echo -e "\n${CYAN}1)${GREEN} Установить ${NC}TG WS Proxy SOCKS5" ;; update) echo -e "\n${CYAN}1)${GREEN} Обновить ${NC}TG WS Proxy SOCKS5" ;;
 installed) echo -e "\n${CYAN}1)${GREEN} Удалить ${NC}TG WS Proxy SOCKS5" ;; esac; case "$RS_ACTION" in install) echo -e "${CYAN}2)${GREEN} Установить ${NC}TG WS Proxy Rust" ;; update) echo -e "${CYAN}2)${GREEN} Обновить ${NC}TG WS Proxy Rust" ;;
 installed) echo -e "${CYAN}2)${GREEN} Удалить ${NC}TG WS Proxy Rust" ;; esac; case "$MT_ACTION" in install) echo -e "${CYAN}3)${GREEN} Установить ${NC}TG WS Proxy MTProto" ;; update) echo -e "${CYAN}3)${GREEN} Обновить ${NC}TG WS Proxy MTProto" ;;
-installed) echo -e "${CYAN}3)${GREEN} Удалить ${NC}TG WS Proxy MTProto" ;; esac; echo -e "${CYAN}4)${GREEN} Удалить все ${NC}TG WS Proxy"; echo -e "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n"; echo -en "${YELLOW}Выберите пункт: ${NC}"; read choice
+installed) echo -e "${CYAN}3)${GREEN} Удалить ${NC}TG WS Proxy MTProto" ;; esac; echo -e "${CYAN}4)${GREEN} Удалить все ${NC}TG WS Proxy"; echo -e "${CYAN}5)${GREEN} Перезапустить все ${NC}TG WS Proxy"; echo -e "${CYAN}Enter) ${GREEN}Выход в главное меню${NC}\n"; echo -en "${YELLOW}Выберите пункт: ${NC}"; read choice
 case "$choice" in 1) case "$GO_ACTION" in install|update) install_TG_GO ;; installed) delete_TG_GO ;; esac ;; 2) case "$RS_ACTION" in install|update) install_TG_RS ;; installed) delete_TG_RS ;; esac ;; 3) case "$MT_ACTION" in install|update) install_update_TG_PKG ;;
 installed) remove_TG_PKG ;; esac ;; 4) echo -e "\n${MAGENTA}Удаляем все TG WS Proxy${NC}"; for s in /etc/init.d/tg-ws*; do [ -e "$s" ] || continue; "$s" stop >/dev/null 2>&1; "$s" disable >/dev/null 2>&1; done
-$DELETE tg-ws* >/dev/null 2>&1; rm -rf /usr/bin/tg-ws* /etc/init.d/tg-ws* /etc/tg-ws* /etc/config/tg-ws*; echo -e "${GREEN}Все ${NC}TG WS Proxy ${GREEN}удалены!${NC}\n"; PAUSE ;; *) break ;; esac; done; }
+$DELETE tg-ws* >/dev/null 2>&1; rm -rf /usr/bin/tg-ws* /etc/init.d/tg-ws* /etc/tg-ws* /etc/config/tg-ws*; echo -e "${GREEN}Все ${NC}TG WS Proxy ${GREEN}удалены!${NC}\n"; PAUSE ;; 5) restart_all_TG ;; *) break ;; esac; done; }
 get_TG_versions() { INSTALLED_VER_GO=""; INSTALLED_VER_RS=""; INSTALLED_VER_MT=""; [ -s "$BIN_VER_GO" ] && INSTALLED_VER_GO="$(cat "$BIN_VER_GO")"; [ -s "$BIN_VER_RS" ] && INSTALLED_VER_RS="$(cat "$BIN_VER_RS")"; if command -v opkg >/dev/null 2>&1
 then INSTALLED_VER_MT="$(opkg list-installed 2>/dev/null | grep '^tg-ws-proxy' | awk '{print $3}' | cut -d'-' -f1)"; else INSTALLED_VER_MT="$(apk list -I 2>/dev/null | grep '^tg-ws-proxy-' | sed -E 's/tg-ws-proxy-([0-9.]+).*/\1/')"; fi; }
 # ==========================================
