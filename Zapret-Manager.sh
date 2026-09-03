@@ -2,8 +2,6 @@
 # =========================================
 # Zapret Manager by StressOzz
 # =========================================
-clear
-
 ZAPRET_MANAGER_VERSION="9.85"; STR_VERSION_AUTOINSTALL="v7"
 GREEN="\033[1;32m"; RED="\033[1;31m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
@@ -186,7 +184,7 @@ try_mirror() {
     return 1
 }
 
-if ! curl --version >/dev/null 2>&1; then echo -e "\ncurl ${RED}отсутствует ${NC}или${RED} работает некорректно${NC}\n"; echo -e "${MAGENTA}Устанавливаем ${NC}curl"
+if ! curl --version >/dev/null 2>&1; then clear; echo -e "curl ${RED}отсутствует ${NC}или${RED} работает некорректно${NC}\n"; echo -e "${MAGENTA}Устанавливаем ${NC}curl"
 $DELETE curl libcurl >/dev/null 2>&1; if ! update_packages; then echo -e "\n${RED}Ошибка обновления списка пакетов!${NC}\n"; else PACKAGES_UPDATED=1; fi
 echo -e "${CYAN}Устанавливаем ${NC}curl"; if ! $INSTALL libcurl curl >/dev/null 2>&1; then echo -e "\n${RED}Не удалось установить curl!${NC}\n"; PAUSE; fi; fi
 
@@ -227,7 +225,7 @@ if [ -z "$VERSION" ]; then echo -e "$NAME - ${RED}не удалось извле
 
 rm -f "$TMP_VER" "$TMP_VER_POD" "$TMP_VER_TG_MT" "$TMP_VER_TG_GO" "$TMP_VER_TG_RS" "$TMP_MAG_VER" "$TMP_VER_SPL" "$TMP_VER_BYEDPI" "$TMP_VER_Z2"
 
-# echo
+clear
 
 echo -e "${CYAN}Cобираем версии:${NC}"
 TMP_VER="/tmp/zapret_version"; TMP_VER_POD="/tmp/podkop_version"; TMP_VER_TG_MT="/tmp/tg_ws_proxy_MTp_ver"; TMP_VER_TG_GO="/tmp/tg_ws_proxy_GO_ver"
