@@ -163,7 +163,6 @@ try_mirror() {
         cp /tmp/distfeeds.conf.bak "$CONFZ"
         return 1
 }
-
     for MIRROR in \
         "mirror-03.infra.openwrt.org" \
         "ftp.halifax.rwth-aachen.de/openwrt" \
