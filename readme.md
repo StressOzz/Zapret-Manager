@@ -127,11 +127,7 @@ sh <(wget -qO - 'https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main
 > [!IMPORTANT]
 > Если у Вас **НЕ** доступен **githubusercontent.com**:
 ```
-sh <(wget -O - https://gh-proxy.org/https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)
-```
-или
-```
-rm -f /tmp/ZMS.sh && wget -T 10 -O /tmp/ZMS.sh "https://v4.gh-proxy.org/https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh" && sh /tmp/ZMS.sh
+rm -f /tmp/ZMS.sh && wget -T 10 -O /tmp/ZMS.sh "https://v4.gh-proxy.org/raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/proxy_zms.sh" && sh /tmp/ZMS.sh
 ```
 затем в **Меню управления доменами в hosts** выбрать **19** пункт, затем **11** пункт
 
