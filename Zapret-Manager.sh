@@ -132,7 +132,7 @@ update_packages() {
         return 0
     fi
     echo -e "${RED}Ошибка обновления списка пакетов!${NC}"
-    echo -e "${CYAN}Подбираем рабочее зеркало ${NC}OpenWRT"
+    echo -e "\n${CYAN}Подбираем рабочее зеркало ${NC}OpenWRT"
 
     [ -f "$CONFZ" ] || {
         echo -e "\n${RED}Файл репозиториев не найден: $CONFZ${NC}\n"
@@ -144,7 +144,7 @@ update_packages() {
 
 try_mirror() {
         MIRROR="$1"
-        echo -e "${CYAN}Проверяем ${NC}$MIRROR"
+        echo -e "\n${CYAN}Проверяем ${NC}$MIRROR"
         if ! wget -q --spider --timeout=3 "https://$MIRROR/releases/" >/dev/null 2>&1; then
             echo -e "$MIRROR ${RED}недоступен!${NC}"
             return 1
