@@ -1130,19 +1130,36 @@ install_update_TGWS() {
     echo -e "\n${MAGENTA}Устанавливаем sTGWS${NC}"
     echo -e "${CYAN}Запускаем оригинальный установщик${NC}"
 
-    wget -q -O - "$TGWS_INSTALL_URL" 2>/dev/null | sh >/dev/null 2>&1
+    if ! wget -q -U "Mozilla/5.0" -O /tmp/tgws.sh "https://gitlab.com/xyzmean/brb/-/raw/main/install-tgws.sh"; then
+        echo -e "\n${RED}Не удалось скачать установщик sTGWS!${NC}\n"
+        rm -f /tmp/tgws.sh
+        PAUSE
+        return
+    fi
+
+    sh /tmp/tgws.sh >/dev/null 2>&1
+    rm -f /tmp/tgws.sh
+    
+
+    if [ ! -x /etc/init.d/tgws ]; then
+        echo -e "\n${RED}Установка sTGWS не удалась!${NC}\n"
+        PAUSE
+        return  
+    fi
 
     echo -e "${CYAN}Подбираем домен${NC}"
+    /etc/init.d/tgws enable >/dev/null 2>&1    
+    /etc/init.d/tgws restart >/dev/null 2>&1
     echo -ne "${YELLOW}Подождите...${NC}\n"
-
+    tgws pick >/dev/null 2>&1
     TGWS_STARTED=0
 
-    for i in $(seq 1 40); do
+    for i in $(seq 1 20); do
         if [ -n "$(tgws status 2>/dev/null)" ]; then
             TGWS_STARTED=1
             break
         fi
-        sleep 2
+        sleep 5
     done
 
     if [ "$TGWS_STARTED" = "1" ]; then
@@ -1159,8 +1176,8 @@ install_update_TGWS() {
 remove_TGWS() {
     echo -e "\n${MAGENTA}Удаляем sTGWS${NC}\n${CYAN}Удаляем пакет${NC}"
 
-    /etc/init.d/tgws disable
-    /etc/init.d/tgws stop
+    /etc/init.d/tgws disable >/dev/null 2>&1
+    /etc/init.d/tgws stop >/dev/null 2>&1
 
     $DELETE tgws >/dev/null 2>&1
     rm -rf /etc/tgws /etc/config/tgws
@@ -1170,6 +1187,13 @@ remove_TGWS() {
 }
 
 restart_TGWS() {
+    if [ ! -x /etc/init.d/tgws ]; then
+        echo -e "\nsTGWS ${RED}не установлен!${NC}\n"
+        PAUSE
+        return   
+    fi
+    
+    
     echo -e "\n${MAGENTA}Перезапускаем sTGWS${NC}"
 
     if [ -x /etc/init.d/tgws ]; then
@@ -1190,13 +1214,20 @@ restart_TGWS() {
 }
 
 reconfigure_TGWS() {
+
+    if [ ! -x /etc/init.d/tgws ]; then
+        echo -e "\nsTGWS ${RED}не установлен!${NC}\n"
+        PAUSE
+        return   
+    fi
+    
     echo -e "\n${MAGENTA}Подбираем новый домен${NC}"
     echo -ne "${YELLOW}Подождите...${NC}\n"
 
     if command -v tgws >/dev/null 2>&1; then
         tgws pick >/dev/null 2>&1
 
-        sleep 5
+        sleep 6
         /etc/init.d/tgws restart >/dev/null 2>&1
         sleep 3
         get_TGWS_domain
@@ -1224,7 +1255,7 @@ menu_TGWS() {
 
         if [ -n "$(tgws status 2>/dev/null)" ]; then
             echo -e "\n${YELLOW}sTGWS:${NC} ${GREEN}запущен${NC}"
-            [ -n "$TGWS_DOMAIN" ] && echo -e "${YELLOW}Домен sTGWS:${NC} ${GREEN}${TGWS_DOMAIN}${NC}"
+            [ -n "$TGWS_DOMAIN" ] && echo -e "${YELLOW}Домен sTGWS: ${NC}${TGWS_DOMAIN}"
         fi
 
         if [ -n "$INSTALLED_VER_TGWS" ]; then
@@ -1327,7 +1358,7 @@ else echo -e "${YELLOW}TG WS Proxy Rust версия:${NC} ${GREEN}$INSTALLED_VE
 echo -e "${YELLOW}Ссылка для подключения:${NC}"; echo -e "tg://socks?server=$LAN_IP&port=2080"; fi; if pgrep -f tg-ws-proxy-rs >/dev/null 2>&1 && [ -f "$BIN_PATH_RS" ] && [ -f "$INIT_PATH_RS" ]; then SECRET_IN_RS="$(sed -n 's/.*--secret[[:space:]]*\([0-9a-fA-F]\{32\}\).*/\1/p' "$INIT_PATH_RS")"; echo -e "\n${YELLOW}Настройки ${CYAN}TG WS Proxy Rust${YELLOW}:${NC}"
 echo -e "${YELLOW}Тип прокси:${NC} MTProto\n${YELLOW}Хост:${NC} $LAN_IP\n${YELLOW}Порт:${NC} 2443\n${YELLOW}Ключ:${NC} dd$SECRET_IN_RS\n${YELLOW}Ссылка для подключения:${NC}\ntg://proxy?server=$LAN_IP&port=2443&secret=dd$SECRET_IN_RS"; fi; if pidof tg-ws-proxy >/dev/null 2>&1 && [ -f "/etc/init.d/tg-ws-proxy" ]
 then SECRET_CONF="$(grep '^SECRET=' "$SECRET_FILE" 2>/dev/null | cut -d'=' -f2)"; echo -e "\n${YELLOW}Настройки ${CYAN}TG WS Proxy MTProto${YELLOW}:${NC}\n${YELLOW}Тип прокси:${NC} MTProto\n${YELLOW}Хост:${NC} $LAN_IP\n${YELLOW}Порт:${NC} 1443\n${YELLOW}Ключ:${NC} dd$SECRET_CONF"
-echo -e "${YELLOW}Ссылка для подключения:${NC}\ntg://proxy?server=$LAN_IP&port=1443&secret=dd$SECRET_CONF"; fi; echo -e "\n${CYAN}1)${GREEN} Меню ${NC}sTGWS${NC}"
+echo -e "${YELLOW}Ссылка для подключения:${NC}\ntg://proxy?server=$LAN_IP&port=1443&secret=dd$SECRET_CONF"; fi; echo -e "\n${CYAN}1)${GREEN} Меню ${NC}sTGWS${NC} ${GREEN}(${NC}beta${GREEN})${NC}"
 case "$GO_ACTION" in install) echo -e "${CYAN}2)${GREEN} Установить ${NC}TG WS Proxy SOCKS5" ;; update) echo -e "${CYAN}2)${GREEN} Обновить ${NC}TG WS Proxy SOCKS5" ;;
 installed) echo -e "${CYAN}2)${GREEN} Удалить ${NC}TG WS Proxy SOCKS5" ;; esac; case "$RS_ACTION" in install) echo -e "${CYAN}3)${GREEN} Установить ${NC}TG WS Proxy Rust" ;; update) echo -e "${CYAN}3)${GREEN} Обновить ${NC}TG WS Proxy Rust" ;;
 installed) echo -e "${CYAN}3)${GREEN} Удалить ${NC}TG WS Proxy Rust" ;; esac; case "$MT_ACTION" in install) echo -e "${CYAN}4)${GREEN} Установить ${NC}TG WS Proxy MTProto" ;; update) echo -e "${CYAN}4)${GREEN} Обновить ${NC}TG WS Proxy MTProto" ;;
