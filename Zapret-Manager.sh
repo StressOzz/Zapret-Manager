@@ -509,7 +509,7 @@ echo -e "${CYAN}Скачиваем архив ${NC}$FILE_NAME"; wget -q -U "Mozi
 unzip -o "$FILE_NAME" >/dev/null; if [ "$PKG_IS_APK" -eq 1 ]; then PKG_PATH="$TMP_SF/apk"; for PKG in "$PKG_PATH"/zapret*; do [ -f "$PKG" ] || continue; echo "$PKG" | grep -q "luci" && continue; install_pkg "$(basename "$PKG")" "$PKG" || return; done
 for PKG in "$PKG_PATH"/luci*; do [ -f "$PKG" ] || continue; install_pkg "$(basename "$PKG")" "$PKG" || return; done; else PKG_PATH="$TMP_SF"; for PKG in "$PKG_PATH"/zapret_*.ipk; do [ -f "$PKG" ] || continue; install_pkg "$(basename "$PKG")" "$PKG" || return; done
 for PKG in "$PKG_PATH"/luci-app-zapret_*.ipk; do [ -f "$PKG" ] || continue; install_pkg "$(basename "$PKG")" "$PKG" || return; done; fi; ADD_FAKE_FLOW
-echo -e "${CYAN}Удаляем временные файлы${NC}"; cd /; rm -rf "$TMP_SF" /tmp/*.ipk /tmp/*.zip /tmp/*zapret* 2>/dev/null; echo -e "Zapret ${GREEN}установлен!${NC}\n"; [ "$NO_PAUSE" != "1" ] && PAUSE; }
+echo -e "${CYAN}Удаляем временные файлы${NC}"; cd /; rm -rf "$TMP_SF" /tmp/*.ipk /tmp/*.zip /tmp/*zapret* 2>/dev/null; mkdir -p "$TMP_SF"; echo -e "Zapret ${GREEN}установлен!${NC}\n"; [ "$NO_PAUSE" != "1" ] && PAUSE; }
 # ==========================================
 # Меню настройки Discord
 # ==========================================
@@ -643,10 +643,10 @@ echo -e "${CYAN}Останавливаем службы${NC}"; /etc/init.d/zapre
 echo -e "${CYAN}Убиваем процессы${NC}"; for pid in $(pgrep -f /opt/zapret 2>/dev/null); do kill -9 "$pid" 2>/dev/null; done; for pid in $(pgrep -f /opt/zapret2 2>/dev/null); do kill -9 "$pid" 2>/dev/null; done; for pid in $(pgrep -f nfqws 2>/dev/null); do kill -9 "$pid" 2>/dev/null; done
 echo -e "${CYAN}Удаляем пакеты${NC}"; $DELETE zapret >/dev/null 2>&1; $DELETE luci-app-zapret >/dev/null 2>&1; $DELETE zapret2 >/dev/null 2>&1; $DELETE luci-app-zapret2 >/dev/null 2>&1
 echo -e "${CYAN}Удаляем папки и конфиги${NC}"; rm -rf /opt/zapret /opt/zapret2 2>/dev/null; rm -f /etc/config/zapret /etc/config/zapret2 2>/dev/null; rm -f /etc/firewall.zapret /etc/firewall.zapret2 2>/dev/null; rm -f /etc/init.d/zapret /etc/init.d/zapret2 2>/dev/null; rm -rf /tmp/*zapret*
-echo -e "${CYAN}Удаляем временные файлы, логи и резервные копии${NC}"; rm -rf /tmp/*zapret* /tmp/zapret_temp /tmp/routerich 2>/dev/null; rm -rf /var/run/*zapret* 2>/dev/null; rm -rf "$TMP_SF" 2>/dev/null; rm -f /tmp/*.ipk /tmp/*.apk /tmp/*.zip 2>/dev/null; rm -rf "$BACKUP_DIR" 2>/dev/null
+echo -e "${CYAN}Удаляем временные файлы, логи и резервные копии${NC}"; rm -rf /tmp/*zapret* /tmp/zapret_temp /tmp/routerich 2>/dev/null; rm -rf /var/run/*zapret* 2>/dev/null; rm -rf "$TMP_SF" 2>/dev/null; rm -f /tmp/*.ipk /tmp/*.apk /tmp/*.zip 2>/dev/null; rm -rf "$BACKUP_DIR" 2>/dev/null; mkdir -p "$TMP_SF"
 echo -e "${CYAN}Очищаем cron${NC}"; crontab -l 2>/dev/null | grep -v -i -E "zapret|/usr/bin/zmsA --auto-best" | crontab - 2>/dev/null; sed -i "\|$AUTO_CRON_CMD|d" "$CRON_FILE" 2>/dev/null; /etc/init.d/cron restart >/dev/null 2>&1
 echo -e "${CYAN}Удаляем nftables таблицы${NC}"; nft list tables 2>/dev/null | awk '{print $2}' | grep -Ei '^(zapret|zapret2)$' | while read -r t; do [ -n "$t" ] && nft delete table "$t" 2>/dev/null; done
-echo -e "Zapret ${GREEN}и${NC} Zapret2 ${GREEN}полностью удалены!${NC}\n"; [ "$NO_PAUSE" != "1" ] && PAUSE; }
+mkdir -p "$TMP_SF"; echo -e "Zapret ${GREEN}и${NC} Zapret2 ${GREEN}полностью удалены!${NC}\n"; [ "$NO_PAUSE" != "1" ] && PAUSE; }
 # ==========================================
 # Тест стратегии для Ютуб
 # ==========================================
@@ -724,7 +724,7 @@ strategy_v10() { printf '%s\n' "#v10" "--filter-tcp=443" "--hostlist-exclude=/op
 flowseal_menu() { [ ! -f "$OUT" ] && download_strategies; while true; do STRATEGIES=$(grep '^#' "$OUT" | sed 's/^#//'); clear
 echo -e "${YELLOW}Список стратегий от Flowseal${NC}\n"; i=1; echo "$STRATEGIES" | while IFS= read -r line; do if [ "$i" -lt 10 ]; then echo -e " ${CYAN}$i) ${NC}$line"; else echo -e "${CYAN}$i) ${NC}$line"; fi; i=$((i+1)); done
 echo -en "${CYAN}99) ${GREEN}Обновить стратегии${NC}\n${CYAN}Enter) ${GREEN}Вернуться в предыдущее меню${NC}\n\n${YELLOW}Выберите пункт: ${NC}"; read CHOICE_SF
-[ -z "$CHOICE_SF" ] && return; echo "$CHOICE_SF" | grep -qE '^[0-9]+$' || return; [ "$CHOICE_SF" -eq 99 ] && { rm -rf "$TMP_SF"; download_strategies; continue; }; SEL_NAME=$(echo "$STRATEGIES" | sed -n "${CHOICE_SF}p"); [ -z "$SEL_NAME" ] && return
+[ -z "$CHOICE_SF" ] && return; echo "$CHOICE_SF" | grep -qE '^[0-9]+$' || return; [ "$CHOICE_SF" -eq 99 ] && { rm -rf "$TMP_SF"; download_strategies; continue; mkdir -p "$TMP_SF"; }; SEL_NAME=$(echo "$STRATEGIES" | sed -n "${CHOICE_SF}p"); [ -z "$SEL_NAME" ] && return
 BLOCK=$(awk -v name="$SEL_NAME" '$0=="#"name {flag=1; print; next} /^#/ && flag {exit} flag {print}' "$OUT"); sed -i "/option NFQWS_OPT '/,\$d" "$CONF"; { echo "	option NFQWS_OPT '"; echo "$BLOCK"; echo "'"; } >> "$CONF"
 if ! grep -q "option NFQWS_PORTS_UDP.*19294-19344,50000-50100" "$CONF"; then sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,19294-19344,50000-50100'/" "$CONF"; fi; if ! grep -q "option NFQWS_PORTS_TCP.*2053,2083,2087,2096,8443" "$CONF"
 then sed -i "/^[[:space:]]*option NFQWS_PORTS_TCP '/s/'$/,2053,2083,2087,2096,8443'/" "$CONF"; fi; echo -e "\n${MAGENTA}Устанавливаем стратегию\n${CYAN}Добавляем домены в исключения${NC}"; ADD_GP_DOMAINS; rm -f "$EXCLUDE_FILE"
@@ -980,7 +980,7 @@ show_single_result() { clear; echo -e "${MAGENTA}Результат тестир
 cat "$FILE" > "$TMP_RES"; awk '!seen && /^Контрольный тест/ {print; seen=1; next} !/^Контрольный тест/ {print}' "$TMP_RES" > "${TMP_RES}.u"; mv "${TMP_RES}.u" "$TMP_RES"; TOTAL=$(head -n1 "$TMP_RES" | cut -d'/' -f2); awk -F'[/ ]' '{for(i=1;i<=NF;i++) if($i~/^[0-9]+$/){print $i "/" $(i+1), $0; break}}' "$TMP_RES" |
 sort -nr -k1,1 | while read -r line; do COUNT=$(echo "$line" | awk -F'/' '{print $1}'); TEXT=$(echo "$line" | cut -d' ' -f2-); if echo "$TEXT" | grep -q Zapret; then COLOR="$CYAN"; elif [ "$COUNT" -eq "$TOTAL" ]; then COLOR="$GREEN"; elif [ "$COUNT" -gt $((TOTAL/2)) ]; then
 COLOR="$YELLOW"; else COLOR="$RED"; fi; echo -e "${COLOR}${TEXT}${NC}"; done; rm -f "$TMP_RES"; [ -z "$NO_PAUSE" ] && echo && PAUSE; }
-run_test_flowseal() { clear; echo -e "${MAGENTA}Тестирование стратегий Flowseal${NC}\n\n${CYAN}Собираем стратегии для теста${NC}"; RESULTS="/opt/zapret/tmp/results_flowseal.txt"; rm -rf "$TMP_SF"
+run_test_flowseal() { clear; echo -e "${MAGENTA}Тестирование стратегий Flowseal${NC}\n\n${CYAN}Собираем стратегии для теста${NC}"; RESULTS="/opt/zapret/tmp/results_flowseal.txt"; rm -rf "$TMP_SF"; mkdir -p "$TMP_SF"
 download_strategies 1; cp "$OUT" "$STR_FILE"; cp "$CONF" "$BACK"; sed -i '/#Y/d' "$STR_FILE"; run_test_core "$RESULTS"; }
 run_test_versions() { clear; echo -e "${MAGENTA}Тестирование стратегий v${NC}\n\n${CYAN}Собираем стратегии для теста${NC}"; RESULTS="/opt/zapret/tmp/results_versions.txt"; : > "$STR_FILE"; cp "$CONF" "$BACK"
 for N in $(seq 1 100); do strategy_v$N >> "$STR_FILE" 2>/dev/null || break; done; sed -i '/#Y/d' "$STR_FILE"; run_test_core "$RESULTS"; }
@@ -1009,7 +1009,7 @@ if ! grep -q '^#' "$CUSTOM_STR_FILE"; then echo -e "\n${RED}В файле не �
 clear; mkdir -p "$TMP_SF"; echo -e "${MAGENTA}Тестирование пользовательских стратегий${NC}\n"; rm -f "$RES_CUSTOM"; sed -i 's/\r$//' "$CUSTOM_STR_FILE"; sed -i '/^[[:space:]]*$/d' "$CUSTOM_STR_FILE"; sed -i 's/^[[:space:]]*//;s/[[:space:]]*$//' "$CUSTOM_STR_FILE"; : > "$CUSTOM_RESULTS"
 OLD_STR_FILE="$STR_FILE"; OLD_RESULTS="$RESULTS"; OLD_BACK="$BACK"; OLD_MODE="$MODE"; STR_FILE="$CUSTOM_STR_FILE"; RESULTS="$CUSTOM_RESULTS"; BACK="$CUSTOM_BACK"; MODE="custom"; cp "$CONF" "$CUSTOM_BACK"; run_test_core "$CUSTOM_RESULTS"; STR_FILE="$OLD_STR_FILE"; RESULTS="$OLD_RESULTS"; BACK="$OLD_BACK"; MODE="$OLD_MODE"; rm -f "$OUT_DPI"; [ -f "$CUSTOM_BACK" ] && mv -f "$CUSTOM_BACK" "$CONF"; ZAPRET_RESTART; }
 TEST_menu() { [ ! -f /etc/init.d/zapret ] && { echo -e "\nZapret ${RED}не установлен!${NC}\n"; PAUSE; return; }; while true; do show_current_strategy; RKN_Check; MODE="normal"; clear; echo -e "${MAGENTA}Меню тестирования стратегий${NC}\n"; 
-INFO_ZPR_STR; STATUS_V=""; STATUS_FLOW=""; STATUS_DOMAIN=""; if [ -s "$RES3" ]; then STATUS_V="${GREEN}v${NC}"; STATUS_FLOW="${GREEN}Flowseal${NC}"; elif [ -s "$RES2" ] || [ -s "$RES1" ]; then [ -s "$RES2" ] && STATUS_V="${GREEN}v${NC}" || STATUS_V="${RED}v${NC}"
+mkdir -p /tmp/zapret_temp; INFO_ZPR_STR; STATUS_V=""; STATUS_FLOW=""; STATUS_DOMAIN=""; if [ -s "$RES3" ]; then STATUS_V="${GREEN}v${NC}"; STATUS_FLOW="${GREEN}Flowseal${NC}"; elif [ -s "$RES2" ] || [ -s "$RES1" ]; then [ -s "$RES2" ] && STATUS_V="${GREEN}v${NC}" || STATUS_V="${RED}v${NC}"
 [ -s "$RES1" ] && STATUS_FLOW="${GREEN}Flowseal${NC}" || STATUS_FLOW="${RED}Flowseal${NC}"; else STATUS_V="${RED}v${NC}"; STATUS_FLOW="${RED}Flowseal${NC}"; fi; [ -s "$RES_DOMAIN" ] && STATUS_DOMAIN="${GREEN}Domain${NC}" || STATUS_DOMAIN="${RED}Domain${NC}"; [ -s "$RES_CUSTOM" ] && STATUS_CUSTOM="${GREEN}Custom${NC}" || STATUS_CUSTOM="${RED}Custom${NC}"; [ -s "$RES_YOUTUBE" ] && STATUS_YOUTUBE="${GREEN}YouTube${NC}" || STATUS_YOUTUBE="${RED}YouTube${NC}"
 [ -f /root/custom_test.txt ] && echo -e "${YELLOW}/root/custom_test.txt:  ${GREEN}присутствует${NC}"; echo -e "${YELLOW}Тест пройден:${NC} ${STATUS_V} | ${STATUS_FLOW} | ${STATUS_DOMAIN} | ${STATUS_CUSTOM} | ${STATUS_YOUTUBE}"
 echo -e "\n${CYAN}1) ${GREEN}Тестирование стратегий ${NC}v ${GREEN}/${NC} Flowseal${NC}\n${CYAN}2) ${GREEN}Тестировать ${NC}текущую${GREEN} стратегию ${NC}\n${CYAN}3) ${GREEN}Тестировать стратегии ${NC}по домену${NC}"
