@@ -507,7 +507,7 @@ config strategy 'DoH_DNS'
 	option enabled '0'
 	option port '53'
 	list filter_l3 'ipv4'
-	list protocol 'tcp'
+	list protocol 'udp'
 	list filter_l7 'unknown'
 	list filter_l7 'dns'
 	option script '--out-range=-n2
