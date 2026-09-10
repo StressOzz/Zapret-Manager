@@ -24,7 +24,6 @@ echo "sh <(wget -q -O - ${GH_RAW}/StressOzz/Zapret-Manager/main/Zapret-Manager.s
 
 BASE_URL="${GH_MAIN}/2Grey/awg-openwrt/releases/download/"
 FLOWSEAL_STR_ZIP="${GH_MAIN}/Flowseal/zapret-discord-youtube/archive/refs/heads/main.zip"
-GEO_HOSTS="${GH_RAW}/Internet-Helper/GeoHideDNS/refs/heads/main/hosts/hosts"
 STR_URL="${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/StrYoutube"
 RAW="${GH_RAW}/hyperion-cs/dpi-checkers/refs/heads/main/ru/tcp-16-20/suite.v2.json"
 RKN_URL="${GH_RAW}/IndeecFOX/zapret4rocket/refs/heads/master/extra_strats/TCP/RKN/List.txt"
@@ -879,8 +878,6 @@ echo -e "\n${MAGENTA}Включаем IPv6 в Zapret${NC}"; ZAPRET_RESTART; echo
 # ==========================================
 hosts_reset() { echo -e "\n${MAGENTA}Восстанавливаем hosts${NC}"; : > /etc/hosts; echo -e "127.0.0.1\tlocalhost\n\n::1\tlocalhost ip6-localhost ip6-loopback\nff02::1 ip6-allnodes\nff02::2 ip6-allrouters" > /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}восстановлен!${NC}\n"; PAUSE; }
 add_block() { printf '%b\n' "$1" | while IFS= read -r line; do [ -z "$line" ] && continue; grep -Fxq "$line" "$HOSTS_FILE" || echo "$line" >> "$HOSTS_FILE"; done; }
-add_GEO_HOSTS() { echo -e "\n${MAGENTA}Заменяем hosts на GeoHide hosts${NC}"; : > /etc/hosts; echo -e "127.0.0.1\tlocalhost\n\n::1\tlocalhost ip6-localhost ip6-loopback\nff02::1 ip6-allnodes\nff02::2 ip6-allrouters" > /etc/hosts
-wget -q -U "Mozilla/5.0" -O - "$GEO_HOSTS" >> /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}заменён на ${NC}GeoHide hosts${GREEN}!${NC}\n"; PAUSE; }
 remove_block() { printf '%b\n' "$1" | while IFS= read -r line; do [ -z "$line" ] && continue; sed -i "\|^$line$|d" "$HOSTS_FILE"; done; }
 toggle_block() { if status_block "$1"; then remove_block "$1"; echo -e "\n${CYAN}Удаляем и применяем${NC}"; else add_block "$1"; echo -e "\n${CYAN}Добавляем и применяем${NC}"; fi; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "${GREEN}Изменения применены!${NC}\n"; PAUSE; }
 toggle_all() { if status_block "$ALL_BLOCKS"; then remove_block "$ALL_BLOCKS"; echo -e "\n${CYAN}Удаляем и применяем${NC}"; else add_block "$ALL_BLOCKS"; echo -e "\n${CYAN}Добавляем и применяем${NC}"; fi; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "${GREEN}Изменения применены!${NC}\n"; PAUSE; }
@@ -914,12 +911,12 @@ menu_GEO_HOSTS() {
         echo -ne "${YELLOW}Выберите пункт:${NC} "
         read -r c
         case "$c" in
-            1) GEO_FILE="$GH_RAW/StressOzz/Zapret-Manager/refs/heads/main/files/GeoHide_hosts_RU"; GEO_NAME="RU";;
-            2) GEO_FILE="$GH_RAW/StressOzz/Zapret-Manager/refs/heads/main/files/GeoHide_hosts_EU"; GEO_NAME="EU";;
-            3) GEO_FILE="$GH_RAW/StressOzz/Zapret-Manager/refs/heads/main/files/GeoHide_hosts_US"; GEO_NAME="US";;
+            1) GEO_FILE="$GH_RAW/Internet-Helper/GeoHideDNS/refs/heads/main/hosts/hosts"; GEO_NAME="RU";;
+            2) GEO_FILE="$GH_RAW/Internet-Helper/GeoHideDNS/refs/heads/main/hosts/eu/hosts"; GEO_NAME="EU";;
+            3) GEO_FILE="$GH_RAW/Internet-Helper/GeoHideDNS/refs/heads/main/hosts/us/hosts"; GEO_NAME="US";;
             *) break;;
         esac
-        echo -e "\n${MAGENTA}Заменяем hosts на GeoHide ${GEO_NAME} hosts${NC}"
+        echo -e "\n${MAGENTA}Меняем hosts на GeoHide ${GEO_NAME} hosts${NC}"
         GEO_TMP="/tmp/GeoHide_hosts"
         if wget -q -U "Mozilla/5.0" -O "$GEO_TMP" "$GEO_FILE" >/dev/null 2>&1 &&
            [ -s "$GEO_TMP" ]; then
