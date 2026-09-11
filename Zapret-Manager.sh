@@ -40,7 +40,7 @@ OWRTAWG=$(grep '^DISTRIB_RELEASE=' /etc/openwrt_release | cut -d"'" -f2); ARCHAW
 CRON_CMD="/etc/init.d/mihomo restart"; CONFIGPATH="/etc/magitrickle/state/config.yaml"; PACKAGES_UPDATED=0; TS_WARN_FLAG="/opt/zapret/tmp/ts_warning_shown"
 CRON_FILE="/etc/crontabs/root"; CONFIGMIX="/etc/mihomo/config.yaml"; LAN_IP=$(uci get network.lan.ipaddr 2>/dev/null | cut -d/ -f1)
 CONF="/etc/config/zapret"; CUSTOM_DIR="/opt/zapret/init.d/openwrt/custom.d/"; HOSTLIST_FILE="/opt/zapret/ipset/zapret-hosts-user.txt"; fileGP="/opt/zapret/ipset/zapret-hosts-google.txt"
-TMP_SF="/tmp/zapret_temp"; HOSTS_FILE="/etc/hosts"; TMP_LIST="$TMP_SF/zapret_yt_list.txt"; tmpDIR="/tmp/PodkopAWG"
+TMP_SF="/tmp/zapret_temp"; HOSTS_FILE="/etc/hosts"; HOSTS_EXCL="/etc/zms-hosts-exclude"; TMP_LIST="$TMP_SF/zapret_yt_list.txt"; tmpDIR="/tmp/PodkopAWG"
 GV_XTREME_FILE="/opt/zapret/tmp/GvXtreme"; GV_XTREME_PORTS="80,88,444-65535"; GV_XTREME_NFQWS_PORTS="80,88,443-65535"
 IF_NAME="AWG"; PROTO="amneziawg"; DEV_NAME="amneziawg0"; DISCORD_DEF_HOSTLIST="/opt/zapret/ipset_def/zapret-hosts-user.txt"
 SAVED_STR="$TMP_SF/StrYou.txt"; HOSTS_USER="$TMP_SF/hosts-user.txt"; OUT_DPI="$TMP_SF/dpi_urls.txt"; OUT="$TMP_SF/str_flow.txt"; ZIP="$TMP_SF/repo.zip"
@@ -113,7 +113,7 @@ hosts_enabled() { if grep -q "### dns.malw.link" /etc/hosts; then hosts_echo="Ma
 elif grep -q "### geohide.ru: hosts file" /etc/hosts; then if grep -q "^# Регион серверов: US$" /etc/hosts; then hosts_echo="GeoHide US"; elif grep -q "^# Регион серверов: EU$" /etc/hosts
 then hosts_echo="GeoHide EU"; elif grep -q "^# Регион серверов: RU$" /etc/hosts; then hosts_echo="GeoHide RU"; else hosts_echo="GeoHide"; fi; return 0
 elif grep -q "45.155.204.190\|instagram.com\|rutor.info\|lib.rus.ec\|ntc.party\|twitch.tv\|web.telegram.org\|www.spotify.com\|store.supercell.com\|raw.githubusercontent.com\|lkfl2.nalog.ru" /etc/hosts; then hosts_echo="добавлены"; return 0; fi; return 1; }
-hosts_add() { printf "%b\n" "$1" | while IFS= read -r L; do grep -qxF "$L" /etc/hosts || echo "$L" >> /etc/hosts; done; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }; D() { printf '%b' "$(printf '%s' "$1" | sed 's/../\\x&/g')"; }
+hosts_add() { printf "%b\n" "$1" | hosts_filter | while IFS= read -r L; do grep -qxF "$L" /etc/hosts || echo "$L" >> /etc/hosts; done; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }; D() { printf '%b' "$(printf '%s' "$1" | sed 's/../\\x&/g')"; }
 ZAPRET_RESTART () { chmod +x /opt/zapret/sync_config.sh; /opt/zapret/sync_config.sh; /etc/init.d/zapret restart >/dev/null 2>&1; sleep 1; }
 PAUSE() { echo -ne "Нажмите Enter..."; read dummy; }; BACKUP_DIR="/opt/zapret_backup"; DATE_FILE="$BACKUP_DIR/date_backup.txt"
 BIN_PATH_GO="/usr/bin/tg-ws-proxy-go"; INIT_PATH_GO="/etc/init.d/tg-ws-proxy-go"; BIN_PATH_RS="/usr/bin/tg-ws-proxy-rs"; INIT_PATH_RS="/etc/init.d/tg-ws-proxy-rs"
@@ -877,8 +877,16 @@ echo -e "\n${MAGENTA}Включаем IPv6 в Zapret${NC}"; ZAPRET_RESTART; echo
 # Hosts menu
 # ==========================================
 hosts_reset() { echo -e "\n${MAGENTA}Восстанавливаем hosts${NC}"; : > /etc/hosts; echo -e "127.0.0.1\tlocalhost\n\n::1\tlocalhost ip6-localhost ip6-loopback\nff02::1 ip6-allnodes\nff02::2 ip6-allrouters" > /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}восстановлен!${NC}\n"; PAUSE; }
-add_block() { printf '%b\n' "$1" | while IFS= read -r line; do [ -z "$line" ] && continue; grep -Fxq "$line" "$HOSTS_FILE" || echo "$line" >> "$HOSTS_FILE"; done; }
-remove_block() { printf '%b\n' "$1" | while IFS= read -r line; do [ -z "$line" ] && continue; sed -i "\|^$line$|d" "$HOSTS_FILE"; done; }
+hosts_filter() { [ -s "$HOSTS_EXCL" ] || { cat; return; }; awk -v ex="$HOSTS_EXCL" 'function out(){ if(!(had && !kept)){ if(h!="") print h; for(i=1;i<=c;i++) print b[i] } h=""; c=0; had=0; kept=0; sk=0 }
+function isex(d,  k){ d=tolower(d); for(k in e) if(d==k || (length(d)>length(k) && substr(d,length(d)-length(k))=="."k)) return 1; return 0 }
+BEGIN{ while((getline l < ex)>0){ gsub(/^[ \t]+|[ \t]+$/,"",l); sub(/^#+[ \t]*/,"",l); if(l!="") e[tolower(l)]=1 } }
+/^[ \t]*#/{ out(); h=$0; n=$0; sub(/^[ \t]*#+[ \t]*/,"",n); sub(/[ \t]+$/,"",n); sk=(tolower(n) in e); next }
+/^[ \t]*$/{ out(); print; next }
+{ had=1; if(sk) next; if(NF<2){ b[++c]=$0; kept=1; next } r=$1; m=0; for(i=2;i<=NF;i++) if(!isex($i)){ r=r" "$i; m++ } if(m==NF-1){ b[++c]=$0; kept=1 } else if(m){ b[++c]=r; kept=1 } }
+END{ out() }'; }
+hosts_apply_excl() { [ -s "$HOSTS_EXCL" ] || return 0; hosts_filter < "$HOSTS_FILE" > /tmp/zms_hosts.new && [ -s /tmp/zms_hosts.new ] && cat /tmp/zms_hosts.new > "$HOSTS_FILE"; rm -f /tmp/zms_hosts.new; }
+add_block() { printf '%b\n' "$1" | hosts_filter | while IFS= read -r line; do [ -z "$line" ] && continue; grep -Fxq "$line" "$HOSTS_FILE" || echo "$line" >> "$HOSTS_FILE"; done; }
+remove_block() { { printf '%b\n' "$1"; printf '%b\n' "$1" | hosts_filter; } | while IFS= read -r line; do [ -z "$line" ] && continue; sed -i "\|^$line$|d" "$HOSTS_FILE"; done; }
 toggle_block() { if status_block "$1"; then remove_block "$1"; echo -e "\n${CYAN}Удаляем и применяем${NC}"; else add_block "$1"; echo -e "\n${CYAN}Добавляем и применяем${NC}"; fi; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "${GREEN}Изменения применены!${NC}\n"; PAUSE; }
 toggle_all() { if status_block "$ALL_BLOCKS"; then remove_block "$ALL_BLOCKS"; echo -e "\n${CYAN}Удаляем и применяем${NC}"; else add_block "$ALL_BLOCKS"; echo -e "\n${CYAN}Добавляем и применяем${NC}"; fi; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "${GREEN}Изменения применены!${NC}\n"; PAUSE; }
 get_state() { status_block "$1" && echo "Удалить " || echo "Добавить"; }
@@ -889,16 +897,24 @@ echo -e "${CYAN} 3) ${GREEN}$(get_state "$INSTAGRAM")${NC} Instagram & Facebook\
 echo -e "${CYAN} 6) ${GREEN}$(get_state "$TWCH")${NC} Twitch\n${CYAN} 7) ${GREEN}$(get_state "$TGWeb")${NC} Telegram Web\n${CYAN} 8) ${GREEN}$(get_state "$SPFY")${NC} Spotify\n${CYAN} 9) ${GREEN}$(get_state "$SPFYEXT")${NC} Spotify extended"
 echo -e "${CYAN}10) ${GREEN}$(get_state "$SCell")${NC} Supercell\n${CYAN}11) ${GREEN}$(get_state "$GITH_RAW")${NC} githubusercontent.com\n${CYAN}12) ${GREEN}$(get_state "$GITH")${NC} github.com\n${CYAN}13) ${GREEN}$(get_state "$USoft")${NC} Ubisoft ${GREEN}(${NC}может не работать${GREEN})${NC}"
 echo -e "${CYAN}14) ${GREEN}$(get_state "$TAPEop")${NC} tapeop.dev\n${CYAN}15) ${GREEN}$(get_state "$ROBLOXhost")${NC} картинки Roblox\n${CYAN}16) ${GREEN}$(get_state "$updDIShost")${NC} updates.discord.com\n${CYAN}17) $S_ALL\n${CYAN}18) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}GeoHide hosts"
-echo -e "${CYAN}19) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}Mafioznik hosts\n${CYAN}20) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}Malw.link hosts\n${CYAN}21) ${GREEN}Восстановить ${NC}hosts"
+echo -e "${CYAN}19) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}Mafioznik hosts\n${CYAN}20) ${GREEN}Заменить ${NC}hosts${GREEN} на ${NC}Malw.link hosts\n${CYAN}21) ${GREEN}Восстановить ${NC}hosts\n${CYAN}22) ${GREEN}Исключения ${NC}(${GREEN}$([ -f "$HOSTS_EXCL" ] && awk 'NF{n++} END{print n+0}' "$HOSTS_EXCL" || echo 0)${NC})"
 echo -ne "${CYAN}Enter) ${GREEN}Вернуться в предыдущее меню${NC}\n\n${YELLOW}Выберите пункт:${NC} ";read -r c; case "$c" in 0) toggle_block "$NALOG";; 1) toggle_block "$RUTOR";; 2) toggle_block "$NTC";; 3) toggle_block "$INSTAGRAM";;
 4) toggle_block "$LIBRUSEC";; 5) toggle_block "$AI";; 6) toggle_block "$TWCH";; 7) toggle_block "$TGWeb";; 8) toggle_block "$SPFY";; 9) toggle_block "$SPFYEXT";; 10) toggle_block "$SCell";; 11) toggle_block "$GITH_RAW";; 12) toggle_block "$GITH";;
 13) toggle_block "$USoft";; 14) toggle_block "$TAPEop";; 15) toggle_block "$ROBLOXhost";; 16) toggle_block "$updDIShost";; 17) toggle_all;; 18) menu_GEO_HOSTS;;
-19) echo -e "\n${MAGENTA}Заменяем hosts на Mafioznik hosts${NC}"; wget -qO /etc/hosts ${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/hosts_mafioznik.txt >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось скачать файл hosts${NC}\n"; PAUSE; }
+19) echo -e "\n${MAGENTA}Заменяем hosts на Mafioznik hosts${NC}"; wget -qO /etc/hosts ${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/hosts_mafioznik.txt >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось скачать файл hosts${NC}\n"; PAUSE; }; hosts_apply_excl
 /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}заменён на ${NC}Mafioznik hosts${GREEN}!${NC}\n"; PAUSE;; 20) echo -e "\n${MAGENTA}Заменяем hosts на Malw.link hosts${NC}"
-wget -qO /etc/hosts ${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/hosts_malw.link.txt >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось скачать файл hosts${NC}\n"; PAUSE; }
-/etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}заменён на ${NC}Malw.link hosts${GREEN}!${NC}\n"; PAUSE;; 21) hosts_reset;; *) break;; esac; done; }
-status_block() { local line; while IFS= read -r line; do [ -z "$line" ] && continue; grep -Fxq "$line" "$HOSTS_FILE" || return 1; done <<EOF
-$(printf '%b\n' "$1")
+wget -qO /etc/hosts ${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/hosts_malw.link.txt >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось скачать файл hosts${NC}\n"; PAUSE; }; hosts_apply_excl
+/etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "hosts ${GREEN}заменён на ${NC}Malw.link hosts${GREEN}!${NC}\n"; PAUSE;; 21) hosts_reset;; 22) menu_hosts_excl;; *) break;; esac; done; }
+menu_hosts_excl() { while true; do clear; echo -e "${MAGENTA}Исключения для доменов в hosts${NC}\n\n${YELLOW}Указанное не попадёт в ${NC}hosts${YELLOW} ни из пунктов меню, ни из ${NC}GeoHide${YELLOW}, ${NC}Mafioznik${YELLOW}, ${NC}Malw.link"
+echo -e "${YELLOW}Домен исключается вместе с поддоменами ${NC}(anthropic.com)${YELLOW}, название блока — целиком ${NC}(Claude, OpenAI)\n"
+if [ -s "$HOSTS_EXCL" ]; then echo -e "${GREEN}Сейчас исключено:${NC}"; awk '{printf "  %d) %s\n", NR, $0}' "$HOSTS_EXCL"; else echo -e "${GREEN}Исключений нет${NC}"; fi
+echo -ne "\n${CYAN}1) ${GREEN}Добавить\n${CYAN}2) ${GREEN}Удалить\n${CYAN}3) ${GREEN}Очистить список${NC}\n${CYAN}Enter) ${GREEN}Вернуться в предыдущее меню${NC}\n\n${YELLOW}Выберите пункт:${NC} "; read -r c; case "$c" in
+1) echo -ne "\n${YELLOW}Домены или названия блоков через пробел:${NC} "; read -r x; set -f; for w in $x; do grep -Fxqi "$w" "$HOSTS_EXCL" 2>/dev/null || echo "$w" >> "$HOSTS_EXCL"; done; set +f; hosts_apply_excl; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "\n${GREEN}Исключения применены к ${NC}hosts\n"; PAUSE;;
+2) [ -s "$HOSTS_EXCL" ] || continue; echo -ne "\n${YELLOW}Номер для удаления:${NC} "; read -r n; case "$n" in ''|*[!0-9]*) continue;; esac; sed -i "${n}d" "$HOSTS_EXCL"; [ -s "$HOSTS_EXCL" ] || rm -f "$HOSTS_EXCL"; echo -e "\n${GREEN}Удалено. Чтобы вернуть домены в ${NC}hosts${GREEN}, включите нужный блок заново${NC}\n"; PAUSE;;
+3) rm -f "$HOSTS_EXCL"; echo -e "\n${GREEN}Список очищен. Чтобы вернуть домены в ${NC}hosts${GREEN}, включите нужные блоки заново${NC}\n"; PAUSE;;
+*) break;; esac; done; }
+status_block() { local line fb; fb=$(printf '%b\n' "$1" | hosts_filter); [ -z "$(printf '%s' "$fb" | tr -d '[:space:]')" ] && return 1; while IFS= read -r line; do [ -z "$line" ] && continue; grep -Fxq "$line" "$HOSTS_FILE" || return 1; done <<EOF
+$fb
 EOF
 }
 menu_GEO_HOSTS() {
@@ -921,6 +937,7 @@ menu_GEO_HOSTS() {
         if wget -q -U "Mozilla/5.0" -O "$GEO_TMP" "$GEO_FILE" >/dev/null 2>&1 &&
            [ -s "$GEO_TMP" ]; then
             mv "$GEO_TMP" /etc/hosts
+            hosts_apply_excl
             /etc/init.d/dnsmasq restart >/dev/null 2>&1
             echo -e "hosts ${GREEN}заменён на ${NC}GeoHide ${GEO_NAME} hosts${GREEN}!${NC}\n"
         else
