@@ -1173,15 +1173,25 @@ install_update_TGWS() {
 remove_TGWS() {
     echo -e "\n${MAGENTA}Удаляем sTGWS${NC}\n${CYAN}Удаляем пакет${NC}"
 
-    /etc/init.d/tgws disable >/dev/null 2>&1
-    /etc/init.d/tgws stop >/dev/null 2>&1
+/etc/init.d/tgws disable >/dev/null 2>&1
+/etc/init.d/tgws stop >/dev/null 2>&1
 
     $DELETE tgws >/dev/null 2>&1
-    
-killall tgws 2>/dev/null; killall stgws 2>/dev/null
-rm -rf /etc/*tgws* /var/lib/*tgws* /var/lock/*tgws*.lock /etc/rc.d/*tgws* /etc/init.d/*tgws* /usr/sbin/*tgws*
+
+/usr/sbin/stgws apply --spec /dev/null --state-dir /var/lib/stgws >/dev/null 2>&1
+/usr/sbin/tgws apply --spec /dev/null --state-dir /var/lib/tgws >/dev/null 2>&1
+killall tgws >/dev/null 2>&1
+killall stgws >/dev/null 2>&1
 nft delete table inet stgws >/dev/null 2>&1
 nft delete table inet tgws >/dev/null 2>&1
+rm -rf /etc/*tgws*
+rm -rf /var/lib/*tgws*
+rm -rf /var/lock/*tgws*
+rm -rf /etc/rc.d/*tgws*
+rm -rf /etc/init.d/*tgws*
+rm -rf /usr/sbin/*tgws*
+rm -rf /usr/bin/*tgws*
+rm -rf /etc/config/*tgws*
 
     echo -e "sTGWS ${GREEN}удалён!${NC}\n"
     PAUSE
