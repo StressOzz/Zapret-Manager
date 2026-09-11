@@ -1177,7 +1177,11 @@ remove_TGWS() {
     /etc/init.d/tgws stop >/dev/null 2>&1
 
     $DELETE tgws >/dev/null 2>&1
-    rm -rf /etc/tgws /etc/config/tgws
+    
+killall tgws 2>/dev/null; killall stgws 2>/dev/null
+rm -rf /etc/*tgws* /var/lib/*tgws* /var/lock/*tgws*.lock /etc/rc.d/*tgws* /etc/init.d/*tgws* /usr/sbin/*tgws*
+nft delete table inet stgws >/dev/null 2>&1
+nft delete table inet tgws >/dev/null 2>&1
 
     echo -e "sTGWS ${GREEN}удалён!${NC}\n"
     PAUSE
