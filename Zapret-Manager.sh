@@ -1262,7 +1262,13 @@ menu_TGWS() {
         get_TGWS_domain
 
         clear
-        echo -e "${MAGENTA}Меню sTGWS${NC}"
+        echo -e "${MAGENTA}Меню sTGWS${NC}\n"
+
+echo -e "${YELLOW}ВНИМАНИЕ! БЕТА-ВЕРСИЯ${NC}"
+echo -e "Данная версия находится на этапе ${YELLOW}бета-тестирования${NC}!"
+echo -e "В отдельных случаях может потребоваться ${RED}сброс роутера${NC} до заводских настроек!"
+echo -e "${RED}Не устанавливайте эту версию, если не уверены, что сможете устранить возможные проблемы!${NC}"
+echo -e "Рекомендуется использовать другие версии ${YELLOW}TG WS Proxy${NC}!"
 
         if [ -n "$(tgws status 2>/dev/null)" ]; then
             echo -e "\n${YELLOW}sTGWS:${NC} ${GREEN}запущен${NC}"
