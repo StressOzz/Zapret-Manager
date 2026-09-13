@@ -1,5 +1,5 @@
 #!/bin/sh
-# Zapret Manager by StressOzz LuCI installer — самодостаточный скрипт (все файлы зашиты внутри).
+# Zapret Manager by StressOzz for LuCI installer
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -1970,7 +1970,7 @@ cat > '/usr/share/luci/menu.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF
 		"action": { "type": "view", "path": "zapret-manager/system" }
 	},
 	"admin/services/zapret-manager/exclusions": {
-		"title": "Исключения IP",
+		"title": "Исключение устройств",
 		"order": 70,
 		"action": { "type": "view", "path": "zapret-manager/exclusions" }
 	}
@@ -2571,7 +2571,7 @@ return view.extend({
 		var dvCard = E('div', { 'class': 'zm-card' }, [
 			E('h3', {}, 'Стратегия для discord.media'),
 			dvGrid,
-			E('p', { 'class': 'zm-hint' }, 'Нужна базовая стратегия с блоком discord.media .')
+			E('p', { 'class': 'zm-hint' }, 'Нужна базовая стратегия с блоком discord.media.')
 		]);
 
 		var fakeCard = E('div', { 'class': 'zm-card' }, [
@@ -2719,13 +2719,13 @@ return view.extend({
 
 		if (data.error) {
 			wrap.appendChild(E('div', { 'class': 'zm-card' }, [
-				E('h3', {}, 'Исключения IP'),
+				E('h3', {}, 'Исключение устройств'),
 				E('p', { 'class': 'zm-hint' }, data.error)
 			]));
 			return wrap;
 		}
 
-		var grid = E('div', { 'class': 'zm-grid' });
+		var grid = E('div', { 'class': 'zm-grid-devices' });
 		var busy = false;
 
 		function renderGrid(devices) {
@@ -2755,7 +2755,7 @@ return view.extend({
 		var manualInput = E('input', { 'type': 'text', 'placeholder': '192.168.1.100', 'class': 'cbi-input-text' });
 
 		var card = E('div', { 'class': 'zm-card' }, [
-			E('h3', {}, 'Исключения IP из Zapret'),
+			E('h3', {}, 'Исключение устройств из Zapret'),
 			grid,
 			E('p', { 'class': 'zm-hint' }, 'Клик по устройству — включить/выключить исключение (трафик этого IP не будет проходить через Zapret).'),
 			E('div', { 'class': 'zm-actions' }, [
@@ -3267,6 +3267,8 @@ html.zm-theme-dark .zm-card {
 .zm-actions .cbi-button { margin: 0; }
 
 .zm-grid { display: flex; flex-wrap: wrap; gap: 9px; }
+.zm-grid-devices { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 9px; }
+.zm-grid-devices .zm-tile { flex: none; min-width: 0; width: 100%; box-sizing: border-box; }
 
 .zm-tile {
 	flex: 0 1 auto;
