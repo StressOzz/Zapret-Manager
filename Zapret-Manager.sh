@@ -517,6 +517,7 @@ echo -e "${CYAN}Скачиваем архив ${NC}$FILE_NAME"; wget -q -U "Mozi
 unzip -o "$FILE_NAME" >/dev/null; if [ "$PKG_IS_APK" -eq 1 ]; then PKG_PATH="$TMP_SF/apk"; for PKG in "$PKG_PATH"/zapret*; do [ -f "$PKG" ] || continue; echo "$PKG" | grep -q "luci" && continue; install_pkg "$(basename "$PKG")" "$PKG" || return; done
 for PKG in "$PKG_PATH"/luci*; do [ -f "$PKG" ] || continue; install_pkg "$(basename "$PKG")" "$PKG" || return; done; else PKG_PATH="$TMP_SF"; for PKG in "$PKG_PATH"/zapret_*.ipk; do [ -f "$PKG" ] || continue; install_pkg "$(basename "$PKG")" "$PKG" || return; done
 for PKG in "$PKG_PATH"/luci-app-zapret_*.ipk; do [ -f "$PKG" ] || continue; install_pkg "$(basename "$PKG")" "$PKG" || return; done; fi; ADD_FAKE_FLOW
+uci set zapret.@main[0].DISABLE_CUSTOM='0'; uci commit zapret; ZAPRET_RESTART
 echo -e "${CYAN}Удаляем временные файлы${NC}"; cd /; rm -rf "$TMP_SF" /tmp/*.ipk /tmp/*.zip /tmp/*zapret* 2>/dev/null; mkdir -p "$TMP_SF"; echo -e "Zapret ${GREEN}установлен!${NC}\n"; [ "$NO_PAUSE" != "1" ] && PAUSE; }
 # ==========================================
 # Меню настройки Discord
