@@ -1,5 +1,5 @@
 #!/bin/sh
-# Zapret Manager by StressOzz LuCI installer — самодостаточный скрипт (все файлы зашиты внутри).
+# Zapret Manager by Stressozz LuCI installer — самодостаточный скрипт (все файлы зашиты внутри).
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -2034,7 +2034,37 @@ var callDohInstall = rpc.declare({ object: 'zapret-manager', method: 'doh_instal
 var callDohRemove = rpc.declare({ object: 'zapret-manager', method: 'doh_remove', expect: {} });
 var callDohSet = rpc.declare({ object: 'zapret-manager', method: 'doh_set', params: ['provider'], expect: {} });
 
+// Некоторые прошивки (например FriendlyWrt) переписывают тему LuCI целиком
+// и не объявляют переменную --background-color-medium вообще — тогда наш
+// var(--background-color-medium, #fff) молча берёт запасное значение #fff,
+// и карточки становятся белыми посреди тёмной страницы. Если же переменная
+// объявлена (как на ванильной OpenWrt) — она уже работает правильно сама,
+// трогать вообще ничего не нужно.
+function detectMissingThemeVar() {
+	if (document.documentElement.hasAttribute('data-zm-theme-checked')) return;
+	document.documentElement.setAttribute('data-zm-theme-checked', '1');
+	try {
+		var declared = getComputedStyle(document.documentElement).getPropertyValue('--background-color-medium').trim();
+		if (declared) return; // тема сама её объявляет — ничего не делаем, это уже рабочий случай
+
+		// переменная не объявлена этой темой — определяем реальный цвет фона
+		// страницы и, если он тёмный, включаем свой запасной тёмный вид
+		var el = document.body, bg = '', hops = 0;
+		while (el && hops < 6) {
+			var c = getComputedStyle(el).backgroundColor;
+			if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') { bg = c; break; }
+			el = el.parentElement;
+			hops++;
+		}
+		var m = bg.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+		if (!m) return;
+		var luminance = (0.299 * (+m[1]) + 0.587 * (+m[2]) + 0.114 * (+m[3])) / 255;
+		if (luminance < 0.5) document.documentElement.classList.add('zm-theme-dark');
+	} catch (e) { /* определение темы не критично для работы панели — при любой ошибке просто ничего не делаем */ }
+}
+
 function injectCss() {
+	detectMissingThemeVar();
 	if (document.getElementById('zm-css')) return;
 	var l = document.createElement('link');
 	l.id = 'zm-css';
@@ -3235,6 +3265,16 @@ cat > '/www/luci-static/resources/view/zapret-manager/style.css' << 'ZM_INSTALLE
 	overflow-wrap: break-word;
 	transition: box-shadow .15s;
 }
+
+/* Запасной тёмный вид — включается через JS ТОЛЬКО если тема прошивки не
+   объявляет переменную --background-color-medium сама (тогда выше сработал
+   бы статичный светлый запасной #fff даже на тёмной странице). Если тема
+   объявляет переменную — этот блок вообще не применяется, ничего не меняется. */
+html.zm-theme-dark .zm-card {
+	background: #1c2128;
+	border-color: rgba(255,255,255,.10);
+	box-shadow: 0 1px 3px rgba(0,0,0,.25), 0 1px 2px rgba(0,0,0,.2);
+}
 .zm-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,.08); }
 
 .zm-card h3 { margin: 0 0 12px 0; font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
@@ -3278,6 +3318,14 @@ cat > '/www/luci-static/resources/view/zapret-manager/style.css' << 'ZM_INSTALLE
 	overflow-wrap: break-word;
 	transition: border-color .15s, background .15s, transform .1s;
 	background: var(--background-color-low, #fafafa);
+}
+/* Только для нейтрального состояния плитки — активные (.zm-active) и
+   выключенные (.zm-tile-off) уже раскрашены полупрозрачным зелёным/красным
+   поверх фона и одинаково хорошо читаются что на светлом, что на тёмном
+   фоне, поэтому их сюда специально не включаем. */
+html.zm-theme-dark .zm-tile:not(.zm-active):not(.zm-tile-off) {
+	background: #22272e;
+	border-color: rgba(255,255,255,.12);
 }
 .zm-tile:hover { border-color: #1a7f37; transform: translateY(-1px); }
 .zm-tile.zm-active {
