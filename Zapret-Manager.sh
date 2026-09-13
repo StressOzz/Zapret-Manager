@@ -866,9 +866,7 @@ rm -rf \
 /etc/init.d/uhttpd restart >/dev/null 2>&1             
         echo -e "Zapret Manager ${GREEN}для ${NC}LuCI ${GREEN}удалён!${NC}\n"
     else
-        echo -e "\n${MAGENTA}Устанавливаем Zapret Manager LuCI${NC}"
         sh <(wget -qO - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/ZapretManager_LuCI.sh)
-        echo -e "Zapret Manager ${GREEN}для ${NC}LuCI ${GREEN}установлен!${NC}\n"
     fi
     PAUSE
 }
