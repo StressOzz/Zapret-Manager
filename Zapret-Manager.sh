@@ -879,8 +879,8 @@ rm -rf \
     fi
     PAUSE
 }
-is_expert_mode() { [ -f "$EXPERT_MODE_FILE" ]; }; toggle_expert_mode() { [ ! -f /etc/init.d/zapret ] && { echo -e "\nZapret ${RED}не установлен!${NC}\n"; PAUSE; return; }; if is_expert_mode; then rm -f "$EXPERT_MODE_FILE"; echo -e "\nExpert mode ${GREEN}выключен!${NC}\n"; else echo 1 > "$EXPERT_MODE_FILE"; echo -e "\nExpert mode ${GREEN}включён!${NC}\n"; fi; PAUSE; }
-sys_menu() { while true; do web_is_enabled && WEB_TEXT="Удалить доступ к скрипту из браузера" || WEB_TEXT="Активировать доступ к скрипту из браузера"; is_expert_mode && EXPERT_TEXT="${GREEN}Выключить${NC} expert mode" || EXPERT_TEXT="${GREEN}Включить${NC} expert mode"
+is_expert_mode() { [ -f "$EXPERT_MODE_FILE" ]; }; toggle_expert_mode() { if is_expert_mode; then rm -f "$EXPERT_MODE_FILE"; echo -e "\nExpert mode ${GREEN}выключен!${NC}\n"; else echo 1 > "$EXPERT_MODE_FILE"; echo -e "\nExpert mode ${GREEN}включён!${NC}\n"; fi; PAUSE; }
+sys_menu() { while true; do web_is_enabled && WEB_TEXT="Удалить доступ к скрипту из браузера" || WEB_TEXT="Активировать доступ к скрипту из браузера"; is_expert_mode && EXPERT_TEXT="${GREEN}Выключить${NC} Expert mode" || EXPERT_TEXT="${GREEN}Включить${NC} Expert mode"
 quic_is_blocked && QUIC_TEXT="${GREEN}Отключить блокировку${NC} QUIC ${GREEN}${NC}" || QUIC_TEXT="${GREEN}Включить блокировку${NC} QUIC ${GREEN}${NC}"
 CURR=$(curr_MIR); clear; OTSTUP=0; echo -e "${MAGENTA}Системное меню${NC}\n"; if [ -f "$DATE_FILE" ] && [ -f "$BACKUP_DIR/zapret.tar.gz" ] && [ -f "$BACKUP_DIR/zapret" ]; then CREATE_DATE=$(cat "$DATE_FILE"); echo -e "${YELLOW}Резервная копия:${NC} $CREATE_DATE" && OTSTUP=1; fi
 is_expert_mode && echo -e "${YELLOW}Expert mode: ${GREEN}включён${NC}" && OTSTUP=1; if [ "$CURR" != "default / OpenWrt" ]; then echo -e "${YELLOW}Используется зеркало: ${NC}$CURR" && OTSTUP=1; fi
