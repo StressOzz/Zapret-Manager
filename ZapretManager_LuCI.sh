@@ -1,5 +1,5 @@
 #!/bin/sh
-# Zapret Manager LuCI installer — самодостаточный скрипт (все файлы зашиты внутри).
+# Zapret Manager by StressOzz LuCI installer — самодостаточный скрипт (все файлы зашиты внутри).
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -138,7 +138,7 @@ status() {
 		else
 			zr_ver=$(apk info -v 2>/dev/null | grep '^zapret-' | head -n1 | cut -d- -f2 | sed 's/-r[0-9]\+$//')
 		fi
-		pgrep -f "/opt/zapret" >/dev/null 2>&1 && zr_running="true"
+		pgrep -f "/opt/zapret/" >/dev/null 2>&1 && zr_running="true"
 	fi
 
 	local zr2="not_installed" zr2_running="false"
@@ -190,7 +190,7 @@ do_install_zapret() {
 	if [ -f /etc/init.d/zapret ]; then
 		echo "==> Останавливаем текущий Zapret"
 		/etc/init.d/zapret stop >/dev/null 2>&1
-		for p in $(pgrep -f /opt/zapret 2>/dev/null); do kill -9 "$p" 2>/dev/null; done
+		for p in $(pgrep -f "/opt/zapret/" 2>/dev/null); do kill -9 "$p" 2>/dev/null; done
 	fi
 
 	echo "==> Скачиваем $url"
@@ -276,7 +276,7 @@ do_install_zapret_full() {
 do_remove_zapret() {
 	echo "==> Останавливаем Zapret"
 	/etc/init.d/zapret stop >/dev/null 2>&1
-	for p in $(pgrep -f /opt/zapret 2>/dev/null); do kill -9 "$p" 2>/dev/null; done
+	for p in $(pgrep -f "/opt/zapret/" 2>/dev/null); do kill -9 "$p" 2>/dev/null; done
 	echo "==> Удаляем пакеты"
 	$DELETE luci-app-zapret >/dev/null 2>&1
 	$DELETE zapret >/dev/null 2>&1
@@ -295,7 +295,7 @@ zapret_action() {
 		start)          /etc/init.d/zapret start >/dev/null 2>&1; zapret_restart; status ;;
 		stop)
 			/etc/init.d/zapret stop >/dev/null 2>&1
-			for p in $(pgrep -f /opt/zapret 2>/dev/null); do kill -9 "$p" 2>/dev/null; done
+			for p in $(pgrep -f "/opt/zapret/" 2>/dev/null); do kill -9 "$p" 2>/dev/null; done
 			status ;;
 		*) echo '{"error":"неизвестное действие"}' ;;
 	esac
