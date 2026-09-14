@@ -76,6 +76,7 @@ docs.altlinux.org
 battleye.b-cdn.net
 download.nvidia.com
 documentfoundation.org
+marketplace.visualstudio.com
 supporter-files.nexus-cdn.com
 #################################### VK
 vk.cc
