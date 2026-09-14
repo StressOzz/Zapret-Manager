@@ -1370,7 +1370,7 @@ _excl_write() {
 
 exclusions_status() {
 	[ -f /etc/init.d/zapret ] || { echo '{"error":"Zapret не установлен"}'; return 1; }
-	local current devjson="" first=1 ip name ts mac rest
+	local current devjson="" first=1 ip name ts mac rest aip ahw aflags amac amask adev aname
 
 	current=$(_excl_current)
 
@@ -1384,6 +1384,38 @@ exclusions_status() {
 			first=0
 			devjson="$devjson{\"ip\":\"$ip\",\"name\":\"$(esc "$name")\",\"excluded\":$(printf '%s\n' "$current" | grep -qx "$ip" && echo true || echo false)}"
 		done < /tmp/dhcp.leases
+	fi
+
+	local lan_dev arp_tmp
+	lan_dev=$(uci -q get network.lan.device)
+	[ -z "$lan_dev" ] && lan_dev="br-lan"
+	arp_tmp="$JOBS_DIR/excl_arp_tmp"
+	rm -f "$arp_tmp"
+	if [ -f /proc/net/arp ]; then
+		tail -n +2 /proc/net/arp | while read -r aip ahw aflags amac amask adev; do
+			[ -z "$aip" ] && continue
+			[ "$adev" = "$lan_dev" ] || continue
+			echo "$aip" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' || continue
+			[ "$aflags" = "0x0" ] && continue
+			printf '%s' "$devjson" | grep -q "\"ip\":\"$aip\"" && continue
+			aname=""
+			[ -f /tmp/dhcp.leases ] && aname=$(awk -v mac="$amac" 'tolower($2)==tolower(mac){print $4; exit}' /tmp/dhcp.leases)
+			if [ -z "$aname" ] || [ "$aname" = "*" ]; then
+				aname=$(logread 2>/dev/null | grep -i "DHCPACK" | grep -i "$aip" | grep -i "$amac" | tail -n1 | awk '{print $NF}')
+			fi
+			[ "$aname" = "$amac" ] && aname=""
+			[ -n "$aname" ] || aname="Неизвестное устройство"
+			printf '%s|%s\n' "$aip" "$aname" >> "$arp_tmp"
+		done
+	fi
+	if [ -f "$arp_tmp" ]; then
+		while IFS='|' read -r aip aname; do
+			[ -z "$aip" ] && continue
+			[ "$first" -eq 1 ] || devjson="$devjson,"
+			first=0
+			devjson="$devjson{\"ip\":\"$aip\",\"name\":\"$(esc "$aname")\",\"excluded\":$(printf '%s\n' "$current" | grep -qx "$aip" && echo true || echo false)}"
+		done < "$arp_tmp"
+		rm -f "$arp_tmp"
 	fi
 
 	local ip2
