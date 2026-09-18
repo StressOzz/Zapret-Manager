@@ -1,5 +1,6 @@
 #!/bin/sh
 # Zapret Manager by StressOzz for LuCI installer
+# Version: 1.06
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -25,6 +26,8 @@ mkdir -p /usr/lib/zapret-manager
 cat > '/usr/lib/zapret-manager/backend.sh' << 'ZM_INSTALLER_EOF'
 
 CONF="/etc/config/zapret"
+ZM_VERSION="1.06"
+ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
 EXCLUDE_URL="${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/zapret-hosts-user-exclude.txt"
@@ -412,14 +415,18 @@ strategy_v10() { printf '%s\n' "#v10" "--filter-tcp=443" "--hostlist-exclude=/op
 
 
 _add_gp_domains() {
-	local f="/opt/zapret/ipset/zapret-hosts-google.txt"
-	mkdir -p "$(dirname "$f")"; touch "$f"
-	printf '%s\n' "gvt1.com" "googleplay.com" "play.google.com" "beacons.gvt2.com" \
-		"play.googleapis.com" "play-fe.googleapis.com" "lh3.googleusercontent.com" \
-		"android.clients.google.com" "connectivitycheck.gstatic.com" \
-		"play-lh.googleusercontent.com" "play-games.googleusercontent.com" \
-		"prod-lt-playstoregatewayadapter-pa.googleapis.com" "youtubei.youtube.com" \
-		| grep -Fxv -f "$f" 2>/dev/null >> "$f"
+	local f="/opt/zapret/ipset/zapret-hosts-google.txt" tmp
+	mkdir -p "$(dirname "$f")"
+	tmp="$f.tmp"
+	{
+		[ -f "$f" ] && cat "$f"
+		printf '%s\n' "gvt1.com" "googleplay.com" "play.google.com" "beacons.gvt2.com" \
+			"play.googleapis.com" "play-fe.googleapis.com" "lh3.googleusercontent.com" \
+			"android.clients.google.com" "connectivitycheck.gstatic.com" \
+			"play-lh.googleusercontent.com" "play-games.googleusercontent.com" \
+			"prod-lt-playstoregatewayadapter-pa.googleapis.com" "youtubei.youtube.com"
+	} | sort -u > "$tmp"
+	mv "$tmp" "$f"
 }
 
 _refresh_exclude_file() {
@@ -1455,7 +1462,8 @@ exclusions_clear() {
 
 
 TG_MTPROTO_VER="0.10"
-TGWS_INSTALL_URL="https://gitlab.com/xyzmean/brb/-/raw/main/install-tgws.sh"
+TGWS_VERSION="0.2.5"
+TGWS_BASE_URL="https://gitlab.com/xyzmean/brb/-/raw/main/dist"
 TGWS_VERSION_URL="https://gitlab.com/xyzmean/brb/-/raw/main/VERSION"
 TG_GO_VER="1.4.1"
 TG_RS_VER="2.3.3"
@@ -1666,11 +1674,51 @@ tgws_status() {
 }
 
 do_tgws_install() {
+	_ensure_deps
 	echo "==> Устанавливаем sTGWS"
-	rm -f /tmp/tgws_install.sh
-	wget -q -U "Mozilla/5.0" -O /tmp/tgws_install.sh "$TGWS_INSTALL_URL" || { echo "ОШИБКА: не удалось скачать установщик sTGWS"; rm -f /tmp/tgws_install.sh; return 1; }
-	sh /tmp/tgws_install.sh >/dev/null 2>&1
-	rm -f /tmp/tgws_install.sh
+	local ver arch file tmp
+	ver=$(curl -fsSL --connect-timeout 4 --max-time 6 "$TGWS_VERSION_URL" 2>/dev/null | tr -d '[:space:]')
+	[ -n "$ver" ] || ver="$TGWS_VERSION"
+	arch="$(awk -F\' '/DISTRIB_ARCH/ {print $2}' /etc/openwrt_release)"
+	[ -n "$arch" ] || arch="$(opkg print-architecture 2>/dev/null | awk '$2!="all"&&$2!="noarch"{print $2}' | tail -1)"
+	if [ -z "$arch" ]; then
+		echo "ОШИБКА: не удалось определить архитектуру роутера"
+		return 1
+	fi
+	file="tgws-${ver}-1_${arch}.${RAZ}"
+	tmp="$JOBS_DIR/tgws_install.$RAZ"
+	echo "==> Роутер: $arch, формат пакетов: $PKG"
+	echo "==> Скачиваем $file"
+	local attempt=1 max_attempts=5
+	while [ "$attempt" -le "$max_attempts" ]; do
+		rm -f "$tmp"
+		wget -q -O "$tmp" "$TGWS_BASE_URL/$file" >/dev/null 2>&1
+		if [ -s "$tmp" ]; then
+			if [ "$RAZ" = "ipk" ]; then
+				tar -tzf "$tmp" 2>/dev/null | grep -q 'debian-binary' && break
+			else
+				head -c 512 "$tmp" | grep -qiE '<html|<!doctype' || break
+			fi
+		fi
+		attempt=$((attempt + 1))
+	done
+	if [ "$attempt" -gt "$max_attempts" ]; then
+		echo "ОШИБКА: не удалось скачать пакет sTGWS ($TGWS_BASE_URL/$file)"
+		rm -f "$tmp"
+		return 1
+	fi
+	echo "==> Обновляем список пакетов"
+	$UPDATE >/dev/null 2>&1
+	if [ "$PKG" = "apk" ]; then
+		if apk info -e kmod-nft-queue >/dev/null 2>&1; then
+			apk add kmod-nft-queue >/dev/null 2>&1
+		fi
+	elif opkg list-installed kmod-nft-queue 2>/dev/null | grep -q .; then
+		opkg flag user kmod-nft-queue >/dev/null 2>&1
+	fi
+	echo "==> Устанавливаем пакет"
+	$INSTALL "$tmp" || { echo "ОШИБКА: менеджер пакетов отказался ставить sTGWS"; rm -f "$tmp"; return 1; }
+	rm -f "$tmp"
 	if [ ! -x /etc/init.d/tgws ]; then
 		echo "ОШИБКА: установка sTGWS не удалась"
 		return 1
@@ -1759,6 +1807,321 @@ tgws_action() {
 	esac
 }
 
+
+TEST_DIR="$JOBS_DIR/strategy_test"
+_test_results_file() { echo "$TEST_DIR/results_$1.txt"; }
+TEST_BACKUP="$TEST_DIR/backup.conf"
+TEST_STOP_FLAG="$TEST_DIR/stop"
+TEST_MODE_FILE="$TEST_DIR/mode"
+TEST_DOMAINS_JSON="${GH_RAW}/hyperion-cs/dpi-checkers/refs/heads/main/ru/tcp-16-20/suite.v2.json"
+TEST_YT_DOMAINS="youtu.be youtube.com i.ytimg.com i9.ytimg.com yt3.ggpht.com yt4.ggpht.com googleapis.com jnn-pa.googleapis.com googleusercontent.com signaler-pa.youtube.com youtubei.googleapis.com manifest.googlevideo.com yt3.googleusercontent.com rr4---sn-4g5e6nze.googlevideo.com rr4---sn-5go7yner.googlevideo.com rr4---sn-q4flrnsl.googlevideo.com rr5---sn-n8v7knez.googlevideo.com rr2---sn-q4fl6ndl.googlevideo.com rr1---sn-q4fl6n6y.googlevideo.com rr1---sn-aj5go5-53.googlevideo.com rr1---sn-4axm-n8vs.googlevideo.com rr14---sn-n8v7kn7r.googlevideo.com rr16---sn-axq7sn76.googlevideo.com rr4---sn-jvhnu5g-c35d.googlevideo.com rr1---sn-8ph2xajvh-5xge.googlevideo.com rr1---sn-xguxaxjvh-gufl.googlevideo.com rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com rr1---sn-gvnuxaxjvh-jx3l.googlevideo.com rr1---sn-gvnuxaxjvh-o8ge.googlevideo.com rr5---sn-gvnuxaxjvh-n8vk.googlevideo.com rr10---sn-gvnuxaxjvh-304z.googlevideo.com rr12---sn-gvnuxaxjvh-bvwz.googlevideo.com rr3---sn-ug5onuxaxjvh-n8v6.googlevideo.com rr1---sn-ug5onuxaxjvh-p5ge.googlevideo.com rr1---sn-ug5onuxaxjvh-p3ul.googlevideo.com rr1---sn-ug5onuxaxjvh-n8v6.googlevideo.com rr1---sn-u5uuxaxjvhg0-ocje.googlevideo.com"
+TEST_PARALLEL=8
+
+_test_sort_results() {
+	local f="$1" tmp
+	tmp="$TEST_DIR/sort.$$"
+	awk -F'[/ ]' '{ for (i = 1; i <= NF; i++) { if ($i ~ /^[0-9]+$/) { print $i, $0; break } } }' "$f" | sort -k1,1 -nr | cut -d' ' -f2- > "$tmp"
+	mv "$tmp" "$f"
+}
+
+_test_prepare_urls() {
+	local out="$1"
+	: > "$out"
+	printf '%s\n' \
+		"gosuslugi.ru|https://www.gosuslugi.ru" \
+		"esia.gosuslugi.ru|https://esia.gosuslugi.ru" \
+		"nalog.ru|https://nalog.ru" \
+		"lkfl2.nalog.ru|https://lkfl2.nalog.ru" \
+		"rutube.ru|https://rutube.ru" \
+		"ntc.party|https://ntc.party/" \
+		"instagram.com|https://instagram.com" \
+		"facebook.com|https://facebook.com" \
+		"rutracker.org|https://rutracker.org" \
+		"nnmclub.to|https://nnmclub.to" \
+		"openwrt.org|https://openwrt.org" \
+		"discord.com|https://discord.com" \
+		"x.com|https://x.com" \
+		"forum.ru-board.com|https://forum.ru-board.com" \
+		"play.google.com|https://play.google.com" \
+		"downloads.openwrt.org|https://downloads.openwrt.org" \
+		"githubusercontent.com|https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/Zapret-Manager.sh" \
+		>> "$out"
+	curl -fsSL --connect-timeout 8 --max-time 15 "$TEST_DOMAINS_JSON" 2>/dev/null \
+		| sed -n 's/.*"id":[[:space:]]*"\([^"]*\)".*"host":[[:space:]]*"\([^"]*\)".*/\1|\2/p' >> "$out"
+}
+
+_test_yt_urls() {
+	local d
+	for d in $TEST_YT_DOMAINS; do
+		printf '%s|https://%s/\n' "$d" "$d"
+	done
+}
+
+_test_kill_pid_tree() {
+	local pid="$1" ch c
+	[ -n "$pid" ] || return 0
+	ch=$(cat "/proc/$pid/task/$pid/children" 2>/dev/null)
+	for c in $ch; do _test_kill_pid_tree "$c"; done
+	kill -9 "$pid" 2>/dev/null
+}
+
+_test_kill_bg_jobs() {
+	local pf="$1" pid
+	[ -s "$pf" ] || return 0
+	while IFS= read -r pid; do
+		[ -n "$pid" ] && _test_kill_pid_tree "$pid"
+	done < "$pf"
+	wait 2>/dev/null
+}
+
+_test_check_url() {
+	local entry="$1" okfile="$2" logfile="$3" text link
+	text=$(echo "$entry" | cut -d'|' -f1)
+	link=$(echo "$entry" | cut -d'|' -f2)
+	if curl -sL --connect-timeout 4 --max-time 6 --speed-time 3 --speed-limit 1 --range 0-65535 -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o /dev/null "$link" >/dev/null 2>&1; then
+		echo 1 >> "$okfile"
+		echo "[ OK ] $text" >> "$logfile"
+	else
+		echo "[FAIL] $text" >> "$logfile"
+	fi
+}
+
+_test_check_all_urls() {
+	local urls="$1" logfile="$2" okfile pidfile total run=0 ok entry
+	okfile="$TEST_DIR/ok.$$"
+	pidfile="$TEST_DIR/pids.$$"
+	: > "$okfile"
+	: > "$pidfile"
+	total=$(printf '%s\n' "$urls" | grep -c '|')
+	while IFS= read -r entry; do
+		[ -z "$entry" ] && continue
+		[ -f "$TEST_STOP_FLAG" ] && break
+		_test_check_url "$entry" "$okfile" "$logfile" &
+		echo $! >> "$pidfile"
+		run=$((run + 1))
+		if [ "$run" -ge "$TEST_PARALLEL" ]; then
+			wait
+			run=0
+			[ -f "$TEST_STOP_FLAG" ] && break
+		fi
+	done <<-TEST_URLS_EOF
+	$urls
+	TEST_URLS_EOF
+	if [ -f "$TEST_STOP_FLAG" ]; then
+		_test_kill_bg_jobs "$pidfile"
+	else
+		wait
+	fi
+	ok=$(wc -l < "$okfile" | tr -d ' ')
+	rm -f "$okfile" "$pidfile"
+	printf '%s %s\n' "$ok" "$total"
+}
+
+_test_build_candidates() {
+	local mode="$1" out="$2" n f
+	: > "$out"
+	case "$mode" in
+		v)
+			for n in 1 2 3 4 5 6 7 8 9 10; do strategy_v"$n" >> "$out"; done
+			;;
+		flowseal)
+			f="$(_flowseal_file)"
+			[ -s "$f" ] || do_flowseal_download >/dev/null 2>&1
+			[ -s "$f" ] && cat "$f" >> "$out"
+			;;
+		v_flowseal)
+			f="$(_flowseal_file)"
+			[ -s "$f" ] || do_flowseal_download >/dev/null 2>&1
+			[ -s "$f" ] && cat "$f" >> "$out"
+			for n in 1 2 3 4 5 6 7 8 9 10; do strategy_v"$n" >> "$out"; done
+			;;
+		youtube)
+			f="$(_yv_file)"
+			[ -s "$f" ] || do_yv_download >/dev/null 2>&1
+			[ -s "$f" ] && cat "$f" >> "$out"
+			;;
+	esac
+	[ "$mode" = "youtube" ] || sed -i '/^#Y/d' "$out"
+}
+
+_test_apply_block() {
+	local block="$1"
+	sed -i "/^[[:space:]]*option NFQWS_OPT '/,\$d" "$CONF"
+	{ echo "	option NFQWS_OPT '"; echo "$block"; echo "'"; } >> "$CONF"
+}
+
+do_test_run() {
+	local mode="$1" results
+	mkdir -p "$TEST_DIR"
+	rm -f "$TEST_STOP_FLAG"
+	results="$(_test_results_file "$mode")"
+	: > "$results"
+	echo "$mode" > "$TEST_MODE_FILE"
+	[ -f "$CONF" ] || { echo "ОШИБКА: Zapret не установлен"; return 1; }
+	cp "$CONF" "$TEST_BACKUP"
+	_add_gp_domains
+	_refresh_exclude_file
+
+	local cand="$TEST_DIR/candidates.txt"
+	echo "==> Собираем стратегии для теста"
+	_test_build_candidates "$mode" "$cand"
+	if [ ! -s "$cand" ]; then
+		echo "ОШИБКА: не удалось собрать ни одной стратегии для теста"
+		rm -f "$TEST_BACKUP"
+		return 1
+	fi
+
+	local urls total_domains
+	if [ "$mode" = "youtube" ]; then
+		urls="$(_test_yt_urls)"
+	else
+		local urls_file="$TEST_DIR/urls.txt"
+		echo "==> Собираем список доменов для теста"
+		_test_prepare_urls "$urls_file"
+		urls="$(cat "$urls_file")"
+	fi
+	total_domains=$(printf '%s\n' "$urls" | grep -c '|')
+
+	local total_str
+	total_str=$(grep -c '^#' "$cand")
+	echo "==> Найдено стратегий: $total_str"
+	echo "==> Доменов для теста: $total_domains"
+
+	echo "==> Контрольный тест: Zapret выключен"
+	/etc/init.d/zapret stop >/dev/null 2>&1
+	local ctrl_log="$TEST_DIR/log_control.txt" ctrl_res ctrl_ok ctrl_total
+	: > "$ctrl_log"
+	ctrl_res=$(_test_check_all_urls "$urls" "$ctrl_log")
+	ctrl_ok=$(echo "$ctrl_res" | cut -d' ' -f1)
+	ctrl_total=$(echo "$ctrl_res" | cut -d' ' -f2)
+	echo "Контрольный тест (Zapret выключен) → ${ctrl_ok}/${ctrl_total}" >> "$results"
+	echo "==> Результат: ${ctrl_ok}/${ctrl_total}"
+	/etc/init.d/zapret start >/dev/null 2>&1
+
+	local lines cur=0
+	lines=$(grep -n '^#' "$cand" | cut -d: -f1)
+	echo "$lines" | while read -r start; do
+		cur=$((cur + 1))
+		if [ -f "$TEST_STOP_FLAG" ]; then
+			echo "==> Получен сигнал остановки, прерываем тестирование"
+			break
+		fi
+		local next name block res ok tot log
+		next=$(echo "$lines" | awk -v s="$start" '$1>s{print;exit}')
+		if [ -z "$next" ]; then
+			sed -n "${start},\$p" "$cand" > "$TEST_DIR/block.txt"
+		else
+			sed -n "${start},$((next-1))p" "$cand" > "$TEST_DIR/block.txt"
+		fi
+		name=$(head -n1 "$TEST_DIR/block.txt")
+		name="${name#\#}"
+		block=$(cat "$TEST_DIR/block.txt")
+		echo "==> [$cur/$total_str] Тестируем: $name"
+		_test_apply_block "$block"
+		zapret_restart
+		log="$TEST_DIR/log_$cur.txt"
+		: > "$log"
+		res=$(_test_check_all_urls "$urls" "$log")
+		ok=$(echo "$res" | cut -d' ' -f1)
+		tot=$(echo "$res" | cut -d' ' -f2)
+		echo "==> Результат: ${ok}/${tot}"
+		echo "${name} → ${ok}/${tot}" >> "$results"
+	done
+
+	if [ -f "$TEST_STOP_FLAG" ]; then
+		echo "==> Тестирование остановлено пользователем, восстанавливаем конфигурацию"
+		rm -f "$TEST_STOP_FLAG"
+	else
+		echo "==> Тестирование завершено, восстанавливаем конфигурацию"
+	fi
+
+	echo "==> Результаты теста"
+	_test_sort_results "$results"
+	cat "$results"
+	local best_line
+	best_line=$(grep -v '^Контрольный тест' "$results" | head -n1)
+	[ -n "$best_line" ] && echo "==> Лучшая стратегия по результатам теста: $best_line"
+
+	cp "$TEST_BACKUP" "$CONF"
+	zapret_restart
+	rm -f "$TEST_BACKUP"
+	echo "==> Готово, конфигурация восстановлена"
+}
+
+test_action() {
+	local action="$1" mode="$2"
+	case "$action" in
+		start)
+			case "$mode" in
+				v|flowseal|v_flowseal|youtube) ;;
+				*) echo '{"error":"неизвестный режим теста"}'; return 1 ;;
+			esac
+			job_start strategy_test do_test_run "$mode"
+			;;
+		stop)
+			if [ ! -f "$JOBS_DIR/strategy_test.pid" ] || ! kill -0 "$(cat "$JOBS_DIR/strategy_test.pid" 2>/dev/null)" 2>/dev/null; then
+				echo '{"error":"тест не запущен"}'
+				return 1
+			fi
+			mkdir -p "$TEST_DIR"
+			touch "$TEST_STOP_FLAG"
+			printf '{"ok":true}\n'
+			;;
+		clear)
+			case "$mode" in
+				v|flowseal|v_flowseal|youtube) rm -f "$(_test_results_file "$mode")" ;;
+				*) rm -f "$TEST_DIR"/results_*.txt ;;
+			esac
+			printf '{"ok":true}\n'
+			;;
+		*) echo '{"error":"неизвестное действие"}' ;;
+	esac
+}
+
+test_status() {
+	local running="false" mode=""
+	if [ -f "$JOBS_DIR/strategy_test.pid" ] && kill -0 "$(cat "$JOBS_DIR/strategy_test.pid" 2>/dev/null)" 2>/dev/null; then
+		running="true"
+	fi
+	[ -f "$TEST_MODE_FILE" ] && mode=$(cat "$TEST_MODE_FILE")
+	printf '{"running":%s,"mode":"%s","has_results_v":%s,"has_results_flowseal":%s,"has_results_v_flowseal":%s,"has_results_youtube":%s}\n' \
+		"$running" "$(esc "$mode")" \
+		"$([ -s "$(_test_results_file v)" ] && echo true || echo false)" \
+		"$([ -s "$(_test_results_file flowseal)" ] && echo true || echo false)" \
+		"$([ -s "$(_test_results_file v_flowseal)" ] && echo true || echo false)" \
+		"$([ -s "$(_test_results_file youtube)" ] && echo true || echo false)"
+}
+
+test_results() {
+	local mode="$1" f
+	f="$(_test_results_file "$mode")"
+	[ -s "$f" ] || { echo '{"lines":""}'; return; }
+	printf '{"lines":"%s"}\n' "$(esc_ml "$(cat "$f")")"
+}
+
+zm_update_status() {
+	local latest_line latest=""
+	latest_line=$(curl -fsSL --connect-timeout 5 --max-time 8 -r 0-400 "$ZM_SCRIPT_URL" 2>/dev/null | grep -m1 '^# Version:')
+	latest=$(echo "$latest_line" | sed 's/^# Version:[[:space:]]*//')
+	printf '{"current":"%s","latest":"%s"}\n' "$(esc "$ZM_VERSION")" "$(esc "$latest")"
+}
+
+do_zm_update() {
+	echo "==> Скачиваем новую версию установщика"
+	local tmp="/tmp/zm_update_install.sh"
+	rm -f "$tmp"
+	wget -q -U "Mozilla/5.0" -O "$tmp" "$ZM_SCRIPT_URL" || { echo "ОШИБКА: не удалось скачать установщик"; rm -f "$tmp"; return 1; }
+	[ -s "$tmp" ] || { echo "ОШИБКА: скачался пустой файл"; rm -f "$tmp"; return 1; }
+	head -c 200 "$tmp" | grep -q '^#!/bin/sh' || { echo "ОШИБКА: скачанный файл не похож на установщик"; rm -f "$tmp"; return 1; }
+	chmod +x "$tmp"
+	echo "==> Запускаем установку новой версии в фоне"
+	( sleep 1; sh "$tmp" >/tmp/zm_update_install.log 2>&1; rm -f "$tmp" ) &
+	echo "==> Готово, обновление запущено — панель станет недоступна на несколько секунд, затем обновите страницу"
+}
+
+zm_update_action() {
+	job_start zm_update do_zm_update
+}
 
 _doh_file="/etc/config/https-dns-proxy"
 
@@ -1906,6 +2269,11 @@ case "$cmd" in
 	doh_remove)                          doh_remove ;;
 	doh_status)                          doh_status ;;
 	doh_set)                              doh_set "$1" ;;
+	test_status)                          test_status ;;
+	test_action)                          test_action "$1" "$2" ;;
+	test_results)                         test_results "$1" ;;
+	zm_update_status)                     zm_update_status ;;
+	zm_update_action)                     zm_update_action ;;
 	*) echo '{"error":"неизвестная команда"}'; exit 1 ;;
 esac
 ZM_INSTALLER_EOF
@@ -1966,6 +2334,11 @@ list_methods() {
 	json_add_object "doh_install";            json_close_object
 	json_add_object "doh_remove";             json_close_object
 	json_add_object "doh_set";                json_add_string "provider" "string"; json_close_object
+	json_add_object "test_status";             json_close_object
+	json_add_object "test_action";             json_add_string "action" "string"; json_add_string "mode" "string"; json_close_object
+	json_add_object "test_results";            json_add_string "mode" "string"; json_close_object
+	json_add_object "zm_update_status";        json_close_object
+	json_add_object "zm_update_action";        json_close_object
 	json_dump
 }
 
@@ -2021,6 +2394,11 @@ call_method() {
 		doh_install)             "$BACKEND" doh_install ;;
 		doh_remove)              "$BACKEND" doh_remove ;;
 		doh_set)                 json_get_var provider provider; "$BACKEND" doh_set "$provider" ;;
+		test_status)             "$BACKEND" test_status ;;
+		test_action)             json_get_var action action; json_get_var mode mode; "$BACKEND" test_action "$action" "$mode" ;;
+		test_results)            json_get_var mode mode; "$BACKEND" test_results "$mode" ;;
+		zm_update_status)        "$BACKEND" zm_update_status ;;
+		zm_update_action)        "$BACKEND" zm_update_action ;;
 		*) echo '{"error":"unknown method"}'; return 1 ;;
 	esac
 }
@@ -2045,6 +2423,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"strategy_list_v", "strategy_list_flowseal", "strategy_list_youtube",
 					"discord_status", "hosts_status", "doh_status", "game_status",
 					"system_status", "mirror_status", "exclusions_status", "tg_status", "tgws_status",
+					"test_status", "test_results", "zm_update_status",
 					"zapret_latest_version"
 				]
 			}
@@ -2060,7 +2439,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"system_check_connectivity", "system_toggle_quic", "system_toggle_ipv6",
 					"system_toggle_flow_offloading_fix", "system_toggle_expert_mode", "system_uninstall_panel",
 					"mirror_set", "exclusions_toggle", "exclusions_clear",
-					"tg_action", "tg_restart_all", "tgws_action"
+					"tg_action", "tg_restart_all", "tgws_action", "test_action", "zm_update_action"
 				]
 			}
 		}
@@ -2088,6 +2467,11 @@ cat > '/usr/share/luci/menu.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF
 		"title": "Стратегии",
 		"order": 20,
 		"action": { "type": "view", "path": "zapret-manager/strategy" }
+	},
+	"admin/services/zapret-manager/test": {
+		"title": "Тест стратегий",
+		"order": 22,
+		"action": { "type": "view", "path": "zapret-manager/test" }
 	},
 	"admin/services/zapret-manager/youtube": {
 		"title": "YouTube",
@@ -2184,6 +2568,11 @@ var callDohStatus = rpc.declare({ object: 'zapret-manager', method: 'doh_status'
 var callDohInstall = rpc.declare({ object: 'zapret-manager', method: 'doh_install', expect: {} });
 var callDohRemove = rpc.declare({ object: 'zapret-manager', method: 'doh_remove', expect: {} });
 var callDohSet = rpc.declare({ object: 'zapret-manager', method: 'doh_set', params: ['provider'], expect: {} });
+var callTestStatus = rpc.declare({ object: 'zapret-manager', method: 'test_status', expect: {} });
+var callTestAction = rpc.declare({ object: 'zapret-manager', method: 'test_action', params: ['action', 'mode'], expect: {} });
+var callTestResults = rpc.declare({ object: 'zapret-manager', method: 'test_results', params: ['mode'], expect: {} });
+var callZmUpdateStatus = rpc.declare({ object: 'zapret-manager', method: 'zm_update_status', expect: {} });
+var callZmUpdateAction = rpc.declare({ object: 'zapret-manager', method: 'zm_update_action', expect: {} });
 
 function detectMissingThemeVar() {
 	if (document.documentElement.hasAttribute('data-zm-theme-checked')) return;
@@ -2255,27 +2644,42 @@ function renderLog(logEl, text) {
 	logEl.scrollTop = logEl.scrollHeight;
 }
 
+var _activePolls = {};
+
 function pollJob(job, logEl, onDone, onTick) {
+	if (_activePolls[job]) {
+		clearInterval(_activePolls[job]);
+		delete _activePolls[job];
+	}
 	logEl.classList.add('zm-show');
 	var failCount = 0;
+	var finished = false;
 	var timer = setInterval(function() {
+		if (finished) return;
 		Promise.all([ callJobStatus(job), callLogTail(job) ]).then(function(res) {
+			if (finished) return;
 			failCount = 0;
 			var st = res[0], lg = res[1];
 			renderLog(logEl, (lg && lg.lines) || '');
 			if (typeof onTick === 'function') onTick();
 			if (st && st.done === true) {
+				finished = true;
 				clearInterval(timer);
+				delete _activePolls[job];
 				onDone(st.rc === '0');
 			}
 		}).catch(function() {
+			if (finished) return;
 			failCount++;
 			if (failCount >= 8) {
+				finished = true;
 				clearInterval(timer);
+				delete _activePolls[job];
 				toast('Роутер не отвечает — операция может ещё выполняться в фоне. Обновите страницу через полминуты, чтобы проверить результат.', 'warning', 25000);
 			}
 		});
 	}, 1200);
+	_activePolls[job] = timer;
 }
 
 function refreshBanner(message) {
@@ -2380,7 +2784,12 @@ return baseclass.extend({
 	dohStatus: callDohStatus,
 	dohInstall: callDohInstall,
 	dohRemove: callDohRemove,
-	dohSet: callDohSet
+	dohSet: callDohSet,
+	testStatus: callTestStatus,
+	testAction: callTestAction,
+	testResults: callTestResults,
+	zmUpdateStatus: callZmUpdateStatus,
+	zmUpdateAction: callZmUpdateAction
 });
 ZM_INSTALLER_EOF
 
@@ -2400,7 +2809,8 @@ return view.extend({
 			zm.hostsStatus().catch(function() { return { items: [] }; }),
 			zm.systemStatus().catch(function() { return {}; }),
 			zm.zapretLatestVersion().catch(function() { return {}; }),
-			zm.systemInfo().catch(function() { return {}; })
+			zm.systemInfo().catch(function() { return {}; }),
+			zm.zmUpdateStatus().catch(function() { return {}; })
 		]);
 	},
 
@@ -2409,6 +2819,7 @@ return view.extend({
 		var data = all[0], dohData = all[1], hostsData = all[2], sysData = all[3];
 		var latestVersion = (all[4] && all[4].version) || '';
 		var sysInfo = all[5] || {};
+		var zmUpdate = all[6] || {};
 		var wrap = E('div', { 'class': 'zm-wrap' });
 		var overviewEl = E('div', {});
 		var cards = E('div', { 'class': 'zm-cards' });
@@ -2427,6 +2838,17 @@ return view.extend({
 
 			return E('div', { 'class': 'zm-card', 'style': 'margin-bottom:4px' }, [
 				E('h3', {}, 'Обзор'),
+				E('div', { 'class': 'zm-row' }, [
+					E('span', { 'class': 'zm-label' }, 'Zapret Manager LuCI'),
+					E('span', {}, [
+						E('span', {}, 'v' + (zmUpdate.current || '?') + ' '),
+						E('button', {
+							'class': 'cbi-button',
+							'style': 'padding:2px 10px; font-size:12px',
+							'click': function() { checkForUpdates(true); }
+						}, 'Проверить обновления')
+					])
+				]),
 				E('div', { 'class': 'zm-row' }, [
 					E('span', { 'class': 'zm-label' }, 'Zapret'),
 					d.zapret === 'installed'
@@ -2556,6 +2978,8 @@ return view.extend({
 			cards.appendChild(sysCard);
 		}
 
+		var lastD = data, lastDoh = dohData, lastHosts = hostsData, lastSys = sysData;
+
 		function refreshOverview() {
 			Promise.all([
 				zm.status(),
@@ -2563,6 +2987,7 @@ return view.extend({
 				zm.hostsStatus().catch(function() { return { items: [] }; }),
 				zm.systemStatus().catch(function() { return {}; })
 			]).then(function(res) {
+				lastD = res[0]; lastDoh = res[1]; lastHosts = res[2]; lastSys = res[3];
 				overviewEl.innerHTML = '';
 				overviewEl.appendChild(renderOverview(res[0], res[1], res[2], res[3]));
 			});
@@ -2588,6 +3013,66 @@ return view.extend({
 		this.bannerEl = bannerEl;
 		this.renderCards = renderCards;
 		this.refreshOverview = refreshOverview;
+
+		var updateEl = E('div', {});
+		wrap.appendChild(updateEl);
+
+		var zmUpdateBusy = false;
+		function renderZmUpdate() {
+			updateEl.innerHTML = '';
+			if (!zmUpdate.latest || zmUpdate.latest === zmUpdate.current) return;
+			var log = E('pre', { 'class': 'zm-log' });
+			updateEl.appendChild(E('div', { 'class': 'zm-refresh-banner zm-show' }, [
+				E('span', {}, 'Доступна новая версия панели Zapret Manager: ' + zmUpdate.latest + ' (у вас установлена ' + zmUpdate.current + ').'),
+				E('button', {
+					'class': 'cbi-button cbi-button-positive',
+					'click': function() {
+						if (zmUpdateBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+						zmUpdateBusy = true;
+						log.classList.add('zm-show');
+						zm.toast('Скачиваем и запускаем обновление панели', 'warning');
+						zm.zmUpdateAction().then(function(res) {
+							if (res.error) { zmUpdateBusy = false; zm.toast(res.error, 'error'); return; }
+							zm.pollJob('zm_update', log, function(ok) {
+								zmUpdateBusy = false;
+								if (ok) {
+									zm.toast('Обновление запущено — подождите около 20 секунд, затем обновите страницу', 'info', 20000);
+									setTimeout(function() { location.reload(); }, 20000);
+								} else {
+									zm.toast('Не удалось скачать обновление', 'error');
+								}
+							});
+						}).catch(function() { zmUpdateBusy = false; });
+					}
+				}, 'Обновить панель')
+			]));
+			updateEl.appendChild(log);
+		}
+		renderZmUpdate();
+
+		var checkBusy = false;
+		function checkForUpdates(manual) {
+			if (checkBusy) { zm.toast('Дождитесь завершения проверки', 'warning'); return; }
+			checkBusy = true;
+			if (manual) zm.toast('Проверяем обновления', 'warning');
+			zm.zmUpdateStatus().then(function(res) {
+				checkBusy = false;
+				zmUpdate = res || {};
+				overviewEl.innerHTML = '';
+				overviewEl.appendChild(renderOverview(lastD, lastDoh, lastHosts, lastSys));
+				renderZmUpdate();
+				if (manual) {
+					if (zmUpdate.latest && zmUpdate.latest !== zmUpdate.current) {
+						zm.toast('Доступна новая версия: ' + zmUpdate.latest, 'info');
+					} else {
+						zm.toast('У вас установлена последняя версия', 'info');
+					}
+				}
+			}).catch(function() {
+				checkBusy = false;
+				if (manual) zm.toast('Не удалось проверить обновления', 'error');
+			});
+		}
 
 		return wrap;
 	},
@@ -3761,6 +4246,209 @@ return view.extend({
 		]);
 		wrap.appendChild(uninstallCard);
 
+		return wrap;
+	}
+});
+ZM_INSTALLER_EOF
+
+mkdir -p /www/luci-static/resources/view/zapret-manager
+cat > '/www/luci-static/resources/view/zapret-manager/test.js' << 'ZM_INSTALLER_EOF'
+'use strict';
+'require view';
+'require zapret-manager.common as zm';
+
+var MODES = [
+	{ id: 'v', label: 'Тестировать v' },
+	{ id: 'flowseal', label: 'Тестировать Flowseal' },
+	{ id: 'v_flowseal', label: 'Тестировать v + Flowseal' }
+];
+
+var MODE_LABELS = {
+	v: 'v', flowseal: 'Flowseal', v_flowseal: 'v + Flowseal', youtube: 'YouTube'
+};
+
+var RESULT_MODES = ['v', 'flowseal', 'v_flowseal', 'youtube'];
+
+return view.extend({
+	load: function() {
+		zm.injectCss();
+		return zm.testStatus();
+	},
+
+	render: function(data) {
+		var view = this;
+		var wrap = E('div', { 'class': 'zm-wrap' });
+		var logEl = E('pre', { 'class': 'zm-log' });
+		var resultsEl = E('pre', { 'class': 'zm-log' });
+		var busy = data.running === true;
+		var curMode = data.mode || '';
+		var status = data;
+
+		var mainCard = E('div', { 'class': 'zm-card' });
+		var ytCard = E('div', { 'class': 'zm-card' });
+		var resultsButtonsEl = E('div', {});
+
+		function stopButton() {
+			return E('button', { 'class': 'cbi-button cbi-button-remove', 'click': doStop }, 'Остановить тестирование стратегий');
+		}
+
+		function renderMain() {
+			mainCard.innerHTML = '';
+			mainCard.appendChild(E('h3', {}, 'Тест стратегий v / Flowseal'));
+			mainCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Тест идёт в фоне — переключение вкладок или закрытие LuCI его не прервёт. По окончании конфигурация всегда возвращается к тому, что было до начала теста — стратегии только тестируются, лучшую нужно применить вручную на странице «Стратегии».'));
+			if (busy && curMode !== 'youtube') {
+				mainCard.appendChild(E('div', { 'class': 'zm-row' }, [
+					E('span', { 'class': 'zm-label' }, 'Статус'),
+					zm.badge(true, 'тест выполняется (' + (MODE_LABELS[curMode] || curMode) + ')', '')
+				]));
+				mainCard.appendChild(E('div', { 'class': 'zm-actions' }, [ stopButton() ]));
+			} else if (busy) {
+				mainCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сейчас выполняется тест YouTube — дождитесь его завершения.'));
+			} else {
+				mainCard.appendChild(E('div', { 'class': 'zm-actions' }, MODES.map(function(m) {
+					return E('button', {
+						'class': 'cbi-button cbi-button-positive',
+						'click': function() { doStart(m.id); }
+					}, m.label);
+				})));
+			}
+		}
+
+		function renderYt() {
+			ytCard.innerHTML = '';
+			ytCard.appendChild(E('h3', {}, 'Тест стратегий YouTube (Yv)'));
+			ytCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Всегда тестируется отдельно от v/Flowseal — своим набором стратегий и доменов YouTube.'));
+			if (busy && curMode === 'youtube') {
+				ytCard.appendChild(E('div', { 'class': 'zm-row' }, [
+					E('span', { 'class': 'zm-label' }, 'Статус'),
+					zm.badge(true, 'тест выполняется', '')
+				]));
+				ytCard.appendChild(E('div', { 'class': 'zm-actions' }, [ stopButton() ]));
+			} else if (busy) {
+				ytCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сейчас выполняется тест v/Flowseal — дождитесь его завершения.'));
+			} else {
+				ytCard.appendChild(E('div', { 'class': 'zm-actions' }, [
+					E('button', {
+						'class': 'cbi-button cbi-button-positive',
+						'click': function() { doStart('youtube'); }
+					}, 'Тестировать YouTube')
+				]));
+			}
+		}
+
+		function startPolling() {
+			logEl.classList.add('zm-show');
+			zm.pollJob('strategy_test', logEl, function(ok) {
+				busy = false;
+				curMode = '';
+				zm.toast(ok ? 'Тест завершён' : 'Тест завершился с ошибкой', ok ? 'info' : 'error');
+				renderMain();
+				renderYt();
+				zm.testStatus().then(function(res) {
+					status = res;
+					renderResultsButtons();
+				});
+			});
+		}
+
+		function doStart(mode) {
+			if (busy) { zm.toast('Дождитесь завершения текущего теста', 'warning'); return; }
+			busy = true;
+			curMode = mode;
+			renderMain();
+			renderYt();
+			zm.toast('Запускаем тест стратегий', 'warning');
+			zm.testAction('start', mode).then(function(res) {
+				if (res.error) { busy = false; curMode = ''; zm.toast(res.error, 'error'); renderMain(); renderYt(); return; }
+				startPolling();
+			}).catch(function() { busy = false; curMode = ''; renderMain(); renderYt(); });
+		}
+
+		function doStop() {
+			zm.toast('Останавливаем тест', 'warning');
+			zm.testAction('stop').then(function(res) {
+				if (res.error) { zm.toast(res.error, 'error'); return; }
+				zm.toast('Тест остановлен, конфигурация восстанавливается', 'info');
+			});
+		}
+
+		function renderResultsColored(el, text) {
+			el.innerHTML = '';
+			var lines = (text || '').split('\n').filter(function(l) { return l; });
+			var controlOk = null;
+			lines.forEach(function(line) {
+				var m = line.match(/^(.*?)\s*→\s*(\d+)\/(\d+)\s*$/);
+				if (m && /^Контрольный тест/.test(m[1])) controlOk = +m[2];
+			});
+			var first = true;
+			lines.forEach(function(line) {
+				var div = document.createElement('div');
+				var m = line.match(/^(.*?)\s*→\s*(\d+)\/(\d+)\s*$/);
+				if (m) {
+					var name = m[1], ok = +m[2], total = +m[3];
+					var isControl = /^Контрольный тест/.test(name);
+					var nameSpan = document.createElement('span');
+					nameSpan.textContent = name + ' → ';
+					var scoreSpan = document.createElement('span');
+					scoreSpan.textContent = ok + '/' + total;
+					if (isControl) {
+						div.className = 'zm-log-code';
+					} else {
+						if (ok === total) scoreSpan.className = 'zm-log-msg-ok';
+						else if (controlOk !== null && ok < controlOk) scoreSpan.className = 'zm-log-msg-error';
+						else scoreSpan.className = 'zm-log-msg-warn';
+						if (first) { nameSpan.style.fontWeight = '700'; first = false; }
+					}
+					div.appendChild(nameSpan);
+					div.appendChild(scoreSpan);
+				} else {
+					div.className = 'zm-log-code';
+					div.textContent = line;
+				}
+				el.appendChild(div);
+			});
+		}
+
+		function showResultsFor(mode) {
+			zm.testResults(mode).then(function(res) {
+				resultsEl.classList.add('zm-show');
+				renderResultsColored(resultsEl, res.lines || '');
+			});
+		}
+
+		function renderResultsButtons() {
+			resultsButtonsEl.innerHTML = '';
+			var actions = [];
+			RESULT_MODES.forEach(function(m) {
+				if (!status['has_results_' + m]) return;
+				actions.push(E('button', {
+					'class': 'cbi-button',
+					'click': function() { showResultsFor(m); }
+				}, 'Показать результаты: ' + MODE_LABELS[m]));
+			});
+			if (actions.length) {
+				resultsButtonsEl.appendChild(E('div', { 'class': 'zm-actions' }, actions));
+			} else {
+				resultsButtonsEl.appendChild(E('p', { 'class': 'zm-hint' }, 'Пока нет сохранённых результатов — запустите тест.'));
+			}
+		}
+
+		var resultsCard = E('div', { 'class': 'zm-card' }, [
+			E('h3', {}, 'Результаты тестирования'),
+			resultsButtonsEl,
+			resultsEl
+		]);
+
+		renderMain();
+		renderYt();
+		renderResultsButtons();
+
+		if (busy) { startPolling(); }
+
+		wrap.appendChild(mainCard);
+		wrap.appendChild(ytCard);
+		wrap.appendChild(logEl);
+		wrap.appendChild(resultsCard);
 		return wrap;
 	}
 });
