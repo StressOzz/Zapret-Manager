@@ -126,8 +126,8 @@ ZAPRET_RESTART () { chmod +x /opt/zapret/sync_config.sh; /opt/zapret/sync_config
 start_test_trap() { mkdir -p "$TMP_SF"; rm -f "$TEST_STOP_FLAG"; echo -e "\nCtrl+C - ${YELLOW}остановить тестирование${NC}"; trap 'touch "$TEST_STOP_FLAG" 2>/dev/null' INT; }
 stop_test_trap() { trap - INT; rm -f "$TEST_STOP_FLAG"; }
 test_interrupted() { [ -f "$TEST_STOP_FLAG" ]; }
-restore_after_test_interrupt() { local BAK="$1"; stop_test_trap; if [ -n "$BAK" ] && [ -f "$BAK" ]; then mv -f "$BAK" "$CONF"; fi; echo -e "\n${YELLOW}Остановливаем тестирование${CYAN}\nВостанавливаем конфигурацию${NC}"; ZAPRET_RESTART; echo -e "${GREEN}Тестирование остановлено!\n${NC}"; [ -z "$NO_PAUSE" ] && PAUSE; }
-_stryou_restore_interrupt() { stop_test_trap; sed -i "/^[[:space:]]*option NFQWS_OPT '/,/^[[:space:]]*'[[:space:]]*\$/d" "$CONF"; cat "$OLD_STR" >> "$CONF"; echo -e "\n${YELLOW}Остановливаем тестирование${CYAN}\nВостанавливаем конфигурацию${NC}"; ZAPRET_RESTART; echo -e "${GREEN}Тестирование остановлено!\n${NC}"; PAUSE </dev/tty; }
+restore_after_test_interrupt() { local BAK="$1"; stop_test_trap; if [ -n "$BAK" ] && [ -f "$BAK" ]; then mv -f "$BAK" "$CONF"; fi; echo; echo -e "\n${YELLOW}Останавливаем тестирование${CYAN}\nВостанавливаем конфигурацию${NC}"; ZAPRET_RESTART; echo -e "${GREEN}Тестирование остановлено!\n${NC}"; [ -z "$NO_PAUSE" ] && PAUSE; }
+_stryou_restore_interrupt() { stop_test_trap; sed -i "/^[[:space:]]*option NFQWS_OPT '/,/^[[:space:]]*'[[:space:]]*\$/d" "$CONF"; cat "$OLD_STR" >> "$CONF"; echo; echo -e "\n${YELLOW}Останавливаем тестирование${CYAN}\nВостанавливаем конфигурацию${NC}"; ZAPRET_RESTART; echo -e "${GREEN}Тестирование остановлено!\n${NC}"; PAUSE </dev/tty; }
 kill_pid_tree() { local pid="$1"; [ -n "$pid" ] || return 0; local ch; ch=$(cat "/proc/$pid/task/$pid/children" 2>/dev/null); for c in $ch; do kill_pid_tree "$c"; done; kill -9 "$pid" 2>/dev/null; }
 kill_bg_jobs() { local pf="$1"; [ -s "$pf" ] || return 0; while IFS= read -r pid; do [ -n "$pid" ] && kill_pid_tree "$pid"; done < "$pf"; wait 2>/dev/null; }
 PAUSE() { echo -ne "Нажмите Enter..."; read dummy; }; BACKUP_DIR="/opt/zapret_backup"; DATE_FILE="$BACKUP_DIR/date_backup.txt"
