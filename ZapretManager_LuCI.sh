@@ -1,6 +1,6 @@
 #!/bin/sh
 # Zapret Manager by StressOzz for LuCI installer
-# Version: 1.07
+# Version: 1.08
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -26,7 +26,7 @@ mkdir -p /usr/lib/zapret-manager
 cat > '/usr/lib/zapret-manager/backend.sh' << 'ZM_INSTALLER_EOF'
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.06"
+ZM_VERSION="1.08"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -2102,6 +2102,9 @@ test_results() {
 zm_update_status() {
 	local latest_line latest=""
 	latest_line=$(curl -fsSL --connect-timeout 5 --max-time 8 -r 0-400 "$ZM_SCRIPT_URL" 2>/dev/null | grep -m1 '^# Version:')
+	if [ -z "$latest_line" ]; then
+		latest_line=$(curl -fsSL --connect-timeout 5 --max-time 10 "$ZM_SCRIPT_URL" 2>/dev/null | grep -m1 '^# Version:')
+	fi
 	latest=$(echo "$latest_line" | sed 's/^# Version:[[:space:]]*//')
 	printf '{"current":"%s","latest":"%s"}\n' "$(esc "$ZM_VERSION")" "$(esc "$latest")"
 }
@@ -2115,7 +2118,14 @@ do_zm_update() {
 	head -c 200 "$tmp" | grep -q '^#!/bin/sh' || { echo "ОШИБКА: скачанный файл не похож на установщик"; rm -f "$tmp"; return 1; }
 	chmod +x "$tmp"
 	echo "==> Запускаем установку новой версии в фоне"
-	( sleep 1; sh "$tmp" >/tmp/zm_update_install.log 2>&1; rm -f "$tmp" ) &
+	(
+		sleep 1
+		sh "$tmp" >/tmp/zm_update_install.log 2>&1
+		rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null
+		/etc/init.d/rpcd restart >/dev/null 2>&1
+		/etc/init.d/uhttpd restart >/dev/null 2>&1
+		rm -f "$tmp"
+	) &
 	echo "==> Готово, обновление запущено — панель станет недоступна на несколько секунд, затем обновите страницу"
 }
 
@@ -2840,14 +2850,7 @@ return view.extend({
 				E('h3', {}, 'Обзор'),
 				E('div', { 'class': 'zm-row' }, [
 					E('span', { 'class': 'zm-label' }, 'Zapret Manager LuCI'),
-					E('span', {}, [
-						E('span', {}, 'v' + (zmUpdate.current || '?') + ' '),
-						E('button', {
-							'class': 'cbi-button',
-							'style': 'padding:2px 10px; font-size:12px',
-							'click': function() { checkForUpdates(true); }
-						}, 'Проверить обновления')
-					])
+					E('span', {}, 'v' + (zmUpdate.current || '?'))
 				]),
 				E('div', { 'class': 'zm-row' }, [
 					E('span', { 'class': 'zm-label' }, 'Zapret'),
@@ -2978,8 +2981,6 @@ return view.extend({
 			cards.appendChild(sysCard);
 		}
 
-		var lastD = data, lastDoh = dohData, lastHosts = hostsData, lastSys = sysData;
-
 		function refreshOverview() {
 			Promise.all([
 				zm.status(),
@@ -2987,7 +2988,6 @@ return view.extend({
 				zm.hostsStatus().catch(function() { return { items: [] }; }),
 				zm.systemStatus().catch(function() { return {}; })
 			]).then(function(res) {
-				lastD = res[0]; lastDoh = res[1]; lastHosts = res[2]; lastSys = res[3];
 				overviewEl.innerHTML = '';
 				overviewEl.appendChild(renderOverview(res[0], res[1], res[2], res[3]));
 			});
@@ -3018,6 +3018,28 @@ return view.extend({
 		wrap.appendChild(updateEl);
 
 		var zmUpdateBusy = false;
+		function waitForServerAndReload() {
+			var attempts = 0;
+			var maxAttempts = 20;
+			var target = L.resource('view/zapret-manager/dashboard.js') + '?_zmcheck=' + Date.now();
+			var timer = setInterval(function() {
+				attempts++;
+				fetch(target, { credentials: 'same-origin', cache: 'no-store' }).then(function(resp) {
+					if (resp.ok) {
+						clearInterval(timer);
+						location.reload();
+					} else if (attempts >= maxAttempts) {
+						clearInterval(timer);
+						zm.toast('Панель обновлена, но страница пока не отвечает — обновите вручную (F5)', 'warning', 15000);
+					}
+				}).catch(function() {
+					if (attempts >= maxAttempts) {
+						clearInterval(timer);
+						zm.toast('Панель обновлена, но страница пока не отвечает — обновите вручную (F5)', 'warning', 15000);
+					}
+				});
+			}, 2000);
+		}
 		function renderZmUpdate() {
 			updateEl.innerHTML = '';
 			if (!zmUpdate.latest || zmUpdate.latest === zmUpdate.current) return;
@@ -3036,8 +3058,8 @@ return view.extend({
 							zm.pollJob('zm_update', log, function(ok) {
 								zmUpdateBusy = false;
 								if (ok) {
-									zm.toast('Обновление запущено — подождите около 20 секунд, затем обновите страницу', 'info', 20000);
-									setTimeout(function() { location.reload(); }, 20000);
+									zm.toast('Обновление скачано, ждём перезапуска панели...', 'info', 15000);
+									waitForServerAndReload();
 								} else {
 									zm.toast('Не удалось скачать обновление', 'error');
 								}
@@ -3049,30 +3071,6 @@ return view.extend({
 			updateEl.appendChild(log);
 		}
 		renderZmUpdate();
-
-		var checkBusy = false;
-		function checkForUpdates(manual) {
-			if (checkBusy) { zm.toast('Дождитесь завершения проверки', 'warning'); return; }
-			checkBusy = true;
-			if (manual) zm.toast('Проверяем обновления', 'warning');
-			zm.zmUpdateStatus().then(function(res) {
-				checkBusy = false;
-				zmUpdate = res || {};
-				overviewEl.innerHTML = '';
-				overviewEl.appendChild(renderOverview(lastD, lastDoh, lastHosts, lastSys));
-				renderZmUpdate();
-				if (manual) {
-					if (zmUpdate.latest && zmUpdate.latest !== zmUpdate.current) {
-						zm.toast('Доступна новая версия: ' + zmUpdate.latest, 'info');
-					} else {
-						zm.toast('У вас установлена последняя версия', 'info');
-					}
-				}
-			}).catch(function() {
-				checkBusy = false;
-				if (manual) zm.toast('Не удалось проверить обновления', 'error');
-			});
-		}
 
 		return wrap;
 	},
@@ -4650,7 +4648,7 @@ return view.extend({
 			}
 			tgwsCard.innerHTML = '';
 			tgwsCard.appendChild(E('h3', {}, 'sTGWS (бета)'));
-			tgwsCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Бета-версия. В отдельных случаях может потребоваться сброс роутера до заводских настроек. Не устанавливайте, если не уверены, что сможете устранить возможные проблемы.'));
+			tgwsCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Бета-версия. В отдельных случаях может потребоваться сброс роутера до заводских настроек. Не устанавливайте, если не уверены, что сможете устранить возможные проблемы — рекомендуется использовать другие варианты TG WS Proxy выше.'));
 			tgwsCard.appendChild(E('div', { 'class': 'zm-row' }, [
 				E('span', { 'class': 'zm-label' }, 'Статус'),
 				installed ? zm.badge(d.running === true, 'запущен', 'остановлен') : zm.badge(false, '', 'не установлен')
@@ -4835,3 +4833,4 @@ command -v curl >/dev/null 2>&1 || $INSTALL curl >/dev/null 2>&1 || true
 command -v unzip >/dev/null 2>&1 || $INSTALL unzip >/dev/null 2>&1 || true
 
 echo -e "Zapret Manager ${GREEN}для ${NC}LuCI ${GREEN}установлен!${NC}\n"
+
