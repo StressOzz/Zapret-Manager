@@ -127,6 +127,7 @@ start_test_trap() { mkdir -p "$TMP_SF"; rm -f "$TEST_STOP_FLAG"; echo -e "\nCtrl
 stop_test_trap() { trap - INT; rm -f "$TEST_STOP_FLAG"; }
 test_interrupted() { [ -f "$TEST_STOP_FLAG" ]; }
 restore_after_test_interrupt() { local BAK="$1"; stop_test_trap; if [ -n "$BAK" ] && [ -f "$BAK" ]; then mv -f "$BAK" "$CONF"; fi; echo -e "\n${YELLOW}Остановливаем тестирование${CYAN}\nВостанавливаем конфигурацию${NC}"; ZAPRET_RESTART; echo -e "${GREEN}Тестирование остановлено!\n${NC}"; [ -z "$NO_PAUSE" ] && PAUSE; }
+_stryou_restore_interrupt() { stop_test_trap; sed -i "/^[[:space:]]*option NFQWS_OPT '/,/^[[:space:]]*'[[:space:]]*\$/d" "$CONF"; cat "$OLD_STR" >> "$CONF"; echo -e "\n${YELLOW}Остановливаем тестирование${CYAN}\nВостанавливаем конфигурацию${NC}"; ZAPRET_RESTART; echo -e "${GREEN}Тестирование остановлено!\n${NC}"; PAUSE </dev/tty; }
 kill_pid_tree() { local pid="$1"; [ -n "$pid" ] || return 0; local ch; ch=$(cat "/proc/$pid/task/$pid/children" 2>/dev/null); for c in $ch; do kill_pid_tree "$c"; done; kill -9 "$pid" 2>/dev/null; }
 kill_bg_jobs() { local pf="$1"; [ -s "$pf" ] || return 0; while IFS= read -r pid; do [ -n "$pid" ] && kill_pid_tree "$pid"; done < "$pf"; wait 2>/dev/null; }
 PAUSE() { echo -ne "Нажмите Enter..."; read dummy; }; BACKUP_DIR="/opt/zapret_backup"; DATE_FILE="$BACKUP_DIR/date_backup.txt"
@@ -692,6 +693,7 @@ _stryou_try_one() {
     COUNT=$((COUNT + 1))
     echo -e "\n${CYAN}${LABEL}: ${NC}${CURRENT_NAME#\#} ($COUNT/$TOTAL)"; apply_strategy "$CURRENT_NAME" "$CURRENT_BODY"; echo -e "${CYAN}Тестируем домены:${NC}"
     STATUS=$(check_access)
+    if test_interrupted; then _stryou_restore_interrupt; return 1; fi
     if [ "$STATUS" != "ok" ]; then echo -e "${RED}Домены не доступны, продолжаем тест...${NC}"; return 2; fi
     echo -e "\n${GREEN}Домены доступны!${NC}\n${YELLOW}Проверьте работу ${NC}YouTube${YELLOW} на устройствах!${NC}"
     echo -en "Enter${GREEN} - применить стратегию, ${NC}S/s${GREEN} - остановить, ${NC}N/n${GREEN} - продолжить тест:${NC} "; read -r ANSWER </dev/tty
@@ -699,9 +701,9 @@ _stryou_try_one() {
         awk '{if(skip){if($0=="--new"||$0~/\047/){skip=0;next}if($0~/^[[:space:]]*$/)next;next}if($0=="--filter-tcp=443"){getline n;if(n=="--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt"){skip=1;next}else{print $0;print n;next}}if($0=="--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt")has_google=1;if($0~/^[[:space:]]*#Yv/)next;print}' "$OLD_STR" > "$NEW_STR"
         awk 'BEGIN{inserted=0;has_google=0}$0=="--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt"{has_google=1}$0=="--new"&&!inserted{while((getline l<"'"$SAVED_STR"'")>0)if(l!~/^[[:space:]]*$/)print l;print "--new";inserted=1;next}$0~/^[[:space:]]*option NFQWS_OPT \047$/&&!has_google&&!inserted{print;while((getline l<"'"$SAVED_STR"'")>0)if(l!~/^[[:space:]]*$/)print l;print "--new";inserted=1;next}{print}' "$NEW_STR" > "$FINAL_STR"
         sed -i "/^[[:space:]]*option NFQWS_OPT '/,/^[[:space:]]*'[[:space:]]*\$/d" "$CONF"; cat "$FINAL_STR" >> "$CONF"; awk '{if($0=="--new"){if(prev!="--new")print}else print;prev=$0}' "$CONF" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"
-        grep -q "^[[:space:]]*' *\$" "$CONF" || echo "'" >> "$CONF"; ZAPRET_RESTART; echo -e "${GREEN}Стратегия применена!${NC}\n"; PAUSE </dev/tty; return 0
+        grep -q "^[[:space:]]*' *\$" "$CONF" || echo "'" >> "$CONF"; ZAPRET_RESTART; stop_test_trap; echo -e "${GREEN}Стратегия применена!${NC}\n"; PAUSE </dev/tty; return 0
     elif [[ "$ANSWER" =~ ^[Ss]$ ]]; then
-        sed -i "/^[[:space:]]*option NFQWS_OPT '/,/^[[:space:]]*'[[:space:]]*\$/d" "$CONF"; cat "$OLD_STR" >> "$CONF"; ZAPRET_RESTART
+        sed -i "/^[[:space:]]*option NFQWS_OPT '/,/^[[:space:]]*'[[:space:]]*\$/d" "$CONF"; cat "$OLD_STR" >> "$CONF"; ZAPRET_RESTART; stop_test_trap
         echo -e "\n${GREEN}Тест остановлен!${NC}\n"; PAUSE </dev/tty; return 1
     fi
     return 2
@@ -709,8 +711,9 @@ _stryou_try_one() {
 auto_stryou() { local SRC="$1"; awk '/^[[:space:]]*option NFQWS_OPT '\''/{flag=1} flag{print} flag && /^[[:space:]]*'\''[[:space:]]*$/{flag=0}' "$CONF" > "$OLD_STR"; case "$SRC" in 1) curl -fsSL "$STR_URL" -o "$TMP_LIST" || { echo -e "\n${RED}Не удалось скачать список стратегий!${NC}\n"; PAUSE; return 1; } ;;
 2) if [ ! -s "$CUSTOM_STR_FILE" ]; then echo -e "\n${RED}Файл ${NC}$CUSTOM_STR_FILE${RED} не найден!${NC}\n"; PAUSE; return 1; fi; cp "$CUSTOM_STR_FILE" "$TMP_LIST"; sed -i 's/\r$//' "$TMP_LIST"
 sed -i '/^[[:space:]]*$/d' "$TMP_LIST"; sed -i 's/^[[:space:]]*//;s/[[:space:]]*$//' "$TMP_LIST" ;; *) return ;; esac; clear; echo -e "${MAGENTA}Тестируем стратегии для YouTube${NC}"
-TOTAL=$(grep -c '^#' "$TMP_LIST"); echo -e "\n${CYAN}Найдено стратегий: ${NC}$TOTAL"; CURRENT_NAME=""; CURRENT_BODY=""; COUNT=0
+TOTAL=$(grep -c '^#' "$TMP_LIST"); echo -e "\n${CYAN}Найдено стратегий: ${NC}$TOTAL"; CURRENT_NAME=""; CURRENT_BODY=""; COUNT=0; start_test_trap
 while IFS= read -r LINE || [ -n "$LINE" ]; do
+    test_interrupted && break
     if echo "$LINE" | grep -q '^#'; then
         if [ -n "$CURRENT_NAME" ]; then _stryou_try_one "Тестируем стратегию"; RC=$?; [ "$RC" = 0 ] && return 0; [ "$RC" = 1 ] && return 1; fi
         CURRENT_NAME="$LINE"; CURRENT_BODY=""
@@ -718,9 +721,10 @@ while IFS= read -r LINE || [ -n "$LINE" ]; do
         [ -n "$LINE" ] && CURRENT_BODY="${CURRENT_BODY}${LINE}\n"
     fi
 done < "$TMP_LIST"
+if test_interrupted; then _stryou_restore_interrupt; return 1; fi
 if [ -n "$CURRENT_NAME" ]; then _stryou_try_one "Проверяем стратегию"; RC=$?; [ "$RC" = 0 ] && return 0; [ "$RC" = 1 ] && return 1; fi
-sed -i "/^[[:space:]]*option NFQWS_OPT '/,/^[[:space:]]*'[[:space:]]*\$/d" "$CONF"; cat "$OLD_STR" >> "$CONF"; ZAPRET_RESTART; echo -e "\n${RED}Рабочая стратегия для YouTube не найдена!${NC}\n"; PAUSE </dev/tty; return 1; }
-check_access() { OK_N=0; TOTAL_N=0; for domain in $DOMAINS; do TOTAL_N=$((TOTAL_N + 1)); echo -ne "$domain" >&2; if curl -s --connect-timeout 1 -m 2 "https://$domain" >/dev/null; then echo -ne " - ${GREEN}доступен${NC}\n" >&2; OK_N=$((OK_N + 1)); else echo -ne " - ${RED}недоступен${NC}\n" >&2; fi; done
+stop_test_trap; sed -i "/^[[:space:]]*option NFQWS_OPT '/,/^[[:space:]]*'[[:space:]]*\$/d" "$CONF"; cat "$OLD_STR" >> "$CONF"; ZAPRET_RESTART; echo -e "\n${RED}Рабочая стратегия для YouTube не найдена!${NC}\n"; PAUSE </dev/tty; return 1; }
+check_access() { OK_N=0; TOTAL_N=0; for domain in $DOMAINS; do test_interrupted && break; TOTAL_N=$((TOTAL_N + 1)); echo -ne "$domain" >&2; if curl -s --connect-timeout 1 -m 2 "https://$domain" >/dev/null; then echo -ne " - ${GREEN}доступен${NC}\n" >&2; OK_N=$((OK_N + 1)); else echo -ne " - ${RED}недоступен${NC}\n" >&2; fi; done
 if [ "$OK_N" -lt "$TOTAL_N" ] && [ "$OK_N" -ge $((TOTAL_N/2)) ]; then echo -e "\n${RED}Не все домены доступны, возможны проблемы с воспроизведением видео!${NC}" >&2; fi; [ "$OK_N" -ge $((TOTAL_N/2)) ] && echo "ok" || echo "fail"; }
 apply_strategy() { NAME="${1#\#}"; BODY="$2"; sed -i "/^[[:space:]]*option NFQWS_OPT '/,/^[[:space:]]*'[[:space:]]*\$/d" "$CONF"; { echo "  option NFQWS_OPT '"; echo "#AUTO $NAME"; printf "%b\n" "$BODY"; echo "'"; } >> "$CONF"; ZAPRET_RESTART; }
 # ==========================================
