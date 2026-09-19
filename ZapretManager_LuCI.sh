@@ -1,6 +1,6 @@
 #!/bin/sh
 # Zapret Manager by StressOzz for LuCI installer
-# Version: 1.16
+# Version: 1.17
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -26,7 +26,7 @@ mkdir -p /usr/lib/zapret-manager
 cat > '/usr/lib/zapret-manager/backend.sh' << 'ZM_INSTALLER_EOF'
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.16"
+ZM_VERSION="1.17"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -4928,8 +4928,7 @@ return view.extend({
 							presetBusy = false;
 							if (res.error) { zm.toast(res.error, 'error'); return; }
 							zm.toast('Список применён: ' + p.label, 'info');
-							zm.mixomoStatus().then(renderPresets);
-							setTimeout(refreshMtEmbed, 1500);
+							waitForListAppliedThenRefresh(p.id);
 						}).catch(function() { presetBusy = false; });
 					}
 				}, p.label);
@@ -4939,6 +4938,24 @@ return view.extend({
 		var mtFrame = null;
 		function refreshMtEmbed() {
 			if (mtFrame) { mtFrame.src = mtFrame.src.split('?')[0] + '?_r=' + Date.now(); }
+		}
+
+		function waitForListAppliedThenRefresh(presetId) {
+			var attempts = 0;
+			var maxAttempts = 20;
+			var timer = setInterval(function() {
+				attempts++;
+				zm.mixomoStatus().then(function(d) {
+					renderPresets(d);
+					if (d.magitrickle_list === presetId) {
+						clearInterval(timer);
+						refreshMtEmbed();
+					} else if (attempts >= maxAttempts) {
+						clearInterval(timer);
+						refreshMtEmbed();
+					}
+				});
+			}, 500);
 		}
 
 		function renderEmbed(d) {
