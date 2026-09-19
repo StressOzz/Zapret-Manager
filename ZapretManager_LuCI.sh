@@ -1,6 +1,6 @@
 #!/bin/sh
 # Zapret Manager by StressOzz for LuCI installer
-# Version: 1.22
+# Version: 1.23
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -19,7 +19,7 @@ chmod 0755 /usr/lib/zapret-manager
 cat > '/usr/lib/zapret-manager/backend.sh' << 'ZM_INSTALLER_EOF'
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.22"
+ZM_VERSION="1.23"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -1018,6 +1018,20 @@ hosts_replace_geohide() {
 
 hosts_reset() {
 	printf '%s\n' "127.0.0.1	localhost" "" "::1	localhost ip6-localhost ip6-loopback" "ff02::1 ip6-allnodes" "ff02::2 ip6-allrouters" > "$HOSTS_FILE"
+	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	printf '{"ok":true}\n'
+}
+
+hosts_file_get() {
+	[ -f "$HOSTS_FILE" ] || { echo '{"error":"файл hosts не найден"}'; return 1; }
+	printf '{"content":"%s"}\n' "$(esc_ml "$(cat "$HOSTS_FILE")")"
+}
+
+hosts_file_set() {
+	local content="$1"
+	[ -n "$content" ] || { echo '{"error":"пустой файл — сохранение отменено"}'; return 1; }
+	cp "$HOSTS_FILE" "$HOSTS_FILE.bak" 2>/dev/null
+	printf '%s' "$content" > "$HOSTS_FILE"
 	/etc/init.d/dnsmasq restart >/dev/null 2>&1
 	printf '{"ok":true}\n'
 }
@@ -3042,6 +3056,8 @@ case "$cmd" in
 	hosts_toggle)                       hosts_toggle "$1" ;;
 	hosts_replace_geohide)              hosts_replace_geohide "$1" ;;
 	hosts_reset)                        hosts_reset ;;
+	hosts_file_get)                     hosts_file_get ;;
+	hosts_file_set)                     hosts_file_set "$1" ;;
 	doh_install)                         doh_install ;;
 	doh_remove)                          doh_remove ;;
 	doh_status)                          doh_status ;;
@@ -3120,6 +3136,8 @@ list_methods() {
 	json_add_object "hosts_toggle";           json_add_string "block" "string"; json_close_object
 	json_add_object "hosts_replace_geohide";  json_add_string "region" "string"; json_close_object
 	json_add_object "hosts_reset";            json_close_object
+	json_add_object "hosts_file_get";         json_close_object
+	json_add_object "hosts_file_set";         json_add_string "content" "string"; json_close_object
 	json_add_object "doh_status";             json_close_object
 	json_add_object "doh_install";            json_close_object
 	json_add_object "doh_remove";             json_close_object
@@ -3192,6 +3210,8 @@ call_method() {
 		hosts_toggle)            json_get_var block block;     "$BACKEND" hosts_toggle "$block" ;;
 		hosts_replace_geohide)   json_get_var region region;   "$BACKEND" hosts_replace_geohide "$region" ;;
 		hosts_reset)             "$BACKEND" hosts_reset ;;
+		hosts_file_get)          "$BACKEND" hosts_file_get ;;
+		hosts_file_set)          json_get_var content content; "$BACKEND" hosts_file_set "$content" ;;
 		doh_status)              "$BACKEND" doh_status ;;
 		doh_install)             "$BACKEND" doh_install ;;
 		doh_remove)              "$BACKEND" doh_remove ;;
@@ -3236,7 +3256,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 				"zapret-manager": [
 					"status", "job_status", "log_tail", "system_info",
 					"strategy_list_v", "strategy_list_flowseal", "strategy_list_youtube",
-					"discord_status", "hosts_status", "doh_status", "game_status",
+					"discord_status", "hosts_status", "hosts_file_get", "doh_status", "game_status",
 					"system_status", "mirror_status", "exclusions_status", "tg_status", "tgws_status",
 					"test_status", "test_results", "zm_update_status", "mixomo_status", "mixomo_config_get",
 					"mixomo_warp_status",
@@ -3250,7 +3270,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"zapret_action", "zapret2_action",
 					"strategy_set_v", "strategy_set_flowseal", "strategy_set_youtube",
 					"discord_set_dv", "discord_set_fake",
-					"hosts_toggle", "doh_set", "hosts_replace_geohide", "hosts_reset", "doh_install", "doh_remove",
+					"hosts_toggle", "doh_set", "hosts_replace_geohide", "hosts_reset", "hosts_file_set", "doh_install", "doh_remove",
 					"game_set", "game_set_fake", "game_toggle_xtreme",
 					"system_check_connectivity", "system_toggle_quic", "system_toggle_ipv6",
 					"system_toggle_flow_offloading_fix", "system_toggle_expert_mode", "system_uninstall_panel",
@@ -3392,6 +3412,8 @@ var callHostsStatus = rpc.declare({ object: 'zapret-manager', method: 'hosts_sta
 var callHostsToggle = rpc.declare({ object: 'zapret-manager', method: 'hosts_toggle', params: ['block'], expect: {} });
 var callHostsReplaceGeohide = rpc.declare({ object: 'zapret-manager', method: 'hosts_replace_geohide', params: ['region'], expect: {} });
 var callHostsReset = rpc.declare({ object: 'zapret-manager', method: 'hosts_reset', expect: {} });
+var callHostsFileGet = rpc.declare({ object: 'zapret-manager', method: 'hosts_file_get', expect: {} });
+var callHostsFileSet = rpc.declare({ object: 'zapret-manager', method: 'hosts_file_set', params: ['content'], expect: {} });
 var callDohStatus = rpc.declare({ object: 'zapret-manager', method: 'doh_status', expect: {} });
 var callDohInstall = rpc.declare({ object: 'zapret-manager', method: 'doh_install', expect: {} });
 var callDohRemove = rpc.declare({ object: 'zapret-manager', method: 'doh_remove', expect: {} });
@@ -3621,6 +3643,8 @@ return baseclass.extend({
 	hostsToggle: callHostsToggle,
 	hostsReplaceGeohide: callHostsReplaceGeohide,
 	hostsReset: callHostsReset,
+	hostsFileGet: callHostsFileGet,
+	hostsFileSet: callHostsFileSet,
 	dohStatus: callDohStatus,
 	dohInstall: callDohInstall,
 	dohRemove: callDohRemove,
@@ -4577,6 +4601,66 @@ return view.extend({
 				refreshAll();
 			}).catch(function() { busy = false; });
 		}
+
+		var editorCard = E('div', { 'class': 'zm-card' });
+		var editorOpen = false;
+		var hostsEl = E('textarea', { 'class': 'zm-config-editor', 'spellcheck': 'false', 'style': 'display:none' });
+		var editorBusy = false;
+
+		function refreshHostsFile() {
+			zm.hostsFileGet().then(function(res) {
+				if (res.error) { zm.toast(res.error, 'error'); return; }
+				hostsEl.value = res.content || '';
+			});
+		}
+
+		function renderEditorCard() {
+			editorCard.innerHTML = '';
+			editorCard.appendChild(E('h3', {}, 'Редактор /etc/hosts'));
+			if (!editorOpen) {
+				editorCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Прямое редактирование всего файла /etc/hosts — для тонкой настройки, которая не покрывается готовыми блоками выше.'));
+				editorCard.appendChild(E('div', { 'class': 'zm-actions' }, [
+					E('button', {
+						'class': 'cbi-button',
+						'click': function() {
+							editorOpen = true;
+							refreshHostsFile();
+							renderEditorCard();
+						}
+					}, 'Открыть редактор hosts')
+				]));
+				return;
+			}
+			editorCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сохранение перезапускает dnsmasq. Резервная копия предыдущей версии остаётся в /etc/hosts.bak.'));
+			hostsEl.style.display = '';
+			editorCard.appendChild(hostsEl);
+			editorCard.appendChild(E('div', { 'class': 'zm-actions' }, [
+				E('button', {
+					'class': 'cbi-button',
+					'click': function() { refreshHostsFile(); zm.toast('Содержимое перечитано с диска', 'info'); }
+				}, 'Обновить из файла'),
+				E('button', {
+					'class': 'cbi-button cbi-button-positive',
+					'click': function() {
+						if (editorBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+						editorBusy = true;
+						zm.toast('Сохраняем hosts', 'warning');
+						zm.hostsFileSet(hostsEl.value).then(function(res) {
+							editorBusy = false;
+							if (res.error) { zm.toast(res.error, 'error'); return; }
+							zm.toast('hosts сохранён, dnsmasq перезапущен', 'info');
+							refreshAll();
+						}).catch(function() { editorBusy = false; });
+					}
+				}, 'Сохранить и применить'),
+				E('button', {
+					'class': 'cbi-button',
+					'click': function() { editorOpen = false; renderEditorCard(); }
+				}, 'Свернуть')
+			]));
+		}
+		renderEditorCard();
+		wrap.appendChild(editorCard);
 
 		return wrap;
 	}
@@ -6257,4 +6341,3 @@ command -v curl >/dev/null 2>&1 || $INSTALL curl >/dev/null 2>&1 || true
 command -v unzip >/dev/null 2>&1 || $INSTALL unzip >/dev/null 2>&1 || true
 
 echo -e "Zapret Manager ${GREEN}для ${NC}LuCI ${GREEN}установлен!${NC}\n"
-
