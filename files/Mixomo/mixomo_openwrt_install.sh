@@ -11,17 +11,6 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-clear
-
-GH_RAW_HOST="https://raw.githubusercontent.com"; GH_MAIN_HOST="https://github.com"
-# GH_PROXY="https://gh-proxy.org/"; GH_CHECK_URL="${GH_RAW_HOST}/StressOzz/Zapret-Manager/refs/heads/main/Zapret-Manager.sh"
-# echo -e "${CYAN}Проверяем доступность ${NC}raw.githubusercontent.com"; if wget -q -T 2 -O /dev/null "$GH_CHECK_URL" 2>/dev/null; then GH_OK=1
-GH_RAW="$GH_RAW_HOST"; GH_MAIN="$GH_MAIN_HOST"
-# echo -e "raw.githubusercontent.com ${GREEN}доступен!${NC}\n"; else GH_OK=0; GH_RAW="${GH_PROXY}${GH_RAW_HOST}"; GH_MAIN="${GH_PROXY}${GH_MAIN_HOST}"
-# echo -e "raw.githubusercontent.com ${RED}недоступен${CYAN} — ${YELLOW}используем прокси!${NC}\n"; fi
-
-
-
 log_online()  { echo -e "${GREEN}[ONLINE]${NC} $*"; }
 log_warn()    { echo -e "${YELLOW}[WARN]${NC} $*"; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
@@ -226,7 +215,7 @@ install_mihomo() {
     echo "Последняя версия: $RELEASE_TAG"
 
     local FILENAME="mihomo-linux-${MIHOMO_ARCH}-${RELEASE_TAG}.gz"
-    local DOWNLOAD_URL="${GH_MAIN}/MetaCubeX/mihomo/releases/download/${RELEASE_TAG}/${FILENAME}"
+    local DOWNLOAD_URL="https://github.com/MetaCubeX/mihomo/releases/download/${RELEASE_TAG}/${FILENAME}"
     local TMP_FILE="/tmp/mihomo.gz"
 
     log_online "Скачивание архива $FILENAME"
@@ -442,7 +431,7 @@ EOF
         local success=0
         
         for url in "https://cdn.jsdelivr.net/npm/ace-builds@${LATEST_ACE_VER}/src-min-noconflict/${file}" \
-                   "${GH_RAW}/ajaxorg/ace-builds/master/src-min-noconflict/${file}" \
+                   "https://raw.githubusercontent.com/ajaxorg/ace-builds/master/src-min-noconflict/${file}" \
                    "https://cdnjs.cloudflare.com/ajax/libs/ace/${CDNJS_ACE_VER}/${file}"; do
             
             log_online "Скачивание $file"
@@ -1291,12 +1280,6 @@ fi
 uci set hev-socks5-tunnel.@instance[0].enabled='1'
 uci set hev-socks5-tunnel.@instance[0].conffile='/etc/hev-socks5-tunnel/main.yml'
 uci commit hev-socks5-tunnel
-
-if grep -qE "^[[:space:]]*option[[:space:]]+enabled[[:space:]]+'0'" /etc/config/hev-socks5-tunnel
-then
-sed -i -E "s/^([[:space:]]*option[[:space:]]+enabled[[:space:]]+)'0'/\1'1'/" /etc/config/hev-socks5-tunnel
-fi
-
 /etc/init.d/hev-socks5-tunnel restart
 sleep 2
 
@@ -1337,7 +1320,7 @@ command -v apk >/dev/null 2>&1 && INSTALL="apk add --allow-untrusted" && RAZ="ap
 ARCH_MT=$(grep "^OPENWRT_ARCH=" /etc/os-release | cut -d'"' -f2)
 MT_VERSION="$(curl -Ls -o /dev/null -w '%{url_effective}' https://github.com/MagiTrickle/MagiTrickle/releases/latest | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
 # MT_VERSION="0.7.0"
-URL="${GH_MAIN}/MagiTrickle/MagiTrickle/releases/download/${MT_VERSION}/magitrickle_${MT_VERSION}-${SUF}1_openwrt_${ARCH_MT}.$RAZ"
+URL="https://github.com/MagiTrickle/MagiTrickle/releases/download/${MT_VERSION}/magitrickle_${MT_VERSION}-${SUF}1_openwrt_${ARCH_MT}.$RAZ"
 FILE_MT="/tmp/$(basename "$URL")"; echo -e "Скачиваем и устанавливаем:\n${CYAN}$URL${NC}"
 curl -Lf --retry 3 --retry-delay 2 -o "$FILE_MT" "$URL" >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка скачивания${NC}\n"; PAUSE; exit 1; }
 $INSTALL "$FILE_MT" >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка установки${NC}\n"; PAUSE; rm -f "$FILE_MT"; exit 1; }
@@ -1415,6 +1398,7 @@ finalize_install() {
 }
 
 main() {
+    clear
     log_done "=== Mixomo OpenWrt от Internet Helper (StressOzz Remix) ==="
     echo ""
 
@@ -1434,7 +1418,7 @@ main() {
     install_magitrickle || step_fail
 ###################################################################################################
 CONFIG_PATH="/etc/magitrickle/state/config.yaml"
-confGIT="${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/MagiTrickle/configAD.yaml"
+confGIT="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/MagiTrickle/configAD.yaml"
 
 echo "Установка списка для MagiTrickle"
 
@@ -1458,12 +1442,12 @@ done
 
 ###################################################################################################
 
-TMP1="/tmp/zashboard.zip"
-TMP2="/tmp/zashboard"
+TMP1="/tmp/metacubexd.tgz"
+TMP2="/tmp/metacubexd"
 DIR1="/etc/mihomo/ui"
-URL1="${GH_MAIN}/Zephyruso/zashboard/releases/latest/download/dist-cdn-fonts.zip"
+URL1="https://github.com/MetaCubeX/metacubexd/releases/latest/download/compressed-dist.tgz"
 
-echo "Устанавка панели Zashboard для Mihomo"
+echo "Установка панели MetaCubeXD для Mihomo"
 
 for i in 1 2 3; do
     curl -fL --connect-timeout 3 --max-time 7 -o "$TMP1" "$URL1" >/dev/null 2>&1 && break
@@ -1477,7 +1461,7 @@ done
 rm -rf "$TMP2"
 mkdir -p "$TMP2"
 
-unzip -oq "$TMP1" -d "$TMP2" || {
+tar -xzf "$TMP1" -C "$TMP2" || {
     echo -e "\n${RED}Ошибка распаковки WEB UI!${NC}\n"
     rm -rf "$TMP1" "$TMP2"
 }
@@ -1485,22 +1469,12 @@ unzip -oq "$TMP1" -d "$TMP2" || {
 rm -rf "$DIR1"
 mkdir -p "$DIR1"
 
-cp -r /tmp/zashboard/dist/* "$DIR1"/ 2>/dev/null || \
-cp -r /tmp/zashboard/* "$DIR1"/ 2>/dev/null || {
+cp -r "$TMP2"/* "$DIR1"/ 2>/dev/null || {
     echo -e "\n${RED}Не удалось установить WEB UI!${NC}\n"
     rm -rf "$TMP1" "$TMP2"
 }
 
 rm -rf "$TMP1" "$TMP2"
-
-if grep -qE "^[[:space:]]*option[[:space:]]+enabled[[:space:]]+'0'" /etc/config/hev-socks5-tunnel; then
-    sed -i -E "s/^([[:space:]]*option[[:space:]]+enabled[[:space:]]+)'0'/\11'/g" /etc/config/hev-socks5-tunnel
-fi
-
-if grep -qE "^[[:space:]]*option[[:space:]]+enabled[[:space:]]+'0'" /etc/config/hev-socks5-tunnel
-then
-sed -i -E "s/^([[:space:]]*option[[:space:]]+enabled[[:space:]]+)'0'/\1'1'/" /etc/config/hev-socks5-tunnel
-fi
 
 /etc/init.d/mihomo restart >/dev/null 2>&1
 /etc/init.d/hev-socks5-tunnel restart >/dev/null 2>&1
