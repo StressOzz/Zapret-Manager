@@ -1,6 +1,6 @@
 #!/bin/sh
 # Zapret Manager by StressOzz for LuCI installer
-# Version: 1.23
+# Version: 1.24
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -19,7 +19,7 @@ chmod 0755 /usr/lib/zapret-manager
 cat > '/usr/lib/zapret-manager/backend.sh' << 'ZM_INSTALLER_EOF'
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.23"
+ZM_VERSION="1.24"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -4552,17 +4552,24 @@ return view.extend({
 		}
 		renderGeoGrid();
 
-		var resetBtn = E('button', { 'class': 'cbi-button cbi-button-remove', 'click': resetHosts }, 'Восстановить hosts');
-
 		var geoCard = E('div', { 'class': 'zm-card' }, [
 			E('h3', {}, 'Заменить hosts на GeoHide'),
 			E('p', { 'class': 'zm-hint' }, 'Внимание: это ПОЛНОСТЬЮ заменит файл /etc/hosts на список от GeoHide DNS — все блоки выше и любые ваши собственные записи будут удалены.'),
 			geoGrid,
-			E('p', { 'class': 'zm-hint' }, 'Или восстановить hosts к чистому виду. Уберёт и блоки выше, и GeoHide.'),
-			E('div', { 'class': 'zm-actions' }, [ resetBtn ]),
 			geoLogEl
 		]);
 		wrap.appendChild(geoCard);
+
+		var resetLogEl = E('pre', { 'class': 'zm-log' });
+		var resetBtn = E('button', { 'class': 'cbi-button cbi-button-remove', 'click': resetHosts }, 'Восстановить hosts');
+
+		var resetCard = E('div', { 'class': 'zm-card' }, [
+			E('h3', {}, 'Восстановить hosts'),
+			E('p', { 'class': 'zm-hint' }, 'Вернёт /etc/hosts к чистому виду — уберёт и блоки выше, и GeoHide, и всё, что было добавлено вручную.'),
+			E('div', { 'class': 'zm-actions' }, [ resetBtn ]),
+			resetLogEl
+		]);
+		wrap.appendChild(resetCard);
 
 		function refreshAll() {
 			zm.hostsStatus().then(function(res) {
@@ -4591,12 +4598,12 @@ return view.extend({
 			if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
 			busy = true;
 			zm.toast('Восстанавливаем hosts', 'warning');
-			geoLogEl.classList.add('zm-show');
-			zm.renderLog(geoLogEl, '==> Восстанавливаем hosts');
+			resetLogEl.classList.add('zm-show');
+			zm.renderLog(resetLogEl, '==> Восстанавливаем hosts');
 			zm.hostsReset().then(function(res) {
 				busy = false;
-				if (res.error) { zm.renderLog(geoLogEl, '==> ОШИБКА: ' + res.error); zm.toast(res.error, 'error'); return; }
-				zm.renderLog(geoLogEl, '==> Готово — hosts восстановлен.');
+				if (res.error) { zm.renderLog(resetLogEl, '==> ОШИБКА: ' + res.error); zm.toast(res.error, 'error'); return; }
+				zm.renderLog(resetLogEl, '==> Готово — hosts восстановлен.');
 				zm.toast('hosts восстановлен', 'info');
 				refreshAll();
 			}).catch(function() { busy = false; });
