@@ -1,6 +1,6 @@
 #!/bin/sh
 # Zapret Manager by StressOzz for LuCI installer
-# Version: 1.13
+# Version: 1.14
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -26,7 +26,7 @@ mkdir -p /usr/lib/zapret-manager
 cat > '/usr/lib/zapret-manager/backend.sh' << 'ZM_INSTALLER_EOF'
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.13"
+ZM_VERSION="1.14"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -2403,8 +2403,8 @@ do_mixomo_install() {
 	fi
 
 	if [ ! -f "$MIHOMO_DIR/.ui_panel" ]; then
-		echo "==> Устанавливаем веб-панель Zashboard (по умолчанию)"
-		do_mixomo_ui_install zashboard || echo "!! Не удалось установить веб-панель — можно поставить позже вручную"
+		echo "==> Устанавливаем веб-панель MetaCubeXD (по умолчанию)"
+		do_mixomo_ui_install metacubexd || echo "!! Не удалось установить веб-панель — можно поставить позже вручную"
 	fi
 
 	echo "==> Готово, Mixomo установлен"
@@ -2659,6 +2659,7 @@ MIXOMO_AWG_H3=3
 MIXOMO_AWG_H4=4
 MIXOMO_AWG_S1=0
 MIXOMO_AWG_S2=0
+MIXOMO_AWG_I1="<b 0xce000000010897a297ecc34cd6dd000044d0ec2e2e1ea2991f467ace4222129b5a098823784694b4897b9986ae0b7280135fa85e196d9ad980b150122129ce2a9379531b0fd3e871ca5fdb883c369832f730e272d7b8b74f393f9f0fa43f11e510ecb2219a52984410c204cf875585340c62238e14ad04dff382f2c200e0ee22fe743b9c6b8b043121c5710ec289f471c91ee414fca8b8be8419ae8ce7ffc53837f6ade262891895f3f4cecd31bc93ac5599e18e4f01b472362b8056c3172b513051f8322d1062997ef4a383b01706598d08d48c221d30e74c7ce000cdad36b706b1bf9b0607c32ec4b3203a4ee21ab64df336212b9758280803fcab14933b0e7ee1e04a7becce3e2633f4852585c567894a5f9efe9706a151b615856647e8b7dba69ab357b3982f554549bef9256111b2d67afde0b496f16962d4957ff654232aa9e845b61463908309cfd9de0a6abf5f425f577d7e5f6440652aa8da5f73588e82e9470f3b21b27b28c649506ae1a7f5f15b876f56abc4615f49911549b9bb39dd804fde182bd2dcec0c33bad9b138ca07d4a4a1650a2c2686acea05727e2a78962a840ae428f55627516e73c83dd8893b02358e81b524b4d99fda6df52b3a8d7a5291326e7ac9d773c5b43b8444554ef5aea104a738ed650aa979674bbed38da58ac29d87c29d387d80b526065baeb073ce65f075ccb56e47533aef357dceaa8293a523c5f6f790be90e4731123d3c6152a70576e90b4ab5bc5ead01576c68ab633ff7d36dcde2a0b2c68897e1acfc4d6483aaaeb635dd63c96b2b6a7a2bfe042f6aed82e5363aa850aace12ee3b1a93f30d8ab9537df483152a5527faca21efc9981b304f11fc95336f5b9637b174c5a0659e2b22e159a9fed4b8e93047371175b1d6d9cc8ab745f3b2281537d1c75fb9451871864efa5d184c38c185fd203de206751b92620f7c369e031d2041e152040920ac2c5ab5340bfc9d0561176abf10a147287ea90758575ac6a9f5ac9f390d0d5b23ee12af583383d994e22c0cf42383834bcd3ada1b3825a0664d8f3fb678261d57601ddf94a8a68a7c273a18c08aa99c7ad8c6c42eab67718843597ec9930457359dfdfbce024afc2dcf9348579a57d8d3490b2fa99f278f1c37d87dad9b221acd575192ffae1784f8e60ec7cee4068b6b988f0433d96d6a1b1865f4e155e9fe020279f434f3bf1bd117b717b92f6cd1cc9bea7d45978bcc3f24bda631a36910110a6ec06da35f8966c9279d130347594f13e9e07514fa370754d1424c0a1545c5070ef9fb2acd14233e8a50bfc5978b5bdf8bc1714731f798d21e2004117c61f2989dd44f0cf027b27d4019e81ed4b5c31db347c4a3a4d85048d7093cf16753d7b0d15e078f5c7a5205dc2f87e330a1f716738dce1c6180e9d02869b5546f1c4d2748f8c90d9693cba4e0079297d22fd61402dea32ff0eb69ebd65a5d0b687d87e3a8b2c42b648aa723c7c7daf37abcc4bb85caea2ee8f55bec20e913b3324ab8f5c3304f820d42ad1b9f2ffc1a3af9927136b4419e1e579ab4c2ae3c776d293d397d575df181e6cae0a4ada5d67ecea171cca3288d57c7bbdaee3befe745fb7d634f70386d873b90c4d6c6596bb65af68f9e5121e67ebf0d89d3c909ceedfb32ce9575a7758ff080724e1ab5d5f43074ecb53a479af21ed03d7b6899c36631c0166f9d47e5e1d4528a5d3d3f744029c4b1c190cbfbad06f5f83f7ad0429fa9a2719c56ffe3783460e166de2d8>"
 
 mixomo_warp_status() {
 	local exists="false" content=""
@@ -2757,7 +2758,7 @@ do_mixomo_warp_register() {
 	printf '%s\n' \
 		"[Interface]" "PrivateKey = $priv" "Address = ${v4}${v6:+, $v6}" "DNS = 9.9.9.9" "MTU = 1280" \
 		"S1 = $MIXOMO_AWG_S1" "S2 = $MIXOMO_AWG_S2" "Jc = $MIXOMO_AWG_JC" "Jmin = $MIXOMO_AWG_JMIN" "Jmax = $MIXOMO_AWG_JMAX" \
-		"H1 = $MIXOMO_AWG_H1" "H2 = $MIXOMO_AWG_H2" "H3 = $MIXOMO_AWG_H3" "H4 = $MIXOMO_AWG_H4" "" \
+		"H1 = $MIXOMO_AWG_H1" "H2 = $MIXOMO_AWG_H2" "H3 = $MIXOMO_AWG_H3" "H4 = $MIXOMO_AWG_H4" "I1 = $MIXOMO_AWG_I1" "" \
 		"[Peer]" "PublicKey = $peer" "AllowedIPs = 0.0.0.0/0, ::/0" "Endpoint = $ep" "PersistentKeepalive = 25" \
 		> "$MIXOMO_WARP_CONF"
 	echo "==> Готово, файл сохранён в $MIXOMO_WARP_CONF"
@@ -2778,7 +2779,7 @@ do_mixomo_warp_integrate() {
 	function lc(s){ return tolower(s) }
 	function yaml_quote(s){ gsub(/\\/,"\\\\",s); gsub(/"/,"\\\"",s); gsub(/\r/,"",s); return "\"" s "\"" }
 	function split_endpoint(s,    a,n){ s=trim(s); n=split(s,a,":"); if(n<2){ host=s; port="" } else { port=a[n]; host=a[1]; for(i=2;i<n;i++) host=host ":" a[i] } }
-	BEGIN{ sec=""; addr4=""; addr6=""; priv=""; pub=""; psk=""; allowed=""; endpoint=""; keep=""; s1=""; s2=""; jc=""; jmin=""; jmax=""; h1=""; h2=""; h3=""; h4=""; mtu="" }
+	BEGIN{ sec=""; addr4=""; addr6=""; priv=""; pub=""; psk=""; allowed=""; endpoint=""; keep=""; s1=""; s2=""; jc=""; jmin=""; jmax=""; h1=""; h2=""; h3=""; h4=""; i1=""; mtu="" }
 	{
 		line=$0; sub(/[;#].*$/, "", line); line=trim(line)
 		if(line=="") next
@@ -2798,6 +2799,7 @@ do_mixomo_warp_integrate() {
 			else if(k=="h2") h2=val
 			else if(k=="h3") h3=val
 			else if(k=="h4") h4=val
+			else if(k=="i1") i1=val
 		} else if(sec=="peer"){
 			if(k=="publickey") pub=val
 			else if(k=="presharedkey") psk=val
@@ -2854,7 +2856,7 @@ do_mixomo_warp_integrate() {
 		printf "%s", allowed_block >> OUT
 		if(mtu!="") print "    mtu: " mtu >> OUT
 		if(keep!="") print "    persistent-keepalive: " keep >> OUT
-		if(s1!="" || s2!="" || jc!="" || jmin!="" || jmax!="" || h1!="" || h2!="" || h3!="" || h4!=""){
+		if(s1!="" || s2!="" || jc!="" || jmin!="" || jmax!="" || h1!="" || h2!="" || h3!="" || h4!="" || i1!=""){
 			print "    amnezia-wg-option:" >> OUT
 			if(s1!="") print "      s1: " s1 >> OUT
 			if(s2!="") print "      s2: " s2 >> OUT
@@ -2865,6 +2867,7 @@ do_mixomo_warp_integrate() {
 			if(h2!="") print "      h2: " h2 >> OUT
 			if(h3!="") print "      h3: " h3 >> OUT
 			if(h4!="") print "      h4: " h4 >> OUT
+			if(i1!="") print "      i1: " yaml_quote(i1) >> OUT
 		}
 	}' "$MIXOMO_WARP_CONF" 2>"$tmp.err"
 	if [ -s "$tmp.err" ]; then
@@ -3636,7 +3639,8 @@ return view.extend({
 			zm.systemStatus().catch(function() { return {}; }),
 			zm.zapretLatestVersion().catch(function() { return {}; }),
 			zm.systemInfo().catch(function() { return {}; }),
-			zm.zmUpdateStatus().catch(function() { return {}; })
+			zm.zmUpdateStatus().catch(function() { return {}; }),
+			zm.mixomoStatus().catch(function() { return {}; })
 		]);
 	},
 
@@ -3646,6 +3650,7 @@ return view.extend({
 		var latestVersion = (all[4] && all[4].version) || '';
 		var sysInfo = all[5] || {};
 		var zmUpdate = all[6] || {};
+		var mixomoData = all[7] || {};
 		var wrap = E('div', { 'class': 'zm-wrap' });
 		var overviewEl = E('div', {});
 		var cards = E('div', { 'class': 'zm-cards' });
@@ -3653,7 +3658,7 @@ return view.extend({
 
 		var DOH_LABELS = { cloudflare: 'Cloudflare', google: 'Google', quad9: 'Quad9', xbox: 'XBOX', geohide_ru: 'GeoHide RU', geohide_eu: 'GeoHide EU', geohide_us: 'GeoHide US' };
 
-		function renderOverview(d, doh, hosts, sys) {
+		function renderOverview(d, doh, hosts, sys, mixomo) {
 			var hostsEnabled = (hosts.items || []).filter(function(it) { return it.enabled; }).length;
 			var hostsTotal = (hosts.items || []).length;
 
@@ -3661,6 +3666,8 @@ return view.extend({
 			if (sys.quic_blocked) sysFlags.push('QUIC заблокирован');
 			if (sys.ipv6_enabled) sysFlags.push('IPv6 в Zapret включён');
 			if (sys.flow_offloading_fix) sysFlags.push('Flow Offloading fix');
+
+			var mixomoRunning = mixomo.mihomo_running === true && mixomo.hev_running === true && mixomo.magitrickle_running === true;
 
 			return E('div', { 'class': 'zm-card', 'style': 'margin-bottom:4px' }, [
 				E('h3', {}, 'Обзор'),
@@ -3677,6 +3684,10 @@ return view.extend({
 				d.zapret2 === 'installed' ? E('div', { 'class': 'zm-row' }, [
 					E('span', { 'class': 'zm-label' }, 'Zapret2'),
 					zm.badge(d.zapret2_running === true, 'запущен', 'остановлен')
+				]) : E([]),
+				mixomo.mihomo === 'installed' ? E('div', { 'class': 'zm-row' }, [
+					E('span', { 'class': 'zm-label' }, 'Mixomo'),
+					zm.badge(mixomoRunning, 'запущен', 'остановлен')
 				]) : E([]),
 				E('div', { 'class': 'zm-row' }, [
 					E('span', { 'class': 'zm-label' }, 'DNS over HTTPS'),
@@ -3802,14 +3813,15 @@ return view.extend({
 				zm.status(),
 				zm.dohStatus().catch(function() { return {}; }),
 				zm.hostsStatus().catch(function() { return { items: [] }; }),
-				zm.systemStatus().catch(function() { return {}; })
+				zm.systemStatus().catch(function() { return {}; }),
+				zm.mixomoStatus().catch(function() { return {}; })
 			]).then(function(res) {
 				overviewEl.innerHTML = '';
-				overviewEl.appendChild(renderOverview(res[0], res[1], res[2], res[3]));
+				overviewEl.appendChild(renderOverview(res[0], res[1], res[2], res[3], res[4]));
 			});
 		}
 
-		overviewEl.appendChild(renderOverview(data, dohData, hostsData, sysData));
+		overviewEl.appendChild(renderOverview(data, dohData, hostsData, sysData, mixomoData));
 		renderCards(data);
 		var updateEl = E('div', {});
 		wrap.appendChild(updateEl);
@@ -4670,7 +4682,7 @@ return view.extend({
 		function renderPanel(d) {
 			panelCard.innerHTML = '';
 			panelCard.appendChild(E('h3', {}, 'Веб-панель Mihomo'));
-			panelCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Собственный веб-интерфейс Mihomo (статистика, выбор прокси вручную). По умолчанию ставится Zashboard.'));
+			panelCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Собственный веб-интерфейс Mihomo (статистика, выбор прокси вручную). По умолчанию ставится MetaCubeXD.'));
 			if (d.mihomo !== 'installed') {
 				panelCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Установите Mixomo, чтобы выбрать панель.'));
 				return;
