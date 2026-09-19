@@ -11,7 +11,7 @@
 </div>
 
 <p align="center">
-  <a href="https://t.me/stressozz_manager">💬 Telegram Community</a>
+<a href="https://t.me/StressOzz_Manager"><img src="https://img.shields.io/badge/Community-Telegram-2CA5E0?style=for-the-badge&logo=telegram"></a>
 </p>
 
 
