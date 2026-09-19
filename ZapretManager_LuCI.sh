@@ -1,6 +1,6 @@
 #!/bin/sh
 # Zapret Manager by StressOzz for LuCI installer
-# Version: 1.14
+# Version: 1.22
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -8,25 +8,18 @@ GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"
 echo -e "\n${MAGENTA}Устанавливаем Zapret Manager для LuCI${NC}"
 
 rm -rf \
-	/usr/lib/zapret-manager* \
-	/usr/libexec/rpcd/zapret-manager* \
-	/usr/share/luci/menu.d/luci-app-zapret-manager.json \
-	/usr/share/rpcd/acl.d/luci-app-zapret-manager.json \
-	/www/luci-static/resources/view/zapret-manager* \
-	/www/luci-static/resources/zapret-manager* \
 	/etc/zapret_manager_expert_mode* \
 	/tmp/zapret-manager* \
 	/tmp/zm_uninstall_panel.sh \
 	/tmp/luci-indexcache* \
 	/tmp/luci-modulecache/* 2>/dev/null
-/etc/init.d/rpcd restart >/dev/null 2>&1
-/etc/init.d/uhttpd restart >/dev/null 2>&1
 
 mkdir -p /usr/lib/zapret-manager
+chmod 0755 /usr/lib/zapret-manager
 cat > '/usr/lib/zapret-manager/backend.sh' << 'ZM_INSTALLER_EOF'
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.14"
+ZM_VERSION="1.22"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -50,12 +43,18 @@ PORTS_UDP="88,1024-2407,2409-4499,4502-19293,19345-49999,50101-65535"
 PORTS_TCP="2802,2302,2502,3478-3480,3724,6000-8000,8085,8090,8100,8903,8904,25565,27015-27030,27036-27037,35500-35600,50001,60442"
 mkdir -p "$JOBS_DIR"
 
+if command -v timeout >/dev/null 2>&1; then
+	T90="timeout 90"; T60="timeout 60"
+else
+	T90=""; T60=""
+fi
+
 if command -v opkg >/dev/null 2>&1; then
-	PKG="opkg"; INSTALL="opkg install"; DELETE="opkg remove"; UPDATE="opkg update"
+	PKG="opkg"; INSTALL="$T90 opkg install"; DELETE="$T60 opkg remove"; UPDATE="$T60 opkg update"
 	TG_ARCH="$(opkg print-architecture 2>/dev/null | awk '{print $2}' | tail -n1)"
 	RAZ="ipk"
 else
-	PKG="apk"; INSTALL="apk add --allow-untrusted"; DELETE="apk del"; UPDATE="apk update"
+	PKG="apk"; INSTALL="$T90 apk add --allow-untrusted"; DELETE="$T60 apk del"; UPDATE="$T60 apk update"
 	TG_ARCH="$(apk --print-arch 2>/dev/null)"
 	RAZ="apk"
 fi
@@ -209,7 +208,7 @@ do_install_zapret() {
 	local attempt=1 max_attempts=5
 	while [ "$attempt" -le "$max_attempts" ]; do
 		rm -f zapret.zip
-		wget -q -U "Mozilla/5.0" -O zapret.zip "$url" >/dev/null 2>&1
+		wget -q --timeout=20 -U "Mozilla/5.0" -O zapret.zip "$url" >/dev/null 2>&1
 		command -v unzip >/dev/null 2>&1 || { echo "==> Устанавливаем unzip"; $INSTALL unzip >/dev/null 2>&1; }
 		if [ -s zapret.zip ] && unzip -tq zapret.zip >/dev/null 2>&1; then
 			break
@@ -246,7 +245,7 @@ do_install_zapret() {
 
 	echo "==> Добавляем домены в исключения"
 	rm -f /opt/zapret/ipset/zapret-hosts-user-exclude.txt
-	wget -q -U "Mozilla/5.0" -O /opt/zapret/ipset/zapret-hosts-user-exclude.txt "$EXCLUDE_URL"
+	wget -q --timeout=20 -U "Mozilla/5.0" -O /opt/zapret/ipset/zapret-hosts-user-exclude.txt "$EXCLUDE_URL"
 
 	do_add_fake_flow
 
@@ -365,17 +364,17 @@ do_install_zapret2() {
 
 	echo "==> Добавляем домены в исключения"
 	mkdir -p /opt/zapret2/ipset
-	wget -q -U "Mozilla/5.0" -O /opt/zapret2/ipset/zapret_hosts_user_exclude.txt "$EXCLUDE_URL"
+	wget -q --timeout=20 -U "Mozilla/5.0" -O /opt/zapret2/ipset/zapret_hosts_user_exclude.txt "$EXCLUDE_URL"
 
 	echo "==> Настраиваем стратегии"
 	mkdir -p /opt/zapret2/init.d/openwrt/custom.d
-	wget -q -U "Mozilla/5.0" -O /opt/zapret2/init.d/openwrt/custom.d/50-discord_media.sh \
+	wget -q --timeout=20 -U "Mozilla/5.0" -O /opt/zapret2/init.d/openwrt/custom.d/50-discord_media.sh \
 		"${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/50-discord_media.sh" \
 		|| echo "!! Не удалось загрузить 50-discord_media.sh"
-	wget -q -U "Mozilla/5.0" -O /etc/config/zapret2 \
+	wget -q --timeout=20 -U "Mozilla/5.0" -O /etc/config/zapret2 \
 		"${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/zapret2" \
 		|| echo "!! Не удалось загрузить zapret2"
-	wget -q -U "Mozilla/5.0" -O /opt/zapret2/ipset/zapret_hosts_discord.txt \
+	wget -q --timeout=20 -U "Mozilla/5.0" -O /opt/zapret2/ipset/zapret_hosts_discord.txt \
 		"${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/zapret_hosts_discord.txt" \
 		|| echo "!! Не удалось загрузить zapret_hosts_discord.txt"
 
@@ -440,7 +439,7 @@ _add_gp_domains() {
 
 _refresh_exclude_file() {
 	rm -f /opt/zapret/ipset/zapret-hosts-user-exclude.txt
-	wget -q -U "Mozilla/5.0" -O /opt/zapret/ipset/zapret-hosts-user-exclude.txt "$EXCLUDE_URL"
+	wget -q --timeout=20 -U "Mozilla/5.0" -O /opt/zapret/ipset/zapret-hosts-user-exclude.txt "$EXCLUDE_URL"
 }
 
 _add_yv_default() {
@@ -510,7 +509,7 @@ do_add_fake_flow() {
 		tls_clienthello_5ka_ru.bin quic_initial_rutube_ru.bin; do
 		if [ ! -f "/opt/zapret/files/fake/$f" ]; then
 			[ "$msg" = 0 ] && { echo "==> Скачиваем дополнительные fake-файлы"; msg=1; }
-			wget -q -U "Mozilla/5.0" -O "/opt/zapret/files/fake/$f" "${FLOWSEAL_FAKE_RAW}/$f" \
+			wget -q --timeout=20 -U "Mozilla/5.0" -O "/opt/zapret/files/fake/$f" "${FLOWSEAL_FAKE_RAW}/$f" \
 				|| echo "!! Не удалось загрузить файл $f"
 		fi
 	done
@@ -526,7 +525,7 @@ do_flowseal_download() {
 
 	while [ "$attempt" -le "$max_attempts" ]; do
 		rm -f "$zip"
-		wget -q -U "Mozilla/5.0" -O "$zip" "$FLOWSEAL_ZIP" >/dev/null 2>&1
+		wget -q --timeout=20 -U "Mozilla/5.0" -O "$zip" "$FLOWSEAL_ZIP" >/dev/null 2>&1
 		if [ -s "$zip" ] && unzip -tq "$zip" >/dev/null 2>&1; then
 			break
 		fi
@@ -1006,7 +1005,7 @@ hosts_replace_geohide() {
 		*) echo '{"error":"неизвестный регион"}'; return 1 ;;
 	esac
 	tmp="$JOBS_DIR/geohide_hosts.tmp"
-	wget -q -U "Mozilla/5.0" -O "$tmp" "$url" >/dev/null 2>&1
+	wget -q --timeout=20 -U "Mozilla/5.0" -O "$tmp" "$url" >/dev/null 2>&1
 	if [ ! -s "$tmp" ]; then
 		rm -f "$tmp"
 		echo '{"error":"не удалось скачать GeoHide hosts"}'
@@ -1555,7 +1554,7 @@ do_tg_install_mtproto() {
 	rm -f /etc/tg-ws-proxy.conf /etc/tg-ws-proxy.conf-opkg
 	$UPDATE >/dev/null 2>&1
 	echo "==> Скачиваем $(basename "$url")"
-	wget -q -O "$tmp" "$url" || { echo "ОШИБКА скачивания $url"; return 1; }
+	wget -q --timeout=20 -O "$tmp" "$url" || { echo "ОШИБКА скачивания $url"; return 1; }
 	$INSTALL "$tmp" >/dev/null 2>&1 || { echo "ОШИБКА установки"; rm -f "$tmp"; return 1; }
 	rm -f "$tmp"
 	mkdir -p "$(dirname "$TG_SECRET_MT_FILE")"
@@ -1701,7 +1700,7 @@ do_tgws_install() {
 	local attempt=1 max_attempts=5
 	while [ "$attempt" -le "$max_attempts" ]; do
 		rm -f "$tmp"
-		wget -q -O "$tmp" "$TGWS_BASE_URL/$file" >/dev/null 2>&1
+		wget -q --timeout=20 -O "$tmp" "$TGWS_BASE_URL/$file" >/dev/null 2>&1
 		if [ -s "$tmp" ]; then
 			if [ "$RAZ" = "ipk" ]; then
 				tar -tzf "$tmp" 2>/dev/null | grep -q 'debian-binary' && break
@@ -2119,15 +2118,15 @@ zm_update_status() {
 }
 
 do_zm_update() {
-	echo "==> Скачиваем и устанавливаем новую версию панели"
+	echo "==> Скачиваем установщик"
 	local tmp="/tmp/zm_update_install.sh"
 	rm -f "$tmp"
-	wget -q -U "Mozilla/5.0" -O "$tmp" "$ZM_SCRIPT_URL" || { echo "ОШИБКА: не удалось скачать установщик"; rm -f "$tmp"; return 1; }
+	wget -q --timeout=20 -U "Mozilla/5.0" -O "$tmp" "$ZM_SCRIPT_URL" || { echo "ОШИБКА: не удалось скачать установщик"; rm -f "$tmp"; return 1; }
 	[ -s "$tmp" ] || { echo "ОШИБКА: скачался пустой файл"; rm -f "$tmp"; return 1; }
 	head -c 200 "$tmp" | grep -q '^#!/bin/sh' || { echo "ОШИБКА: скачанный файл не похож на установщик"; rm -f "$tmp"; return 1; }
-	sh "$tmp"
-	rm -f "$tmp"
-	echo "==> Готово"
+	chmod +x "$tmp"
+	echo "==> Установка запущена в фоне — она перезапускает rpcd/uhttpd, поэтому не может отслеживаться этой же задачей. Панель перезагрузится сама через несколько секунд"
+	( sh "$tmp" >/tmp/zm_update_install.log 2>&1; rm -f "$tmp" ) &
 }
 
 zm_update_action() {
@@ -2265,7 +2264,7 @@ do_mixomo_install() {
 
 	echo "==> Определяем последнюю версию Mihomo"
 	local tag
-	tag=$(curl -Ls -o /dev/null -w '%{url_effective}' "https://github.com/MetaCubeX/mihomo/releases/latest" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+	tag=$(curl -Ls --connect-timeout 5 --max-time 10 -o /dev/null -w '%{url_effective}' "https://github.com/MetaCubeX/mihomo/releases/latest" 2>/dev/null | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 	[ -n "$tag" ] || { echo "ОШИБКА: не удалось определить версию Mihomo"; return 1; }
 	echo "==> Версия: $tag"
 
@@ -2274,7 +2273,7 @@ do_mixomo_install() {
 	url="${GH_MAIN}/MetaCubeX/mihomo/releases/download/${tag}/${file}"
 	tmp="/tmp/mihomo.gz"
 	echo "==> Скачиваем $file"
-	curl -Lf --retry 3 --retry-delay 2 "$url" -o "$tmp" >/dev/null 2>&1 || { echo "ОШИБКА: не удалось скачать $file"; return 1; }
+	curl -Lf --connect-timeout 5 --max-time 90 --retry 3 --retry-delay 2 "$url" -o "$tmp" >/dev/null 2>&1 || { echo "ОШИБКА: не удалось скачать $file"; return 1; }
 	gunzip -c "$tmp" > "$MIHOMO_BIN" 2>/dev/null || { echo "ОШИБКА: не удалось распаковать архив"; rm -f "$tmp"; return 1; }
 	chmod +x "$MIHOMO_BIN"
 	rm -f "$tmp"
@@ -2324,6 +2323,11 @@ do_mixomo_install() {
 	echo "==> Устанавливаем hev-socks5-tunnel"
 	$UPDATE >/dev/null 2>&1
 	$INSTALL hev-socks5-tunnel >/dev/null 2>&1
+	if [ "$PKG" = "apk" ]; then
+		apk info -e hev-socks5-tunnel >/dev/null 2>&1 || { echo "ОШИБКА: не удалось установить hev-socks5-tunnel — проверьте интернет и репозитории пакетов"; return 1; }
+	else
+		opkg list-installed 2>/dev/null | grep -q '^hev-socks5-tunnel ' || { echo "ОШИБКА: не удалось установить hev-socks5-tunnel — проверьте интернет и репозитории пакетов"; return 1; }
+	fi
 	mkdir -p /etc/hev-socks5-tunnel
 	printf '%s\n' 'tunnel:' '  name: Mihomo' '  mtu: 8500' '  multi-queue: false' '  ipv4: 198.18.0.1' \
 		'socks5:' '  port: 7890' '  address: 127.0.0.1' "  udp: 'udp'" > /etc/hev-socks5-tunnel/main.yml
@@ -2375,21 +2379,25 @@ do_mixomo_install() {
 	/etc/init.d/firewall restart >/dev/null 2>&1
 
 	echo "==> Устанавливаем MagiTrickle"
-	local arch_mt mt_ver_latest file_mt url_mt suf
+	local arch_mt mt_tag assets_page file_mt url_mt
 	arch_mt=$(grep '^OPENWRT_ARCH=' /etc/os-release 2>/dev/null | cut -d'"' -f2)
-	suf=""
-	[ "$PKG" = "apk" ] && suf="r"
-	mt_ver_latest=$(curl -Ls -o /dev/null -w '%{url_effective}' "https://github.com/MagiTrickle/MagiTrickle/releases/latest" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-	if [ -n "$mt_ver_latest" ] && [ -n "$arch_mt" ]; then
-		file_mt="magitrickle_${mt_ver_latest}-${suf}1_openwrt_${arch_mt}.${RAZ}"
-		url_mt="${GH_MAIN}/MagiTrickle/MagiTrickle/releases/download/${mt_ver_latest}/${file_mt}"
-		tmp="/tmp/$file_mt"
-		echo "==> Скачиваем $file_mt"
-		if curl -Lf --retry 3 --retry-delay 2 -o "$tmp" "$url_mt" >/dev/null 2>&1; then
-			$INSTALL "$tmp" >/dev/null 2>&1 || echo "!! Не удалось установить MagiTrickle"
-			rm -f "$tmp"
+	mt_tag=$(curl -Ls --connect-timeout 5 --max-time 10 -o /dev/null -w '%{url_effective}' "https://github.com/MagiTrickle/MagiTrickle/releases/latest" 2>/dev/null | sed 's#.*/tag/##')
+	if [ -n "$mt_tag" ] && [ -n "$arch_mt" ]; then
+		assets_page=$(curl -fsSL --connect-timeout 5 --max-time 15 "https://github.com/MagiTrickle/MagiTrickle/releases/expanded_assets/${mt_tag}" 2>/dev/null)
+		url_mt=$(printf '%s' "$assets_page" | grep -oE "href=\"/MagiTrickle/MagiTrickle/releases/download/[^\"]*_openwrt_${arch_mt}\.${RAZ}\"" | head -n1 | sed 's/^href="//; s/"$//')
+		if [ -n "$url_mt" ]; then
+			url_mt="${GH_MAIN}${url_mt}"
+			file_mt=$(basename "$url_mt")
+			tmp="/tmp/$file_mt"
+			echo "==> Скачиваем $file_mt"
+			if curl -Lf --connect-timeout 5 --max-time 90 --retry 3 --retry-delay 2 -o "$tmp" "$url_mt" >/dev/null 2>&1; then
+				$INSTALL "$tmp" >/dev/null 2>&1 || echo "!! Не удалось установить MagiTrickle"
+				rm -f "$tmp"
+			else
+				echo "!! Не удалось скачать MagiTrickle"
+			fi
 		else
-			echo "!! Не удалось скачать MagiTrickle"
+			echo "!! Не найден файл MagiTrickle для архитектуры $arch_mt в версии $mt_tag"
 		fi
 	else
 		echo "!! Не удалось определить версию или архитектуру MagiTrickle"
@@ -2515,7 +2523,7 @@ mixomo_subscription_set() {
 	if grep -q '^[[:space:]]*proxy-providers:' "$MIHOMO_CONF" 2>/dev/null; then
 		local tmp
 		tmp=$(mktemp)
-		if awk -v url="$sub_url" 'BEGIN { updated = 0 } { if ($0 ~ /^[[:space:]]*type:[[:space:]]*http[[:space:]]*$/) { print; getline; if ($0 ~ /^[[:space:]]*url:[[:space:]]*"/) { sub(/url:[[:space:]]*".*"/, "url: \"" url "\""); updated = 1 } print; next } print } END { exit (updated ? 0 : 1) }' "$MIHOMO_CONF" > "$tmp"
+		if awk -v url="$sub_url" 'BEGIN { updated = 0; in_provider = 0; section = "" } { if ($0 ~ /^[a-zA-Z_-]+:/) { section = $0; sub(/:.*/, "", section) } if (!updated && section == "proxy-providers" && $0 ~ /^[[:space:]]*type:[[:space:]]*http[[:space:]]*$/) { in_provider = 1; print; next } if (!updated && in_provider && $0 ~ /^[[:space:]]*url:[[:space:]]*"/) { sub(/url:[[:space:]]*".*"/, "url: \"" url "\""); updated = 1; in_provider = 0; print; next } print } END { exit (updated ? 0 : 1) }' "$MIHOMO_CONF" > "$tmp"
 		then
 			mv "$tmp" "$MIHOMO_CONF"
 			/etc/init.d/mihomo restart >/dev/null 2>&1
@@ -2526,33 +2534,24 @@ mixomo_subscription_set() {
 	fi
 
 	printf '%s\n' \
-		'mode: rule' 'ipv6: false' 'mixed-port: 7890' 'log-level: error' 'allow-lan: false' \
-		'unified-delay: true' 'tcp-concurrent: false' 'find-process-mode: off' \
-		'external-controller: 0.0.0.0:9090' 'external-ui: ./ui' 'routing-mark: 2' \
-		'profile:' '  store-selected: true' '  store-fake-ip: true' '  tracing: true' \
-		'sniffer:' '  enable: true' '  force-dns-mapping: true' '  parse-pure-ip: true' \
-		'  sniff:' '    HTTP:' '      ports: [80]' '      override-destination: true' \
-		'    TLS:' '      ports: [443, 8443]' '    QUIC:' '      ports: [443, 8443]' \
-		'  skip-domain:' '    - Mijia Cloud' '    - +.lan' '    - +.local' \
-		'    - +.msftconnecttest.com' '    - +.msftncsi.com' '    - +.3gppnetwork.org' \
-		'    - +.openwrt.org' '    - +.vsean.net' '    - cudy.net' '' \
-		'hosts:' '  ntc.party: 130.255.77.28' '' \
-		'proxies:' '' '  - name: "Домашний интернет"' '    type: direct' '' \
-		'proxy-providers:' '' '  Подписка:' '    type: http' "    url: \"$sub_url\"" \
-		'    path: ./proxy-providers/sub.yaml' '    interval: 86400' '    health-check:' \
-		'      enable: true' '      url: http://www.gstatic.com/generate_204' \
-		'      interval: 300' '      timeout: 5000' '      lazy: true' '' \
-		'proxy-groups:' '' '  - name: "Сервер для YouTube"' '    type: select' \
-		'    icon: https://www.clashverge.dev/assets/icons/youtube.svg' '    proxies:' \
-		'      - "Домашний интернет"' '    use:' '      - "Подписка"' '' \
-		'  - name: "Сервер для остального трафика"' '    type: select' \
-		'    icon: https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.3/assets/svg/1f310.svg' \
-		'    use:' '      - "Подписка"' '' \
-		'rule-providers:' '' '  youtube:' '    type: http' '    format: yaml' \
+		'mixed-port: 7890' 'allow-lan: false' 'tcp-concurrent: true' 'mode: rule' \
+		'log-level: info' 'ipv6: false' 'external-controller: 0.0.0.0:9090' \
+		'external-ui: ui' 'secret:' 'unified-delay: true' \
+		'profile:' '  store-selected: true' '  store-fake-ip: true' '' \
+		'proxy-groups:' '  - name: GLOBAL' '    type: select' '    proxies:' \
+		'      - DIRECT' '    use:' '      - Подписка' '' \
+		'  - name: YouTube' '    type: select' '    proxies:' \
+		'      - DIRECT' '    use:' '      - Подписка' '' \
+		'rules:' '  - RULE-SET,youtube,YouTube' '  - MATCH,GLOBAL' '' \
+		'proxy-providers:' '  Подписка:' '    type: http' '    proxy: DIRECT' \
+		'    header:' '      x-hwid:' '        - b6e2d53b1b2c8618719f42fb95ab1e43' \
+		"    url: \"$sub_url\"" '    interval: 43200' '    health-check:' \
+		'      enable: true' '      interval: 300' \
+		'      url: "https://google.com/generate_204"' '      expected-status: 204' '' \
+		'rule-providers:' '  youtube:' '    type: http' '    format: yaml' \
 		'    behavior: classical' \
 		'    url: "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/YouTube/YouTube.yaml"' \
-		'    path: ./rule-providers/youtube-list.yaml' '    interval: 86400' '' \
-		'rules:' '  - RULE-SET,youtube,Сервер для YouTube' '  - MATCH,Сервер для остального трафика' \
+		'    path: ./rule-providers/youtube.yaml' '    interval: 86400' \
 		> "$MIHOMO_CONF"
 	/etc/init.d/mihomo restart >/dev/null 2>&1
 	printf '{"ok":true,"mode":"created"}\n'
@@ -2567,10 +2566,11 @@ mixomo_magitrickle_list_set() {
 		*) echo '{"error":"неизвестный список"}'; return 1 ;;
 	esac
 	[ -x /etc/init.d/magitrickle ] || { echo '{"error":"MagiTrickle не установлен"}'; return 1; }
-	wget -q -O "$MAGITRICKLE_CONF" "$url" || { echo '{"error":"не удалось скачать список"}'; return 1; }
+	wget -q --timeout=20 -O "$MAGITRICKLE_CONF" "$url" || { echo '{"error":"не удалось скачать список"}'; return 1; }
 	[ -s "$MAGITRICKLE_CONF" ] || { echo '{"error":"скачанный файл пуст"}'; return 1; }
 	/etc/init.d/magitrickle enable >/dev/null 2>&1
 	/etc/init.d/magitrickle restart >/dev/null 2>&1
+	[ -x /etc/init.d/mihomo ] && /etc/init.d/mihomo restart >/dev/null 2>&1
 	printf '{"ok":true}\n'
 }
 
@@ -2668,6 +2668,19 @@ mixomo_warp_status() {
 		content=$(cat "$MIXOMO_WARP_CONF")
 	fi
 	printf '{"exists":%s,"content":"%s"}\n' "$exists" "$(esc_ml "$content")"
+}
+
+mixomo_warp_config_set() {
+	local content="$1"
+	[ -n "$content" ] || { echo '{"error":"пустая конфигурация — сохранение отменено"}'; return 1; }
+	echo "$content" | grep -q '^\[Interface\]' || { echo '{"error":"файл должен начинаться с секции [Interface]"}'; return 1; }
+	echo "$content" | grep -q '^\[Peer\]' || { echo '{"error":"в файле нет секции [Peer]"}'; return 1; }
+	echo "$content" | grep -q '^PrivateKey' || { echo '{"error":"в секции [Interface] нет PrivateKey"}'; return 1; }
+	echo "$content" | grep -q '^PublicKey' || { echo '{"error":"в секции [Peer] нет PublicKey"}'; return 1; }
+	mkdir -p "$(dirname "$MIXOMO_WARP_CONF")"
+	printf '%s' "$content" > "$MIXOMO_WARP_CONF"
+	chmod 600 "$MIXOMO_WARP_CONF"
+	printf '{"ok":true}\n'
 }
 
 _mixomo_warp_best_endpoint() {
@@ -2836,7 +2849,7 @@ do_mixomo_warp_integrate() {
 		print "    type: select" >> OUT
 		print "    proxies:" >> OUT
 		print "      - WARP" >> OUT
-		print "      - REJECT" >> OUT
+		print "      - DIRECT" >> OUT
 		print "" >> OUT
 		print "rules:" >> OUT
 		print "  - \"MATCH,GLOBAL\"" >> OUT
@@ -2879,7 +2892,6 @@ do_mixomo_warp_integrate() {
 	cp "$MIHOMO_CONF" "$MIHOMO_CONF.bak" 2>/dev/null
 	chmod 600 "$tmp"
 	mv -f "$tmp" "$MIHOMO_CONF"
-	/etc/init.d/mihomo reload >/dev/null 2>&1
 	/etc/init.d/mihomo restart >/dev/null 2>&1
 	echo "==> Готово, WARP интегрирован в Mihomo"
 }
@@ -3050,12 +3062,14 @@ case "$cmd" in
 	mixomo_warp_status)                   mixomo_warp_status ;;
 	mixomo_warp_action)                   mixomo_warp_action "$1" ;;
 	mixomo_warp_integrate_action)         mixomo_warp_integrate_action ;;
+	mixomo_warp_config_set)               mixomo_warp_config_set "$1" ;;
 	*) echo '{"error":"неизвестная команда"}'; exit 1 ;;
 esac
 ZM_INSTALLER_EOF
 chmod 0755 '/usr/lib/zapret-manager/backend.sh'
 
 mkdir -p /usr/libexec/rpcd
+chmod 0755 /usr/libexec/rpcd
 cat > '/usr/libexec/rpcd/zapret-manager' << 'ZM_INSTALLER_EOF'
 #!/bin/sh
 
@@ -3126,6 +3140,7 @@ list_methods() {
 	json_add_object "mixomo_warp_status";      json_close_object
 	json_add_object "mixomo_warp_action";      json_add_string "endpoint_mode" "string"; json_close_object
 	json_add_object "mixomo_warp_integrate_action"; json_close_object
+	json_add_object "mixomo_warp_config_set"; json_add_string "content" "string"; json_close_object
 	json_dump
 }
 
@@ -3197,6 +3212,7 @@ call_method() {
 		mixomo_warp_status)      "$BACKEND" mixomo_warp_status ;;
 		mixomo_warp_action)      json_get_var endpoint_mode endpoint_mode; "$BACKEND" mixomo_warp_action "$endpoint_mode" ;;
 		mixomo_warp_integrate_action) "$BACKEND" mixomo_warp_integrate_action ;;
+		mixomo_warp_config_set) json_get_var content content; "$BACKEND" mixomo_warp_config_set "$content" ;;
 		*) echo '{"error":"unknown method"}'; return 1 ;;
 	esac
 }
@@ -3210,6 +3226,7 @@ ZM_INSTALLER_EOF
 chmod 0755 '/usr/libexec/rpcd/zapret-manager'
 
 mkdir -p /usr/share/rpcd/acl.d
+chmod 0755 /usr/share/rpcd/acl.d
 cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 {
 	"luci-app-zapret-manager": {
@@ -3241,15 +3258,17 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"tg_action", "tg_restart_all", "tgws_action", "test_action", "zm_update_action",
 					"mixomo_action", "mixomo_config_set", "mixomo_subscription_set",
 					"mixomo_magitrickle_list_set", "mixomo_autorestart_set", "mixomo_ui_action",
-					"mixomo_warp_action", "mixomo_warp_integrate_action"
+					"mixomo_warp_action", "mixomo_warp_integrate_action", "mixomo_warp_config_set"
 				]
 			}
 		}
 	}
 }
 ZM_INSTALLER_EOF
+chmod 0644 '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json'
 
 mkdir -p /usr/share/luci/menu.d
+chmod 0755 /usr/share/luci/menu.d
 cat > '/usr/share/luci/menu.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 {
 	"admin/services/zapret-manager": {
@@ -3322,8 +3341,10 @@ cat > '/usr/share/luci/menu.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF
 	}
 }
 ZM_INSTALLER_EOF
+chmod 0644 '/usr/share/luci/menu.d/luci-app-zapret-manager.json'
 
 mkdir -p /www/luci-static/resources/zapret-manager
+chmod 0755 /www/luci-static/resources/zapret-manager
 cat > '/www/luci-static/resources/zapret-manager/common.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require baseclass';
@@ -3391,6 +3412,7 @@ var callMixomoUiAction = rpc.declare({ object: 'zapret-manager', method: 'mixomo
 var callMixomoWarpStatus = rpc.declare({ object: 'zapret-manager', method: 'mixomo_warp_status', expect: {} });
 var callMixomoWarpAction = rpc.declare({ object: 'zapret-manager', method: 'mixomo_warp_action', params: ['endpoint_mode'], expect: {} });
 var callMixomoWarpIntegrateAction = rpc.declare({ object: 'zapret-manager', method: 'mixomo_warp_integrate_action', expect: {} });
+var callMixomoWarpConfigSet = rpc.declare({ object: 'zapret-manager', method: 'mixomo_warp_config_set', params: ['content'], expect: {} });
 
 function detectMissingThemeVar() {
 	if (document.documentElement.hasAttribute('data-zm-theme-checked')) return;
@@ -3618,11 +3640,14 @@ return baseclass.extend({
 	mixomoUiAction: callMixomoUiAction,
 	mixomoWarpStatus: callMixomoWarpStatus,
 	mixomoWarpAction: callMixomoWarpAction,
-	mixomoWarpIntegrateAction: callMixomoWarpIntegrateAction
+	mixomoWarpIntegrateAction: callMixomoWarpIntegrateAction,
+	mixomoWarpConfigSet: callMixomoWarpConfigSet
 });
 ZM_INSTALLER_EOF
+chmod 0644 '/www/luci-static/resources/zapret-manager/common.js'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
+chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/dashboard.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -3847,19 +3872,34 @@ return view.extend({
 		var zmUpdateBusy = false;
 		function waitForServerAndReload() {
 			var attempts = 0;
-			var maxAttempts = 30;
-			var target = L.resource('view/zapret-manager/dashboard.js') + '?_zmcheck=' + Date.now();
+			var maxAttempts = 50;
+			var sawRestart = false;
+			var consecutiveOk = 0;
+			var neededOk = 3;
+			var target = L.resource('view/zapret-manager/dashboard.js');
 			var timer = setInterval(function() {
 				attempts++;
-				fetch(target, { credentials: 'same-origin', cache: 'no-store' }).then(function(resp) {
+				fetch(target + '?_zmcheck=' + Date.now(), { credentials: 'same-origin', cache: 'no-store' }).then(function(resp) {
 					if (resp.ok) {
-						clearInterval(timer);
-						location.reload();
-					} else if (attempts >= maxAttempts) {
-						clearInterval(timer);
-						zm.toast('Панель обновлена, но страница пока не отвечает — обновите вручную (F5)', 'warning', 15000);
+						consecutiveOk++;
+						if (sawRestart && consecutiveOk >= neededOk) {
+							clearInterval(timer);
+							location.reload();
+						} else if (attempts >= maxAttempts) {
+							clearInterval(timer);
+							location.reload();
+						}
+					} else {
+						sawRestart = true;
+						consecutiveOk = 0;
+						if (attempts >= maxAttempts) {
+							clearInterval(timer);
+							zm.toast('Панель обновлена, но страница пока не отвечает — обновите вручную (F5)', 'warning', 15000);
+						}
 					}
 				}).catch(function() {
+					sawRestart = true;
+					consecutiveOk = 0;
 					if (attempts >= maxAttempts) {
 						clearInterval(timer);
 						zm.toast('Панель обновлена, но страница пока не отвечает — обновите вручную (F5)', 'warning', 15000);
@@ -3870,7 +3910,6 @@ return view.extend({
 		function renderZmUpdate() {
 			updateEl.innerHTML = '';
 			if (!zmUpdate.latest || zmUpdate.latest === zmUpdate.current) return;
-			var log = E('pre', { 'class': 'zm-log' });
 			updateEl.appendChild(E('div', { 'class': 'zm-refresh-banner zm-show' }, [
 				E('span', {}, 'Доступна новая версия панели Zapret Manager: ' + zmUpdate.latest + ' (у вас установлена ' + zmUpdate.current + ').'),
 				E('button', {
@@ -3878,24 +3917,15 @@ return view.extend({
 					'click': function() {
 						if (zmUpdateBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
 						zmUpdateBusy = true;
-						log.classList.add('zm-show');
-						zm.toast('Скачиваем и запускаем обновление панели', 'warning');
+						zm.toast('Обновление запущено — страница перезагрузится автоматически, когда панель будет готова. Не заходите на другие вкладки, чтобы не потерять сессию', 'warning', 12000);
 						zm.zmUpdateAction().then(function(res) {
-							if (res.error) { zmUpdateBusy = false; zm.toast(res.error, 'error'); return; }
-							zm.pollJob('zm_update', log, function(ok) {
-								zmUpdateBusy = false;
-								if (ok) {
-									zm.toast('Обновление скачано, ждём перезапуска панели...', 'info', 15000);
-									waitForServerAndReload();
-								} else {
-									zm.toast('Не удалось скачать обновление', 'error');
-								}
-							});
+							zmUpdateBusy = false;
+							if (res.error) { zm.toast(res.error, 'error'); return; }
+							waitForServerAndReload();
 						}).catch(function() { zmUpdateBusy = false; });
 					}
 				}, 'Обновить панель')
 			]));
-			updateEl.appendChild(log);
 		}
 		renderZmUpdate();
 
@@ -3961,8 +3991,10 @@ return view.extend({
 	}
 });
 ZM_INSTALLER_EOF
+chmod 0644 '/www/luci-static/resources/view/zapret-manager/dashboard.js'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
+chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/discord.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -4054,8 +4086,10 @@ return view.extend({
 	}
 });
 ZM_INSTALLER_EOF
+chmod 0644 '/www/luci-static/resources/view/zapret-manager/discord.js'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
+chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/doh.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -4170,8 +4204,10 @@ return view.extend({
 	}
 });
 ZM_INSTALLER_EOF
+chmod 0644 '/www/luci-static/resources/view/zapret-manager/doh.js'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
+chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/exclusions.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -4283,8 +4319,10 @@ return view.extend({
 	}
 });
 ZM_INSTALLER_EOF
+chmod 0644 '/www/luci-static/resources/view/zapret-manager/exclusions.js'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
+chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/game.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -4413,8 +4451,10 @@ return view.extend({
 	}
 });
 ZM_INSTALLER_EOF
+chmod 0644 '/www/luci-static/resources/view/zapret-manager/game.js'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
+chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/hosts.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -4542,8 +4582,10 @@ return view.extend({
 	}
 });
 ZM_INSTALLER_EOF
+chmod 0644 '/www/luci-static/resources/view/zapret-manager/hosts.js'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
+chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/mixomo.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -4900,8 +4942,7 @@ return view.extend({
 							presetBusy = false;
 							if (res.error) { zm.toast(res.error, 'error'); return; }
 							zm.toast('Список применён: ' + p.label, 'info');
-							zm.mixomoStatus().then(renderPresets);
-							refreshMtEmbed();
+							waitForListAppliedThenRefresh(p.id);
 						}).catch(function() { presetBusy = false; });
 					}
 				}, p.label);
@@ -4911,6 +4952,25 @@ return view.extend({
 		var mtFrame = null;
 		function refreshMtEmbed() {
 			if (mtFrame) { mtFrame.src = mtFrame.src.split('?')[0] + '?_r=' + Date.now(); }
+		}
+
+		function waitForListAppliedThenRefresh(presetId) {
+			var attempts = 0;
+			var maxAttempts = 20;
+			var timer = setInterval(function() {
+				attempts++;
+				zm.mixomoStatus().then(function(d) {
+					if (d.magitrickle_list === presetId) {
+						clearInterval(timer);
+						renderPresets(d);
+						setTimeout(refreshMtEmbed, 2500);
+					} else if (attempts >= maxAttempts) {
+						clearInterval(timer);
+						renderPresets(d);
+						setTimeout(refreshMtEmbed, 2500);
+					}
+				});
+			}, 500);
 		}
 
 		function renderEmbed(d) {
@@ -5002,12 +5062,38 @@ return view.extend({
 			}).catch(function() { warpBusy = false; });
 		}
 
+		var warpConfigEl = E('textarea', { 'class': 'zm-config-editor', 'spellcheck': 'false' });
+		var warpConfigBusy = false;
 		function renderWarpConf(w) {
-			warpConfCard.innerHTML = '';
-			warpConfCard.appendChild(E('h3', {}, 'Содержимое WARP.conf'));
-			var pre = E('pre', { 'class': 'zm-log zm-show' }, w.content || 'ещё не сгенерирован');
-			warpConfCard.appendChild(pre);
+			warpConfigEl.value = w.content || '';
 		}
+
+		warpConfCard.appendChild(E('h3', {}, 'Редактор WARP.conf'));
+		warpConfCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Можно вставить сюда свой готовый WARP.conf (например, купленный отдельно ключ) вместо генерации выше — при сохранении проверяются обязательные поля ([Interface]/[Peer], PrivateKey/PublicKey).'));
+		warpConfCard.appendChild(warpConfigEl);
+		warpConfCard.appendChild(E('div', { 'class': 'zm-actions' }, [
+			E('button', {
+				'class': 'cbi-button',
+				'click': function() {
+					zm.mixomoWarpStatus().then(function(w) { renderWarpConf(w); });
+					zm.toast('Содержимое перечитано с диска', 'info');
+				}
+			}, 'Обновить из файла'),
+			E('button', {
+				'class': 'cbi-button cbi-button-positive',
+				'click': function() {
+					if (warpConfigBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+					warpConfigBusy = true;
+					zm.toast('Сохраняем WARP.conf', 'warning');
+					zm.mixomoWarpConfigSet(warpConfigEl.value).then(function(res) {
+						warpConfigBusy = false;
+						if (res.error) { zm.toast(res.error, 'error', 10000); return; }
+						zm.toast('WARP.conf сохранён', 'info');
+						zm.mixomoWarpStatus().then(function(w) { renderWarpStatus(w); renderWarpConf(w); });
+					}).catch(function() { warpConfigBusy = false; });
+				}
+			}, 'Сохранить')
+		]));
 
 		panels.warp.appendChild(warpStatusCard);
 		panels.warp.appendChild(warpLogEl);
@@ -5030,8 +5116,10 @@ return view.extend({
 	}
 });
 ZM_INSTALLER_EOF
+chmod 0644 '/www/luci-static/resources/view/zapret-manager/mixomo.js'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
+chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/strategy.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -5167,8 +5255,10 @@ return view.extend({
 	}
 });
 ZM_INSTALLER_EOF
+chmod 0644 '/www/luci-static/resources/view/zapret-manager/strategy.js'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
+chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/style.css' << 'ZM_INSTALLER_EOF'
 .zm-wrap { display: flex; flex-direction: column; gap: 16px; max-width: 1100px; }
 
@@ -5362,8 +5452,10 @@ html.zm-theme-dark .zm-config-editor { border-color: rgba(255,255,255,.14); }
 
 .cbi-page-actions { display: none !important; }
 ZM_INSTALLER_EOF
+chmod 0644 '/www/luci-static/resources/view/zapret-manager/style.css'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
+chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/system.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -5574,8 +5666,10 @@ return view.extend({
 	}
 });
 ZM_INSTALLER_EOF
+chmod 0644 '/www/luci-static/resources/view/zapret-manager/system.js'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
+chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/test.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -5777,8 +5871,10 @@ return view.extend({
 	}
 });
 ZM_INSTALLER_EOF
+chmod 0644 '/www/luci-static/resources/view/zapret-manager/test.js'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
+chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/tgproxy.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -6044,8 +6140,10 @@ return view.extend({
 	}
 });
 ZM_INSTALLER_EOF
+chmod 0644 '/www/luci-static/resources/view/zapret-manager/tgproxy.js'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
+chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/youtube.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -6148,10 +6246,10 @@ return view.extend({
 	}
 });
 ZM_INSTALLER_EOF
+chmod 0644 '/www/luci-static/resources/view/zapret-manager/youtube.js'
 
 rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null || true
-/etc/init.d/rpcd restart >/dev/null 2>&1
-/etc/init.d/uhttpd restart >/dev/null 2>&1
+/etc/init.d/rpcd reload >/dev/null 2>&1 || /etc/init.d/rpcd restart >/dev/null 2>&1
 
 if command -v apk >/dev/null 2>&1; then PM="apk"; INSTALL="apk add"
 else PM="opkg"; INSTALL="opkg install"; fi
