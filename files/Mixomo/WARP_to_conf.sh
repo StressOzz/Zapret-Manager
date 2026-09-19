@@ -126,7 +126,7 @@ END{
   print "    type: select" >> OUT
   print "    proxies:" >> OUT
   print "      - WARP" >> OUT
-  print "      - REJECT" >> OUT
+  print "      - DIRECT" >> OUT
   print "" >> OUT
 
   print "rules:" >> OUT
