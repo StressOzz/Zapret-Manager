@@ -1466,7 +1466,7 @@ TGSTATUS=""; pidof tg-ws-proxy-go >/dev/null 2>&1 && TGSTATUS="${TGSTATUS:+$TGST
 pidof tg-ws-proxy-rs >/dev/null 2>&1 && TGSTATUS="${TGSTATUS:+$TGSTATUS/}${NC}Rust${GREEN}"
 if [ -n "$(tgws status 2>/dev/null)" ]; then
     if [ -n "$INSTALLED_VER_TGWS" ] && [ -n "$TGWS_VERSION" ] && [ "$INSTALLED_VER_TGWS" != "$TGWS_VERSION" ]; then
-        TGSTATUS="${TGSTATUS:+$TGSTATUS/}${RED}sTGWS NEW${GREEN}"
+        TGSTATUS="${TGSTATUS:+$TGSTATUS/}${NC}sTGWS ${RED}есть обновление${GREEN}"
     else
         TGSTATUS="${TGSTATUS:+$TGSTATUS/}${NC}sTGWS${GREEN}"
     fi
@@ -1615,28 +1615,28 @@ get_TG_versions
         TGSTATUS=""
         if pidof tg-ws-proxy-go >/dev/null 2>&1; then
             if [ -n "$INSTALLED_VER_GO" ] && [ -n "$TG_GO_VERSION" ] && [ "$INSTALLED_VER_GO" != "$TG_GO_VERSION" ]; then
-                TGSTATUS="${TGSTATUS:+$TGSTATUS/}${RED}SOCKS5 NEW${GREEN}"
+                TGSTATUS="${TGSTATUS:+$TGSTATUS/}${RED}SOCKS5 есть обновление${GREEN}"
             else
                 TGSTATUS="${TGSTATUS:+$TGSTATUS/}${NC}SOCKS5${GREEN}"
             fi
         fi
         if pidof tg-ws-proxy >/dev/null 2>&1; then
             if [ -n "$INSTALLED_VER_MT" ] && [ -n "$TG_MTProto" ] && [ "$INSTALLED_VER_MT" != "$TG_MTProto" ]; then
-                TGSTATUS="${TGSTATUS:+$TGSTATUS/}${RED}MTProto NEW${GREEN}"
+                TGSTATUS="${TGSTATUS:+$TGSTATUS/}${NC}MTProto ${RED}есть обновление${GREEN}"
             else
                 TGSTATUS="${TGSTATUS:+$TGSTATUS/}${NC}MTProto${GREEN}"
             fi
         fi
         if pidof tg-ws-proxy-rs >/dev/null 2>&1; then
             if [ -n "$INSTALLED_VER_RS" ] && [ -n "$TG_RS_VERSION" ] && [ "$INSTALLED_VER_RS" != "$TG_RS_VERSION" ]; then
-                TGSTATUS="${TGSTATUS:+$TGSTATUS/}${RED}Rust NEW${GREEN}"
+                TGSTATUS="${TGSTATUS:+$TGSTATUS/}${NC}Rust ${RED}есть обновление${GREEN}"
             else
                 TGSTATUS="${TGSTATUS:+$TGSTATUS/}${NC}Rust${GREEN}"
             fi
         fi
 if [ -n "$(tgws status 2>/dev/null)" ]; then
     if [ -n "$INSTALLED_VER_TGWS" ] && [ -n "$TGWS_VERSION" ] && [ "$INSTALLED_VER_TGWS" != "$TGWS_VERSION" ]; then
-        TGSTATUS="${TGSTATUS:+$TGSTATUS/}${RED}sTGWS NEW${GREEN}"
+        TGSTATUS="${TGSTATUS:+$TGSTATUS/}${NC}sTGWS ${RED}есть обновление${GREEN}"
     else
         TGSTATUS="${TGSTATUS:+$TGSTATUS/}${NC}sTGWS${GREEN}"
     fi
