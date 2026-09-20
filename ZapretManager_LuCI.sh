@@ -1,6 +1,6 @@
 #!/bin/sh
 # Zapret Manager by StressOzz for LuCI installer
-# Version: 1.25
+# Version: 1.26
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -8,18 +8,25 @@ GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"
 echo -e "\n${MAGENTA}Устанавливаем Zapret Manager для LuCI${NC}"
 
 rm -rf \
+	/usr/lib/zapret-manager* \
 	/etc/zapret_manager_expert_mode* \
-	/tmp/zapret-manager* \
+	/tmp/zapret-manager \
+	/tmp/zapret-manager-luci* \
 	/tmp/zm_uninstall_panel.sh \
 	/tmp/luci-indexcache* \
 	/tmp/luci-modulecache/* 2>/dev/null
+rm -f \
+	/www/luci-static/resources/view/zapret-manager/test.js \
+	/www/luci-static/resources/view/zapret-manager/youtube.js \
+	/www/luci-static/resources/view/zapret-manager/game.js \
+	/www/luci-static/resources/view/zapret-manager/discord.js 2>/dev/null
 
-mkdir -p /usr/lib/zapret-manager
-chmod 0755 /usr/lib/zapret-manager
-cat > '/usr/lib/zapret-manager/backend.sh' << 'ZM_INSTALLER_EOF'
+mkdir -p /opt/zapret-manager-luci
+chmod 0755 /opt/zapret-manager-luci
+cat > '/opt/zapret-manager-luci/backend.sh' << 'ZM_INSTALLER_EOF'
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.25"
+ZM_VERSION="1.26"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -30,7 +37,7 @@ EXCLUDE_URL="${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/zapret-hosts-use
 FLOWSEAL_ZIP="${GH_MAIN}/Flowseal/zapret-discord-youtube/archive/refs/heads/main.zip"
 FLOWSEAL_FAKE_RAW="${GH_MAIN}/Flowseal/zapret-discord-youtube/raw/refs/heads/main/bin"
 STR_URL="${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/StrYoutube"
-JOBS_DIR="/tmp/zapret-manager"
+JOBS_DIR="/tmp/zapret-manager-luci"
 CRON_FILE="/etc/crontabs/root"
 MIHOMO_DIR="/etc/mihomo"
 MIHOMO_BIN="/usr/bin/mihomo"
@@ -38,7 +45,7 @@ MIHOMO_CONF="/etc/mihomo/config.yaml"
 MAGITRICKLE_CONF="/etc/magitrickle/state/config.yaml"
 MIXOMO_CRON_CMD="/etc/init.d/mihomo restart"
 HOSTS_FILE="/etc/hosts"
-EXPERT_MODE_FILE="/etc/zapret_manager_expert_mode"
+EXPERT_MODE_FILE="/opt/zapret-manager-luci/expert_mode"
 PORTS_UDP="88,1024-2407,2409-4499,4502-19293,19345-49999,50101-65535"
 PORTS_TCP="2802,2302,2502,3478-3480,3724,6000-8000,8085,8090,8100,8903,8904,25565,27015-27030,27036-27037,35500-35600,50001,60442"
 mkdir -p "$JOBS_DIR"
@@ -1291,12 +1298,12 @@ system_uninstall_panel() {
 	local script="/tmp/zm_uninstall_panel.sh"
 	cat > "$script" << 'ZM_UNINSTALL_EOF'
 sleep 1
-rm -rf /usr/lib/zapret-manager /usr/libexec/rpcd/zapret-manager \
+rm -rf /opt/zapret-manager-luci /usr/libexec/rpcd/zapret-manager \
 	/usr/share/luci/menu.d/luci-app-zapret-manager.json \
 	/usr/share/rpcd/acl.d/luci-app-zapret-manager.json \
 	/www/luci-static/resources/view/zapret-manager \
 	/www/luci-static/resources/zapret-manager \
-	/tmp/zapret-manager /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null
+	/tmp/zapret-manager-luci /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null
 /etc/init.d/rpcd restart >/dev/null 2>&1
 /etc/init.d/uhttpd restart >/dev/null 2>&1
 rm -f "$0"
@@ -3082,7 +3089,7 @@ case "$cmd" in
 	*) echo '{"error":"неизвестная команда"}'; exit 1 ;;
 esac
 ZM_INSTALLER_EOF
-chmod 0755 '/usr/lib/zapret-manager/backend.sh'
+chmod 0755 '/opt/zapret-manager-luci/backend.sh'
 
 mkdir -p /usr/libexec/rpcd
 chmod 0755 /usr/libexec/rpcd
@@ -3091,7 +3098,7 @@ cat > '/usr/libexec/rpcd/zapret-manager' << 'ZM_INSTALLER_EOF'
 
 . /usr/share/libubox/jshn.sh
 
-BACKEND="/usr/lib/zapret-manager/backend.sh"
+BACKEND="/opt/zapret-manager-luci/backend.sh"
 
 list_methods() {
 	json_init
@@ -3305,29 +3312,9 @@ cat > '/usr/share/luci/menu.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF
 		"action": { "type": "view", "path": "zapret-manager/dashboard" }
 	},
 	"admin/services/zapret-manager/strategy": {
-		"title": "Стратегии",
+		"title": "Стратегии Zapret",
 		"order": 20,
 		"action": { "type": "view", "path": "zapret-manager/strategy" }
-	},
-	"admin/services/zapret-manager/test": {
-		"title": "Тест стратегий",
-		"order": 22,
-		"action": { "type": "view", "path": "zapret-manager/test" }
-	},
-	"admin/services/zapret-manager/youtube": {
-		"title": "YouTube",
-		"order": 25,
-		"action": { "type": "view", "path": "zapret-manager/youtube" }
-	},
-	"admin/services/zapret-manager/game": {
-		"title": "Игры",
-		"order": 27,
-		"action": { "type": "view", "path": "zapret-manager/game" }
-	},
-	"admin/services/zapret-manager/discord": {
-		"title": "Discord",
-		"order": 30,
-		"action": { "type": "view", "path": "zapret-manager/discord" }
 	},
 	"admin/services/zapret-manager/hosts": {
 		"title": "Hosts",
@@ -4006,101 +3993,6 @@ chmod 0644 '/www/luci-static/resources/view/zapret-manager/dashboard.js'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
 chmod 0755 /www/luci-static/resources/view/zapret-manager
-cat > '/www/luci-static/resources/view/zapret-manager/discord.js' << 'ZM_INSTALLER_EOF'
-'use strict';
-'require view';
-'require zapret-manager.common as zm';
-
-var FAKES = [
-	'stun.bin', 'stun2.bin', 'quic_initial_4pda_to.bin',
-	'quic_initial_tencent_com.bin', 'tls_clienthello_sochi_park.bin',
-	'quic_initial_www_google_com.bin', 'quic_initial_steamcommunity_com.bin',
-	'quic_initial_5ka_ru.bin', 'quic_initial_rutube_ru.bin'
-];
-
-return view.extend({
-	load: function() {
-		zm.injectCss();
-		return zm.discordStatus();
-	},
-
-	render: function(data) {
-		var wrap = E('div', { 'class': 'zm-wrap' });
-		var dvGrid = E('div', { 'class': 'zm-grid' });
-		var fakeGrid = E('div', { 'class': 'zm-grid' });
-		var busy = false;
-
-		function renderDv() {
-			dvGrid.innerHTML = '';
-			(data.available || []).forEach(function(dv) {
-				var num = dv.replace('Dv', '');
-				dvGrid.appendChild(E('div', {
-					'class': 'zm-tile' + (data.current === dv ? ' zm-active' : ''),
-					'click': function() {
-						if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-						busy = true;
-						zm.toast('Применяем стратегию ' + dv + '', 'warning');
-						zm.discordSetDv(num).then(function(res) {
-							busy = false;
-							if (!zm.notifyStrategyResult(res, dv)) return;
-							refreshState();
-						}).catch(function() { busy = false; });
-					}
-				}, dv));
-			});
-		}
-
-		function renderFake() {
-			fakeGrid.innerHTML = '';
-			FAKES.forEach(function(f) {
-				fakeGrid.appendChild(E('div', {
-					'class': 'zm-tile' + (data.current_fake === f ? ' zm-active' : ''),
-					'click': function() {
-						if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-						busy = true;
-						zm.toast('Меняем fake-файл на ' + f + '', 'warning');
-						zm.discordSetFake(f).then(function(res) {
-							busy = false;
-							if (!zm.notifyStrategyResult(res, f)) return;
-							refreshState();
-						}).catch(function() { busy = false; });
-					}
-				}, f));
-			});
-		}
-
-		function refreshState() {
-			zm.discordStatus().then(function(res) {
-				data = res;
-				renderDv();
-				renderFake();
-			});
-		}
-
-		renderDv();
-		renderFake();
-
-		var dvCard = E('div', { 'class': 'zm-card' }, [
-			E('h3', {}, 'Стратегия для discord.media'),
-			dvGrid,
-			E('p', { 'class': 'zm-hint' }, 'Нужна базовая стратегия с блоком discord.media.')
-		]);
-
-		var fakeCard = E('div', { 'class': 'zm-card' }, [
-			E('h3', {}, 'Fake-файл для discord,stun'),
-			fakeGrid
-		]);
-
-		wrap.appendChild(dvCard);
-		wrap.appendChild(fakeCard);
-		return wrap;
-	}
-});
-ZM_INSTALLER_EOF
-chmod 0644 '/www/luci-static/resources/view/zapret-manager/discord.js'
-
-mkdir -p /www/luci-static/resources/view/zapret-manager
-chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/doh.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -4331,138 +4223,6 @@ return view.extend({
 });
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/exclusions.js'
-
-mkdir -p /www/luci-static/resources/view/zapret-manager
-chmod 0755 /www/luci-static/resources/view/zapret-manager
-cat > '/www/luci-static/resources/view/zapret-manager/game.js' << 'ZM_INSTALLER_EOF'
-'use strict';
-'require view';
-'require zapret-manager.common as zm';
-
-var FAKES = [
-	'stun.bin', 'stun2.bin', 'quic_initial_4pda_to.bin',
-	'quic_initial_tencent_com.bin', 'tls_clienthello_sochi_park.bin',
-	'quic_initial_www_google_com.bin', 'quic_initial_steamcommunity_com.bin',
-	'quic_initial_5ka_ru.bin', 'quic_initial_rutube_ru.bin'
-];
-
-return view.extend({
-	load: function() {
-		zm.injectCss();
-		return zm.gameStatus();
-	},
-
-	render: function(data) {
-		var wrap = E('div', { 'class': 'zm-wrap' });
-		var gvGrid = E('div', { 'class': 'zm-grid' });
-		var xtremeRow = E('div', {});
-		var fakeGrid = E('div', { 'class': 'zm-grid' });
-		var busy = false;
-
-		function renderGv() {
-			gvGrid.innerHTML = '';
-			[1, 2, 3, 4].forEach(function(n) {
-				gvGrid.appendChild(E('div', {
-					'class': 'zm-tile' + (data.current === ('Gv' + n) ? ' zm-active' : ''),
-					'click': function() {
-						if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-						busy = true;
-						zm.toast('Применяем игровую стратегию Gv' + n + '', 'warning');
-						zm.gameSet(String(n)).then(function(res) {
-							busy = false;
-							if (res.error) { zm.toast(res.error, 'error'); return; }
-							zm.toast(res.game === 'none' ? 'Игровая стратегия снята' : res.game + ' применена', 'info');
-							refreshState();
-						}).catch(function() { busy = false; });
-					}
-				}, 'Gv' + n));
-			});
-		}
-
-		function renderXtreme() {
-			var xtreme = data.xtreme === true;
-			xtremeRow.innerHTML = '';
-			xtremeRow.appendChild(E('div', { 'class': 'zm-row' }, [
-				E('span', { 'class': 'zm-label' }, 'Статус'),
-				zm.badge(xtreme, 'включён', 'выключен')
-			]));
-			xtremeRow.appendChild(E('p', { 'class': 'zm-hint' }, 'Внимание: может повлиять на работу приложений и соединений — используйте только для проверки игр.'));
-			xtremeRow.appendChild(E('div', { 'class': 'zm-actions' }, [
-				E('button', {
-					'class': xtreme ? 'cbi-button cbi-button-remove' : 'cbi-button cbi-button-positive',
-					'click': function() {
-						if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-						busy = true;
-						zm.toast(xtreme ? 'Выключаем Xtreme' : 'Включаем Xtreme', 'warning');
-						zm.gameToggleXtreme().then(function(res) {
-							busy = false;
-							if (res.error) { zm.toast(res.error, 'error'); return; }
-							zm.toast(res.xtreme ? 'Xtreme включён' : 'Xtreme выключен', 'info');
-							refreshState();
-						}).catch(function() { busy = false; });
-					}
-				}, xtreme ? 'Выключить Xtreme' : 'Включить Xtreme')
-			]));
-		}
-
-		function renderFake() {
-			fakeGrid.innerHTML = '';
-			FAKES.forEach(function(f) {
-				fakeGrid.appendChild(E('div', {
-					'class': 'zm-tile' + (data.fake === f ? ' zm-active' : ''),
-					'click': function() {
-						if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-						busy = true;
-						zm.toast('Меняем fake-файл на ' + f + '', 'warning');
-						zm.gameSetFake(f).then(function(res) {
-							busy = false;
-							if (res.error) { zm.toast(res.error, 'error'); return; }
-							zm.toast(f + ' установлен', 'info');
-							refreshState();
-						}).catch(function() { busy = false; });
-					}
-				}, f));
-			});
-		}
-
-		function refreshState() {
-			zm.gameStatus().then(function(res) {
-				data = res;
-				renderGv();
-				renderXtreme();
-				renderFake();
-			});
-		}
-
-		renderGv();
-		renderXtreme();
-		renderFake();
-
-		var gvCard = E('div', { 'class': 'zm-card' }, [
-			E('h3', {}, 'Игровая стратегия'),
-			gvGrid,
-			E('p', { 'class': 'zm-hint' }, 'Повторный клик по уже выбранной — снимает игровую стратегию.')
-		]);
-
-		var xtremeCard = E('div', { 'class': 'zm-card' }, [
-			E('h3', {}, 'Xtreme режим'),
-			xtremeRow
-		]);
-
-		var fakeCard = E('div', { 'class': 'zm-card' }, [
-			E('h3', {}, 'Fake-файл для игровой стратегии'),
-			fakeGrid,
-			E('p', { 'class': 'zm-hint' }, 'Доступно только если игровая стратегия уже выбрана.')
-		]);
-
-		wrap.appendChild(gvCard);
-		wrap.appendChild(xtremeCard);
-		wrap.appendChild(fakeCard);
-		return wrap;
-	}
-});
-ZM_INSTALLER_EOF
-chmod 0644 '/www/luci-static/resources/view/zapret-manager/game.js'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
 chmod 0755 /www/luci-static/resources/view/zapret-manager
@@ -5203,132 +4963,632 @@ cat > '/www/luci-static/resources/view/zapret-manager/strategy.js' << 'ZM_INSTAL
 'require view';
 'require zapret-manager.common as zm';
 
+var TABS = [
+	{ id: 'strategy', label: 'Стратегии' },
+	{ id: 'test', label: 'Тест стратегий' },
+	{ id: 'youtube', label: 'YouTube' },
+	{ id: 'game', label: 'Игры' },
+	{ id: 'discord', label: 'Discord' }
+];
+
+var TEST_MODES = [
+	{ id: 'v', label: 'Тестировать v' },
+	{ id: 'flowseal', label: 'Тестировать Flowseal' },
+	{ id: 'v_flowseal', label: 'Тестировать v + Flowseal' }
+];
+var TEST_MODE_LABELS = {
+	v: 'v', flowseal: 'Flowseal', v_flowseal: 'v + Flowseal', youtube: 'YouTube'
+};
+var TEST_RESULT_MODES = ['v', 'flowseal', 'v_flowseal', 'youtube'];
+
+var GAME_FAKES = [
+	'stun.bin', 'stun2.bin', 'quic_initial_4pda_to.bin',
+	'quic_initial_tencent_com.bin', 'tls_clienthello_sochi_park.bin',
+	'quic_initial_www_google_com.bin', 'quic_initial_steamcommunity_com.bin',
+	'quic_initial_5ka_ru.bin', 'quic_initial_rutube_ru.bin'
+];
+
 return view.extend({
 	load: function() {
 		zm.injectCss();
-		return Promise.all([ zm.status(), zm.strategyListV() ]);
+		return Promise.all([
+			zm.status(),
+			zm.strategyListV(),
+			zm.testStatus(),
+			zm.strategyListYoutube(),
+			zm.gameStatus(),
+			zm.discordStatus()
+		]);
 	},
 
-	render: function(data) {
-		var status = data[0], vList = data[1];
-		var lastFlowseal = null;
+	render: function(all) {
+		var view = this;
+		var statusData = all[0], vListData = all[1], testData = all[2], ytInitialData = all[3], gameData = all[4], discordData = all[5];
 		var wrap = E('div', { 'class': 'zm-wrap' });
-		var logEl = E('pre', { 'class': 'zm-log' });
-		var busy = false;
+		var activeTab = 'strategy';
 
-		var currentBanner = E('div', { 'class': 'zm-current-banner' });
-		wrap.appendChild(currentBanner);
-
-		var vGrid = E('div', { 'class': 'zm-grid' });
-		var vCard = E('div', { 'class': 'zm-card' }, [
-			E('h3', {}, 'Стратегии v1 – v10'),
-			vGrid
-		]);
-
-		var fGrid = E('div', { 'class': 'zm-grid' });
-		var fCard = E('div', { 'class': 'zm-card' }, [
-			E('h3', {}, 'Стратегии Flowseal'),
-			E('div', { 'class': 'zm-actions' }, [
-				E('button', {
-					'class': 'cbi-button',
-					'click': function() {
-						if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-						busy = true;
-						zm.toast('Обновляем список Flowseal', 'warning');
-						fGrid.innerHTML = 'Загрузка списка';
-						zm.strategyListFlowseal().then(function(res) {
-							if (res.started) {
-								zm.pollJob('flowseal_download', logEl, function(ok) {
-									busy = false;
-									zm.toast(ok ? 'Список Flowseal обновлён' : 'Не удалось обновить список', ok ? 'info' : 'error');
-									zm.strategyListFlowseal().then(renderFlowseal);
-								});
-							} else {
-								busy = false;
-								renderFlowseal(res);
-								zm.toast('Список Flowseal обновлён', 'info');
-							}
-						}).catch(function() { busy = false; });
-					}
-				}, 'Обновить список')
-			]),
-			fGrid
-		]);
-
-		function renderBanner() {
-			currentBanner.className = 'zm-current-banner' + (status.strategy ? '' : ' zm-current-empty');
-			currentBanner.innerHTML = '';
-			if (status.strategy) {
-				currentBanner.appendChild(E('span', {}, 'Сейчас применено: '));
-				currentBanner.appendChild(E('b', {}, status.strategy));
-			} else {
-				currentBanner.appendChild(E('span', {}, 'Стратегия ещё не выбрана'));
-			}
-		}
-
-		function renderV() {
-			vGrid.innerHTML = '';
-			(vList.items || []).forEach(function(it) {
-				var words = (' ' + (status.strategy || '') + ' ');
-				vGrid.appendChild(E('div', {
-					'class': 'zm-tile' + (!status.flowseal && words.indexOf(' ' + it.id + ' ') !== -1 ? ' zm-active' : ''),
-					'click': function() {
-						if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-						busy = true;
-						zm.toast('Применяем стратегию ' + it.id + '', 'warning');
-						zm.strategySetV(it.id).then(function(res) {
-							busy = false;
-							if (!zm.notifyStrategyResult(res, it.id)) return;
-							refreshState();
-						}).catch(function() { busy = false; });
-					}
-				}, it.id));
-			});
-		}
-
-		function renderFlowseal(res) {
-			lastFlowseal = res;
-			fGrid.innerHTML = '';
-			(res.items || []).forEach(function(it) {
-				fGrid.appendChild(E('div', {
-					'class': 'zm-tile' + (status.flowseal === it.id ? ' zm-active' : ''),
-					'click': function() {
-						if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-						busy = true;
-						zm.toast('Применяем стратегию ' + it.label + '', 'warning');
-						zm.strategySetFlowseal(it.id).then(function(r2) {
-							busy = false;
-							if (!zm.notifyStrategyResult(r2, it.id)) return;
-							refreshState();
-						}).catch(function() { busy = false; });
-					}
-				}, it.label));
-			});
-			if (!res.items || !res.items.length)
-				fGrid.appendChild(E('p', { 'class': 'zm-hint' }, 'Список пуст — нажмите «Обновить список».'));
-		}
-
-		function refreshState() {
-			zm.status().then(function(s) {
-				status = s;
-				renderBanner();
-				renderV();
-				if (lastFlowseal) renderFlowseal(lastFlowseal);
-			});
-		}
-
-		renderBanner();
-		renderV();
-
-		wrap.appendChild(vCard);
-		wrap.appendChild(fCard);
-		wrap.appendChild(logEl);
-
-		zm.strategyListFlowseal().then(function(res) {
-			if (!res.started) renderFlowseal(res);
-			else fGrid.appendChild(E('p', { 'class': 'zm-hint' }, 'Список ещё не загружен — нажмите «Обновить список».'));
+		var tabBar = E('div', { 'class': 'zm-actions', 'style': 'margin-bottom:14px' });
+		var panels = {};
+		TABS.forEach(function(t) {
+			panels[t.id] = E('div', { 'style': t.id === activeTab ? '' : 'display:none' });
 		});
 
+		function renderTabBar() {
+			tabBar.innerHTML = '';
+			TABS.forEach(function(t) {
+				tabBar.appendChild(E('button', {
+					'class': 'cbi-button' + (t.id === activeTab ? ' cbi-button-positive' : ''),
+					'click': function() {
+						activeTab = t.id;
+						TABS.forEach(function(t2) { panels[t2.id].style.display = t2.id === activeTab ? '' : 'none'; });
+						renderTabBar();
+					}
+				}, t.label));
+			});
+		}
+
+		(function buildStrategyPanel() {
+			var status = statusData, vList = vListData;
+			var lastFlowseal = null;
+			var logEl = E('pre', { 'class': 'zm-log' });
+			var busy = false;
+
+			var currentBanner = E('div', { 'class': 'zm-current-banner' });
+			panels.strategy.appendChild(currentBanner);
+
+			var vGrid = E('div', { 'class': 'zm-grid' });
+			var vCard = E('div', { 'class': 'zm-card' }, [
+				E('h3', {}, 'Стратегии v1 – v10'),
+				vGrid
+			]);
+
+			var fGrid = E('div', { 'class': 'zm-grid' });
+			var fCard = E('div', { 'class': 'zm-card' }, [
+				E('h3', {}, 'Стратегии Flowseal'),
+				E('div', { 'class': 'zm-actions' }, [
+					E('button', {
+						'class': 'cbi-button',
+						'click': function() {
+							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+							busy = true;
+							zm.toast('Обновляем список Flowseal', 'warning');
+							fGrid.innerHTML = 'Загрузка списка';
+							zm.strategyListFlowseal().then(function(res) {
+								if (res.started) {
+									zm.pollJob('flowseal_download', logEl, function(ok) {
+										busy = false;
+										zm.toast(ok ? 'Список Flowseal обновлён' : 'Не удалось обновить список', ok ? 'info' : 'error');
+										zm.strategyListFlowseal().then(renderFlowseal);
+									});
+								} else {
+									busy = false;
+									renderFlowseal(res);
+									zm.toast('Список Flowseal обновлён', 'info');
+								}
+							}).catch(function() { busy = false; });
+						}
+					}, 'Обновить список')
+				]),
+				fGrid
+			]);
+
+			function renderBanner() {
+				currentBanner.className = 'zm-current-banner' + (status.strategy ? '' : ' zm-current-empty');
+				currentBanner.innerHTML = '';
+				if (status.strategy) {
+					currentBanner.appendChild(E('span', {}, 'Сейчас применено: '));
+					currentBanner.appendChild(E('b', {}, status.strategy));
+				} else {
+					currentBanner.appendChild(E('span', {}, 'Стратегия ещё не выбрана'));
+				}
+			}
+
+			function renderV() {
+				vGrid.innerHTML = '';
+				(vList.items || []).forEach(function(it) {
+					var words = (' ' + (status.strategy || '') + ' ');
+					vGrid.appendChild(E('div', {
+						'class': 'zm-tile' + (!status.flowseal && words.indexOf(' ' + it.id + ' ') !== -1 ? ' zm-active' : ''),
+						'click': function() {
+							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+							busy = true;
+							zm.toast('Применяем стратегию ' + it.id + '', 'warning');
+							zm.strategySetV(it.id).then(function(res) {
+								busy = false;
+								if (!zm.notifyStrategyResult(res, it.id)) return;
+								refreshState();
+							}).catch(function() { busy = false; });
+						}
+					}, it.id));
+				});
+			}
+
+			function renderFlowseal(res) {
+				lastFlowseal = res;
+				fGrid.innerHTML = '';
+				(res.items || []).forEach(function(it) {
+					fGrid.appendChild(E('div', {
+						'class': 'zm-tile' + (status.flowseal === it.id ? ' zm-active' : ''),
+						'click': function() {
+							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+							busy = true;
+							zm.toast('Применяем стратегию ' + it.label + '', 'warning');
+							zm.strategySetFlowseal(it.id).then(function(r2) {
+								busy = false;
+								if (!zm.notifyStrategyResult(r2, it.id)) return;
+								refreshState();
+							}).catch(function() { busy = false; });
+						}
+					}, it.label));
+				});
+				if (!res.items || !res.items.length)
+					fGrid.appendChild(E('p', { 'class': 'zm-hint' }, 'Список пуст — нажмите «Обновить список».'));
+			}
+
+			function refreshState() {
+				zm.status().then(function(s) {
+					status = s;
+					renderBanner();
+					renderV();
+					if (lastFlowseal) renderFlowseal(lastFlowseal);
+				});
+			}
+
+			renderBanner();
+			renderV();
+
+			panels.strategy.appendChild(vCard);
+			panels.strategy.appendChild(fCard);
+			panels.strategy.appendChild(logEl);
+
+			zm.strategyListFlowseal().then(function(res) {
+				if (!res.started) renderFlowseal(res);
+				else fGrid.appendChild(E('p', { 'class': 'zm-hint' }, 'Список ещё не загружен — нажмите «Обновить список».'));
+			});
+		})();
+
+		(function buildTestPanel() {
+			var logEl = E('pre', { 'class': 'zm-log' });
+			var resultsEl = E('pre', { 'class': 'zm-log' });
+			var busy = testData.running === true;
+			var curMode = testData.mode || '';
+			var status = testData;
+
+			var mainCard = E('div', { 'class': 'zm-card' });
+			var ytCard = E('div', { 'class': 'zm-card' });
+			var resultsButtonsEl = E('div', {});
+
+			function stopButton() {
+				return E('button', { 'class': 'cbi-button cbi-button-remove', 'click': doStop }, 'Остановить тестирование стратегий');
+			}
+
+			function renderMain() {
+				mainCard.innerHTML = '';
+				mainCard.appendChild(E('h3', {}, 'Тест стратегий v / Flowseal'));
+				mainCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Тест идёт в фоне — переключение вкладок или закрытие LuCI его не прервёт. По окончании конфигурация всегда возвращается к тому, что было до начала теста — стратегии только тестируются, лучшую нужно применить вручную на странице «Стратегии».'));
+				if (busy && curMode !== 'youtube') {
+					mainCard.appendChild(E('div', { 'class': 'zm-row' }, [
+						E('span', { 'class': 'zm-label' }, 'Статус'),
+						zm.badge(true, 'тест выполняется (' + (TEST_MODE_LABELS[curMode] || curMode) + ')', '')
+					]));
+					mainCard.appendChild(E('div', { 'class': 'zm-actions' }, [ stopButton() ]));
+				} else if (busy) {
+					mainCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сейчас выполняется тест YouTube — дождитесь его завершения.'));
+				} else {
+					mainCard.appendChild(E('div', { 'class': 'zm-actions' }, TEST_MODES.map(function(m) {
+						return E('button', {
+							'class': 'cbi-button cbi-button-positive',
+							'click': function() { doStart(m.id); }
+						}, m.label);
+					})));
+				}
+			}
+
+			function renderYt() {
+				ytCard.innerHTML = '';
+				ytCard.appendChild(E('h3', {}, 'Тест стратегий YouTube (Yv)'));
+				ytCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Всегда тестируется отдельно от v/Flowseal — своим набором стратегий и доменов YouTube.'));
+				if (busy && curMode === 'youtube') {
+					ytCard.appendChild(E('div', { 'class': 'zm-row' }, [
+						E('span', { 'class': 'zm-label' }, 'Статус'),
+						zm.badge(true, 'тест выполняется', '')
+					]));
+					ytCard.appendChild(E('div', { 'class': 'zm-actions' }, [ stopButton() ]));
+				} else if (busy) {
+					ytCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сейчас выполняется тест v/Flowseal — дождитесь его завершения.'));
+				} else {
+					ytCard.appendChild(E('div', { 'class': 'zm-actions' }, [
+						E('button', {
+							'class': 'cbi-button cbi-button-positive',
+							'click': function() { doStart('youtube'); }
+						}, 'Тестировать YouTube')
+					]));
+				}
+			}
+
+			function startPolling() {
+				logEl.classList.add('zm-show');
+				zm.pollJob('strategy_test', logEl, function(ok) {
+					busy = false;
+					curMode = '';
+					zm.toast(ok ? 'Тест завершён' : 'Тест завершился с ошибкой', ok ? 'info' : 'error');
+					renderMain();
+					renderYt();
+					zm.testStatus().then(function(res) {
+						status = res;
+						renderResultsButtons();
+					});
+				});
+			}
+
+			function doStart(mode) {
+				if (busy) { zm.toast('Дождитесь завершения текущего теста', 'warning'); return; }
+				busy = true;
+				curMode = mode;
+				renderMain();
+				renderYt();
+				zm.toast('Запускаем тест стратегий', 'warning');
+				zm.testAction('start', mode).then(function(res) {
+					if (res.error) { busy = false; curMode = ''; zm.toast(res.error, 'error'); renderMain(); renderYt(); return; }
+					startPolling();
+				}).catch(function() { busy = false; curMode = ''; renderMain(); renderYt(); });
+			}
+
+			function doStop() {
+				zm.toast('Останавливаем тест', 'warning');
+				zm.testAction('stop').then(function(res) {
+					if (res.error) { zm.toast(res.error, 'error'); return; }
+					zm.toast('Тест остановлен, конфигурация восстанавливается', 'info');
+				});
+			}
+
+			function renderResultsColored(el, text) {
+				el.innerHTML = '';
+				var lines = (text || '').split('\n').filter(function(l) { return l; });
+				var controlOk = null;
+				lines.forEach(function(line) {
+					var m = line.match(/^(.*?)\s*→\s*(\d+)\/(\d+)\s*$/);
+					if (m && /^Контрольный тест/.test(m[1])) controlOk = +m[2];
+				});
+				var first = true;
+				lines.forEach(function(line) {
+					var div = document.createElement('div');
+					var m = line.match(/^(.*?)\s*→\s*(\d+)\/(\d+)\s*$/);
+					if (m) {
+						var name = m[1], ok = +m[2], total = +m[3];
+						var isControl = /^Контрольный тест/.test(name);
+						var nameSpan = document.createElement('span');
+						nameSpan.textContent = name + ' → ';
+						var scoreSpan = document.createElement('span');
+						scoreSpan.textContent = ok + '/' + total;
+						if (isControl) {
+							div.className = 'zm-log-code';
+						} else {
+							if (ok === total) scoreSpan.className = 'zm-log-msg-ok';
+							else if (controlOk !== null && ok < controlOk) scoreSpan.className = 'zm-log-msg-error';
+							else scoreSpan.className = 'zm-log-msg-warn';
+							if (first) { nameSpan.style.fontWeight = '700'; first = false; }
+						}
+						div.appendChild(nameSpan);
+						div.appendChild(scoreSpan);
+					} else {
+						div.className = 'zm-log-code';
+						div.textContent = line;
+					}
+					el.appendChild(div);
+				});
+			}
+
+			function showResultsFor(mode) {
+				zm.testResults(mode).then(function(res) {
+					resultsEl.classList.add('zm-show');
+					renderResultsColored(resultsEl, res.lines || '');
+				});
+			}
+
+			function renderResultsButtons() {
+				resultsButtonsEl.innerHTML = '';
+				var actions = [];
+				TEST_RESULT_MODES.forEach(function(m) {
+					if (!status['has_results_' + m]) return;
+					actions.push(E('button', {
+						'class': 'cbi-button',
+						'click': function() { showResultsFor(m); }
+					}, 'Показать результаты: ' + TEST_MODE_LABELS[m]));
+				});
+				if (actions.length) {
+					resultsButtonsEl.appendChild(E('div', { 'class': 'zm-actions' }, actions));
+				} else {
+					resultsButtonsEl.appendChild(E('p', { 'class': 'zm-hint' }, 'Пока нет сохранённых результатов — запустите тест.'));
+				}
+			}
+
+			var resultsCard = E('div', { 'class': 'zm-card' }, [
+				E('h3', {}, 'Результаты тестирования'),
+				resultsButtonsEl,
+				resultsEl
+			]);
+
+			renderMain();
+			renderYt();
+			renderResultsButtons();
+
+			if (busy) { startPolling(); }
+
+			panels.test.appendChild(mainCard);
+			panels.test.appendChild(ytCard);
+			panels.test.appendChild(logEl);
+			panels.test.appendChild(resultsCard);
+		})();
+
+		(function buildYoutubePanel() {
+			var status = statusData, initial = ytInitialData;
+			var logEl = E('pre', { 'class': 'zm-log' });
+			var grid = E('div', { 'class': 'zm-grid' });
+			var lastList = null;
+			var current = '';
+			var busy = false;
+
+			function currentYv(s) {
+				var words = (s.strategy || '').split(' ');
+				for (var i = 0; i < words.length; i++) {
+					if (/^Yv[0-9]+$/.test(words[i])) return words[i];
+				}
+				return '';
+			}
+
+			function renderGrid(res) {
+				lastList = res;
+				grid.innerHTML = '';
+				(res.items || []).forEach(function(it) {
+					grid.appendChild(E('div', {
+						'class': 'zm-tile' + (current === it.id ? ' zm-active' : ''),
+						'click': function() {
+							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+							busy = true;
+							zm.toast('Применяем стратегию ' + it.id + '', 'warning');
+							zm.strategySetYoutube(it.id).then(function(r2) {
+								busy = false;
+								if (!zm.notifyStrategyResult(r2, it.id)) return;
+								refreshState();
+							}).catch(function() { busy = false; });
+						}
+					}, it.id));
+				});
+				if (!res.items || !res.items.length)
+					grid.appendChild(E('p', { 'class': 'zm-hint' }, 'Список пуст — нажмите «Обновить список».'));
+			}
+
+			function refreshState() {
+				zm.status().then(function(s) {
+					current = currentYv(s);
+					if (lastList) renderGrid(lastList);
+				});
+			}
+
+			current = currentYv(status);
+
+			var card = E('div', { 'class': 'zm-card' }, [
+				E('h3', {}, 'Стратегии для YouTube'),
+				E('div', { 'class': 'zm-actions' }, [
+					E('button', {
+						'class': 'cbi-button',
+						'click': function() {
+							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+							busy = true;
+							zm.toast('Обновляем список YouTube-стратегий', 'warning');
+							grid.innerHTML = 'Загрузка списка';
+							zm.strategyListYoutube().then(function(res) {
+								if (res.started) {
+									zm.pollJob('youtube_download', logEl, function(ok) {
+										busy = false;
+										zm.toast(ok ? 'Список YouTube-стратегий обновлён' : 'Не удалось обновить список', ok ? 'info' : 'error');
+										zm.strategyListYoutube().then(renderGrid);
+									});
+								} else {
+									busy = false;
+									renderGrid(res);
+									zm.toast('Список YouTube-стратегий обновлён', 'info');
+								}
+							}).catch(function() { busy = false; });
+						}
+					}, 'Обновить список')
+				]),
+				grid,
+				E('p', { 'class': 'zm-hint' }, 'Применяется поверх текущей стратегии — заменяет только YouTube-часть.')
+			]);
+
+			panels.youtube.appendChild(card);
+			panels.youtube.appendChild(logEl);
+
+			if (!initial.started) {
+				renderGrid(initial);
+			} else {
+				grid.appendChild(E('p', { 'class': 'zm-hint' }, 'Список ещё не загружен — нажмите «Обновить список».'));
+			}
+		})();
+
+		(function buildGamePanel() {
+			var data = gameData;
+			var gvGrid = E('div', { 'class': 'zm-grid' });
+			var xtremeRow = E('div', {});
+			var fakeGrid = E('div', { 'class': 'zm-grid' });
+			var busy = false;
+
+			function renderGv() {
+				gvGrid.innerHTML = '';
+				[1, 2, 3, 4].forEach(function(n) {
+					gvGrid.appendChild(E('div', {
+						'class': 'zm-tile' + (data.current === ('Gv' + n) ? ' zm-active' : ''),
+						'click': function() {
+							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+							busy = true;
+							zm.toast('Применяем игровую стратегию Gv' + n + '', 'warning');
+							zm.gameSet(String(n)).then(function(res) {
+								busy = false;
+								if (res.error) { zm.toast(res.error, 'error'); return; }
+								zm.toast(res.game === 'none' ? 'Игровая стратегия снята' : res.game + ' применена', 'info');
+								refreshState();
+							}).catch(function() { busy = false; });
+						}
+					}, 'Gv' + n));
+				});
+			}
+
+			function renderXtreme() {
+				var xtreme = data.xtreme === true;
+				xtremeRow.innerHTML = '';
+				xtremeRow.appendChild(E('div', { 'class': 'zm-row' }, [
+					E('span', { 'class': 'zm-label' }, 'Статус'),
+					zm.badge(xtreme, 'включён', 'выключен')
+				]));
+				xtremeRow.appendChild(E('p', { 'class': 'zm-hint' }, 'Внимание: может повлиять на работу приложений и соединений — используйте только для проверки игр.'));
+				xtremeRow.appendChild(E('div', { 'class': 'zm-actions' }, [
+					E('button', {
+						'class': xtreme ? 'cbi-button cbi-button-remove' : 'cbi-button cbi-button-positive',
+						'click': function() {
+							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+							busy = true;
+							zm.toast(xtreme ? 'Выключаем Xtreme' : 'Включаем Xtreme', 'warning');
+							zm.gameToggleXtreme().then(function(res) {
+								busy = false;
+								if (res.error) { zm.toast(res.error, 'error'); return; }
+								zm.toast(res.xtreme ? 'Xtreme включён' : 'Xtreme выключен', 'info');
+								refreshState();
+							}).catch(function() { busy = false; });
+						}
+					}, xtreme ? 'Выключить Xtreme' : 'Включить Xtreme')
+				]));
+			}
+
+			function renderFake() {
+				fakeGrid.innerHTML = '';
+				GAME_FAKES.forEach(function(f) {
+					fakeGrid.appendChild(E('div', {
+						'class': 'zm-tile' + (data.fake === f ? ' zm-active' : ''),
+						'click': function() {
+							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+							busy = true;
+							zm.toast('Меняем fake-файл на ' + f + '', 'warning');
+							zm.gameSetFake(f).then(function(res) {
+								busy = false;
+								if (res.error) { zm.toast(res.error, 'error'); return; }
+								zm.toast(f + ' установлен', 'info');
+								refreshState();
+							}).catch(function() { busy = false; });
+						}
+					}, f));
+				});
+			}
+
+			function refreshState() {
+				zm.gameStatus().then(function(res) {
+					data = res;
+					renderGv();
+					renderXtreme();
+					renderFake();
+				});
+			}
+
+			renderGv();
+			renderXtreme();
+			renderFake();
+
+			var gvCard = E('div', { 'class': 'zm-card' }, [
+				E('h3', {}, 'Игровая стратегия'),
+				gvGrid,
+				E('p', { 'class': 'zm-hint' }, 'Повторный клик по уже выбранной — снимает игровую стратегию.')
+			]);
+
+			var xtremeCard = E('div', { 'class': 'zm-card' }, [
+				E('h3', {}, 'Xtreme режим'),
+				xtremeRow
+			]);
+
+			var fakeCard = E('div', { 'class': 'zm-card' }, [
+				E('h3', {}, 'Fake-файл для игровой стратегии'),
+				fakeGrid,
+				E('p', { 'class': 'zm-hint' }, 'Доступно только если игровая стратегия уже выбрана.')
+			]);
+
+			panels.game.appendChild(gvCard);
+			panels.game.appendChild(xtremeCard);
+			panels.game.appendChild(fakeCard);
+		})();
+
+		(function buildDiscordPanel() {
+			var data = discordData;
+			var dvGrid = E('div', { 'class': 'zm-grid' });
+			var fakeGrid = E('div', { 'class': 'zm-grid' });
+			var busy = false;
+
+			function renderDv() {
+				dvGrid.innerHTML = '';
+				(data.available || []).forEach(function(dv) {
+					dvGrid.appendChild(E('div', {
+						'class': 'zm-tile' + (data.current === dv ? ' zm-active' : ''),
+						'click': function() {
+							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+							busy = true;
+							zm.toast('Применяем стратегию ' + dv + '', 'warning');
+							zm.discordSetDv(dv.replace('Dv', '')).then(function(res) {
+								busy = false;
+								if (!zm.notifyStrategyResult(res, dv)) return;
+								refreshState();
+							}).catch(function() { busy = false; });
+						}
+					}, dv));
+				});
+			}
+
+			function renderFake() {
+				fakeGrid.innerHTML = '';
+				GAME_FAKES.forEach(function(f) {
+					fakeGrid.appendChild(E('div', {
+						'class': 'zm-tile' + (data.current_fake === f ? ' zm-active' : ''),
+						'click': function() {
+							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+							busy = true;
+							zm.toast('Меняем fake-файл на ' + f + '', 'warning');
+							zm.discordSetFake(f).then(function(res) {
+								busy = false;
+								if (!zm.notifyStrategyResult(res, f)) return;
+								refreshState();
+							}).catch(function() { busy = false; });
+						}
+					}, f));
+				});
+			}
+
+			function refreshState() {
+				zm.discordStatus().then(function(res) {
+					data = res;
+					renderDv();
+					renderFake();
+				});
+			}
+
+			renderDv();
+			renderFake();
+
+			var dvCard = E('div', { 'class': 'zm-card' }, [
+				E('h3', {}, 'Стратегия для discord.media'),
+				dvGrid,
+				E('p', { 'class': 'zm-hint' }, 'Нужна базовая стратегия с блоком discord.media.')
+			]);
+
+			var fakeCard = E('div', { 'class': 'zm-card' }, [
+				E('h3', {}, 'Fake-файл для discord,stun'),
+				fakeGrid
+			]);
+
+			panels.discord.appendChild(dvCard);
+			panels.discord.appendChild(fakeCard);
+		})();
+
+		renderTabBar();
+		wrap.appendChild(tabBar);
+		TABS.forEach(function(t) { wrap.appendChild(panels[t.id]); });
 		return wrap;
 	}
 });
@@ -5748,211 +6008,6 @@ chmod 0644 '/www/luci-static/resources/view/zapret-manager/system.js'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
 chmod 0755 /www/luci-static/resources/view/zapret-manager
-cat > '/www/luci-static/resources/view/zapret-manager/test.js' << 'ZM_INSTALLER_EOF'
-'use strict';
-'require view';
-'require zapret-manager.common as zm';
-
-var MODES = [
-	{ id: 'v', label: 'Тестировать v' },
-	{ id: 'flowseal', label: 'Тестировать Flowseal' },
-	{ id: 'v_flowseal', label: 'Тестировать v + Flowseal' }
-];
-
-var MODE_LABELS = {
-	v: 'v', flowseal: 'Flowseal', v_flowseal: 'v + Flowseal', youtube: 'YouTube'
-};
-
-var RESULT_MODES = ['v', 'flowseal', 'v_flowseal', 'youtube'];
-
-return view.extend({
-	load: function() {
-		zm.injectCss();
-		return zm.testStatus();
-	},
-
-	render: function(data) {
-		var view = this;
-		var wrap = E('div', { 'class': 'zm-wrap' });
-		var logEl = E('pre', { 'class': 'zm-log' });
-		var resultsEl = E('pre', { 'class': 'zm-log' });
-		var busy = data.running === true;
-		var curMode = data.mode || '';
-		var status = data;
-
-		var mainCard = E('div', { 'class': 'zm-card' });
-		var ytCard = E('div', { 'class': 'zm-card' });
-		var resultsButtonsEl = E('div', {});
-
-		function stopButton() {
-			return E('button', { 'class': 'cbi-button cbi-button-remove', 'click': doStop }, 'Остановить тестирование стратегий');
-		}
-
-		function renderMain() {
-			mainCard.innerHTML = '';
-			mainCard.appendChild(E('h3', {}, 'Тест стратегий v / Flowseal'));
-			mainCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Тест идёт в фоне — переключение вкладок или закрытие LuCI его не прервёт. По окончании конфигурация всегда возвращается к тому, что было до начала теста — стратегии только тестируются, лучшую нужно применить вручную на странице «Стратегии».'));
-			if (busy && curMode !== 'youtube') {
-				mainCard.appendChild(E('div', { 'class': 'zm-row' }, [
-					E('span', { 'class': 'zm-label' }, 'Статус'),
-					zm.badge(true, 'тест выполняется (' + (MODE_LABELS[curMode] || curMode) + ')', '')
-				]));
-				mainCard.appendChild(E('div', { 'class': 'zm-actions' }, [ stopButton() ]));
-			} else if (busy) {
-				mainCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сейчас выполняется тест YouTube — дождитесь его завершения.'));
-			} else {
-				mainCard.appendChild(E('div', { 'class': 'zm-actions' }, MODES.map(function(m) {
-					return E('button', {
-						'class': 'cbi-button cbi-button-positive',
-						'click': function() { doStart(m.id); }
-					}, m.label);
-				})));
-			}
-		}
-
-		function renderYt() {
-			ytCard.innerHTML = '';
-			ytCard.appendChild(E('h3', {}, 'Тест стратегий YouTube (Yv)'));
-			ytCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Всегда тестируется отдельно от v/Flowseal — своим набором стратегий и доменов YouTube.'));
-			if (busy && curMode === 'youtube') {
-				ytCard.appendChild(E('div', { 'class': 'zm-row' }, [
-					E('span', { 'class': 'zm-label' }, 'Статус'),
-					zm.badge(true, 'тест выполняется', '')
-				]));
-				ytCard.appendChild(E('div', { 'class': 'zm-actions' }, [ stopButton() ]));
-			} else if (busy) {
-				ytCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сейчас выполняется тест v/Flowseal — дождитесь его завершения.'));
-			} else {
-				ytCard.appendChild(E('div', { 'class': 'zm-actions' }, [
-					E('button', {
-						'class': 'cbi-button cbi-button-positive',
-						'click': function() { doStart('youtube'); }
-					}, 'Тестировать YouTube')
-				]));
-			}
-		}
-
-		function startPolling() {
-			logEl.classList.add('zm-show');
-			zm.pollJob('strategy_test', logEl, function(ok) {
-				busy = false;
-				curMode = '';
-				zm.toast(ok ? 'Тест завершён' : 'Тест завершился с ошибкой', ok ? 'info' : 'error');
-				renderMain();
-				renderYt();
-				zm.testStatus().then(function(res) {
-					status = res;
-					renderResultsButtons();
-				});
-			});
-		}
-
-		function doStart(mode) {
-			if (busy) { zm.toast('Дождитесь завершения текущего теста', 'warning'); return; }
-			busy = true;
-			curMode = mode;
-			renderMain();
-			renderYt();
-			zm.toast('Запускаем тест стратегий', 'warning');
-			zm.testAction('start', mode).then(function(res) {
-				if (res.error) { busy = false; curMode = ''; zm.toast(res.error, 'error'); renderMain(); renderYt(); return; }
-				startPolling();
-			}).catch(function() { busy = false; curMode = ''; renderMain(); renderYt(); });
-		}
-
-		function doStop() {
-			zm.toast('Останавливаем тест', 'warning');
-			zm.testAction('stop').then(function(res) {
-				if (res.error) { zm.toast(res.error, 'error'); return; }
-				zm.toast('Тест остановлен, конфигурация восстанавливается', 'info');
-			});
-		}
-
-		function renderResultsColored(el, text) {
-			el.innerHTML = '';
-			var lines = (text || '').split('\n').filter(function(l) { return l; });
-			var controlOk = null;
-			lines.forEach(function(line) {
-				var m = line.match(/^(.*?)\s*→\s*(\d+)\/(\d+)\s*$/);
-				if (m && /^Контрольный тест/.test(m[1])) controlOk = +m[2];
-			});
-			var first = true;
-			lines.forEach(function(line) {
-				var div = document.createElement('div');
-				var m = line.match(/^(.*?)\s*→\s*(\d+)\/(\d+)\s*$/);
-				if (m) {
-					var name = m[1], ok = +m[2], total = +m[3];
-					var isControl = /^Контрольный тест/.test(name);
-					var nameSpan = document.createElement('span');
-					nameSpan.textContent = name + ' → ';
-					var scoreSpan = document.createElement('span');
-					scoreSpan.textContent = ok + '/' + total;
-					if (isControl) {
-						div.className = 'zm-log-code';
-					} else {
-						if (ok === total) scoreSpan.className = 'zm-log-msg-ok';
-						else if (controlOk !== null && ok < controlOk) scoreSpan.className = 'zm-log-msg-error';
-						else scoreSpan.className = 'zm-log-msg-warn';
-						if (first) { nameSpan.style.fontWeight = '700'; first = false; }
-					}
-					div.appendChild(nameSpan);
-					div.appendChild(scoreSpan);
-				} else {
-					div.className = 'zm-log-code';
-					div.textContent = line;
-				}
-				el.appendChild(div);
-			});
-		}
-
-		function showResultsFor(mode) {
-			zm.testResults(mode).then(function(res) {
-				resultsEl.classList.add('zm-show');
-				renderResultsColored(resultsEl, res.lines || '');
-			});
-		}
-
-		function renderResultsButtons() {
-			resultsButtonsEl.innerHTML = '';
-			var actions = [];
-			RESULT_MODES.forEach(function(m) {
-				if (!status['has_results_' + m]) return;
-				actions.push(E('button', {
-					'class': 'cbi-button',
-					'click': function() { showResultsFor(m); }
-				}, 'Показать результаты: ' + MODE_LABELS[m]));
-			});
-			if (actions.length) {
-				resultsButtonsEl.appendChild(E('div', { 'class': 'zm-actions' }, actions));
-			} else {
-				resultsButtonsEl.appendChild(E('p', { 'class': 'zm-hint' }, 'Пока нет сохранённых результатов — запустите тест.'));
-			}
-		}
-
-		var resultsCard = E('div', { 'class': 'zm-card' }, [
-			E('h3', {}, 'Результаты тестирования'),
-			resultsButtonsEl,
-			resultsEl
-		]);
-
-		renderMain();
-		renderYt();
-		renderResultsButtons();
-
-		if (busy) { startPolling(); }
-
-		wrap.appendChild(mainCard);
-		wrap.appendChild(ytCard);
-		wrap.appendChild(logEl);
-		wrap.appendChild(resultsCard);
-		return wrap;
-	}
-});
-ZM_INSTALLER_EOF
-chmod 0644 '/www/luci-static/resources/view/zapret-manager/test.js'
-
-mkdir -p /www/luci-static/resources/view/zapret-manager
-chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/tgproxy.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -6220,112 +6275,6 @@ return view.extend({
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/tgproxy.js'
 
-mkdir -p /www/luci-static/resources/view/zapret-manager
-chmod 0755 /www/luci-static/resources/view/zapret-manager
-cat > '/www/luci-static/resources/view/zapret-manager/youtube.js' << 'ZM_INSTALLER_EOF'
-'use strict';
-'require view';
-'require zapret-manager.common as zm';
-
-return view.extend({
-	load: function() {
-		zm.injectCss();
-		return Promise.all([ zm.status(), zm.strategyListYoutube() ]);
-	},
-
-	render: function(data) {
-		var status = data[0], initial = data[1];
-		var wrap = E('div', { 'class': 'zm-wrap' });
-		var logEl = E('pre', { 'class': 'zm-log' });
-		var grid = E('div', { 'class': 'zm-grid' });
-		var lastList = null;
-		var current = '';
-		var busy = false;
-
-		function currentYv(s) {
-			var words = (s.strategy || '').split(' ');
-			for (var i = 0; i < words.length; i++) {
-				if (/^Yv[0-9]+$/.test(words[i])) return words[i];
-			}
-			return '';
-		}
-
-		function renderGrid(res) {
-			lastList = res;
-			grid.innerHTML = '';
-			(res.items || []).forEach(function(it) {
-				grid.appendChild(E('div', {
-					'class': 'zm-tile' + (current === it.id ? ' zm-active' : ''),
-					'click': function() {
-						if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-						busy = true;
-						zm.toast('Применяем стратегию ' + it.id + '', 'warning');
-						zm.strategySetYoutube(it.id).then(function(r2) {
-							busy = false;
-							if (!zm.notifyStrategyResult(r2, it.id)) return;
-							refreshState();
-						}).catch(function() { busy = false; });
-					}
-				}, it.id));
-			});
-			if (!res.items || !res.items.length)
-				grid.appendChild(E('p', { 'class': 'zm-hint' }, 'Список пуст — нажмите «Обновить список».'));
-		}
-
-		function refreshState() {
-			zm.status().then(function(s) {
-				current = currentYv(s);
-				if (lastList) renderGrid(lastList);
-			});
-		}
-
-		current = currentYv(status);
-
-		var card = E('div', { 'class': 'zm-card' }, [
-			E('h3', {}, 'Стратегии для YouTube'),
-			E('div', { 'class': 'zm-actions' }, [
-				E('button', {
-					'class': 'cbi-button',
-					'click': function() {
-						if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-						busy = true;
-						zm.toast('Обновляем список YouTube-стратегий', 'warning');
-						grid.innerHTML = 'Загрузка списка';
-						zm.strategyListYoutube().then(function(res) {
-							if (res.started) {
-								zm.pollJob('youtube_download', logEl, function(ok) {
-									busy = false;
-									zm.toast(ok ? 'Список YouTube-стратегий обновлён' : 'Не удалось обновить список', ok ? 'info' : 'error');
-									zm.strategyListYoutube().then(renderGrid);
-								});
-							} else {
-								busy = false;
-								renderGrid(res);
-								zm.toast('Список YouTube-стратегий обновлён', 'info');
-							}
-						}).catch(function() { busy = false; });
-					}
-				}, 'Обновить список')
-			]),
-			grid,
-			E('p', { 'class': 'zm-hint' }, 'Применяется поверх текущей стратегии — заменяет только YouTube-часть.')
-		]);
-
-		wrap.appendChild(card);
-		wrap.appendChild(logEl);
-
-		if (!initial.started) {
-			renderGrid(initial);
-		} else {
-			grid.appendChild(E('p', { 'class': 'zm-hint' }, 'Список ещё не загружен — нажмите «Обновить список».'));
-		}
-
-		return wrap;
-	}
-});
-ZM_INSTALLER_EOF
-chmod 0644 '/www/luci-static/resources/view/zapret-manager/youtube.js'
-
 rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null || true
 /etc/init.d/rpcd reload >/dev/null 2>&1 || /etc/init.d/rpcd restart >/dev/null 2>&1
 
@@ -6335,3 +6284,4 @@ command -v curl >/dev/null 2>&1 || $INSTALL curl >/dev/null 2>&1 || true
 command -v unzip >/dev/null 2>&1 || $INSTALL unzip >/dev/null 2>&1 || true
 
 echo -e "Zapret Manager ${GREEN}для ${NC}LuCI ${GREEN}установлен!${NC}\n"
+
