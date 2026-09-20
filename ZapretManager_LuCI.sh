@@ -1,6 +1,6 @@
 #!/bin/sh
 # Zapret Manager by StressOzz for LuCI installer
-# Version: 1.27
+# Version: 1.28
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -27,7 +27,7 @@ chmod 0755 /opt/zapret-manager-luci
 cat > '/opt/zapret-manager-luci/backend.sh' << 'ZM_INSTALLER_EOF'
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.27"
+ZM_VERSION="1.28"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -3878,28 +3878,7 @@ return view.extend({
 
 		var zmUpdateBusy = false;
 		function waitForServerAndReload() {
-			var target = L.resource('view/zapret-manager/dashboard.js');
-			setTimeout(function() {
-				var attempts = 0;
-				var maxAttempts = 15;
-				var timer = setInterval(function() {
-					attempts++;
-					fetch(target + '?_zmcheck=' + Date.now(), { credentials: 'same-origin', cache: 'no-store' }).then(function(resp) {
-						if (resp.ok) {
-							clearInterval(timer);
-							location.reload();
-						} else if (attempts >= maxAttempts) {
-							clearInterval(timer);
-							zm.toast('Панель обновлена, но страница пока не отвечает — обновите вручную (F5)', 'warning', 15000);
-						}
-					}).catch(function() {
-						if (attempts >= maxAttempts) {
-							clearInterval(timer);
-							zm.toast('Панель обновлена, но страница пока не отвечает — обновите вручную (F5)', 'warning', 15000);
-						}
-					});
-				}, 700);
-			}, 10000);
+			setTimeout(function() { location.href = L.url('admin/logout'); }, 4000);
 		}
 		function renderZmUpdate() {
 			updateEl.innerHTML = '';
@@ -3911,7 +3890,7 @@ return view.extend({
 					'click': function() {
 						if (zmUpdateBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
 						zmUpdateBusy = true;
-						zm.toast('Обновление запущено — страница перезагрузится автоматически в течение примерно 20 секунд. Не заходите на другие вкладки, чтобы не потерять сессию', 'warning', 30000);
+						zm.toast('Обновление запущено — через 4 секунды вы будете автоматически выведены из LuCI. Просто зайдите заново', 'warning', 6000);
 						zm.zmUpdateAction().then(function(res) {
 							zmUpdateBusy = false;
 							if (res.error) { zm.toast(res.error, 'error'); return; }
@@ -4253,7 +4232,7 @@ return view.extend({
 			editorCard.innerHTML = '';
 			editorCard.appendChild(E('h3', {}, 'Редактор /etc/hosts'));
 			if (!editorOpen) {
-				editorCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Прямое редактирование всего файла /etc/hosts — для тонкой настройки, которая не покрывается готовыми блоками выше.'));
+				editorCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Прямое редактирование всего файла /etc/hosts.'));
 				editorCard.appendChild(E('div', { 'class': 'zm-actions' }, [
 					E('button', {
 						'class': 'cbi-button',
@@ -4410,7 +4389,7 @@ return view.extend({
 				}, 'Установить'));
 			}
 			statusCard.appendChild(E('h3', {}, 'Mixomo'));
-			statusCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Связка из трёх программ: Mihomo (прокси-ядро) + hev-socks5-tunnel (мост в туннель) + MagiTrickle (направляет в туннель только выбранные сайты). Устанавливаются, обновляются и удаляются вместе, одной кнопкой.'));
+			statusCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Связка из трёх программ: Mihomo (прокси-ядро) + hev-socks5-tunnel (мост в туннель) + MagiTrickle (направляет в туннель только выбранные сайты).'));
 			statusCard.appendChild(E('div', { 'class': 'zm-row' }, [
 				E('span', { 'class': 'zm-label' }, 'Mihomo'),
 				installed ? zm.badge(d.mihomo_running === true, 'запущен', 'остановлен') : zm.badge(false, '', 'не установлен')
@@ -5070,7 +5049,7 @@ return view.extend({
 			function renderYt() {
 				ytCard.innerHTML = '';
 				ytCard.appendChild(E('h3', {}, 'Тест стратегий YouTube (Yv)'));
-				ytCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Всегда тестируется отдельно от v/Flowseal — своим набором стратегий и доменов YouTube.'));
+				ytCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Всегда тестируется отдельно от v/Flowseal.'));
 				if (busy && curMode === 'youtube') {
 					ytCard.appendChild(E('div', { 'class': 'zm-row' }, [
 						E('span', { 'class': 'zm-label' }, 'Статус'),
@@ -6082,9 +6061,6 @@ return view.extend({
 					E('p', { 'class': 'zm-hint' }, extra)
 				]));
 			});
-			if (!any) {
-				linksWrap.appendChild(E('p', { 'class': 'zm-hint' }, 'Ссылки появятся здесь после установки и запуска хотя бы одного варианта прокси ниже.'));
-			}
 		}
 
 		var busyMap = {};
@@ -6184,7 +6160,7 @@ return view.extend({
 			}
 			tgwsCard.innerHTML = '';
 			tgwsCard.appendChild(E('h3', {}, 'sTGWS (бета)'));
-			tgwsCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Бета-версия. В отдельных случаях может потребоваться сброс роутера до заводских настроек. Не устанавливайте, если не уверены, что сможете устранить возможные проблемы — рекомендуется использовать другие варианты TG WS Proxy выше.'));
+			tgwsCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Бета-версия. В отдельных случаях может потребоваться сброс роутера до заводских настроек. Не устанавливайте, если не уверены, что сможете устранить возможные проблемы.'));
 			tgwsCard.appendChild(E('div', { 'class': 'zm-row' }, [
 				E('span', { 'class': 'zm-label' }, 'Статус'),
 				installed ? zm.badge(d.running === true, 'запущен', 'остановлен') : zm.badge(false, '', 'не установлен')
