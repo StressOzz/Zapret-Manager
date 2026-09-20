@@ -1,6 +1,6 @@
 #!/bin/sh
 # Zapret Manager by StressOzz for LuCI installer
-# Version: 1.24
+# Version: 1.25
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -19,7 +19,7 @@ chmod 0755 /usr/lib/zapret-manager
 cat > '/usr/lib/zapret-manager/backend.sh' << 'ZM_INSTALLER_EOF'
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.24"
+ZM_VERSION="1.25"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -3895,41 +3895,28 @@ return view.extend({
 
 		var zmUpdateBusy = false;
 		function waitForServerAndReload() {
-			var attempts = 0;
-			var maxAttempts = 50;
-			var sawRestart = false;
-			var consecutiveOk = 0;
-			var neededOk = 3;
 			var target = L.resource('view/zapret-manager/dashboard.js');
-			var timer = setInterval(function() {
-				attempts++;
-				fetch(target + '?_zmcheck=' + Date.now(), { credentials: 'same-origin', cache: 'no-store' }).then(function(resp) {
-					if (resp.ok) {
-						consecutiveOk++;
-						if (sawRestart && consecutiveOk >= neededOk) {
+			setTimeout(function() {
+				var attempts = 0;
+				var maxAttempts = 15;
+				var timer = setInterval(function() {
+					attempts++;
+					fetch(target + '?_zmcheck=' + Date.now(), { credentials: 'same-origin', cache: 'no-store' }).then(function(resp) {
+						if (resp.ok) {
 							clearInterval(timer);
 							location.reload();
 						} else if (attempts >= maxAttempts) {
 							clearInterval(timer);
-							location.reload();
+							zm.toast('Панель обновлена, но страница пока не отвечает — обновите вручную (F5)', 'warning', 15000);
 						}
-					} else {
-						sawRestart = true;
-						consecutiveOk = 0;
+					}).catch(function() {
 						if (attempts >= maxAttempts) {
 							clearInterval(timer);
 							zm.toast('Панель обновлена, но страница пока не отвечает — обновите вручную (F5)', 'warning', 15000);
 						}
-					}
-				}).catch(function() {
-					sawRestart = true;
-					consecutiveOk = 0;
-					if (attempts >= maxAttempts) {
-						clearInterval(timer);
-						zm.toast('Панель обновлена, но страница пока не отвечает — обновите вручную (F5)', 'warning', 15000);
-					}
-				});
-			}, 700);
+					});
+				}, 700);
+			}, 10000);
 		}
 		function renderZmUpdate() {
 			updateEl.innerHTML = '';
@@ -3941,7 +3928,7 @@ return view.extend({
 					'click': function() {
 						if (zmUpdateBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
 						zmUpdateBusy = true;
-						zm.toast('Обновление запущено — страница перезагрузится автоматически, когда панель будет готова. Не заходите на другие вкладки, чтобы не потерять сессию', 'warning', 12000);
+						zm.toast('Обновление запущено — страница перезагрузится автоматически в течение примерно 20 секунд. Не заходите на другие вкладки, чтобы не потерять сессию', 'warning', 30000);
 						zm.zmUpdateAction().then(function(res) {
 							zmUpdateBusy = false;
 							if (res.error) { zm.toast(res.error, 'error'); return; }
