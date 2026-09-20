@@ -1,6 +1,8 @@
 #!/bin/sh
 # ByeTube for LuCI installer
-# Version: 1.0
+# Version: 1.01
+
+GREEN="\033[1;32m"; MAGENTA="\033[1;35m"; NC="\033[0m"
 
 BYEDPI_REPO="DPITrickster/ByeDPI-OpenWrt"
 R="${BT_ROOT:-}"
@@ -12,18 +14,16 @@ LEGACY=0
 MODE=install
 NOSTART=0
 
-say()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m!! \033[0m%s\n' "$*" >&2; }
 die()  { printf '\033[1;31mОшибка:\033[0m %s\n' "$*" >&2; exit 1; }
 
 usage() {
 	cat <<'USAGE'
 ByeTube — установщик для OpenWrt
 
-  sh install.sh               установить и запустить
-  sh install.sh --no-start    установить, но не запускать
-  sh install.sh --uninstall   удалить (пакеты byedpi и hev остаются)
-  sh install.sh --purge       удалить вместе с пакетами byedpi и hev-socks5-tunnel
+  sh ByeTube.sh               установить и запустить
+  sh ByeTube.sh --no-start    установить, но не запускать
+  sh ByeTube.sh --uninstall   удалить (пакеты byedpi и hev остаются)
+  sh ByeTube.sh --purge       удалить вместе с пакетами byedpi и hev-socks5-tunnel
 
   BYEDPI_URL=<ссылка на .ipk/.apk>   поставить byedpi с конкретной ссылки
   FORCE_BYEDPI=1                     переустановить byedpi
@@ -47,8 +47,8 @@ pkg_has() {
 	if [ "$PM" = apk ]; then apk info -e "$1" >/dev/null 2>&1
 	else opkg list-installed 2>/dev/null | grep -q "^$1 - "; fi
 }
-pkg_add() { if [ "$PM" = apk ]; then apk add "$@"; else opkg install "$@"; fi; }
-pkg_del() { if [ "$PM" = apk ]; then apk del "$@"; else opkg remove "$@"; fi; }
+pkg_add() { if [ "$PM" = apk ]; then apk add "$@"; else opkg install "$@"; fi >/dev/null 2>&1; }
+pkg_del() { if [ "$PM" = apk ]; then apk del "$@"; else opkg remove "$@"; fi >/dev/null 2>&1; }
 
 fetch() {
 	if command -v curl >/dev/null 2>&1; then
@@ -149,14 +149,11 @@ BT_FILE_END_7f3a9c
 }
 
 do_uninstall() {
-	say "Останавливаю и удаляю ByeTube"
+	echo -e "\n${MAGENTA}Удаляем ByeTube${NC}"
 	[ -x "$R$BT_DIR/bin/byetube" ] && "$R$BT_DIR/bin/byetube" test stop >/dev/null 2>&1
-	run_uninstall
-	if [ "$MODE" = purge ]; then
-		say "Удаляю пакеты byedpi и hev-socks5-tunnel"
-		pkg_del byedpi hev-socks5-tunnel >/dev/null 2>&1
-	fi
-	say "Готово."
+	run_uninstall >/dev/null 2>&1
+	[ "$MODE" = purge ] && pkg_del byedpi hev-socks5-tunnel
+	echo -e "ByeTube ${GREEN}удалён!${NC}\n"
 	exit 0
 }
 
@@ -171,19 +168,14 @@ fix_resolv() {
 
 ensure_dnsmasq_full() {
 	local p
-	if dnsmasq --version 2>/dev/null | grep -Eq '(^| )nftset( |$)'; then
-		say "dnsmasq с поддержкой nftset уже установлен"
-		return 0
-	fi
-	say "Заменяю dnsmasq на dnsmasq-full (нужен nftset)"
+	dnsmasq --version 2>/dev/null | grep -Eq '(^| )nftset( |$)' && return 0
 	mkdir -p "$BT_TMP_DIR"
 	cp /etc/config/dhcp "$BT_TMP_DIR/dhcp.bak" 2>/dev/null
 	for p in dnsmasq dnsmasq-dhcpv6; do
-		pkg_has "$p" && pkg_del "$p" >/dev/null 2>&1
+		pkg_has "$p" && pkg_del "$p"
 	done
 	fix_resolv
 	if ! pkg_add dnsmasq-full; then
-		warn "не удалось поставить dnsmasq-full, возвращаю обычный dnsmasq"
 		fix_resolv
 		pkg_add dnsmasq
 		[ -f /etc/config/dhcp ] || cp "$BT_TMP_DIR/dhcp.bak" /etc/config/dhcp 2>/dev/null
@@ -197,13 +189,9 @@ ensure_dnsmasq_full() {
 
 install_byedpi() {
 	local url json cands f
-	if [ -x /usr/bin/ciadpi ] && [ "${FORCE_BYEDPI:-0}" != 1 ]; then
-		say "ByeDPI уже установлен"
-		return 0
-	fi
+	[ -x /usr/bin/ciadpi ] && [ "${FORCE_BYEDPI:-0}" != 1 ] && return 0
 	url="${BYEDPI_URL:-}"
 	if [ -z "$url" ]; then
-		say "Ищу пакет byedpi ($ARCH, .$EXT) в $BYEDPI_REPO"
 		json=$(fetch "https://api.github.com/repos/$BYEDPI_REPO/releases?per_page=40" - 2>/dev/null)
 		cands=$(printf '%s\n' "$json" \
 			| grep -o '"browser_download_url": *"[^"]*"' \
@@ -213,11 +201,10 @@ install_byedpi() {
 		[ -n "$url" ] || url=$(printf '%s\n' "$cands" | head -n 1)
 	fi
 	[ -n "$url" ] || die "не нашёл пакет byedpi для $ARCH (.$EXT). Скачайте вручную с https://github.com/$BYEDPI_REPO/releases и запустите: BYEDPI_URL=<ссылка> sh install.sh"
-	say "Скачиваю $url"
 	mkdir -p "$BT_TMP_DIR/dl"
 	f="$BT_TMP_DIR/dl/$(basename "$url")"
 	fetch "$url" "$f" || die "не удалось скачать byedpi"
-	if [ "$PM" = apk ]; then apk add --allow-untrusted "$f"; else opkg install "$f"; fi \
+	{ if [ "$PM" = apk ]; then apk add --allow-untrusted "$f"; else opkg install "$f"; fi; } >/dev/null 2>&1 \
 		|| die "не удалось установить byedpi"
 	rm -rf "$BT_TMP_DIR/dl"
 	NEW_BYEDPI=1
@@ -1004,7 +991,7 @@ BT_TMP="${BT_TMP:-/tmp/ByeTube}"
 BT_FUNCTIONS="${BT_FUNCTIONS:-/lib/functions.sh}"
 BT_DEFAULT="$BT_HOME/default"
 BT_CUSTOM="$BT_HOME/custom"
-BT_VERSION="1.0"
+BT_VERSION="1.01"
 
 TUN=byetube0
 MARK=0x10000
@@ -2020,39 +2007,63 @@ BT_FILE_END_7f3a9c
 var LIST = [
 	{
 		id: 'p1',
-		label: '1 · Каскад (по умолчанию)',
-		name: '1 · Каскад disorder/split + tlsrec + md5sig, авто-режим -As (по умолчанию)',
+		label: 'Стратегия 1',
+		name: 'Стратегия 1',
 		opts: '-d1 -d3+s -s6+s -d9+s -s12+s -d15+s -s20+s -d25+s -s30+s -d35+s -r1+s -S -a1 -As -d1 -d3+s -s6+s -d9+s -s12+s -d15+s -s20+s -d25+s -s30+s -d35+s -S -a1'
 	},
 	{
 		id: 'p2',
-		label: '2 · OOB + tlsrec',
-		name: '2 · Короткая: OOB + tlsrec у SNI',
-		opts: '-o1 -a1 -r-5+se'
-	},
-	{
-		id: 'p3',
-		label: '3 · Fake SNI + OOB',
-		name: '3 · Fake SNI google.com + disorder/OOB (TTL 4)',
-		opts: '-n "google.com" -Qr -d5+sm -f3+sm -o2 -t4 -a1'
-	},
-	{
-		id: 'p4',
-		label: '4 · Каскад без tlsrec',
-		name: '4 · Каскад disorder/split без tlsrec и авто-режима',
+		label: 'Стратегия 2',
+		name: 'Стратегия 2',
 		opts: '-d1 -s1+s -d3+s -s6+s -d9+s -s12+s -d15+s -s20+s -d25+s -s30+s -d35+s -a1'
 	},
 	{
+		id: 'p3',
+		label: 'Стратегия 3',
+		name: 'Стратегия 3',
+		opts: '-d1 -s1+s -d1+s -s3+s -d6+s -s12+s -d14+s -s20+s -d24+s -s30+s -a1'
+	},
+	{
+		id: 'p4',
+		label: 'Стратегия 4',
+		name: 'Стратегия 4',
+		opts: '-d1 -s1+s -s3+s -s6+s -s9+s -s12+s -s15+s -s20+s -s30+s -a1'
+	},
+	{
 		id: 'p5',
-		label: '5 · Fake + disoob',
-		name: '5 · Fake + disoob + tlsrec (TTL 5 и 15)',
-		opts: '-f1 -t5 -n "google.com" -q3+h -Qr -f2 -q1 -r1+s -t15 -q1 -o2 -a1'
+		label: 'Стратегия 5',
+		name: 'Стратегия 5',
+		opts: '-d1 -s4 -d8 -s1+s -d5+s -s10+s -d20+s -a1'
 	},
 	{
 		id: 'p6',
-		label: '6 · OOB + авто-режим',
-		name: '6 · OOB + tlsrec + авто-режим -At,r,s, fake google.com',
+		label: 'Стратегия 6',
+		name: 'Стратегия 6',
 		opts: '-o1 -r-5+se -a1 -At,r,s -d1 -n "google.com" -Qr -f-1 -a1'
+	},
+	{
+		id: 'p7',
+		label: 'Стратегия 7',
+		name: 'Стратегия 7',
+		opts: '-f-1 -n "google.com" -Qr -s2+s -r3 -o20 -t4 -a1'
+	},
+	{
+		id: 'p8',
+		label: 'Стратегия 8',
+		name: 'Стратегия 8',
+		opts: '-f64+se -n "google.com" -t5 -a1'
+	},
+	{
+		id: 'p9',
+		label: 'Стратегия 9',
+		name: 'Стратегия 9',
+		opts: '-o1 -r-5+se -a1'
+	},
+	{
+		id: 'p10',
+		label: 'Стратегия 10',
+		name: 'Стратегия 10',
+		opts: '-o1 -a1 -r-5+se'
 	}
 ];
 
@@ -2124,6 +2135,15 @@ function tile(label, cls, onclick, title) {
 
 function btn(label, cls, onclick) {
 	return E('button', { 'class': 'cbi-button' + (cls ? ' ' + cls : ''), 'click': onclick }, [ label ]);
+}
+
+function cmdNodes(text) {
+	var out = [];
+	String(text).split(' ').forEach(function(tok, i) {
+		if (i) out.push(' ');
+		out.push(E('span', { 'class': 'bt-tok' }, [ tok ]));
+	});
+	return out;
 }
 
 function hint(text) {
@@ -2245,23 +2265,27 @@ return view.extend({
 		}
 
 		function renderMain() {
-			var kids = [ E('h3', {}, [ 'Состояние' ]) ];
-			kids.push(row('Служба', isWorking()
+			var items = [];
+			items.push(row('Служба', isWorking()
 				? bt.badge(true, 'работает', '')
 				: bt.badge(false, '', st.enabled ? 'запущена не полностью' : 'выключена')));
 			if (st.binaries === false)
-				kids.push(row('Пакеты', bt.badge(false, '', 'не найден byedpi или hev-socks5-tunnel')));
-			kids.push(row('ByeDPI (ciadpi)', bt.badge(st.byedpi, 'запущен', 'не запущен')));
-			kids.push(row('hev-socks5-tunnel', bt.badge(st.hev, 'запущен', 'не запущен')));
-			kids.push(row('Интерфейс byetube0', bt.badge(st.tun, 'поднят', 'нет')));
-			kids.push(row('Маркировка nftables', bt.badge(st.nft, 'активна', 'нет')));
-			kids.push(row('Policy routing', bt.badge(st.rule && st.route, 'активен', 'нет')));
-			kids.push(row('dnsmasq → nftset', st.dnsmasq_nftset === false
+				items.push(row('Пакеты', bt.badge(false, '', 'не найден byedpi или hev-socks5-tunnel')));
+			items.push(row('ByeDPI (ciadpi)', bt.badge(st.byedpi, 'запущен', 'не запущен')));
+			items.push(row('hev-socks5-tunnel', bt.badge(st.hev, 'запущен', 'не запущен')));
+			items.push(row('Интерфейс byetube0', bt.badge(st.tun, 'поднят', 'нет')));
+			items.push(row('Маркировка nftables', bt.badge(st.nft, 'активна', 'нет')));
+			items.push(row('Policy routing', bt.badge(st.rule && st.route, 'активен', 'нет')));
+			items.push(row('dnsmasq → nftset', st.dnsmasq_nftset === false
 				? bt.badge(false, '', 'нужен dnsmasq-full')
 				: bt.badge(st.dns, 'домены загружены', 'нет')));
-			kids.push(row('Firewall forward', bt.badge(st.fw, 'разрешён', 'нет')));
-			kids.push(row('IP в наборах', E('span', {}, [ 'IPv4: ' + (st.ips4 || 0) + (st.ipv6 ? ', IPv6: ' + (st.ips6 || 0) : '') ])));
-			kids.push(row('Версия', E('span', {}, [ 'v' + (st.version || '?') ])));
+			items.push(row('Firewall forward', bt.badge(st.fw, 'разрешён', 'нет')));
+			items.push(row('IP в наборах', E('span', {}, [ 'IPv4: ' + (st.ips4 || 0) + (st.ipv6 ? ', IPv6: ' + (st.ips6 || 0) : '') ])));
+			var half = Math.ceil(items.length / 2);
+			var kids = [ E('div', { 'class': 'bt-cols' }, [
+				E('div', { 'class': 'bt-col' }, items.slice(0, half)),
+				E('div', { 'class': 'bt-col' }, items.slice(half))
+			]) ];
 			kids.push(E('div', { 'class': 'zm-actions' }, [
 				st.enabled
 					? btn('Выключить', 'cbi-button-remove', function() {
@@ -2341,15 +2365,16 @@ return view.extend({
 			'class': 'zm-config-editor',
 			'spellcheck': 'false',
 			'wrap': 'soft',
+			'placeholder': 'Параметры ciadpi одной строкой',
 			'style': 'min-height:130px;white-space:pre-wrap'
-		}, [ cfg.byedpi_opts || '' ]);
+		}, [ '' ]);
 
 		function renderStrategy() {
 			var cur = currentPreset();
 			fill(bannerEl, cfg.byedpi_opts
-				? [ E('span', {}, [ 'Сейчас применено: ' ]), E('b', {}, [ cur ? cur.name : 'своя стратегия' ]) ]
+				? [ E('div', { 'class': 'bt-current-label' }, [ 'Сейчас применено' ]), E('div', { 'class': 'bt-current-cmd' }, cmdNodes(cfg.byedpi_opts)) ]
 				: [ E('span', {}, [ 'Стратегия ещё не выбрана' ]) ]);
-			bannerEl.className = 'zm-current-banner' + (cfg.byedpi_opts ? '' : ' zm-current-empty');
+			bannerEl.className = 'zm-current-banner bt-current' + (cfg.byedpi_opts ? '' : ' zm-current-empty');
 
 			fill(presetsCard, [
 				E('h3', {}, [ 'Готовые стратегии' ]),
@@ -2358,7 +2383,6 @@ return view.extend({
 						setStrategy(p.opts, p.label);
 					}, p.name + '\n' + p.opts);
 				})),
-				cfg.byedpi_opts ? E('div', { 'class': 'bt-cmd-line' }, [ cfg.byedpi_opts ]) : '',
 				hint('Стратегия зависит от провайдера — лучшую под вашего провайдера найдёт вкладка «Тест стратегий».')
 			]);
 		}
@@ -2534,23 +2558,12 @@ return view.extend({
 		function renderResults(text) {
 			resultsText = text || '';
 			var res = bt.parseResults(resultsText);
-			if (!res.rows.length && !res.control) {
+			if (!res.rows.length) {
 				fill(testResults, [ E('h3', {}, [ 'Результаты' ]), hint(running ? 'Тест выполняется…' : 'Пока нет результатов — запустите тест.') ]);
 				return;
 			}
 			var controlOk = res.control ? res.control.ok : null;
 			var curClean = presets.clean(cfg.byedpi_opts);
-
-			var legend = E('div', { 'class': 'bt-legend' }, []);
-			if (res.control) {
-				legend.appendChild(document.createTextNode('Контрольный замер (без обхода): '));
-				legend.appendChild(E('span', { 'class': 'bt-chip bt-chip-off' }, [ res.control.ok + '/' + res.control.total ]));
-				legend.appendChild(E('br'));
-			}
-			legend.appendChild(E('span', { 'class': 'bt-chip bt-chip-ok' }, [ 'все домены' ]));
-			legend.appendChild(E('span', { 'class': 'bt-chip bt-chip-warn' }, [ 'лучше контроля' ]));
-			legend.appendChild(E('span', { 'class': 'bt-chip bt-chip-bad' }, [ 'не лучше' ]));
-			legend.appendChild(document.createTextNode('При равенстве выше стоит стратегия, что раньше в списке.'));
 
 			var rows = res.rows.map(function(r, i) {
 				var p = presets.find(r.opts);
@@ -2561,7 +2574,7 @@ return view.extend({
 					if (isCur) nm.appendChild(bt.span('bt-c-cur', (p ? '  ' : '') + '(текущая)'));
 					body.push(nm);
 				}
-				body.push(E('div', { 'class': 'bt-cmd' }, [ r.opts ]));
+				body.push(E('div', { 'class': 'bt-cmd' }, cmdNodes(r.opts)));
 				return E('tr', {}, [
 					E('td', { 'class': 'bt-td-n' }, [ String(i + 1) ]),
 					E('td', { 'class': 'bt-td-s' }, [ E('span', { 'class': bt.chipClass(r.ok, r.total, controlOk) }, [ r.ok + '/' + r.total ]) ]),
@@ -2578,7 +2591,6 @@ return view.extend({
 			fill(testResults, [
 				E('h3', {}, [ 'Результаты' ]),
 				E('div', { 'class': 'zm-log zm-show bt-panel' }, [
-					legend,
 					E('table', { 'class': 'bt-table' }, [ E('tbody', {}, rows) ])
 				])
 			]);
@@ -2821,13 +2833,6 @@ html.zm-theme-dark .zm-config-editor { border-color: rgba(255,255,255,.14); }
 
 .zm-hint { font-size: 12px; opacity: .65; margin-top: 6px; line-height: 1.5; overflow-wrap: break-word; }
 
-.zm-refresh-banner {
-	display: flex; align-items: center; justify-content: space-between; gap: 14px;
-	background: rgba(191,135,0,.12); border: 2px solid rgba(191,135,0,.35);
-	color: #9a6700; border-radius: 12px; padding: 16px 20px; font-size: 15px; font-weight: 500;
-	margin-top: 12px;
-}
-.zm-refresh-banner button { flex-shrink: 0; }
 
 #zm-toast-container {
 	position: fixed; top: 20px; right: 20px; z-index: 10000;
@@ -2863,6 +2868,24 @@ html.zm-theme-dark .zm-config-editor { border-color: rgba(255,255,255,.14); }
 	background: rgba(110,118,129,.08); border-color: rgba(110,118,129,.2);
 }
 
+.bt-cols { display: grid; grid-template-columns: 1fr 1fr; column-gap: 44px; }
+.bt-col { min-width: 0; }
+.bt-col .zm-label { flex: 0 0 170px; }
+@media (max-width: 860px) {
+	.bt-cols { grid-template-columns: 1fr; }
+	.bt-col .zm-row { justify-content: space-between; }
+	.bt-col .zm-label { flex: 0 1 auto; }
+	.bt-col .zm-row > :last-child { margin-left: auto; }
+}
+.bt-current { flex-direction: column; align-items: stretch; gap: 8px; padding: 14px 18px; }
+.bt-current-label { font-size: 13px; font-weight: 700; }
+.bt-current-cmd {
+	background: #0d1117; color: #7ee787;
+	font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+	font-size: 14px; line-height: 1.65;
+	border-radius: 8px; padding: 12px 14px;
+	white-space: normal; user-select: all;
+}
 .bt-panel { display: block; max-height: none; min-height: 0; margin-top: 10px; }
 .bt-table { width: 100%; table-layout: fixed; border-collapse: collapse; border-spacing: 0; margin: 0; background: transparent; }
 .bt-table td { padding: 8px 8px 8px 0; border: 0; border-top: 1px solid rgba(255,255,255,.10); vertical-align: top; background: transparent; color: inherit; white-space: normal; overflow-wrap: anywhere; }
@@ -2877,7 +2900,8 @@ html.zm-theme-dark .zm-config-editor { border-color: rgba(255,255,255,.14); }
 	.bt-table td { display: block; width: auto; border: 0 !important; padding: 0 !important; }
 	.bt-table td.bt-td-c { grid-column: 1 / -1; grid-row: 2; margin-top: 7px; }
 }
-.bt-cmd { color: #e6edf3; white-space: pre-wrap; word-break: break-word; overflow-wrap: anywhere; }
+.bt-cmd { color: #e6edf3; white-space: normal; }
+.bt-tok { white-space: nowrap; }
 .bt-name { color: #8b949e; margin-bottom: 2px; }
 .bt-chip { display: inline-block; min-width: 4.4em; text-align: center; padding: 1px 8px; border-radius: 5px; font-weight: 700; color: #0d1117; }
 .bt-chip-ok { background: #3fb950; }
@@ -2891,10 +2915,7 @@ html.zm-theme-dark .zm-config-editor { border-color: rgba(255,255,255,.14); }
 .bt-c-white { color: #e6edf3; }
 .bt-c-key { color: #e3c04a; font-weight: 700; }
 .bt-c-cur { color: #56d4dd; font-weight: 700; }
-.bt-legend { margin-bottom: 10px; color: #8b949e; }
-.bt-legend .bt-chip { margin-right: 6px; }
 .bt-input { width: 110px; box-sizing: border-box; }
-.bt-cmd-line { font-family: ui-monospace, "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace; font-size: 12px; opacity: .75; overflow-wrap: anywhere; margin-top: 6px; }
 .cbi-page-actions { display: none !important; }
 BT_FILE_END_7f3a9c
 	chmod 644 "$R/www/luci-static/resources/view/byetube/style.css"
@@ -2902,68 +2923,46 @@ BT_FILE_END_7f3a9c
 }
 
 migrate_legacy() {
-	local f moved=""
+	local f
 	if [ ! -e "$R/etc/config/ytbypass" ] && [ ! -e "$R/etc/init.d/ytbypass" ] \
 		&& [ ! -d "$R/usr/libexec/ytbypass" ] && [ ! -e "$R/usr/bin/ytbypass" ]; then
 		return 0
 	fi
-	say "Найдена прежняя установка YouTube Bypass — переношу настройки в ByeTube"
 	LEGACY=1
 	if [ -f "$R/etc/config/ytbypass" ] && [ ! -f "$R/etc/config/byetube" ]; then
 		mkdir -p "$R/etc/config"
 		sed 's/^config ytbypass\([[:space:]]\)/config byetube\1/' "$R/etc/config/ytbypass" > "$R/etc/config/byetube"
-		moved="настройки"
 	fi
 	for f in strategies.txt test-domains.txt; do
 		if [ -s "$R/etc/ytbypass/$f" ] && [ ! -e "$R$BT_DIR/custom/$f" ]; then
 			mkdir -p "$R$BT_DIR/custom"
 			cp "$R/etc/ytbypass/$f" "$R$BT_DIR/custom/$f"
-			moved="$moved${moved:+, }$f"
 		fi
 	done
-	[ -n "$moved" ] && say "Перенесено: $moved"
 	return 0
 }
 
 finish_legacy() {
 	[ "$LEGACY" = 1 ] || return 0
-	say "Удаляю прежнюю установку ytbypass"
-	run_uninstall --legacy
+	run_uninstall --legacy >/dev/null 2>&1
 }
 
 update_default_strategy() {
-	local old1 old2 new cur
-	old1='--split 1 --disorder 3+s --mod-http=h,d --auto=torst --tlsrec 1+s'
-	old2='-o1 -r-5+se -a1 -At,r,s -d1 -n "google.com" -Qr -f-1 -a1'
+	local old new cur
+	old='--split 1 --disorder 3+s --mod-http=h,d --auto=torst --tlsrec 1+s'
 	new='-d1 -d3+s -s6+s -d9+s -s12+s -d15+s -s20+s -d25+s -s30+s -d35+s -r1+s -S -a1 -As -d1 -d3+s -s6+s -d9+s -s12+s -d15+s -s20+s -d25+s -s30+s -d35+s -S -a1'
 	cur=$(uci -q get byetube.main.byedpi_opts)
-	if [ "$cur" = "$old1" ] || [ "$cur" = "$old2" ]; then
+	if [ "$cur" = "$old" ]; then
 		uci set byetube.main.byedpi_opts="$new" && uci commit byetube
-		say "Стратегия по умолчанию обновлена"
 	fi
 }
 
-show_state() {
-	local ST IPS
+verify_running() {
+	local ST
 	ST=$("$BT_DIR/bin/byetube" status 2>/dev/null)
-	show() {
-		if [ "$(jsonfilter -s "$ST" -e "@.$1" 2>/dev/null)" = "true" ]; then
-			printf '  \033[32m[ok]\033[0m %s\n' "$2"
-		else
-			printf '  \033[31m[--]\033[0m %s\n' "$2"
-		fi
-	}
-	echo
-	say "Состояние:"
-	show byedpi "ByeDPI (ciadpi)"
-	show hev    "hev-socks5-tunnel"
-	show tun    "интерфейс byetube0"
-	show nft    "правила nftables"
-	show route  "policy routing"
-	show dns    "dnsmasq -> nftset"
-	show fw     "firewall forward"
-	IPS=$(jsonfilter -s "$ST" -e '@.ips4' 2>/dev/null)
-	echo "  IP youtube.com в наборе после тестового резолва: ${IPS:-0}"
+	case "$ST" in *'"enabled":true'*) ;; *) return 0 ;; esac
+	case "$ST" in *'"byedpi":true'*'"hev":true'*'"tun":true'*) return 0 ;; esac
+	return 1
 }
 
 main() {
@@ -2986,10 +2985,10 @@ main() {
 
 	[ "$MODE" = install ] || do_uninstall
 
-	say "OpenWrt $DISTRIB_RELEASE, архитектура $ARCH, менеджер пакетов: $PM"
+	echo -e "\n${MAGENTA}Устанавливаем ByeTube${NC}"
+
 	command -v fw4 >/dev/null 2>&1 || die "нужен firewall4 (OpenWrt 22.03+); hev-socks5-tunnel в пакетах — с 24.10"
 	command -v nft >/dev/null 2>&1 || die "не найден nft"
-	[ -d /www/luci-static/resources ] || warn "LuCI не найден — веб-интерфейс работать не будет (установите luci)"
 
 	if ip rule add pref 8999 fwmark 0x10000/0x10000 lookup 89 2>/dev/null; then
 		ip rule del pref 8999 2>/dev/null
@@ -2997,22 +2996,19 @@ main() {
 		die "ваш ip не поддерживает fwmark с маской. Установите ip-full: замените ip-tiny на ip-full и запустите установщик снова"
 	fi
 
-	say "Обновляю списки пакетов"
-	if [ "$PM" = apk ]; then apk update >/dev/null 2>&1 || warn "apk update не удался"
-	else opkg update >/dev/null 2>&1 || warn "opkg update не удался"; fi
+	if [ "$PM" = apk ]; then apk update >/dev/null 2>&1; else opkg update >/dev/null 2>&1; fi
 
-	pkg_has kmod-tun || { say "Ставлю kmod-tun"; pkg_add kmod-tun || die "kmod-tun не установлен"; }
+	pkg_has kmod-tun || pkg_add kmod-tun || die "kmod-tun не установлен"
 	ensure_dnsmasq_full
 
 	if ! pkg_has hev-socks5-tunnel; then
-		say "Ставлю hev-socks5-tunnel"
 		pkg_add hev-socks5-tunnel || die "hev-socks5-tunnel не найден в репозитории (есть в feeds OpenWrt 24.10+)"
 		NEW_HEV=1
 	fi
 	install_byedpi
 
 	for p in ca-bundle curl; do
-		pkg_has "$p" || pkg_add "$p" >/dev/null 2>&1 || warn "не удалось поставить $p — тест стратегий работать не будет (остальное — да)"
+		pkg_has "$p" || pkg_add "$p"
 	done
 
 	if [ "$NEW_BYEDPI" = 1 ] && [ -x /etc/init.d/byedpi ]; then
@@ -3023,40 +3019,21 @@ main() {
 	fi
 
 	migrate_legacy
-	say "Устанавливаю ByeTube (сервис + LuCI) в $BT_DIR"
 	install_payload
 	finish_legacy
 	rm -rf /tmp/luci-indexcache* /tmp/luci-modulecache
 	/etc/init.d/rpcd reload >/dev/null 2>&1
 
 	update_default_strategy
-	/etc/init.d/byetube enable
+	/etc/init.d/byetube enable >/dev/null 2>&1
 
-	if [ "$NOSTART" = 1 ]; then
-		say "Установлено. Запуск пропущен (--no-start): /etc/init.d/byetube start"
-		exit 0
+	if [ "$NOSTART" != 1 ]; then
+		/etc/init.d/byetube restart >/dev/null 2>&1
+		sleep 4
+		verify_running || die "ByeTube установлен, но служба не запустилась. Смотрите: logread -e byetube"
 	fi
 
-	say "Запускаю"
-	/etc/init.d/byetube restart
-	sleep 4
-	nslookup youtube.com 127.0.0.1 >/dev/null 2>&1
-	sleep 1
-	show_state
-
-	cat <<MSG
-
-Готово. Веб-интерфейс: LuCI -> Службы -> ByeTube.
-Все файлы приложения — в $BT_DIR, временные — в $BT_TMP_DIR.
-Проверка: откройте YouTube на устройстве в LAN (DNS — роутер), затем на роутере:
-  $BT_DIR/bin/byetube status       состояние
-  $BT_DIR/bin/byetube ips          IP, попавшие в наборы
-  $BT_DIR/bin/byetube diag         диагностика клиента
-  logread -e byetube               логи
-
-Если клиент уже держал IP YouTube в DNS-кэше — перезапустите браузер / переподключите Wi-Fi.
-Удаление: sh install.sh --uninstall
-MSG
+	echo -e "ByeTube ${GREEN}установлен!${NC}\n"
 }
 
 [ -n "${BT_LIB_ONLY:-}" ] || main "$@"
