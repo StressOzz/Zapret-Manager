@@ -1,6 +1,6 @@
 #!/bin/sh
 # Zapret Manager by StressOzz for LuCI installer
-# Version: 1.26
+# Version: 1.27
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -19,14 +19,15 @@ rm -f \
 	/www/luci-static/resources/view/zapret-manager/test.js \
 	/www/luci-static/resources/view/zapret-manager/youtube.js \
 	/www/luci-static/resources/view/zapret-manager/game.js \
-	/www/luci-static/resources/view/zapret-manager/discord.js 2>/dev/null
+	/www/luci-static/resources/view/zapret-manager/discord.js \
+	/www/luci-static/resources/view/zapret-manager/exclusions.js 2>/dev/null
 
 mkdir -p /opt/zapret-manager-luci
 chmod 0755 /opt/zapret-manager-luci
 cat > '/opt/zapret-manager-luci/backend.sh' << 'ZM_INSTALLER_EOF'
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.26"
+ZM_VERSION="1.27"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -3312,7 +3313,7 @@ cat > '/usr/share/luci/menu.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF
 		"action": { "type": "view", "path": "zapret-manager/dashboard" }
 	},
 	"admin/services/zapret-manager/strategy": {
-		"title": "Стратегии Zapret",
+		"title": "Настройки Zapret",
 		"order": 20,
 		"action": { "type": "view", "path": "zapret-manager/strategy" }
 	},
@@ -3335,11 +3336,6 @@ cat > '/usr/share/luci/menu.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF
 		"title": "Система",
 		"order": 60,
 		"action": { "type": "view", "path": "zapret-manager/system" }
-	},
-	"admin/services/zapret-manager/exclusions": {
-		"title": "Исключение устройств",
-		"order": 70,
-		"action": { "type": "view", "path": "zapret-manager/exclusions" }
 	},
 	"admin/services/zapret-manager/mixomo": {
 		"title": "Mixomo",
@@ -4111,121 +4107,6 @@ chmod 0644 '/www/luci-static/resources/view/zapret-manager/doh.js'
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
 chmod 0755 /www/luci-static/resources/view/zapret-manager
-cat > '/www/luci-static/resources/view/zapret-manager/exclusions.js' << 'ZM_INSTALLER_EOF'
-'use strict';
-'require view';
-'require zapret-manager.common as zm';
-
-return view.extend({
-	load: function() {
-		zm.injectCss();
-		return zm.exclusionsStatus();
-	},
-
-	render: function(data) {
-		var wrap = E('div', { 'class': 'zm-wrap' });
-
-		if (data.error) {
-			wrap.appendChild(E('div', { 'class': 'zm-card' }, [
-				E('h3', {}, 'Исключение устройств'),
-				E('p', { 'class': 'zm-hint' }, data.error)
-			]));
-			return wrap;
-		}
-
-		var grid = E('div', { 'class': 'zm-grid-devices' });
-		var busy = false;
-
-		function renderGrid(devices) {
-			grid.innerHTML = '';
-			(devices || []).forEach(function(d) {
-				grid.appendChild(E('div', {
-					'class': 'zm-tile' + (d.excluded ? ' zm-tile-off' : ''),
-					'click': function() {
-						if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-						busy = true;
-						zm.toast('Переключаем исключение для ' + d.ip + '', 'warning');
-						zm.exclusionsToggle(d.ip).then(function(res) {
-							busy = false;
-							if (res.error) { zm.toast(res.error, 'error'); return; }
-							zm.toast(d.ip + (res.excluded ? ' исключён' : ' больше не исключён'), 'info');
-							zm.exclusionsStatus().then(function(r) { renderGrid(r.devices); });
-						}).catch(function() { busy = false; });
-					}
-				}, [ E('div', {}, d.ip), E('div', { 'class': 'zm-hint' }, d.name) ]));
-			});
-			if (!devices || !devices.length)
-				grid.appendChild(E('p', { 'class': 'zm-hint' }, 'Устройства не найдены (нет записей в /tmp/dhcp.leases).'));
-		}
-
-		renderGrid(data.devices);
-
-		var manualInput = E('input', { 'type': 'text', 'placeholder': '192.168.1.100', 'class': 'cbi-input-text' });
-
-		var card = E('div', { 'class': 'zm-card' }, [
-			E('h3', {}, 'Исключение устройств из Zapret'),
-			grid,
-			E('p', { 'class': 'zm-hint' }, 'Клик по устройству — включить/выключить исключение (трафик этого IP не будет проходить через Zapret).'),
-			E('div', { 'class': 'zm-actions' }, [
-				E('button', {
-					'class': 'cbi-button',
-					'click': function() {
-						if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-						busy = true;
-						zm.toast('Обновляем список устройств', 'warning');
-						zm.exclusionsStatus().then(function(res) {
-							busy = false;
-							renderGrid(res.devices);
-							zm.toast('Список устройств обновлён', 'info');
-						}).catch(function() { busy = false; });
-					}
-				}, 'Обновить список'),
-				manualInput,
-				E('button', {
-					'class': 'cbi-button',
-					'click': function() {
-						if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-						var ip = manualInput.value.trim();
-						if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
-							zm.toast('Некорректный IPv4 адрес', 'error');
-							return;
-						}
-						busy = true;
-						zm.toast('Добавляем ' + ip + ' в исключения', 'warning');
-						zm.exclusionsToggle(ip).then(function(res) {
-							busy = false;
-							if (res.error) { zm.toast(res.error, 'error'); return; }
-							manualInput.value = '';
-							zm.toast(ip + (res.excluded ? ' добавлен в исключения' : ' убран из исключений'), 'info');
-							zm.exclusionsStatus().then(function(r) { renderGrid(r.devices); });
-						}).catch(function() { busy = false; });
-					}
-				}, 'Добавить вручную'),
-				E('button', {
-					'class': 'cbi-button cbi-button-remove',
-					'click': function() {
-						if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-						busy = true;
-						zm.toast('Очищаем все исключения', 'warning');
-						zm.exclusionsClear().then(function() {
-							busy = false;
-							zm.toast('Все исключения очищены', 'info');
-							zm.exclusionsStatus().then(function(res) { renderGrid(res.devices); });
-						}).catch(function() { busy = false; });
-					}
-				}, 'Очистить все')
-			])
-		]);
-
-		wrap.appendChild(card);
-		return wrap;
-	}
-});
-ZM_INSTALLER_EOF
-chmod 0644 '/www/luci-static/resources/view/zapret-manager/exclusions.js'
-
-mkdir -p /www/luci-static/resources/view/zapret-manager
-chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/hosts.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -4968,7 +4849,8 @@ var TABS = [
 	{ id: 'test', label: 'Тест стратегий' },
 	{ id: 'youtube', label: 'YouTube' },
 	{ id: 'game', label: 'Игры' },
-	{ id: 'discord', label: 'Discord' }
+	{ id: 'discord', label: 'Discord' },
+	{ id: 'exclusions', label: 'Исключение устройств' }
 ];
 
 var TEST_MODES = [
@@ -4997,13 +4879,14 @@ return view.extend({
 			zm.testStatus(),
 			zm.strategyListYoutube(),
 			zm.gameStatus(),
-			zm.discordStatus()
+			zm.discordStatus(),
+			zm.exclusionsStatus()
 		]);
 	},
 
 	render: function(all) {
 		var view = this;
-		var statusData = all[0], vListData = all[1], testData = all[2], ytInitialData = all[3], gameData = all[4], discordData = all[5];
+		var statusData = all[0], vListData = all[1], testData = all[2], ytInitialData = all[3], gameData = all[4], discordData = all[5], exclusionsData = all[6];
 		var wrap = E('div', { 'class': 'zm-wrap' });
 		var activeTab = 'strategy';
 
@@ -5584,6 +5467,104 @@ return view.extend({
 
 			panels.discord.appendChild(dvCard);
 			panels.discord.appendChild(fakeCard);
+		})();
+
+		(function buildExclusionsPanel() {
+			var data = exclusionsData;
+
+			if (data.error) {
+				panels.exclusions.appendChild(E('div', { 'class': 'zm-card' }, [
+					E('h3', {}, 'Исключение устройств'),
+					E('p', { 'class': 'zm-hint' }, data.error)
+				]));
+				return;
+			}
+
+			var grid = E('div', { 'class': 'zm-grid-devices' });
+			var busy = false;
+
+			function renderGrid(devices) {
+				grid.innerHTML = '';
+				(devices || []).forEach(function(d) {
+					grid.appendChild(E('div', {
+						'class': 'zm-tile' + (d.excluded ? ' zm-tile-off' : ''),
+						'click': function() {
+							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+							busy = true;
+							zm.toast('Переключаем исключение для ' + d.ip + '', 'warning');
+							zm.exclusionsToggle(d.ip).then(function(res) {
+								busy = false;
+								if (res.error) { zm.toast(res.error, 'error'); return; }
+								zm.toast(d.ip + (res.excluded ? ' исключён' : ' больше не исключён'), 'info');
+								zm.exclusionsStatus().then(function(r) { renderGrid(r.devices); });
+							}).catch(function() { busy = false; });
+						}
+					}, [ E('div', {}, d.ip), E('div', { 'class': 'zm-hint' }, d.name) ]));
+				});
+				if (!devices || !devices.length)
+					grid.appendChild(E('p', { 'class': 'zm-hint' }, 'Устройства не найдены (нет записей в /tmp/dhcp.leases).'));
+			}
+
+			renderGrid(data.devices);
+
+			var manualInput = E('input', { 'type': 'text', 'placeholder': '192.168.1.100', 'class': 'cbi-input-text' });
+
+			var card = E('div', { 'class': 'zm-card' }, [
+				E('h3', {}, 'Исключение устройств из Zapret'),
+				grid,
+				E('p', { 'class': 'zm-hint' }, 'Клик по устройству — включить/выключить исключение (трафик этого IP не будет проходить через Zapret).'),
+				E('div', { 'class': 'zm-actions' }, [
+					E('button', {
+						'class': 'cbi-button',
+						'click': function() {
+							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+							busy = true;
+							zm.toast('Обновляем список устройств', 'warning');
+							zm.exclusionsStatus().then(function(res) {
+								busy = false;
+								renderGrid(res.devices);
+								zm.toast('Список устройств обновлён', 'info');
+							}).catch(function() { busy = false; });
+						}
+					}, 'Обновить список'),
+					manualInput,
+					E('button', {
+						'class': 'cbi-button',
+						'click': function() {
+							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+							var ip = manualInput.value.trim();
+							if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(ip)) {
+								zm.toast('Некорректный IPv4 адрес', 'error');
+								return;
+							}
+							busy = true;
+							zm.toast('Добавляем ' + ip + ' в исключения', 'warning');
+							zm.exclusionsToggle(ip).then(function(res) {
+								busy = false;
+								if (res.error) { zm.toast(res.error, 'error'); return; }
+								manualInput.value = '';
+								zm.toast(ip + (res.excluded ? ' добавлен в исключения' : ' убран из исключений'), 'info');
+								zm.exclusionsStatus().then(function(r) { renderGrid(r.devices); });
+							}).catch(function() { busy = false; });
+						}
+					}, 'Добавить вручную'),
+					E('button', {
+						'class': 'cbi-button cbi-button-remove',
+						'click': function() {
+							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+							busy = true;
+							zm.toast('Очищаем все исключения', 'warning');
+							zm.exclusionsClear().then(function() {
+								busy = false;
+								zm.toast('Все исключения очищены', 'info');
+								zm.exclusionsStatus().then(function(res) { renderGrid(res.devices); });
+							}).catch(function() { busy = false; });
+						}
+					}, 'Очистить все')
+				])
+			]);
+
+			panels.exclusions.appendChild(card);
 		})();
 
 		renderTabBar();
