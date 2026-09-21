@@ -300,7 +300,7 @@ zapret2_local_version() { if [ "$PKG_IS_APK" -eq 1 ]; then apk list --installed 
 zapret2_luci_installed() { if [ "$PKG_IS_APK" -eq 1 ]; then apk list --installed 2>/dev/null | grep -q "^luci-app-zapret2"; else opkg list-installed 2>/dev/null | grep -q "luci-app-zapret2"; fi; }
 install_zapret2() { [ "$(grep '^DISTRIB_ARCH=' /etc/openwrt_release | cut -d"'" -f2)" = "aarch64_cortex-a53" ] || { echo -e "\n${RED}Архитектура не поддерживается!\n${YELLOW}Только для ${NC}aarch64_cortex-a53${YELLOW}!${NC}\n"; PAUSE; return 1; }
 if [ -f /etc/init.d/zapret ] && ! is_expert_mode; then echo -e "\n${RED}Установлен ${NC}Zapret${RED}!${NC}"; echo -e "${YELLOW}Установка ${NC}Zapret2${YELLOW} невозможна!${NC}\n"; PAUSE; return 1; fi
-echo -e "\n${MAGENTA}Устанавливаем Zapret2${NC}"; rm -rf "$ZAPRET2_TMP_DIR"; mkdir -p "$ZAPRET2_TMP_DIR"; zapret2_update_cache; MAIN_FILE2="$(zapret2_remote_file)"; LUCI_FILE2="$(zapret2_remote_luci_file)"
+echo -e "\n${MAGENTA}Устанавливаем Zapret2${NC}"; ZAPRET2_CONFIG_BACKUP="/tmp/zapret2_config_backup"; rm -f "$ZAPRET2_CONFIG_BACKUP"; [ -f /etc/config/zapret2 ] && cp -f /etc/config/zapret2 "$ZAPRET2_CONFIG_BACKUP"; rm -rf "$ZAPRET2_TMP_DIR"; mkdir -p "$ZAPRET2_TMP_DIR"; zapret2_update_cache; MAIN_FILE2="$(zapret2_remote_file)"; LUCI_FILE2="$(zapret2_remote_luci_file)"
 if [ -z "$MAIN_FILE2" ]; then echo -e "\n${RED}Не удалось найти пакет ${NC}zapret2\n"; PAUSE; return 1; fi; update_packages || return 1
 echo -e "${CYAN}Скачиваем ${NC}$MAIN_FILE2"; curl -L -s --connect-timeout 10 "${ZAPRET2_BASE_URL}${MAIN_FILE2}" -o "$ZAPRET2_TMP_DIR/$MAIN_FILE2" || { echo -e "\n${RED}Не удалось скачать ${NC}$MAIN_FILE2\n"; PAUSE; return 1; }
 if [ -n "$LUCI_FILE2" ]; then echo -e "${CYAN}Скачиваем ${NC}$LUCI_FILE2"; curl -L -s --connect-timeout 10 "${ZAPRET2_BASE_URL}${LUCI_FILE2}" -o "$ZAPRET2_TMP_DIR/$LUCI_FILE2"; fi
@@ -309,7 +309,7 @@ rm -rf "$ZAPRET2_TMP_DIR"; echo -e "${CYAN}Добавляем домены в и
 # echo -e "${CYAN}Включаем стратегию по умолчанию${NC}"; sed -i "/config strategy 'default'/,/config /s/option enabled '0'/option enabled '1'/" /etc/config/zapret2 >/dev/null 2>&1
 echo -e "${CYAN}Настраиваем стратегии${NC}"
 wget -q -U "Mozilla/5.0" -O /opt/zapret2/init.d/openwrt/custom.d/50-discord_media.sh "https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/50-discord_media.sh" || echo -e "${RED}Не удалось загрузить ${NC}50-discord_media.sh"
-wget -q -U "Mozilla/5.0" -O /etc/config/zapret2 "https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/zapret2" || echo -e "${RED}Не удалось загрузить ${NC}zapret2"
+if [ -f "$ZAPRET2_CONFIG_BACKUP" ]; then cp -f "$ZAPRET2_CONFIG_BACKUP" /etc/config/zapret2; else wget -q -U "Mozilla/5.0" -O /etc/config/zapret2 "https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/zapret2" || echo -e "${RED}Не удалось загрузить ${NC}zapret2"; fi; rm -f "$ZAPRET2_CONFIG_BACKUP"
 wget -q -U "Mozilla/5.0" -O /opt/zapret2/ipset/zapret_hosts_discord.txt "https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/zapret_hosts_discord.txt" || echo -e "${RED}Не удалось загрузить ${NC}zapret_hosts_discord.txt"
 echo -e "${CYAN}Запускаем ${NC}Zapret2"; /etc/init.d/zapret2 enable >/dev/null 2>&1; /etc/init.d/zapret2 restart >/dev/null 2>&1; echo -e "Zapret2 ${GREEN}установлен!${NC}\n"; PAUSE; }
 remove_zapret2() { echo -e "\n${MAGENTA}Удаляем Zapret2${NC}"; echo -e "${CYAN}Останавливаем ${NC}zapret2"; /etc/init.d/zapret2 stop >/dev/null 2>&1
