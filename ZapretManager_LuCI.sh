@@ -1,6 +1,6 @@
 #!/bin/sh
 # Zapret Manager by StressOzz for LuCI installer
-# Version: 1.28
+# Version: 1.29
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -27,7 +27,7 @@ chmod 0755 /opt/zapret-manager-luci
 cat > '/opt/zapret-manager-luci/backend.sh' << 'ZM_INSTALLER_EOF'
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.28"
+ZM_VERSION="1.29"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -48,7 +48,7 @@ MIXOMO_CRON_CMD="/etc/init.d/mihomo restart"
 HOSTS_FILE="/etc/hosts"
 EXPERT_MODE_FILE="/opt/zapret-manager-luci/expert_mode"
 PORTS_UDP="88,1024-2407,2409-4499,4502-19293,19345-49999,50101-65535"
-PORTS_TCP="2802,2302,2502,3478-3480,3724,6000-8000,8085,8090,8100,8903,8904,25565,27015-27030,27036-27037,35500-35600,50001,60442"
+PORTS_TCP="2099,2802,2302,2502,3478-3480,3724,6000-8000,8085,8090,8100,8903,8904,25565,27015-27030,27036-27037,35500-35600,50001,60442"
 mkdir -p "$JOBS_DIR"
 
 if command -v timeout >/dev/null 2>&1; then
