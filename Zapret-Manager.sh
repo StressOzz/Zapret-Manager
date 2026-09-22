@@ -116,7 +116,7 @@ updDIShost="#updates.discord.com\n162.159.138.232 updates.discord.com\n162.159.1
 ROBLOXhost="#tr.rbxcdn.com\n108.156.22.8 tr.rbxcdn.com\n108.157.32.114 tr.rbxcdn.com\n18.65.147.108 tr.rbxcdn.com\n18.65.147.112 tr.rbxcdn.com\n13.224.181.18 tr.rbxcdn.com\n13.224.181.74 tr.rbxcdn.com\n
 54.230.253.22 tr.rbxcdn.com\n54.230.253.81 tr.rbxcdn.com\n54.230.253.48 tr.rbxcdn.com\n54.230.253.59 tr.rbxcdn.com\n143.204.214.34 tr.rbxcdn.com\n143.204.214.67 tr.rbxcdn.com\n
 143.204.214.92 tr.rbxcdn.com\n99.84.181.25 tr.rbxcdn.com\n99.84.181.63 tr.rbxcdn.com\n65.8.158.45 tr.rbxcdn.com\n65.8.158.112 tr.rbxcdn.com"
-ALL_BLOCKS="$AI\n$INSTAGRAM\n$NTC\n$LIBRUSEC\n$TGWeb\n$TWCH\n$SCell\n$SPFY"; TMP_ARCHIVE_RS="/tmp/tg-ws-proxy-rs.tar.gz"; TMP_DIR_RS="/tmp/tg-ws-proxy-rs"
+ALL_BLOCKS="$AI\n$INSTAGRAM\n$NTC\n$LIBRUSEC\n$TGWeb\n$TWCH\n$SCell\n$SPFY\n$RUTOR"; TMP_ARCHIVE_RS="/tmp/tg-ws-proxy-rs.tar.gz"; TMP_DIR_RS="/tmp/tg-ws-proxy-rs"
 hosts_enabled() { if grep -q "### dns.malw.link" /etc/hosts; then hosts_echo="Malw.link"; return 0; elif grep -q "#mafioznik" /etc/hosts; then hosts_echo="Mafioznik"; return 0
 elif grep -q "### geohide.ru: hosts file" /etc/hosts; then if grep -q "^# Регион серверов: US$" /etc/hosts; then hosts_echo="GeoHide US"; elif grep -q "^# Регион серверов: EU$" /etc/hosts
 then hosts_echo="GeoHide EU"; elif grep -q "^# Регион серверов: RU$" /etc/hosts; then hosts_echo="GeoHide RU"; else hosts_echo="GeoHide"; fi; return 0
