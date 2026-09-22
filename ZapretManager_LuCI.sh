@@ -1,6 +1,6 @@
 #!/bin/sh
 # Zapret Manager by StressOzz for LuCI installer
-# Version: 1.30
+# Version: 1.31
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -30,7 +30,7 @@ chmod 0755 /opt/zapret-manager-luci
 cat > '/opt/zapret-manager-luci/backend.sh' << 'ZM_INSTALLER_EOF'
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.30"
+ZM_VERSION="1.31"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -2467,7 +2467,11 @@ do_mixomo_remove() {
 	rm -rf "$MIHOMO_DIR"
 
 	[ -x /etc/init.d/hev-socks5-tunnel ] && /etc/init.d/hev-socks5-tunnel stop >/dev/null 2>&1
-	$DELETE hev-socks5-tunnel >/dev/null 2>&1
+	if [ -x /etc/init.d/ytbypass ]; then
+		echo "==> hev-socks5-tunnel используется ByeTube — оставляю пакет"
+	else
+		$DELETE hev-socks5-tunnel >/dev/null 2>&1
+	fi
 	rm -rf /etc/hev-socks5-tunnel
 	uci -q delete hev-socks5-tunnel.@instance[0]
 	uci commit hev-socks5-tunnel 2>/dev/null
@@ -4456,9 +4460,14 @@ do_bytetube_uninstall() {
 
 do_bytetube_purge() {
 	do_bytetube_uninstall
-	echo "==> Удаляю пакеты byedpi и hev-socks5-tunnel"
+	echo "==> Удаляю пакет byedpi"
 	$DELETE byedpi >/dev/null 2>&1
-	$DELETE hev-socks5-tunnel >/dev/null 2>&1
+	if [ -x "$MIHOMO_BIN" ] && [ -x /etc/init.d/magitrickle ]; then
+		echo "==> hev-socks5-tunnel используется Mixomo — оставляю пакет"
+	else
+		echo "==> Удаляю пакет hev-socks5-tunnel"
+		$DELETE hev-socks5-tunnel >/dev/null 2>&1
+	fi
 	echo "==> Готово."
 }
 
@@ -8694,6 +8703,26 @@ function renderInstalled(all) {
 		var presetsCard = E('div', { 'class': 'zm-card' });
 		var domainsToggleCard = E('div', { 'class': 'zm-card' });
 		var extraDomainsCard = E('div', { 'class': 'zm-card' });
+		var removeLogEl = E('pre', { 'class': 'zm-log' });
+		var removeBusy = false;
+
+		function removeByeTube() {
+			if (removeBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+			removeBusy = true;
+			zm.toast('Удаляем ByeTube', 'warning');
+			callBytetubeAction('purge').then(function(res) {
+				if (res && res.error) { removeBusy = false; zm.toast(res.error, 'error'); return; }
+				if (res && res.started) {
+					zm.pollJob('bytetube_remove', removeLogEl, function(ok) {
+						removeBusy = false;
+						zm.toast(ok ? 'ByeTube удалён' : 'Ошибка удаления — смотрите журнал', ok ? 'info' : 'error');
+						if (ok) location.reload();
+					});
+				} else {
+					removeBusy = false;
+				}
+			}).catch(function() { removeBusy = false; });
+		}
 
 		function refreshState() {
 			return Promise.all([ bt.status(), bt.config() ]).then(function(r) {
@@ -8771,7 +8800,8 @@ function renderInstalled(all) {
 						bt.toast('Наборы очищены. Перезапустите браузер или обновите DNS-кэш на клиентах.', 'info');
 						refreshState();
 					});
-				})
+				}),
+				btn('Удалить', 'cbi-button-remove', removeByeTube)
 			]));
 			fill(statusCard, kids);
 
@@ -9152,6 +9182,7 @@ function renderInstalled(all) {
 
 		wrap.appendChild(tabBar);
 		TABS.forEach(function(t) { wrap.appendChild(panels[t.id]); });
+		wrap.appendChild(removeLogEl);
 
 		renderTabBar();
 		renderMain();
