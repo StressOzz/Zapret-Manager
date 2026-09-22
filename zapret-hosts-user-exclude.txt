@@ -30,6 +30,7 @@ boosty.to
 ottai.com
 ufanet.tv
 apple.com
+gudsen.vip
 whatbox.ca
 trovo.live
 beeline.tv
@@ -57,6 +58,7 @@ battleye.com
 opencity.pro
 ipstream.one
 godville.net
+gudsen.vip
 voidboost.cc
 hcaptcha.com
 mchose.com.cn
@@ -64,6 +66,7 @@ voidboost.one
 kaspersky.com
 canonical.com
 mediafire.com
+mozaracing.com
 vivoglobal.com
 dolynkcloud.com
 libreoffice.org
