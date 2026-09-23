@@ -1603,7 +1603,7 @@ nfqws_opt_set() {
 
 
 TG_MTPROTO_VER="0.10"
-TGWS_VERSION="0.2.9"
+TGWS_VERSION="0.3.0"
 TGWS_BASE_URL="https://gitlab.com/xyzmean/brb/-/raw/main/dist"
 TGWS_VERSION_URL="https://gitlab.com/xyzmean/brb/-/raw/main/VERSION"
 TG_GO_VER="1.4.1"
