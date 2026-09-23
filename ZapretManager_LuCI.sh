@@ -13,12 +13,16 @@ echo -e "\n${MAGENTA}Устанавливаем Zapret Manager для LuCI${NC}"
 # Сравнение равных стратегий в фоне — не повод отказывать: оно снимается, а стратегию меняет только
 # в самом конце.
 if [ -f /tmp/zapret-manager-luci/redbtn_deep.pid ]; then
-	kill "$(cat /tmp/zapret-manager-luci/redbtn_deep.pid 2>/dev/null)" 2>/dev/null
-	pkill -f "qnum=8397" 2>/dev/null
-	nft delete table inet zm_rb_ztest >/dev/null 2>&1
+	# `|| true` обязательно: установщик идёт под set -e, и kill уже завершившегося процесса
+	# молча обрывал установку сразу после заголовка.
+	kill "$(cat /tmp/zapret-manager-luci/redbtn_deep.pid 2>/dev/null)" 2>/dev/null || true
+	pkill -f "qnum=8397" 2>/dev/null || true
+	nft delete table inet zm_rb_ztest >/dev/null 2>&1 || true
 fi
 for _zm_job in redbtn steer; do
-	if [ -f /tmp/zapret-manager-luci/$_zm_job.pid ] && kill -0 "$(cat /tmp/zapret-manager-luci/$_zm_job.pid 2>/dev/null)" 2>/dev/null; then
+	# Жив процесс и в журнале нет __DONE__: номер завершившейся задачи мог достаться другому.
+	if [ -f /tmp/zapret-manager-luci/$_zm_job.pid ] && kill -0 "$(cat /tmp/zapret-manager-luci/$_zm_job.pid 2>/dev/null)" 2>/dev/null &&
+	   ! grep -q '^__DONE__' /tmp/zapret-manager-luci/$_zm_job.log 2>/dev/null; then
 		echo -e "${YELLOW}Идёт автообход или операция Steer — дождитесь окончания и запустите установку снова${NC}"
 		exit 1
 	fi
@@ -142,11 +146,21 @@ _ensure_deps() {
 }
 
 
+# Задача жива, если жив её процесс И в журнале ещё нет __DONE__. Одного kill -0 мало: номер
+# процесса завершившейся задачи система отдаёт следующему, и на тестовом роутере его получила
+# плановая проверка гео-DNS из cron — подбор «шёл» спустя час после «Готово», а установщик
+# отказывался ставиться.
+_job_running() { # ИМЯ
+	local pid="$JOBS_DIR/$1.pid"
+	[ -f "$pid" ] && kill -0 "$(cat "$pid" 2>/dev/null)" 2>/dev/null || return 1
+	! grep -q '^__DONE__' "$JOBS_DIR/$1.log" 2>/dev/null
+}
+
 job_start() {
 	local name="$1"; shift
 	local log="$JOBS_DIR/$name.log"
 	local pid="$JOBS_DIR/$name.pid"
-	if [ -f "$pid" ] && kill -0 "$(cat "$pid" 2>/dev/null)" 2>/dev/null; then
+	if _job_running "$name"; then
 		printf '{"started":true,"job":"%s","already_running":true}\n' "$name"
 		return 0
 	fi
@@ -161,7 +175,7 @@ job_status() {
 	local pid="$JOBS_DIR/$name.pid"
 	local log="$JOBS_DIR/$name.log"
 	local running="false" done="false" rc=""
-	if [ -f "$pid" ] && kill -0 "$(cat "$pid" 2>/dev/null)" 2>/dev/null; then running="true"; fi
+	_job_running "$name" && running="true"
 	if [ -f "$log" ] && grep -q '^__DONE__' "$log"; then
 		done="true"
 		rc=$(grep '^__DONE__' "$log" | tail -1 | awk '{print $2}')
@@ -2221,7 +2235,7 @@ test_action() {
 				v|flowseal|v_flowseal|youtube|current) ;;
 				*) echo '{"error":"неизвестный режим теста"}'; return 1 ;;
 			esac
-			if [ -f "$JOBS_DIR/redbtn.pid" ] && kill -0 "$(cat "$JOBS_DIR/redbtn.pid" 2>/dev/null)" 2>/dev/null; then
+			if _job_alive redbtn; then
 				echo '{"error":"идёт автообход — дождитесь его окончания"}'
 				return 1
 			fi
@@ -4756,7 +4770,7 @@ _rb_svc_names() { local id; for id in $1; do printf '%s, ' "$(_rb_svc_field "$id
 # Сервис можно пустить через WARP, только если у него есть списки доменов или адресов.
 _rb_routable() { [ -n "$(_rb_svc_field "$1" 3)$(_rb_svc_field "$1" 4)" ]; }
 _rb_in() { grep -qxF "$1" "$2" 2>/dev/null; }
-_job_alive() { [ -f "$JOBS_DIR/$1.pid" ] && kill -0 "$(cat "$JOBS_DIR/$1.pid" 2>/dev/null)" 2>/dev/null; }
+_job_alive() { _job_running "$1"; }
 
 # Наш объект в ubus должен пережить установку пакетов: luci-proto-amneziawg в post-install
 # зовёт `rpcd reload`, следом идёт перезапуск сети, и rpcd поднимался без объекта
@@ -5332,7 +5346,10 @@ _st_warp_up() { # [repick]
 		# Живой туннель с прошлого раза не трогаем — даже если колония совпала с соседом: её
 		# выбрала разведка, когда другой не нашлось, и пересканировать его на каждом «Применить»
 		# значило бы рвать соединения ради того же результата. Развести заново — «Сменить точки входа».
-		if [ "$repick" != repick ] && _st_warp_alive_if "$i" && c="$(_st_colo_of "$i")"; then
+		# КРОМЕ РОССИЙСКОЙ: её разведка берёт последним запасом, когда не нашлось ничего, и
+		# держаться за неё только потому, что туннель жив, — значит оставить геоблок навсегда
+		# (на тестовом роутере так и вышло: HEL, DME, HEL). Такой туннель разводится заново.
+		if [ "$repick" != repick ] && _st_warp_alive_if "$i" && c="$(_st_colo_of "$i")" && ! _st_warp_is_ru "$c"; then
 			got="$(uci -q get "network.${i}_peer.endpoint_host") $(uci -q get "network.${i}_peer.endpoint_port") $c"
 			_rb_say "WARP $n работает: колония $c"
 		else
@@ -6375,20 +6392,23 @@ _rb_zt_check() { # ФАЙЛ_ЦЕЛЕЙ
 	rm -f "$okf"
 }
 
-# Углублённая проверка равных лучших — по узлам CDN из списка dpi-detector (Runnin4ik), как в
-# brb-deep. Короткие запросы основного прохода не различают стратегии, набравшие одинаково, а
-# российский DPI рвёт поток к CDN и хостингам на 16-20 КБ, когда страница уже «открылась». Здесь
-# с каждого узла берётся диапазон в 64 КБ, и узел, отдавший меньше 20 КБ, считается оборванным.
-# В списке есть узлы, которые столько не отдают и без DPI, поэтому числа сравниваются только
-# между стратегиями на одном и том же наборе. Узел без имени — идём по адресу, сертификат не
-# проверяется: важен объём дошедшего, а не подлинность узла.
+# Дополнительный замер близких к лучшей — по узлам CDN из списка dpi-detector (Runnin4ik) и
+# ТЕМ ЖЕ СПОСОБОМ, что у него (core/tcp16_scanner.py). Российский DPI рвёт соединение к CDN и
+# хостингам, когда через него ушло 16-20 КБ, и страница, открывшаяся по короткой проверке, на
+# этом месте замирает. Поэтому по ОДНОМУ соединению идут десять запросов HEAD с заголовком
+# X-Pad по 4 КБ — около 40 КБ от нас, — и узел засчитывается, только если соединение пережило
+# все десять. Качать к себе, как делал brb-deep, бесполезно: по голому адресу такие узлы
+# столько не отдают, и у всех стратегий выходило одинаковое «3 из 37». Имя для SNI и Host — из
+# списка, у кого оно есть, у остальных example.com, как у dpi-detector; сертификат не
+# проверяется — важно, дожило ли соединение, а не чей узел.
 RB_DEEP_URLS="https://raw.githubusercontent.com/Runnin4ik/dpi-detector/main/tcp16.json https://cdn.jsdelivr.net/gh/Runnin4ik/dpi-detector@main/tcp16.json"
-RB_DEEP_MIN=20480
-# Больше равных не проверяем: минута на стратегию, а дюжина равных — это уже четверть часа.
+RB_DEEP_REQS=10
+# Больше близких не проверяем: на роутере со 128 МБ это пять-шесть минут на стратегию.
 RB_DEEP_MAX=6
 
-# Цели: «id|адрес|порт», каждый третий узел списка — так в выборку попадают все провайдеры, а не
-# только первые в файле (Hetzner и Cloudflare).
+# Цели: «id|адрес|порт|имя», весь список — все сто с лишним узлов, как у dpi-detector. Замер
+# идёт в фоне, когда обход уже работает, и лишние минуты тут дешевле выборки, в которую какой-то
+# провайдер попал одним узлом.
 _rb_zt_deep_targets() { # ФАЙЛ
 	local u src="$RB_RUN/zt.tcp16.json"
 	for u in $RB_DEEP_URLS; do
@@ -6396,25 +6416,31 @@ _rb_zt_deep_targets() { # ФАЙЛ
 		rm -f "$src"
 	done
 	[ -s "$src" ] || return 1
-	sed -n 's/.*"id":[[:space:]]*"\([^"]*\)".*"ip":[[:space:]]*"\([^"]*\)".*"port":[[:space:]]*\([0-9]*\).*/\1|\2|\3/p' "$src" |
-		awk 'NR % 3 == 1' > "$1"
+	awk 'function f(k,  m) { if (match($0, "\"" k "\":[[:space:]]*\"?[^\",}]*")) { m = substr($0, RSTART, RLENGTH); sub(/^"[^"]*":[[:space:]]*"?/, "", m); return m } return "" }
+		/"ip"/ { print f("id") "|" f("ip") "|" f("port") "|" f("sni") }' "$src" > "$1"
 	rm -f "$src"
 	[ -s "$1" ]
 }
 
-_rb_zt_deep() { # ФАЙЛ_УЗЛОВ -> «необорванных всего»
-	local okf="$RB_RUN/zt.dok" run=0 id ip port sc total pids=""
+_rb_zt_deep() { # ФАЙЛ_УЗЛОВ -> «выдержавших всего»
+	local okf="$RB_RUN/zt.dok" run=0 id ip port sni total pids="" pad k urls
 	: > "$okf"
 	total=$(grep -c '|' "$1")
-	while IFS='|' read -r id ip port; do
+	pad=$(head -c 4000 /dev/urandom | base64 2>/dev/null | tr -dc 'A-Za-z0-9' | head -c 4000)
+	[ -n "$pad" ] || pad=$(awk 'BEGIN { srand(); for (i = 0; i < 4000; i++) printf "%c", 97 + int(rand() * 26) }')
+	while IFS='|' read -r id ip port sni; do
 		[ -n "$ip" ] || continue
 		_rb_stopped && break
-		sc=https; [ "$port" = 80 ] && sc=http
 		(
-			n=$(curl -sk --local-port "$RB_ZT_LO-$RB_ZT_HI" --connect-timeout 4 --max-time 12 --range 0-65535 \
-				-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o /dev/null -w '%{size_download}' \
-				"$sc://$ip:$port/" 2>/dev/null)
-			[ "${n:-0}" -ge "$RB_DEEP_MIN" ] 2>/dev/null && echo "$id" >> "$okf"
+			if [ "$port" = 80 ]; then u="http://$ip/"; res=""
+			else sni="${sni:-example.com}"; u="https://$sni:$port/"; res="--resolve $sni:$port:$ip"; fi
+			urls=""; k=0
+			# -o у каждого адреса свой: без него заголовки второго и дальше шли в вывод.
+			while [ "$k" -lt "$RB_DEEP_REQS" ]; do urls="$urls -o /dev/null $u"; k=$((k + 1)); done
+			n=$(curl -sk -I $res --local-port "$RB_ZT_LO-$RB_ZT_HI" --connect-timeout 8 --max-time 12 \
+				-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36" \
+				-H "X-Pad: $pad" -w '%{http_code}\n' $urls 2>/dev/null | grep -c '^[1-5][0-9][0-9]$')
+			[ "${n:-0}" -ge "$RB_DEEP_REQS" ] 2>/dev/null && echo "$id" >> "$okf"
 		) &
 		pids="$pids $!"
 		run=$((run + 1))
@@ -6563,24 +6589,30 @@ _rb_svc_targets() { # "id id..." ФАЙЛ
 	done
 }
 
-_rb_zt_ties() { # ФАЙЛ_РЕЗУЛЬТАТОВ -> имена равных первому, не больше RB_DEEP_MAX
-	local key
-	key="$(tail -n +2 "$1" | head -n1)"; key="${key#* → }"
-	tail -n +2 "$1" | awk -v k="$key" '{ v = $0; sub(/^.* → /, "", v) } v == k { sub(/ → .*/, ""); print }' | head -n "$RB_DEEP_MAX"
+# Близкие к лучшей: общий счёт не ниже 90 % от её счёта. Разница в пару целей на полсотни —
+# это шум короткой проверки, а стратегия чуть ниже по общему счёту может открывать сервисы,
+# которые у лучшей не открылись. Первой идёт лучшая (она применена), за ней остальные — сначала
+# открывшие больше адресов неоткрывшихся сервисов; всего не больше RB_DEEP_MAX.
+_rb_zt_ties() { # ФАЙЛ_РЕЗУЛЬТАТОВ -> имена, по строке
+	tail -n +2 "$1" | awk '
+		{ n = $0; sub(/ → .*/, "", n); g = $0; sub(/^.* → /, "", g); split(g, a, "/"); v = $0; sub(/^.* · сервисы /, "", v)
+		  if (NR == 1) { top = a[1]; print "0\t" n; next }
+		  if (a[1] * 10 >= top * 9) print (100000 - v) "\t" n }' |
+		sort -n | cut -f2- | head -n "$RB_DEEP_MAX"
 }
 
-# Равные лучшие — тот же общий счёт и те же адреса сервисов, что у первого. Если их больше
-# одного, решает углублённая проверка: печатает имя победителя (или первого, если проверить не
-# удалось или все набрали одинаково). Первый — применённый: другой побеждает, только набрав
-# строго больше.
+# Близкие к лучшей (см. _rb_zt_ties). Если их больше одной, у каждой меряется дополнительный
+# счёт — узлы CDN, до которых дошёл поток, — и итоговый счёт = основной + дополнительный.
+# Печатает имя победителя по итоговому (или первой, если проверить не удалось). Первая —
+# применённая: другая побеждает, только набрав строго больше.
 _rb_zt_deep_pick() { # ФАЙЛ_РЕЗУЛЬТАТОВ
-	local res="$1" best key ties n name blk="$RB_RUN/zt.dblock" tgt="$RB_RUN/zt.deep" r sc top=-1 win
+	local res="$1" best key ties n name blk="$RB_RUN/zt.dblock" tgt="$RB_RUN/zt.deep" r sc main tot top=-1 win
 	best=$(tail -n +2 "$res" | head -n1)
 	win="${best%% → *}"
 	ties="$(_rb_zt_ties "$res")"
 	n=$(printf '%s\n' "$ties" | grep -c .)
 	[ "$n" -gt 1 ] || { echo "$win"; return 0; }
-	echo "Сравниваем $n равные стратегии" >&2
+	echo "Сравниваем близкие стратегии: $n" >&2
 	_rb_zt_deep_targets "$tgt" || { echo "      список для сравнения не скачался — оставляем применённую" >&2; echo "$win"; return 0; }
 	_rb_zt_rules_up || { echo "$win"; return 0; }
 	printf '%s\n' "$ties" > "$RB_RUN/zt.ties"
@@ -6591,8 +6623,10 @@ _rb_zt_deep_pick() { # ФАЙЛ_РЕЗУЛЬТАТОВ
 		r="$(_rb_zt_one "$blk" "$tgt" _rb_zt_deep)"
 		sc="${r%% *}"
 		[ "$sc" = -1 ] && { echo "      не запустилась" >&2; continue; }
-		echo "      $sc из ${r#* }" >&2
-		[ "$sc" -gt "$top" ] && { top="$sc"; win="$name"; }
+		main=$(awk -v n="$name" 'NR > 1 { m = $0; sub(/ → .*/, "", m); if (m == n) { sub(/^.* → /, ""); split($0, a, "/"); print a[1]; exit } }' "$res")
+		tot=$(( ${main:-0} + sc ))
+		echo "      основной ${main:-0} + дополнительный $sc из ${r#* } = $tot" >&2
+		[ "$tot" -gt "$top" ] && { top="$tot"; win="$name"; }
 	done < "$RB_RUN/zt.ties"
 	_rb_zt_down
 	rm -f "$RB_RUN/zt.ties" "$blk" "$tgt"
@@ -7046,14 +7080,14 @@ do_redbtn_run() {
 		_rb_warn "DNS over HTTPS перехватывает DNS сети — сервисы через WARP работать не будут, нажмите «Исправить» на странице Steer"
 	fi
 	_rb_say "Готово, обход подобран"
-	# Равные лучшие сравниваются уже после — обход к этому моменту работает.
+	# Близкие к лучшей сравниваются уже после — обход к этому моменту работает.
 	if [ -n "$deep_cur" ] && [ -s "$RB_RUN/deep.res" ] && [ "$(_rb_zt_ties "$RB_RUN/deep.res" | grep -c .)" -gt 1 ]; then
 		# Правила проб снимаются ловушкой на выходе, а с ними и таблица изоляции — снимаем
 		# сейчас, чтобы ловушка не выдернула её из-под фоновой проверки.
 		_rb_probe_nft_down
 		trap - EXIT INT TERM
 		job_start redbtn_deep do_redbtn_deep "$deep_cur" >/dev/null
-		_rb_say "Лучшая стратегия определится позже — идёт сравнение равных"
+		_rb_say "Лучшая стратегия определится позже — идёт сравнение близких"
 	fi
 }
 
@@ -8580,7 +8614,7 @@ return view.extend({
 				return;
 			}
 			if (!busy && data.steer_busy) heroCard.appendChild(E('div', { 'class': 'zm-ab-note zm-ab-note-warn' }, 'На странице Steer идёт операция — запуск станет доступен, когда она закончится.'));
-			if (!busy && data.deep) heroCard.appendChild(E('div', { 'class': 'zm-ab-note zm-st-note-ok' }, 'Лучшая стратегия определится позже — идёт сравнение равных.'));
+			if (!busy && data.deep) heroCard.appendChild(E('div', { 'class': 'zm-ab-note zm-st-note-ok' }, 'Лучшая стратегия определится позже — идёт сравнение близких.'));
 			else if (!busy && data.deep_note) heroCard.appendChild(E('div', { 'class': 'zm-ab-note zm-st-note-ok' }, data.deep_note));
 
 			if (busy) {
