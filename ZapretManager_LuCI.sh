@@ -4767,6 +4767,12 @@ RB_AWG_MIRROR="https://gitlab.com/xyzmean/brb/-/raw/main/deps/awg"
 RB_LANE_DIRECT="21000-21199"
 # Российские колонии Cloudflare: туннель через них геоблок не снимает, берутся только в запас.
 RB_RU_COLOS="DME SVX LED KJA REN OVB KZN AER VVO"
+# Свой DNS для проб. Системный резолвер может отдавать чужое: подмену провайдера или адреса
+# fakeip вышестоящего роутера со splify2 (с ними проба через туннель стучится в адрес, который
+# что-то значит только там). Первый ответивший из списка — на весь проход.
+RB_PROBE_DOHS="https://1.1.1.1/dns-query https://8.8.8.8/dns-query https://77.88.8.8/dns-query"
+RB_PROBE_DOH=""
+RB_SYS_DNS=""
 RB_PARALLEL=8
 RB_BAR=60
 
@@ -4780,6 +4786,21 @@ _rb_own() { mkdir -p "$RB_DIR"; grep -qxF "$1" "$RB_OWNED" 2>/dev/null || echo "
 _rb_owns() { grep -qxF "$1" "$RB_OWNED" 2>/dev/null; }
 _rb_running() { [ -f "$JOBS_DIR/redbtn.pid" ] && kill -0 "$(cat "$JOBS_DIR/redbtn.pid" 2>/dev/null)" 2>/dev/null; }
 _rb_test_running() { [ -f "$JOBS_DIR/strategy_test.pid" ] && kill -0 "$(cat "$JOBS_DIR/strategy_test.pid" 2>/dev/null)" 2>/dev/null; }
+
+# Наш объект в ubus должен пережить установку пакетов. luci-proto-amneziawg в post-install
+# зовёт `rpcd reload`, следом идёт перезапуск сети, и на живом роутере (mipsel, 25.12.5) rpcd
+# поднялся без объекта zapret-manager: страница получала «Object not found» и считала роутер
+# мёртвым до конца подбора. Повторная перезагрузка rpcd возвращает объект.
+_rb_rpcd_ensure() {
+	local i=0
+	while [ "$i" -lt 3 ]; do
+		ubus list zapret-manager >/dev/null 2>&1 && return 0
+		/etc/init.d/rpcd reload >/dev/null 2>&1
+		sleep 3
+		i=$((i + 1))
+	done
+	ubus list zapret-manager >/dev/null 2>&1
+}
 
 _rb_svc_ids() { grep -v '^#' "$RB_SHARE/services.conf" 2>/dev/null | cut -d'|' -f1 | grep .; }
 _rb_svc_field() { grep "^$1|" "$RB_SHARE/services.conf" 2>/dev/null | head -n1 | cut -d'|' -f"$2"; }
@@ -4820,12 +4841,21 @@ _rb_probe_nft_up() {
 }
 _rb_probe_nft_down() { nft delete table inet zm_rb_probe >/dev/null 2>&1; }
 
+_rb_doh_pick() {
+	local u
+	for u in $RB_PROBE_DOHS; do
+		curl -s -o /dev/null --max-time 6 --doh-url "$u" https://www.google.com/ 2>/dev/null && { echo "$u"; return 0; }
+	done
+	return 1
+}
+
 _rb_check_one() { # ХОСТ РЕЖИМ(as_is|direct|warp) ОТКАЗ ФАЙЛ_УСПЕХОВ
 	local host="$1" mode="$2" deny="$3" okf="$4" body res code size rc extra=""
 	body="$RB_RUN/body.$$.$host"
+	[ -n "$RB_PROBE_DOH" ] && [ -z "$RB_SYS_DNS" ] && extra="--doh-url $RB_PROBE_DOH"
 	case "$mode" in
-		direct) extra="--local-port $RB_LANE_DIRECT" ;;
-		warp)   extra="--interface $RB_WARP_IF" ;;
+		direct) extra="$extra --local-port $RB_LANE_DIRECT" ;;
+		warp)   extra="$extra --interface $RB_WARP_IF" ;;
 	esac
 	res=$(curl -sL $extra --connect-timeout 4 --max-time 8 --speed-time 4 --speed-limit 1 --range 0-65535 \
 		-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o "$body" -w '%{http_code} %{size_download}' "https://$host/" 2>/dev/null)
@@ -4883,7 +4913,7 @@ _rb_check_service() { # ID РЕЖИМ -> код 0, если сервис раб�
 _rb_check_all() { # РЕЖИМ [ПОДПИСЬ]
 	local id
 	for id in $(_rb_svc_ids); do
-		[ "$id" = telegram ] && continue
+		case "$id" in telegram|geoblock) continue ;; esac
 		_rb_stopped && return 0
 		if _rb_check_service "$id" "$1"; then
 			echo "$id ok"
@@ -4955,6 +4985,12 @@ _rb_install_steer() {
 		if $INSTALL "$tmp" >/dev/null 2>&1; then
 			rm -f "$tmp"
 			_rb_own "pkg steer"
+			# Пакет включает движок сразу, а движок и с пустой спекой заворачивает DNS сети на
+			# свой резолвер. На живом роутере так оборвался DNS клиентов по IPv6: запросы к
+			# роутеру по v6 уходили в тайм-аут. Включается он только вместе с правилами.
+			/etc/init.d/steer stop >/dev/null 2>&1
+			/etc/init.d/steer disable >/dev/null 2>&1
+			_rb_rpcd_ensure
 			_rb_say "Движок steer $ver установлен"
 			return 0
 		fi
@@ -5008,6 +5044,7 @@ _rb_install_awg() {
 		/etc/init.d/network restart >/dev/null 2>&1
 		sleep 8
 	fi
+	_rb_rpcd_ensure
 	return 0
 }
 
@@ -5186,6 +5223,89 @@ _rb_warp_up() {
 	return 1
 }
 
+# ── списки для туннеля ──
+#
+# Списки сервисов берутся наборами .srs из каталога splify2-lists (github.com/xyzmean/splify2-lists):
+# его lists.json называет для каждого набора ссылку на релиз издателя С ЗАФИКСИРОВАННЫМ тегом,
+# так что два роутера с одним каталогом уводят в туннель одно и то же. Набор раскладывает сам
+# движок (`steer srs-read`) на домены, подсети и сужение по протоколу и портам.
+#
+# Качается сначала напрямую, потом ЧЕРЕЗ ТУННЕЛЬ: списки нужны ровно тем сервисам, которые
+# уходят в WARP, значит туннель к этому моменту уже поднят, а GitHub у аудитории кнопки часто
+# закрыт. Не скачалось вовсе — берётся список из пакета: хуже свежего, но лучше никакого.
+RB_LISTS_MANIFEST="https://github.com/xyzmean/splify2-lists/releases/latest/download/lists.json"
+RB_SRS_FALLBACK="https://github.com/itdoginfo/allow-domains/releases/latest/download"
+
+_rb_fetch() { # URL ФАЙЛ — напрямую, потом через туннель
+	curl -fsSL --connect-timeout 6 --max-time 60 -o "$2" "$1" 2>/dev/null && [ -s "$2" ] && return 0
+	[ -d "/sys/class/net/$RB_WARP_IF" ] &&
+		curl -fsSL --interface "$RB_WARP_IF" --connect-timeout 6 --max-time 60 -o "$2" "$1" 2>/dev/null && [ -s "$2" ]
+}
+
+_rb_srs_url() { # НАБОР -> ссылка из каталога или «последний релиз» издателя
+	local m="$RB_RUN/lists.json" u=""
+	[ -s "$m" ] || _rb_fetch "$RB_LISTS_MANIFEST" "$m" || rm -f "$m"
+	[ -s "$m" ] && u=$(grep -o '"url"[[:space:]]*:[[:space:]]*"[^"]*/allow-domains/releases/download/[^"]*/'"$1"'\.srs"' "$m" |
+		head -n1 | sed 's/.*"\(https[^"]*\)"$/\1/')
+	echo "${u:-$RB_SRS_FALLBACK/$1.srs}"
+}
+
+# Набор -> $RB_DIR/lists/НАБОР.dom / .pfx / .meta. Код 0 — разложен.
+_rb_srs_get() { # НАБОР
+	local d="$RB_DIR/lists" f
+	mkdir -p "$d"
+	[ -f "$RB_RUN/srs.$1.done" ] && return 0
+	f="$RB_RUN/$1.srs"
+	_rb_fetch "$(_rb_srs_url "$1")" "$f" || return 1
+	steer srs-read "$f" --out "$d/$1.dom.tmp" --prefixes-out "$d/$1.pfx.tmp" --meta-out "$d/$1.meta.tmp" >/dev/null 2>&1 || {
+		rm -f "$f" "$d/$1".*.tmp; return 1; }
+	for x in dom pfx meta; do touch "$d/$1.$x.tmp"; mv "$d/$1.$x.tmp" "$d/$1.$x"; done
+	rm -f "$f"
+	touch "$RB_RUN/srs.$1.done"
+}
+
+# Каналы сервиса в спеке: печатает JSON-объекты через запятую (без внешних скобок).
+_rb_svc_channels() { # ID
+	local id="$1" name sets set dom="" pfx="" narrow="" f proto ports ch="" sep=""
+	name="$(_rb_svc_field "$id" 2)"
+	sets="$(_rb_svc_field "$id" 8 | tr ',' ' ')"
+	for set in $sets; do
+		# Один набор на несколько сервисов (Instagram и WhatsApp — оба meta) — в спеку один раз.
+		# Пометка файлом: функцию зовут в подоболочке, переменная оттуда не возвращается.
+		[ -f "$RB_RUN/used.$set" ] && continue
+		if _rb_srs_get "$set"; then
+			touch "$RB_RUN/used.$set"
+			f="$RB_DIR/lists/$set"
+			[ -s "$f.dom" ] && dom="$dom${dom:+,}\"$f.dom\""
+			if [ -s "$f.pfx" ]; then
+				if [ -s "$f.meta" ]; then narrow="$narrow $set"; else pfx="$pfx${pfx:+,}\"$f.pfx\""; fi
+			fi
+		else
+			_rb_warn "Список $set не скачался — беру список из пакета" >&2
+			sets=""
+			break
+		fi
+	done
+	# Ни одного набора или набор не скачался — списки из пакета.
+	if [ -z "$sets" ]; then
+		dom="$(_rb_json_list "$(_rb_svc_field "$id" 3 | tr ',' ' ')")"
+		pfx="$(_rb_json_list "$(_rb_svc_field "$id" 4 | tr ',' ' ')")"
+		narrow=""
+	fi
+	[ -n "$dom" ] && { ch="$ch$sep{\"name\":\"$name\",\"out\":\"zm_warp\",\"match\":{\"domains_files\":[$dom]}}"; sep=","; }
+	[ -n "$pfx" ] && { ch="$ch$sep{\"name\":\"$name (адреса)\",\"out\":\"zm_warp\",\"match\":{\"prefixes_files\":[$pfx]}}"; sep=","; }
+	# Подсети с сужением — отдельным каналом с протоколом и портами (схема 2): без сужения
+	# в туннель ушёл бы весь TCP к подсетям Cloudflare, а не только голос Discord.
+	for set in $narrow; do
+		f="$RB_DIR/lists/$set"
+		proto=$(sed -n 's/^proto=//p' "$f.meta" | head -n1)
+		ports=$(sed -n 's/^ports=//p' "$f.meta" | head -n1 | sed 's/,/","/g')
+		ch="$ch$sep{\"name\":\"$name (голос)\",\"out\":\"zm_warp\",\"match\":{\"prefixes_files\":[\"$f.pfx\"]${proto:+,\"proto\":\"$proto\"}${ports:+,\"ports\":[\"$ports\"]}}}"
+		sep=","
+	done
+	printf '%s' "$ch"
+}
+
 # ── спека steer ──
 
 _rb_json_list() { # файлы через пробел -> "a","b"
@@ -5195,21 +5315,16 @@ _rb_json_list() { # файлы через пробел -> "a","b"
 }
 
 _rb_spec_build() { # ID... -> JSON в stdout
-	local id name dom pre match chans="" sep=""
+	local id c chans="" schema=1
+	rm -f "$RB_RUN"/used.*
 	for id in "$@"; do
-		name="$(_rb_svc_field "$id" 2)"
-		dom="$(_rb_json_list "$(_rb_svc_field "$id" 3 | tr ',' ' ')")"
-		pre="$(_rb_json_list "$(_rb_svc_field "$id" 4 | tr ',' ' ')")"
-		match=""
-		[ -n "$dom" ] && match="\"domains_files\":[$dom]"
-		[ -n "$pre" ] && match="$match${match:+,}\"prefixes_files\":[$pre]"
-		[ -n "$match" ] || continue
-		chans="$chans$sep{\"name\":\"$name\",\"out\":\"zm_warp\",\"match\":{$match}}"
-		sep=","
+		c="$(_rb_svc_channels "$id")"
+		[ -n "$c" ] && chans="$chans${chans:+,}$c"
 	done
 	[ -n "$chans" ] || return 1
-	printf '{"schema":1,"lan_devices":["br-lan"],"outputs":{"zm_warp":{"kind":"interface","devices":["%s"],"on_fail":"direct"}},"channels":[%s]}\n' \
-		"$RB_WARP_IF" "$chans"
+	case "$chans" in *'"ports"'*|*'"proto"'*) schema=2 ;; esac
+	printf '{"schema":%s,"lan_devices":["br-lan"],"outputs":{"zm_warp":{"kind":"interface","devices":["%s"],"on_fail":"direct"}},"channels":[%s]}\n' \
+		"$schema" "$RB_WARP_IF" "$chans"
 }
 
 _rb_spec_apply() { # ID...
@@ -5250,7 +5365,9 @@ _rb_spec_clear() {
 # превращаются в правила. Побеждает тот, кто зарегистрировался раньше, а проигравший молчит.
 _rb_dns_conflict() {
 	[ -f /etc/config/https-dns-proxy ] || return 1
-	pidof https-dns-proxy >/dev/null 2>&1 || return 1
+	# Служба самого пакета, а не любой процесс https-dns-proxy: свой экземпляр для ИИ-сервисов
+	# кнопка держит отдельно (zm-geodns), и порт 53 он не трогает.
+	/etc/init.d/https-dns-proxy running >/dev/null 2>&1 || return 1
 	_rb_owns "steer-spec" || return 1
 	# Ключа нет — у прокси умолчание единица.
 	local fd
@@ -5355,6 +5472,182 @@ _rb_result_write() { # ID СОСТОЯНИЕ
 	echo "$1|$2" >> "$RB_RESULTS"
 }
 
+# ── ИИ-сервисы: только DNS ──
+#
+# Геоблок не лечится ни стратегией zapret, ни туннелем: сервис смотрит, откуда пришли, и
+# открывает его только резолвер, выдающий адрес своего прокси. Поэтому проба здесь идёт
+# СИСТЕМНЫМ DNS — тем, что лечит, — а подбор zapret и WARP этот сервис не запускает.
+#
+# РЕЗОЛВЕР — ТОЛЬКО ДЛЯ ДОМЕНОВ СПИСКА, а не для всей сети. Список — тот, что публикует
+# dns.malw.link (файл hosts его репозитория: какие имена этот резолвер разблокирует); адреса к
+# ним отдаёт выбранный резолвер, а не файл, поэтому они не стареют вместе со списком. dnsmasq
+# получает свой файл `server=/домен/127.0.0.1#5055`, остальное разрешается как раньше.
+#
+# Резолвер крутится СВОИМ экземпляром https-dns-proxy (служба zm-geodns), а не секцией в
+# /etc/config/https-dns-proxy: та принадлежит человеку и странице DoH, и её dnsmasq_config_update
+# '*' увела бы в георезолвер вообще всё. Пакет, если его ставит кнопка, свою службу тут же
+# выключает — иначе он при установке сам забирает dnsmasq и порт 53 (проверено на 25.12.5).
+RB_GEO_PORT=5055
+RB_GEO_RESOLVER="$RB_DIR/geo.resolver"
+RB_GEO_DOMAINS="$RB_DIR/geo-domains.lst"
+RB_GEO_LIST_URLS="https://raw.githubusercontent.com/ImMALWARE/dns.malw.link/refs/heads/master/hosts https://cdn.jsdelivr.net/gh/ImMALWARE/dns.malw.link@master/hosts"
+RB_GEO_FALLBACK="chatgpt.com openai.com oaistatic.com oaiusercontent.com sora.com claude.ai anthropic.com claudeusercontent.com gemini.google.com aistudio.google.com generativelanguage.googleapis.com copilot.microsoft.com grok.com x.ai perplexity.ai"
+
+_rb_geo_how() {
+	if grep -qE '[[:space:]](chatgpt\.com|openai\.com)([[:space:]]|$)' /etc/hosts 2>/dev/null; then echo hosts
+	else echo doh; fi
+}
+
+# Проверить один резолвер: ответил ли он и жив ли прокси, адрес которого он выдал. Проба —
+# настоящий запрос к chatgpt.com через этот резолвер: curl спрашивает DoH и подключается к
+# выданному адресу. Печатает «время_мс id», если годится.
+_rb_geo_try() { # СТРОКА_doh.conf
+	local id url boot role host h port ip b res rc code t body
+	IFS='|' read -r id _t url boot role <<-EOF
+	$1
+	EOF
+	host=${url#https://}; host=${host%%/*}; h=${host%%:*}; port=443
+	case "$host" in *:*) port=${host##*:} ;; esac
+	# Имя самого резолвера разрешаем его bootstrap-серверами: DoH и нужен там, где системный
+	# DNS врёт.
+	ip=""
+	for b in $(echo "$boot" | tr ',' ' '); do
+		ip=$(nslookup "$h" "$b" 2>/dev/null | awk '/^Address/ && !/#/ && $2 !~ /:/ {print $2}' | tail -n1)
+		[ -n "$ip" ] && break
+	done
+	body="$RB_RUN/geo.$id"
+	res=$(curl -s --connect-timeout 5 --max-time 10 ${ip:+--resolve "$h:$port:$ip"} --doh-url "$url" \
+		-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o "$body" -w '%{http_code} %{time_total}' https://chatgpt.com/ 2>/dev/null)
+	rc=$?
+	code="${res%% *}"; t="${res##* }"
+	if [ "$rc" = 0 ] && [ "$code" != 000 ] && ! grep -qiE "$(_rb_svc_field geoblock 7 | sed 's/,/|/g')" "$body" 2>/dev/null; then
+		echo "$t $id" | awk '{printf "%d %s\n", $1 * 1000, $2}'
+	fi
+	rm -f "$body"
+}
+
+# Лучший резолвер пула — самый быстрый из тех, чей прокси отвечает. Все проверяются сразу.
+_rb_geo_pick() {
+	local line out="$RB_RUN/geo.pick"
+	: > "$out"
+	while IFS= read -r line; do
+		case "$line" in ''|\#*) continue ;; esac
+		[ "$(echo "$line" | cut -d'|' -f5)" = geo ] || continue
+		( _rb_geo_try "$line" >> "$out" ) &
+	done < "$RB_SHARE/doh.conf"
+	wait
+	[ -s "$out" ] || return 1
+	sort -n "$out" | awk 'NR == 1 {print $2}'
+}
+
+# Список доменов: скачать (напрямую, потом через туннель), взять имена и свернуть поддомены
+# под родителя — dnsmasq-у `server=/example.com/` хватает на все поддомены.
+_rb_geo_domains() {
+	local u f="$RB_RUN/geo.hosts" ok=0
+	for u in $RB_GEO_LIST_URLS; do _rb_fetch "$u" "$f" && grep -q '^[0-9]' "$f" && { ok=1; break; }; done
+	if [ "$ok" = 1 ]; then
+		awk '/^[0-9]/ {print tolower($2)}' "$f" | sort -u | awk '
+			{ d[NR] = $0; have[$0] = 1 }
+			END { for (i = 1; i <= NR; i++) { n = split(d[i], p, "."); c = 0
+				for (j = 2; j < n; j++) { s = p[j]; for (k = j + 1; k <= n; k++) s = s "." p[k]; if (s in have) { c = 1; break } }
+				if (!c) print d[i] } }' > "$RB_GEO_DOMAINS.tmp" && mv "$RB_GEO_DOMAINS.tmp" "$RB_GEO_DOMAINS"
+	fi
+	rm -f "$f"
+	[ -s "$RB_GEO_DOMAINS" ] || { printf '%s\n' $RB_GEO_FALLBACK > "$RB_GEO_DOMAINS"; _rb_warn "Список доменов не скачался — беру короткий список ИИ-сервисов"; }
+	_rb_say "Доменов для DNS ИИ-сервисов: $(grep -c . "$RB_GEO_DOMAINS")"
+}
+
+_rb_geo_enable() {
+	local id line
+	if [ ! -x /usr/sbin/https-dns-proxy ]; then
+		local had_conf=0
+		[ -s /etc/config/https-dns-proxy ] && had_conf=1
+		_rb_say "Устанавливаем https-dns-proxy"
+		$UPDATE >/dev/null 2>&1
+		$INSTALL https-dns-proxy >/dev/null 2>&1 || { echo "ОШИБКА: https-dns-proxy не установился"; return 1; }
+		_rb_own "pkg https-dns-proxy"
+		# Своя служба пакета при установке сама забирает dnsmasq. Если настройки до установки не
+		# было, это умолчание пакета — выключаем, stop возвращает dnsmasq как было. Если была —
+		# её писал человек (или страница DoH), и dnsmasq уже на неё смотрит: выключить службу
+		# значило бы оставить весь DNS роутера на мёртвых портах. Так и случилось на живом
+		# роутере, пока этой проверки не было.
+		if [ "$had_conf" = 0 ]; then
+			/etc/init.d/https-dns-proxy stop >/dev/null 2>&1
+			/etc/init.d/https-dns-proxy disable >/dev/null 2>&1
+		fi
+		_rb_rpcd_ensure
+	fi
+	_rb_say "Подбираем DNS для ИИ-сервисов"
+	id="$(_rb_geo_pick)" || { echo "!! Ни один DNS не открыл ИИ-сервисы"; return 1; }
+	line="$(grep "^$id|" "$RB_SHARE/doh.conf" | head -n1)"
+	_rb_say "Лучший: $(echo "$line" | cut -d'|' -f2)"
+	_rb_geo_domains
+	{
+		echo "GEO_ID='$id'"
+		echo "GEO_TITLE='$(echo "$line" | cut -d'|' -f2)'"
+		echo "GEO_URL='$(echo "$line" | cut -d'|' -f3)'"
+		echo "GEO_BOOT='$(echo "$line" | cut -d'|' -f4)'"
+	} > "$RB_GEO_RESOLVER"
+	_rb_own "svc zm-geodns"
+	/etc/init.d/zm-geodns enable >/dev/null 2>&1
+	/etc/init.d/zm-geodns restart >/dev/null 2>&1
+	# Экземпляру нужно время разрешить имя самого резолвера (bootstrap): первые секунды он
+	# молчит, и проверка сразу после запуска отвечала «не открывается».
+	local i=0
+	while [ "$i" -lt 20 ]; do
+		nslookup -type=a chatgpt.com "127.0.0.1:$RB_GEO_PORT" 2>/dev/null | grep -q '^Address: [0-9]' && break
+		sleep 1; i=$((i + 1))
+	done
+}
+
+_rb_geo_disable() {
+	/etc/init.d/zm-geodns stop >/dev/null 2>&1
+	/etc/init.d/zm-geodns disable >/dev/null 2>&1
+	rm -f "$RB_GEO_RESOLVER"
+}
+
+_rb_geo_ok() {
+	local ok=0
+	RB_SYS_DNS=1
+	_rb_check_service geoblock as_is && ok=1
+	RB_SYS_DNS=""
+	[ "$ok" = 1 ]
+}
+
+_rb_geo_step() {
+	_rb_say "Проверяем ИИ-сервисы"
+	if _rb_geo_ok; then
+		_rb_result_write geoblock "$( [ -s "$RB_GEO_RESOLVER" ] && echo doh || _rb_geo_how)"
+		echo "[ OK ] $(_rb_svc_field geoblock 2) — открывается"
+		return 0
+	fi
+	if _rb_geo_enable && _rb_geo_ok; then
+		_rb_result_write geoblock doh
+		echo "[ OK ] $(_rb_svc_field geoblock 2) — через DoH"
+		grep -q redbtn_geo_watch "$CRON_FILE" 2>/dev/null || {
+			echo "*/30 * * * * /opt/zapret-manager-luci/backend.sh redbtn_geo_watch >/dev/null 2>&1" >> "$CRON_FILE"
+			/etc/init.d/cron restart >/dev/null 2>&1; }
+	else
+		_rb_result_write geoblock none
+		echo "[FAIL] $(_rb_svc_field geoblock 2) — не открывается"
+	fi
+}
+
+# Кнопка «Подобрать DNS заново» и сторож раз в 30 минут: прокси резолвера может умереть.
+do_redbtn_geo_doh() {
+	_rb_geo_enable || { _rb_result_write geoblock none; return 1; }
+	if _rb_geo_ok; then _rb_result_write geoblock doh; _rb_say "Готово, ИИ-сервисы открываются"
+	else _rb_result_write geoblock none; echo "!! ИИ-сервисы не открываются"; fi
+}
+
+redbtn_geo_watch() {
+	[ -s "$RB_GEO_RESOLVER" ] || return 0
+	_rb_running && return 0
+	_rb_geo_ok && return 0
+	logger -t zm-redbtn "ИИ-сервисы перестали открываться — подбираю DNS заново"
+	do_redbtn_geo_doh >/dev/null 2>&1
+}
+
 # ── основной проход ──
 
 do_redbtn_run() {
@@ -5381,6 +5674,7 @@ do_redbtn_run() {
 
 	trap '_rb_probe_nft_down' EXIT INT TERM
 	_rb_probe_nft_up
+	RB_PROBE_DOH="$(_rb_doh_pick)" || _rb_warn "Ни один DNS для проверок не ответил — проверяем системным"
 
 	_rb_phase check
 	_rb_say "Проверяем сервисы при текущей настройке"
@@ -5477,11 +5771,20 @@ do_redbtn_run() {
 
 	_rb_phase steer
 	if [ -n "$warp_ids" ]; then
+		_rb_say "Скачиваем списки сервисов"
 		_rb_spec_apply $warp_ids || return 1
 	else
 		_rb_spec_clear
+		# Правил нет — движку, поставленному кнопкой, работать незачем (см. _rb_install_steer).
+		if _rb_owns "pkg steer"; then
+			/etc/init.d/steer stop >/dev/null 2>&1
+			/etc/init.d/steer disable >/dev/null 2>&1
+		fi
 		if _rb_owns "net $RB_WARP_IF"; then ifdown "$RB_WARP_IF" >/dev/null 2>&1; fi
 	fi
+
+	_rb_phase geo
+	_rb_geo_step
 
 	_rb_phase telegram
 	_rb_say "Проверяем Telegram"
@@ -5493,6 +5796,7 @@ do_redbtn_run() {
 		echo "[ OK ] Telegram — открывается"
 	else
 		if do_tgws_install; then
+			_rb_rpcd_ensure
 			_rb_own "pkg tgws"
 			_rb_result_write telegram tgws
 			echo "[ OK ] Telegram — через веб-сокет"
@@ -5527,6 +5831,9 @@ do_redbtn_remove() {
 		uci commit firewall
 		/etc/init.d/firewall reload >/dev/null 2>&1
 	fi
+	if _rb_owns "svc zm-geodns"; then _rb_geo_disable; fi
+	sed -i '/redbtn_geo_watch/d' "$CRON_FILE" 2>/dev/null && /etc/init.d/cron restart >/dev/null 2>&1
+	if _rb_owns "pkg https-dns-proxy"; then $DELETE https-dns-proxy >/dev/null 2>&1; fi
 	_rb_owns "pkg tgws" && do_tgws_remove
 	if _rb_owns "pkg steer"; then
 		_rb_say "Удаляем движок steer"
@@ -5554,14 +5861,16 @@ redbtn_status() {
 	[ -d "/sys/class/net/$RB_WARP_IF" ] && warp_up=true
 	command -v steer >/dev/null 2>&1 && steer_ver="$(_rb_steer_ver)"
 	_rb_dns_conflict && dns=true
+	local geo=""
+	[ -s "$RB_GEO_RESOLVER" ] && geo=$(sed -n "s/^GEO_TITLE='\(.*\)'$/\1/p" "$RB_GEO_RESOLVER")
 	for id in $(_rb_svc_ids); do
 		name="$(_rb_svc_field "$id" 2)"
 		st="$(grep "^$id|" "$RB_RESULTS" 2>/dev/null | head -n1 | cut -d'|' -f2)"
 		svc="$svc$sep{\"id\":\"$id\",\"name\":\"$(esc "$name")\",\"state\":\"$st\"}"
 		sep=","
 	done
-	printf '{"running":%s,"phase":"%s","last":"%s","blocker":"%s","warp_up":%s,"warp_colo":"%s","steer":"%s","dns_conflict":%s,"configured":%s,"services":[%s]}\n' \
-		"$running" "$(esc "$phase")" "$last" "$blk" "$warp_up" "$(esc "$colo")" "$(esc "$steer_ver")" "$dns" \
+	printf '{"running":%s,"phase":"%s","last":"%s","blocker":"%s","warp_up":%s,"warp_colo":"%s","steer":"%s","dns_conflict":%s,"geo_dns":"%s","configured":%s,"services":[%s]}\n' \
+		"$running" "$(esc "$phase")" "$last" "$blk" "$warp_up" "$(esc "$colo")" "$(esc "$steer_ver")" "$dns" "$(esc "$geo")" \
 		"$([ -s "$RB_OWNED" ] && echo true || echo false)" "$svc"
 }
 
@@ -5586,6 +5895,10 @@ redbtn_action() {
 		dns_fix)
 			do_redbtn_dns_fix
 			printf '{"ok":true}\n'
+			;;
+		geo_doh)
+			_rb_running && { echo '{"error":"дождитесь окончания подбора"}'; return 1; }
+			job_start redbtn do_redbtn_geo_doh
 			;;
 		*) echo '{"error":"неизвестное действие"}' ;;
 	esac
@@ -5667,6 +5980,7 @@ case "$cmd" in
 	health)                               health ;;
 	redbtn_status)                        redbtn_status ;;
 	redbtn_action)                        redbtn_action "$1" "$2" ;;
+	redbtn_geo_watch)                     redbtn_geo_watch ;;
 	bytetube_action)                      bytetube_action "$1" ;;
 	*) echo '{"error":"неизвестная команда"}'; exit 1 ;;
 esac
@@ -6633,6 +6947,8 @@ var STATES = {
 	zapret: { text: 'через Zapret', cls: 'zm-ok' },
 	warp:   { text: 'через WARP', cls: 'zm-ok' },
 	tgws:   { text: 'через веб-сокет', cls: 'zm-ok' },
+	doh:    { text: 'через DoH', cls: 'zm-ok' },
+	hosts:  { text: 'через hosts', cls: 'zm-ok' },
 	none:   { text: 'не открывается', cls: 'zm-bad' }
 };
 
@@ -6642,6 +6958,7 @@ var PHASES = {
 	zapret: 'Подбираем стратегию Zapret',
 	warp: 'Поднимаем туннель WARP',
 	steer: 'Применяем правила',
+	geo: 'Проверяем ИИ-сервисы',
 	telegram: 'Проверяем Telegram',
 	remove: 'Снимаем настройки'
 };
@@ -6761,9 +7078,17 @@ return view.extend({
 			renderMain();
 			zm.pollJob('redbtn', logEl, function(ok) {
 				busy = false;
-				videoHide();
-				zm.toast(ok ? 'Готово' : 'Операция завершилась с ошибкой', ok ? 'info' : 'error');
-				refresh();
+				// Опрос сдаётся, когда роутер на время перестаёт отвечать (перезапуск сети при
+				// установке туннеля). Подбор при этом идёт дальше — ждём роутер и следим снова.
+				zm.redbtnStatus().then(function(res) {
+					if (res && res.running) { busy = true; follow(withVideo && !!videoEl, false); return; }
+					videoHide();
+					zm.toast(ok ? 'Готово' : 'Операция завершилась с ошибкой', ok ? 'info' : 'error');
+					refresh();
+				}).catch(function() {
+					zm.toast('Роутер не отвечает — ждём', 'warning');
+					setTimeout(function() { busy = false; waitRouter(); }, 5000);
+				});
 			}, function() {
 				if (++ticks % 5) return;
 				zm.redbtnStatus().then(function(res) {
@@ -6774,6 +7099,15 @@ return view.extend({
 					renderServices();
 				});
 			});
+		}
+
+		function waitRouter() {
+			zm.redbtnStatus().then(function(res) {
+				data = res || {};
+				if (data.running) { follow(!!videoEl, false); return; }
+				videoHide();
+				renderAll();
+			}).catch(function() { setTimeout(waitRouter, 5000); });
 		}
 
 		function start() {
@@ -6860,6 +7194,11 @@ return view.extend({
 					stateBadge(s.state)
 				]));
 			});
+			if (data.geo_dns)
+				svcCard.appendChild(E('div', { 'class': 'zm-row' }, [
+					E('span', { 'class': 'zm-label' }, 'DNS для ИИ-сервисов'),
+					E('span', {}, data.geo_dns)
+				]));
 		}
 
 		function renderWarp() {
@@ -6879,8 +7218,31 @@ return view.extend({
 				]));
 		}
 
+		function geoCard() {
+			var geo = (data.services || []).filter(function(s) { return s.id === 'geoblock'; })[0];
+			if (!geo || geo.state !== 'none') return null;
+			return E('div', { 'class': 'zm-card' }, [
+				E('h3', {}, 'ИИ-сервисы'),
+				E('p', { 'class': 'zm-hint' }, 'ChatGPT, Claude и Gemini не открылись ни через один DNS из списка.'),
+				E('div', { 'class': 'zm-actions' }, [
+					E('button', {
+						'class': 'cbi-button cbi-button-positive',
+						'click': function() {
+							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+							zm.redbtnAction('geo_doh', '').then(function(res) {
+								if (res.error) { zm.toast(res.error, 'error'); return; }
+								follow(false);
+							});
+						}
+					}, 'Подобрать DNS заново')
+				])
+			]);
+		}
+
 		function renderDns() {
 			dnsCard.innerHTML = '';
+			var g = busy ? null : geoCard();
+			if (g) dnsCard.appendChild(g);
 			if (!data.dns_conflict) return;
 			dnsCard.appendChild(E('div', { 'class': 'zm-card' }, [
 				E('h3', {}, 'DNS'),
@@ -6927,7 +7289,11 @@ mkdir -p /usr/share/zm-redbtn/lists
 cat > '/usr/share/zm-redbtn/services.conf' << 'ZM_INSTALLER_EOF'
 # Сервисы красной кнопки. Каталог и цели — из BigRedButton (gitlab.com/xyzmean/brb).
 #
-# ФОРМАТ: id|название|списки доменов|списки адресов|обязательные цели|дополнительные цели|признак отказа
+# ФОРМАТ: id|название|списки доменов|списки адресов|обязательные цели|дополнительные цели|признак отказа|наборы
+#
+#   наборы    — имена наборов .srs каталога splify2-lists (издатель itdoginfo), через запятую;
+#               по ним сервис уводится в туннель. Не скачались — берутся списки из пакета
+#               (второе и третье поля). ИИ-сервисы и Telegram в туннель не уходят вовсе.
 #
 #   списки    — файлы в /usr/share/zm-redbtn/lists, через запятую; по ним движок уводит сервис в
 #               туннель. Адресные списки только там, где сервис ходит по адресам без DNS
@@ -6938,14 +7304,14 @@ cat > '/usr/share/zm-redbtn/services.conf' << 'ZM_INSTALLER_EOF'
 #   дополнительные — из них должно открыться не меньше RB_BAR процентов.
 #   признак отказа — фразы в ответе, при которых сервис считается закрытым, хотя ответил
 #               (геоблок отвечает кодом 200 со страницей «недоступно в вашей стране»).
-youtube|YouTube|svc_youtube.lst||www.youtube.com,youtubei.googleapis.com,manifest.googlevideo.com|youtu.be,i.ytimg.com,i9.ytimg.com,yt3.ggpht.com,yt4.ggpht.com,jnn-pa.googleapis.com,signaler-pa.youtube.com,yt3.googleusercontent.com,rr4---sn-4g5e6nze.googlevideo.com,rr4---sn-5go7yner.googlevideo.com,rr5---sn-n8v7knez.googlevideo.com,rr2---sn-q4fl6ndl.googlevideo.com,rr1---sn-q4fl6n6y.googlevideo.com,rr14---sn-n8v7kn7r.googlevideo.com,rr4---sn-jvhnu5g-c35d.googlevideo.com,rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com,rr12---sn-gvnuxaxjvh-bvwz.googlevideo.com,rr1---sn-ug5onuxaxjvh-n8v6.googlevideo.com|
-discord|Discord|svc_discord.lst|discord.lst|discord.com,gateway.discord.gg,updates.discord.com|cdn.discordapp.com,media.discordapp.net|
-instagram|Instagram|svc_meta.lst|meta.lst|www.instagram.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com|
-whatsapp|WhatsApp|svc_meta.lst|whatsapp.lst|web.whatsapp.com|static.whatsapp.net,mmg.whatsapp.net|
-x|X (Twitter)|svc_twitter.lst|twitter_x.lst|x.com|twitter.com,abs.twimg.com,video.twimg.com|
-github|GitHub|own_github.lst||github.com,raw.githubusercontent.com,objects.githubusercontent.com|codeload.github.com,api.github.com,ghcr.io|
-geoblock|ИИ-сервисы|geoblock.lst||chatgpt.com|claude.ai,api.openai.com,gemini.google.com|App unavailable,unsupported_country,not available in your country,not available in your region
-telegram|Telegram|||web.telegram.org|t.me,core.telegram.org,telegra.ph|
+youtube|YouTube|svc_youtube.lst||www.youtube.com,youtubei.googleapis.com,manifest.googlevideo.com|youtu.be,i.ytimg.com,i9.ytimg.com,yt3.ggpht.com,yt4.ggpht.com,jnn-pa.googleapis.com,signaler-pa.youtube.com,yt3.googleusercontent.com,rr4---sn-4g5e6nze.googlevideo.com,rr4---sn-5go7yner.googlevideo.com,rr5---sn-n8v7knez.googlevideo.com,rr2---sn-q4fl6ndl.googlevideo.com,rr1---sn-q4fl6n6y.googlevideo.com,rr14---sn-n8v7kn7r.googlevideo.com,rr4---sn-jvhnu5g-c35d.googlevideo.com,rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com,rr12---sn-gvnuxaxjvh-bvwz.googlevideo.com,rr1---sn-ug5onuxaxjvh-n8v6.googlevideo.com||youtube
+discord|Discord|svc_discord.lst|discord.lst|discord.com,gateway.discord.gg,updates.discord.com|cdn.discordapp.com,media.discordapp.net||discord
+instagram|Instagram|svc_meta.lst|meta.lst|www.instagram.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com||meta
+whatsapp|WhatsApp|svc_meta.lst|whatsapp.lst|web.whatsapp.com|static.whatsapp.net,mmg.whatsapp.net||meta
+x|X (Twitter)|svc_twitter.lst|twitter_x.lst|x.com|twitter.com,abs.twimg.com,video.twimg.com||twitter
+github|GitHub|own_github.lst||github.com,raw.githubusercontent.com,objects.githubusercontent.com|codeload.github.com,api.github.com,ghcr.io||
+geoblock|ИИ-сервисы|||chatgpt.com|claude.ai,api.openai.com,gemini.google.com|App unavailable,unsupported_country,not available in your country,not available in your region|
+telegram|Telegram|||web.telegram.org|t.me,core.telegram.org,telegra.ph||
 ZM_INSTALLER_EOF
 cat > '/usr/share/zm-redbtn/lists/svc_youtube.lst' << 'ZM_INSTALLER_EOF'
 ggpht.com
@@ -7054,473 +7420,6 @@ release-assets.githubusercontent.com
 uploads.github.com
 user-images.githubusercontent.com
 www.github.com
-ZM_INSTALLER_EOF
-cat > '/usr/share/zm-redbtn/lists/geoblock.lst' << 'ZM_INSTALLER_EOF'
-4pda.to
-4pda.ws
-a-vrv.akamaized.net
-abercrombie.com
-adidas.com
-adobe.com
-adobe.io
-adobe.net
-affinity.studio
-ai-chat.bsg.brave.com
-ai.com
-aircanada.com
-akc.org
-all3dp.com
-alphacoders.com
-alza.hu
-amazfitwatchfaces.com
-amplitude.com
-analog.com
-andrevi.ch
-ansys.com
-anthropic.com
-anthropic.qualtrics.com
-api.jetbrains.ai
-api.themoviedb.org
-arc.net
-arduino.cc
-assets.heroku.com
-atlassian.com
-att.com
-augmentcode.com
-autodesk.com
-backend-v2.crixet.com
-bell-sw.com
-bestbuy.com
-bitdefender.com
-bitnami.com
-blinkshot.io
-bosch.com
-boschaftermarket.com
-boschautoparts.com
-brawlstarsgame.com
-broadcom.com
-broncosportforum.com
-btod.com
-buanzo.org
-buf.build
-builds.parsec.app
-buymeacoffee.com
-canva.com
-canva.dev
-capacitorjs.com
-carrefouruae.com
-cats.com
-cdn.web-platform.io
-cdromance.org
-cdw.com
-chainreactioncycles.com
-chaos.com
-chat.com
-chat.openai.com.cdn.cloudflare.net
-chatgpt.com
-cisco.com
-cisecurity.org
-citrix.com
-clamav.net
-clashofclans.com
-clashroyaleapp.com
-claude.ai
-claude.com
-clevelandclinic.org
-clickup.com
-clip.opus.pro
-code.gist.build
-codeium.com
-coingate.com
-community.sophos.com
-connect.ngrok-agent.com
-contabo.com
-copilot.microsoft.com
-corsair.com
-cpu-monkey.com
-credly.com
-crunchyroll.com
-cursor-cdn.com
-cursor.sh
-cursorapi.com
-cvedetails.com
-daemon-tools.cc
-dashboard.algolia.com
-dashboard.gitguardian.com
-data-cdn.mbamupdates.com
-data.cline.bot
-deepl.com
-deezer.com
-dell.com
-dellcdn.com
-designer.microsoft.com
-developer.nvidia.com
-devexpress.com
-diabrowser.com
-digitalcontent.sky
-disctech.com
-disneyplus.com
-docs.liquibase.com
-document360.com
-document360.io
-download3.omnissa.com
-downloads.intercomcdn.com
-ducati.com
-dyson.com
-easydmarc.com
-editorx.com
-elevenlabs.io
-eneba.com
-etsy.com
-exchanger.bits.media
-expandrive.com
-extremetech.com
-f1.com
-fast.com
-filebin.net
-files.manus.cdn
-fivetran.com
-flir.com
-flir.eu
-flourish.studio
-fluke.com
-flukenetworks.com
-flyertalk.com
-footballapi.pulselive.com
-force-user-content.com
-force.com
-formula1.com
-forum.netgate.com
-framer.app
-framer.com
-framercanvas.com
-framercdn.com
-framerstatic.com
-framerusercontent.com
-freeimages.com
-fxnetworks.com
-g2a.com
-gamestop.com
-gaming.amazon.com
-geforcenow.com
-genspark.ai
-geolocation.onetrust.com
-getoutline.com
-gfn.am
-ghostrc.game.idtech.services
-global.fncstatic.com
-glpals.com
-gofund.me
-gofundme.com
-gonift.com
-gpsonextra.net
-gpu-monkey.com
-gql.twitch.tv
-grafana.com
-graylog.org
-grizzlysms.com
-grok.com
-grok.x.com
-groq.com
-groupon.com
-guilded.gg
-habr.com
-hashicorp.com
-haydaygame.com
-hbomax.com
-hc-ping.com
-hchk.io
-healthline.com
-herokucdn.com
-hollisterco.com
-home-connect.com
-home.by.me
-hostinger.com
-hotels.com
-housebrand.com
-htmhell.dev
-httptoolkit.com
-hume.ai
-hybrid-analysis.com
-ibm.com
-iedb.org
-iherb.com
-ikea.com
-image.tmdb.org
-imgur.com
-indeed.com
-install.launcher.omniverse.nvidia.com
-intel.com
-intel.de
-intel.nl
-intelix.sophos.com
-intercom.io
-intuit.com
-intuitibits.com
-itninja.com
-jamf.com
-jetbrains.com
-jetbrains.space
-jetbrains.team
-joesandbox.com
-kaleido.ai
-keysight.com
-kinogo.la
-klarna.com
-kmail-lists.com
-lambdalabs.com
-langdock.com
-last.fm
-ldoceonline.com
-legalshield.com
-lgeapi.com
-lgthinq.com
-lidarr.audio
-lifehacker.com
-lightning.ai
-lookerstudio.google.com
-lyst.com
-mailerlite.com
-mailinator.com
-manus.im
-manybooks.net
-marvelsnap.com
-mattermost.com
-max.com
-medicalnewstoday.com
-meetup.com
-metopera.org
-middlewareinventory.com
-mintmobile.com
-miracleptr.wordpress.com
-mixcloud.com
-mongodb.com
-monoprice.com
-mouser.com
-mouser.fi
-mssg.me
-multisim.com
-myheritage.com
-myjetbrains.com
-myparallels.com
-myqrcode.com
-nba.com
-neo4j.com
-netacad.com
-netapp.com
-netflix.ca
-netflix.com
-netflix.net
-netflixinvestor.com
-netflixtechblog.com
-netlify.com
-new.abb.com
-newark.com
-news.google.com
-newsroom.porsche.com
-nfl.com
-nflxext.com
-nflximg.com
-nflximg.net
-nflxsearch.net
-nflxso.net
-nflxvideo.net
-ngrok.com
-ni.com
-nike.com
-nitropdf.com
-nordaccount.com
-nordcdn.com
-nordvpn.com
-notion-emojis.s3-us-west-2.amazonaws.com
-notion-static.com
-notion.com
-notion.new
-notion.site
-notion.so
-ntp.msn.com
-nxp.com
-oaistatic.com
-oaiusercontent.com
-ocstore.com
-octopus.do
-omnissa.com
-onfastspring.com
-onshape.com
-openai.com
-openh264.org
-openrouter.ai
-oracle.com
-oraclecloud.com
-paddle.com
-paddlestatus.com
-pandasecurity.com
-parallels.cn
-parallels.com
-parallels.net
-parallelsaccess.com
-paritydeals.com
-patreon.com
-patreonusercontent.com
-paywithmoon.com
-pcgamesn.com
-pcmag.com
-penguin.com
-penguinrandomhouse.com
-pexels.com
-philiascans.org
-pingdom.com
-pkgs.tailscale.com
-platform.activestate.com
-plugshare.com
-posthog.com
-premierleague.com
-primark.com
-primevideo.com
-proactivebackend-pa.googleapis.com
-production-openaicom-storage.azureedge.net
-profitwell.com
-prowlarr.com
-public.parsec.app
-qobuz.com
-qodana.cloud
-qoder.com
-qt.io
-qualcomm.com
-quicknode.com
-qwant.com
-reactflow.dev
-recraft.ai
-redis.io
-redislabs.com
-remna.st
-remove.bg
-research.net
-reve.art
-salesforce-experience.com
-salesforce-hub.com
-salesforce-scrt.com
-salesforce-setup.com
-salesforce-sites.com
-salesforce.com
-salesforceiq.com
-salesforceliveagent.com
-schneider-electric.com
-sdxcentral.com
-se.com
-seconddinnertech.com
-semrush.com
-sentry.dev
-sentry.io
-sephora.com
-servarr.com
-sfdcopens.com
-sharefile.com
-sharefile.io
-shinyhardware.co.uk
-shop.gameloft.com
-sigsauer.com
-singlekey-id.com
-site.com
-siteground.com
-sketchup.com
-sky.com
-skycdp.com
-smartbear.co
-smartbear.com
-smartdeploy.com
-snapgametech.com
-snapgene.com
-snort.org
-snyk.io
-solarwinds.com
-sonara.ai
-sora.com
-spacelift.io
-spiceworks.com
-spitfireaudio.com
-spotify.com
-squadbustersgame.com
-squareup.com
-strava.com
-streamable.com
-suggestqueries.google.com
-supercell.com
-support.anydesk.com
-support.xerox.com
-surveymonkey.com
-swagger.io
-swapd.co
-synoforum.com
-syslog-ng.com
-tableau.com
-talosintelligence.com
-teamviewer.com
-techbargains.com
-telemetr.io
-tempmail.plus
-terraform.io
-theaudiodb.com
-themoviedb.org
-ti.com
-tidal.com
-timberland.de
-tmdb-image-prod.b-cdn.net
-tmdb.com
-tmdb.org
-toolbox.app
-torrenteditor.com
-trae.ai
-trailblazer.me
-trailhead.com
-transferwise.com
-tria.ge
-truthsocial.com
-tsmc.com
-tutanota.com
-typing.com
-uaudio.com
-uizard.io
-unscreen.com
-upwork.com
-usher.ttvnw.net
-v.vrv.co
-vagrantcloud.com
-veeam.com
-verificationacademy.com
-vmware.com
-vod-fy.crunchyrollcdn.com
-volkswagen-classic-parts.com
-vyos.io
-w.atwiki.jp
-walmart.com
-watchguard.com
-watermarkremover.io
-wbagora.com
-wbgames.com
-wdfiles.com
-weather.com
-webnames.ca
-weebly.com
-wetransfer.com
-widgetapp.stream
-wikidot.com
-windsurf.com
-wise.com
-wpengine.com
-wunderground.com
-www3.corsair.com
-x-minus.pro
-x.ai
-xiaomi.eu
-xrite.com
-xsts.auth.xboxlive.com
-xtracloud.net
-yeggi.com
-youtrack.cloud
-zapier.com
-zedge.net
-zerossl.com
 ZM_INSTALLER_EOF
 cat > '/usr/share/zm-redbtn/lists/discord.lst' << 'ZM_INSTALLER_EOF'
 104.16.0.0/12
@@ -8070,7 +7969,82 @@ cat > '/usr/share/zm-redbtn/lists/twitter_x.lst' << 'ZM_INSTALLER_EOF'
 202.160.128.0/22
 208.91.196.0/23
 ZM_INSTALLER_EOF
+rm -f /usr/share/zm-redbtn/lists/geoblock.lst
 chmod 0644 /usr/share/zm-redbtn/services.conf /usr/share/zm-redbtn/lists/*.lst
+cat > '/etc/init.d/zm-geodns' << 'ZM_INSTALLER_EOF'
+#!/bin/sh /etc/rc.common
+# DNS для ИИ-сервисов красной кнопки Zapret Manager: свой экземпляр https-dns-proxy на
+# 127.0.0.1:5055 и файл dnsmasq, который отдаёт ему ТОЛЬКО домены из списка
+# /etc/zm-redbtn/geo-domains.lst. Остальной DNS роутера не меняется.
+START=99
+STOP=10
+USE_PROCD=1
+
+RES=/etc/zm-redbtn/geo.resolver
+DOM=/etc/zm-redbtn/geo-domains.lst
+PORT=5055
+
+confdir() {
+	local d
+	d=$(sed -n 's/^conf-dir=\([^,]*\).*/\1/p' /var/etc/dnsmasq.conf.* 2>/dev/null | head -n 1)
+	[ -n "$d" ] || d=/tmp/dnsmasq.d
+	echo "$d"
+}
+
+dnsmasq_on() {
+	local d f
+	d="$(confdir)"; f="$d/zm-geo.conf"
+	mkdir -p "$d"
+	# По двадцать доменов в строке: dnsmasq понимает server=/a/b/c/адрес.
+	awk -v p="$PORT" 'NF { l = l "/" $1; if (++n == 20) { print "server=" l "/127.0.0.1#" p; l = ""; n = 0 } }
+		END { if (n) print "server=" l "/127.0.0.1#" p }' "$DOM" > "$f.tmp"
+	if cmp -s "$f.tmp" "$f"; then rm -f "$f.tmp"; else mv "$f.tmp" "$f"; /etc/init.d/dnsmasq restart >/dev/null 2>&1; fi
+}
+
+dnsmasq_off() {
+	local f
+	f="$(confdir)/zm-geo.conf"
+	[ -f "$f" ] || return 0
+	rm -f "$f"
+	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+}
+
+start_service() {
+	[ -s "$RES" ] && [ -s "$DOM" ] && [ -x /usr/sbin/https-dns-proxy ] || return 0
+	. "$RES"
+	procd_open_instance
+	procd_set_param command /usr/sbin/https-dns-proxy -a 127.0.0.1 -p "$PORT" -4 \
+		-b "$GEO_BOOT" -r "$GEO_URL" -u nobody -g nogroup
+	procd_set_param respawn 3600 5 0
+	procd_close_instance
+	dnsmasq_on
+}
+
+stop_service() {
+	dnsmasq_off
+}
+ZM_INSTALLER_EOF
+chmod 0755 /etc/init.d/zm-geodns
+cat > '/usr/share/zm-redbtn/doh.conf' << 'ZM_INSTALLER_EOF'
+# Резолверы для ИИ-сервисов. Пул geo — из BigRedButton (gitlab.com/xyzmean/brb) плюс dns.yo1nk.app.
+# Формат: id|название|ссылка DoH|bootstrap-серверы|роль. Берётся самый быстрый geo, чей прокси отвечает.
+yo1nk|dns.yo1nk.app|https://dns.yo1nk.app/dns-query|1.1.1.1,77.88.8.8|geo
+malw|dns.malw.link (снимает геоблок)|https://dns.malw.link/dns-query|1.1.1.1,8.8.8.8,77.88.8.8|geo
+malw_cf|dns.malw.link через Cloudflare|https://5u35p8m9i7.cloudflare-gateway.com/dns-query|1.1.1.1,8.8.8.8,77.88.8.8|geo
+comss|Comss.one|https://dns.comss.one/dns-query|1.1.1.1,77.88.8.8|geo
+comss_ru|Comss RU|https://dns.comss.ru/dns-query|1.1.1.1,77.88.8.8|geo
+mafioznik|Mafioznik|https://dns.mafioznik.com/dns-query|1.1.1.1,77.88.8.8|geo
+mafioznik_xyz|Mafioznik XYZ|https://dns.mafioznik.xyz/dns-query|1.1.1.1,77.88.8.8|geo
+astracat|AstraCat|https://dns.astrakat.ru/dns-query|1.1.1.1,77.88.8.8|geo
+astracat_8443|AstraCat :8443|https://dns.astrakat.ru:8443/dns-query|1.1.1.1,77.88.8.8|geo
+geohide|GeoHide :444|https://dns.geohide.ru:444/dns-query|1.1.1.1,77.88.8.8|geo
+geohide_8443|GeoHide :8443|https://dns.geohide.ru:8443/dns-query|1.1.1.1,77.88.8.8|geo
+xbox|Xbox DNS|https://xbox-dns.ru/dns-query|1.1.1.1,77.88.8.8|geo
+cloudflare|Cloudflare|https://cloudflare-dns.com/dns-query|1.1.1.1,1.0.0.1|plain
+google|Google|https://dns.google/dns-query|8.8.8.8,8.8.4.4|plain
+yandex|Яндекс (запасной, работает изнутри страны)|https://common.dot.dns.yandex.net/dns-query|77.88.8.8,77.88.8.1|fallback
+ZM_INSTALLER_EOF
+chmod 0644 /usr/share/zm-redbtn/doh.conf
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
 chmod 0755 /www/luci-static/resources/view/zapret-manager
