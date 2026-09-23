@@ -15403,8 +15403,8 @@ body.zmw-locked .zmw-shell { filter: blur(6px); pointer-events: none; }
 .zmw-nav-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .zmw-nav-item.zmw-active { background: var(--grad-soft); color: var(--text); }
 .zmw-nav-item.zmw-active::before {
-	content: ""; position: absolute; left: -14px; top: 10px; bottom: 10px; width: 4px;
-	border-radius: 0 4px 4px 0; background: var(--grad);
+	content: ""; position: absolute; left: -9px; top: 10px; bottom: 10px; width: 4px;
+	border-radius: 4px; background: var(--grad);
 }
 .zmw-nav-item.zmw-active .zmw-nav-ico {
 	background: var(--grad); color: #fff; border-color: transparent;
