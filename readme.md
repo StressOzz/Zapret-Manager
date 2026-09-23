@@ -116,6 +116,20 @@
 
 ---
 
+## 🔹 Запуск менеджера в LuCI или в браузере
+
+Для запуска **Zapret Manager** в **LuСI** или **в браузере**, выполните в **SSH**
+```
+sh <(wget -qO - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/ZapretManager_LuCI.sh)
+```
+или - запустите основной скрипт → Системное меню → Установить **Zapret Manager для LuCI**
+
+После установки, скрипт будет доступен в браузере по ссылке **http://192.168.1.1:7788/** (192.168.1.1 это IP вашего роутера)
+
+в **LuCI** вкладка **Services** → **Zapret Manager**
+
+---
+
 ## 🔹 Запуск менеджера
 
 Подключитесь по **SSH** к роутеру и выполните команду:
@@ -137,19 +151,6 @@ rm -f /tmp/ZMS.sh && wget -T 10 -O /tmp/ZMS.sh "https://v4.gh-proxy.org/raw.gith
 ```
 zms
 ```
-
----
-
-## 🔹 Запуск менеджера в LuCI
-
-Для запуска **Zapret Manager** в **LuСI**, выполните в **SSH**
-```
-sh <(wget -qO - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/ZapretManager_LuCI.sh)
-```
-
-или - запустите основной скрипт → Системное меню → Установить Zapret Manager для LuCI
-
-После установки, скрипт будет доступен в **LuCI** вкладка **Services** → **Zapret Manager**
 
 ---
 
