@@ -1321,7 +1321,7 @@ rm -rf /opt/zapret-manager-luci /usr/libexec/rpcd/zapret-manager \
 	/www/luci-static/resources/bytetube \
 	/www/luci-static/resources/view/bytetube \
 	/tmp/zapret-manager-luci /tmp/luci-indexcache* /tmp/luci-modulecache/* \
-	/www/zm /www/zm-webui.html 2>/dev/null
+	/www/zm /www/zm-webui.html /usr/share/zm-redbtn 2>/dev/null
 uci -q delete uhttpd.zmweb && uci -q commit uhttpd
 /etc/init.d/rpcd restart >/dev/null 2>&1
 /etc/init.d/uhttpd restart >/dev/null 2>&1
@@ -2194,6 +2194,10 @@ test_action() {
 				v|flowseal|v_flowseal|youtube|current) ;;
 				*) echo '{"error":"неизвестный режим теста"}'; return 1 ;;
 			esac
+			if [ -f "$JOBS_DIR/redbtn.pid" ] && kill -0 "$(cat "$JOBS_DIR/redbtn.pid" 2>/dev/null)" 2>/dev/null; then
+				echo '{"error":"идёт подбор красной кнопки — дождитесь его окончания"}'
+				return 1
+			fi
 			job_start strategy_test do_test_run "$mode"
 			;;
 		stop)
@@ -3049,7 +3053,7 @@ _bytetube_fetch() { # URL OUT
 
 health() {
 	# Быстрая сводка без сетевых запросов: 0 — не установлено, 1 — работает, 2 — установлено, но не работает
-	local zr=0 zr2=0 bt=0 tg=0 mx=0 doh=0 hs=0 inst=0 bad=0 out=""
+	local zr=0 zr2=0 bt=0 tg=0 mx=0 doh=0 hs=0 inst=0 bad=0 out="" rb=0
 	if [ -f /etc/init.d/zapret ]; then zr=2; pgrep -f "/opt/zapret/" >/dev/null 2>&1 && zr=1; fi
 	if [ -f /etc/init.d/zapret2 ]; then zr2=2; /etc/init.d/zapret2 status >/dev/null 2>&1 && zr2=1; fi
 	if [ -x /usr/bin/bytetube ]; then
@@ -3073,8 +3077,13 @@ health() {
 	if [ "$doh" = "2" ]; then pidof https-dns-proxy >/dev/null 2>&1 && doh=1; fi
 	out=$(hosts_status 2>/dev/null)
 	case "$out" in *'"enabled":true'*|*'"geohide":"'[a-z]*) hs=1 ;; esac
-	printf '{"zapret":%s,"zapret2":%s,"bytetube":%s,"tg":%s,"mixomo":%s,"doh":%s,"hosts":%s}\n' \
-		"$zr" "$zr2" "$bt" "$tg" "$mx" "$doh" "$hs"
+	if [ -s /etc/zm-redbtn/owned ]; then
+		rb=1
+		grep -q '|none$' /etc/zm-redbtn/services 2>/dev/null && rb=2
+		if grep -qx 'steer-spec' /etc/zm-redbtn/owned; then /etc/init.d/steer running >/dev/null 2>&1 || rb=2; fi
+	fi
+	printf '{"zapret":%s,"zapret2":%s,"bytetube":%s,"tg":%s,"mixomo":%s,"doh":%s,"hosts":%s,"redbtn":%s}\n' \
+		"$zr" "$zr2" "$bt" "$tg" "$mx" "$doh" "$hs" "$rb"
 }
 
 bytetube_installed() {
@@ -4702,6 +4711,856 @@ doh_set() {
 }
 
 
+# ───────────────────────── Красная кнопка ─────────────────────────
+#
+# Автоподбор обхода по сервисам: роутер сам проверяет каждый сервис и берёт ему самый дешёвый
+# работающий способ. Идея и каталог сервисов — из BigRedButton (gitlab.com/xyzmean/brb), но
+# ступень обхода DPI здесь своя, менеджерская: стратегию подбирает тестер Zapret Manager
+# (do_test_run) и применяет её его же функциями (strategy_set_*). Своего перебора с отдельными
+# экземплярами nfqws, как было в brb, здесь нет — у zapret на роутере один хозяин, и это
+# менеджер.
+#
+# ЛЕСТНИЦА, по возрастанию цены:
+#   1. напрямую        — сервис открывается и без обхода;
+#   2. через Zapret    — открывается при общей стратегии zapret (её подбирает тестер ZM);
+#   3. через WARP      — туннель AmneziaWG к Cloudflare, трафик сервиса уводит движок steer;
+#   4. через веб-сокет — только Telegram: микропакет tgws (его же ставит страница TG WS Proxy).
+#
+# ЧЕГО КНОПКА НЕ ДЕЛАЕТ, и это исправления против brb:
+#   - не трогает DNS роутера (brb выкидывал чужие секции https-dns-proxy и ставил dnsmasq
+#     noresolv=1, а при удалении не возвращал ничего). DNS — страница «DNS over HTTPS»;
+#     если её перенаправление порта 53 спорит с резолвером движка, кнопка это показывает и
+#     чинит только по нажатию;
+#   - не пишет поверх чужой спеки steer (splify2 или настроенной руками);
+#   - не делает хуже: если подобранная стратегия открыла меньше сервисов, чем было, прежняя
+#     настройка zapret возвращается;
+#   - заводит туннелю зону firewall с NAT: без неё проба с самого роутера проходила, а
+#     устройства сети через туннель не ходили;
+#   - записывает всё, что поставила и поменяла (RB_OWNED), и снимает ровно это при удалении.
+
+RB_DIR="/etc/zm-redbtn"
+RB_SHARE="/usr/share/zm-redbtn"
+RB_RUN="$JOBS_DIR/redbtn"
+RB_OWNED="$RB_DIR/owned"
+RB_RESULTS="$RB_DIR/services"
+RB_LAST="$RB_DIR/last"
+RB_STOP_FLAG="$RB_RUN/stop"
+RB_PHASE_FILE="$RB_RUN/phase"
+RB_WARP_CONF="$RB_DIR/warp.conf"
+RB_WARP_IF="zmwarp"
+RB_WARP_ZONE="zmwarp"
+RB_STEER_VER="1.5.7"
+RB_STEER_SPEC="/etc/steer/spec.json"
+RB_STEER_URLS="https://github.com/xyzmean/steer/releases/download/v@VER@ https://gitlab.com/xyzmean/steer/-/raw/dist https://raw.githubusercontent.com/xyzmean/steer/dist"
+RB_AWG_MIRROR="https://gitlab.com/xyzmean/brb/-/raw/main/deps/awg"
+# Полоса локальных портов для проверки «напрямую». Пакетам из неё ставится бит 0x40000000 —
+# тот самый, по которому общий zapret пропускает пакет мимо себя (DESYNC_MARK). Так проба
+# «без обхода» не требует останавливать zapret всей сети.
+RB_LANE_DIRECT="21000-21199"
+# Российские колонии Cloudflare: туннель через них геоблок не снимает, берутся только в запас.
+RB_RU_COLOS="DME SVX LED KJA REN OVB KZN AER VVO"
+RB_PARALLEL=8
+RB_BAR=60
+
+mkdir -p "$RB_RUN" 2>/dev/null
+
+_rb_say() { echo "==> $*"; }
+_rb_warn() { echo "!! $*"; }
+_rb_phase() { printf '%s\n' "$1" > "$RB_PHASE_FILE"; }
+_rb_stopped() { [ -f "$RB_STOP_FLAG" ]; }
+_rb_own() { mkdir -p "$RB_DIR"; grep -qxF "$1" "$RB_OWNED" 2>/dev/null || echo "$1" >> "$RB_OWNED"; }
+_rb_owns() { grep -qxF "$1" "$RB_OWNED" 2>/dev/null; }
+_rb_running() { [ -f "$JOBS_DIR/redbtn.pid" ] && kill -0 "$(cat "$JOBS_DIR/redbtn.pid" 2>/dev/null)" 2>/dev/null; }
+_rb_test_running() { [ -f "$JOBS_DIR/strategy_test.pid" ] && kill -0 "$(cat "$JOBS_DIR/strategy_test.pid" 2>/dev/null)" 2>/dev/null; }
+
+_rb_svc_ids() { grep -v '^#' "$RB_SHARE/services.conf" 2>/dev/null | cut -d'|' -f1 | grep .; }
+_rb_svc_field() { grep "^$1|" "$RB_SHARE/services.conf" 2>/dev/null | head -n1 | cut -d'|' -f"$2"; }
+
+# ── что мешает кнопке ──
+#
+# splify2 держит ту же спеку steer и сам ведёт туннели и списки: два хозяина одной спеки
+# затирали бы друг друга. Zapret2 несовместим с тестером zapret.
+_rb_blocker() {
+	if [ -x /etc/init.d/splify2 ] || ubus list splify2 >/dev/null 2>&1; then echo splify2; return; fi
+	if [ -f /etc/init.d/zapret2 ] && [ ! -f "$EXPERT_MODE_FILE" ]; then echo zapret2; return; fi
+	if _rb_spec_foreign; then echo steer; return; fi
+	echo ""
+}
+
+# Спека steer чужая: она есть, в ней есть каналы, и писали её не мы.
+_rb_spec_foreign() {
+	[ -s "$RB_STEER_SPEC" ] || return 1
+	_rb_owns "steer-spec" && return 1
+	grep -q '"channels"[[:space:]]*:[[:space:]]*\[[[:space:]]*{' "$RB_STEER_SPEC"
+}
+
+# ── пробы ──
+#
+# Успех — curl вернул 0, сервер ответил кодом (не 000 и не 451) и в теле нет признака отказа.
+# Без проверки кода brb считал «открылось» и заглушку провайдера, и 403.
+_rb_probe_nft_up() {
+	nft delete table inet zm_rb_probe >/dev/null 2>&1
+	nft -f - >/dev/null 2>&1 <<-RBNFT
+	table inet zm_rb_probe {
+		chain out {
+			type route hook output priority mangle - 5; policy accept;
+			tcp sport $RB_LANE_DIRECT meta mark set meta mark | 0x40000000
+			udp sport $RB_LANE_DIRECT meta mark set meta mark | 0x40000000
+		}
+	}
+	RBNFT
+}
+_rb_probe_nft_down() { nft delete table inet zm_rb_probe >/dev/null 2>&1; }
+
+_rb_check_one() { # ХОСТ РЕЖИМ(as_is|direct|warp) ОТКАЗ ФАЙЛ_УСПЕХОВ
+	local host="$1" mode="$2" deny="$3" okf="$4" body res code size rc extra=""
+	body="$RB_RUN/body.$$.$host"
+	case "$mode" in
+		direct) extra="--local-port $RB_LANE_DIRECT" ;;
+		warp)   extra="--interface $RB_WARP_IF" ;;
+	esac
+	res=$(curl -sL $extra --connect-timeout 4 --max-time 8 --speed-time 4 --speed-limit 1 --range 0-65535 \
+		-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o "$body" -w '%{http_code} %{size_download}' "https://$host/" 2>/dev/null)
+	rc=$?
+	code="${res%% *}"; size="${res##* }"
+	# Тайм-аут посреди тела (28) считается ответом, только если пришло больше 32 КБ: сервер без
+	# поддержки --range отдаёт страницу целиком, и на медленном канале она не успевает. Меньшее —
+	# отказ: блокировка «16-20 КБ» выглядит именно так — код 200, пара десятков килобайт и тишина.
+	[ "$rc" = 28 ] && [ "${size:-0}" -gt 32768 ] 2>/dev/null && rc=0
+	if [ "$rc" = 0 ] && [ -n "$code" ] && [ "$code" != "000" ] && [ "$code" != "451" ]; then
+		if [ -n "$deny" ] && [ -s "$body" ] && printf '%s\n' "$deny" | tr ',' '\n' | grep -v '^$' | grep -qiFf - "$body"; then
+			:
+		else
+			echo "$host" >> "$okf"
+		fi
+	fi
+	rm -f "$body"
+}
+
+# Проверить набор хостов параллельно, печатает хосты, которые открылись.
+_rb_check_hosts() { # "хост хост..." РЕЖИМ ОТКАЗ
+	local hosts="$1" mode="$2" deny="$3" okf run=0 h
+	okf="$RB_RUN/ok.$$.$(date +%s)$RANDOM"
+	: > "$okf"
+	for h in $hosts; do
+		_rb_check_one "$h" "$mode" "$deny" "$okf" &
+		run=$((run + 1))
+		if [ "$run" -ge "$RB_PARALLEL" ]; then wait; run=0; fi
+	done
+	wait
+	cat "$okf"
+	rm -f "$okf"
+}
+
+# Вердикт по сервису: открылись ВСЕ обязательные цели и не меньше RB_BAR % дополнительных.
+# Одного youtube.com мало — страница открывается, а видео с googlevideo нет.
+_rb_check_service() { # ID РЕЖИМ -> код 0, если сервис работает
+	local id="$1" mode="$2" must extra deny ok h n_extra=0 n_ok=0
+	must=$(_rb_svc_field "$id" 5 | tr ',' ' ')
+	extra=$(_rb_svc_field "$id" 6 | tr ',' ' ')
+	deny=$(_rb_svc_field "$id" 7)
+	ok=$(_rb_check_hosts "$must $extra" "$mode" "$deny")
+	for h in $must; do printf '%s\n' "$ok" | grep -qxF "$h" || return 1; done
+	for h in $extra; do
+		n_extra=$((n_extra + 1))
+		printf '%s\n' "$ok" | grep -qxF "$h" && n_ok=$((n_ok + 1))
+	done
+	[ "$n_extra" -eq 0 ] && return 0
+	[ $((n_ok * 100)) -ge $((n_extra * RB_BAR)) ]
+}
+
+# Проверить все сервисы (кроме Telegram), печатает «id ok|fail» по строке.
+_rb_check_all() { # РЕЖИМ
+	local id
+	for id in $(_rb_svc_ids); do
+		[ "$id" = telegram ] && continue
+		if _rb_check_service "$id" "$1"; then echo "$id ok"; else echo "$id fail"; fi
+	done
+}
+
+_rb_count_ok() { printf '%s\n' "$1" | grep -c ' ok$'; }
+_rb_failed() { printf '%s\n' "$1" | awk '$2=="fail"{print $1}'; }
+
+_rb_print_checks() { # ТАБЛИЦА ПОДПИСЬ_OK
+	local id st
+	printf '%s\n' "$1" | while read -r id st; do
+		[ -n "$id" ] || continue
+		if [ "$st" = ok ]; then echo "[ OK ] $(_rb_svc_field "$id" 2) — $2"
+		else echo "[FAIL] $(_rb_svc_field "$id" 2)"; fi
+	done
+}
+
+# ── пакеты ──
+
+_rb_arch() { awk -F\' '/DISTRIB_ARCH/ {print $2}' /etc/openwrt_release; }
+_rb_release() { awk -F\' '/DISTRIB_RELEASE/ {print $2}' /etc/openwrt_release; }
+_rb_target() { awk -F\' '/DISTRIB_TARGET/ {print $2}' /etc/openwrt_release | tr '/' '_'; }
+
+# Скачать и проверить, что это пакет, а не HTML-страница ошибки с кодом 200.
+_rb_fetch_pkg() { # URL ФАЙЛ
+	rm -f "$2"
+	curl -fsSL --connect-timeout 8 --max-time 120 -o "$2" "$1" 2>/dev/null || { rm -f "$2"; return 1; }
+	[ -s "$2" ] || { rm -f "$2"; return 1; }
+	if head -c 512 "$2" | grep -qi '<html\|<!doctype'; then rm -f "$2"; return 1; fi
+	return 0
+}
+
+_rb_steer_ver() { steer --version 2>/dev/null | head -n1 | awk '{print $2}'; }
+
+_rb_install_steer() {
+	if command -v steer >/dev/null 2>&1; then
+		_rb_say "Движок steer уже установлен: $(_rb_steer_ver)"
+		return 0
+	fi
+	local arch file tmp base url ver
+	arch="$(_rb_arch)"
+	[ -n "$arch" ] || { echo "ОШИБКА: не удалось определить архитектуру роутера"; return 1; }
+	tmp="$RB_RUN/steer.$RAZ"
+	_rb_say "Устанавливаем движок steer $RB_STEER_VER"
+	$UPDATE >/dev/null 2>&1
+	for base in $RB_STEER_URLS; do
+		ver="$RB_STEER_VER"
+		url="$(echo "$base" | sed "s/@VER@/$ver/")/steer-${ver}-1_${arch}.${RAZ}"
+		if ! _rb_fetch_pkg "$url" "$tmp"; then
+			# На зеркале может лежать выпуск на шаг старше — берём тот, что там есть.
+			case "$base" in *@VER@*) continue ;; esac
+			ver=$(curl -fsSL --connect-timeout 8 --max-time 15 "$base/VERSION" 2>/dev/null | tr -d '[:space:]')
+			echo "$ver" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || continue
+			_rb_fetch_pkg "$base/steer-${ver}-1_${arch}.${RAZ}" "$tmp" || continue
+		fi
+		if $INSTALL "$tmp" >/dev/null 2>&1; then
+			rm -f "$tmp"
+			_rb_own "pkg steer"
+			_rb_say "Движок steer $ver установлен"
+			return 0
+		fi
+	done
+	rm -f "$tmp"
+	echo "ОШИБКА: не удалось установить движок steer"
+	return 1
+}
+
+_rb_awg_loaded() { grep -q '^amneziawg ' /proc/modules 2>/dev/null || [ -d /sys/module/amneziawg ]; }
+
+_rb_install_awg() {
+	if _rb_awg_loaded && command -v awg >/dev/null 2>&1; then return 0; fi
+	if ! _pkg_is_installed kmod-amneziawg || ! command -v awg >/dev/null 2>&1; then
+		_rb_say "Устанавливаем AmneziaWG"
+		local rel arch tgt p base ok
+		rel="$(_rb_release)"; arch="$(_rb_arch)"; tgt="$(_rb_target)"
+		$UPDATE >/dev/null 2>&1
+		for base in "${GH_MAIN}/2Grey/awg-openwrt/releases/download/v$rel" "$RB_AWG_MIRROR/$rel"; do
+			ok=1
+			for p in kmod-amneziawg amneziawg-tools; do
+				_pkg_is_installed "$p" && continue
+				if _rb_fetch_pkg "$base/${p}_v${rel}_${arch}_${tgt}.${RAZ}" "$RB_RUN/$p.$RAZ" &&
+				   $INSTALL "$RB_RUN/$p.$RAZ" >/dev/null 2>&1; then
+					_rb_own "pkg $p"
+				else
+					ok=0
+				fi
+				rm -f "$RB_RUN/$p.$RAZ"
+			done
+			[ "$ok" = 1 ] && break
+		done
+		# Обработчик для веб-интерфейса — чтобы туннель было видно в «Сеть → Интерфейсы».
+		# Без него всё работает, поэтому неудача здесь не ошибка.
+		if [ "$ok" = 1 ] && ! _pkg_is_installed luci-proto-amneziawg; then
+			_rb_fetch_pkg "$base/luci-proto-amneziawg_v${rel}_${arch}_${tgt}.${RAZ}" "$RB_RUN/lpa.$RAZ" &&
+				$INSTALL "$RB_RUN/lpa.$RAZ" >/dev/null 2>&1 && _rb_own "pkg luci-proto-amneziawg"
+			rm -f "$RB_RUN/lpa.$RAZ"
+		fi
+	fi
+	# Установщик пакета модуль в ядро не грузит, а /etc/init.d/kmod грузит его только при
+	# загрузке: без modprobe интерфейс не поднимается до перезагрузки роутера.
+	_rb_awg_loaded || modprobe amneziawg >/dev/null 2>&1
+	if ! _rb_awg_loaded || ! command -v awg >/dev/null 2>&1; then
+		echo "ОШИБКА: не удалось установить AmneziaWG"
+		return 1
+	fi
+	# netifd узнаёт о протоколе amneziawg только при своём запуске.
+	if ! ubus call network get_proto_handlers 2>/dev/null | grep -q '"amneziawg"'; then
+		_rb_say "Перезапускаем сеть, чтобы она узнала протокол AmneziaWG"
+		/etc/init.d/network restart >/dev/null 2>&1
+		sleep 8
+	fi
+	return 0
+}
+
+# ── WARP ──
+
+_rb_warp_field() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$RB_WARP_CONF" | head -n1; }
+
+_rb_warp_register() {
+	[ -s "$RB_WARP_CONF" ] && return 0
+	mkdir -p "$RB_DIR"
+	# Тот же генератор, что у страницы Mixomo, но в свой файл: чужой /root/WARP.conf не трогаем.
+	( MIXOMO_WARP_CONF="$RB_WARP_CONF"; do_mixomo_warp_register manual ) || return 1
+	chmod 600 "$RB_WARP_CONF"
+	[ -n "$(_rb_warp_field PrivateKey)" ] && [ -n "$(_rb_warp_field PublicKey)" ]
+}
+
+# Кандидаты в точку входа: адреса Cloudflare, ответившие быстрее всех по HTTP. Это только
+# отсев — годность точки решает настоящее рукопожатие туннеля и данные через него.
+_rb_warp_candidates() {
+	local prefixes="188.114.96. 188.114.97. 188.114.98. 188.114.99. 162.159.192. 162.159.193. 162.159.195. 8.34.146. 8.39.214. 8.39.204. 8.6.112. 8.35.211. 8.39.125. 8.47.69."
+	local pings="$RB_RUN/pings" ip count=0
+	rm -f "$pings"
+	for ip in $(awk -v prefixes="$prefixes" 'BEGIN { srand(); n = split(prefixes, arr, " "); for (i = 0; i < 40; i++) { print arr[int(rand() * n) + 1] int(rand() * 256) } }'); do
+		(
+			t=$(curl -s --connect-timeout 2 -o /dev/null -w '%{time_total}' -H "Host: trace.cloudflare.com" "http://$ip/cdn-cgi/trace" 2>/dev/null) || exit 0
+			[ -n "$t" ] && echo "$t $ip" | awk '{printf "%d %s\n", $1 * 1000, $2}' >> "$pings"
+		) &
+		count=$((count + 1))
+		[ $((count % 20)) -eq 0 ] && wait
+	done
+	wait
+	[ -s "$pings" ] && sort -n "$pings" | head -n 5 | awk '{print $2}'
+	echo "engage.cloudflareclient.com"
+}
+
+_rb_warp_iface_write() { # ХОСТ ПОРТ
+	local priv addr peer
+	priv="$(_rb_warp_field PrivateKey)"
+	addr="$(_rb_warp_field Address | tr ',' '\n' | sed 's/[[:space:]]//g' | grep -v ':' | head -n1)"
+	peer="$(_rb_warp_field PublicKey)"
+	case "$addr" in */*) ;; *) addr="$addr/32" ;; esac
+	uci -q delete "network.$RB_WARP_IF"
+	uci -q delete "network.${RB_WARP_IF}_peer"
+	uci set "network.$RB_WARP_IF=interface"
+	uci set "network.$RB_WARP_IF.proto=amneziawg"
+	uci set "network.$RB_WARP_IF.private_key=$priv"
+	uci add_list "network.$RB_WARP_IF.addresses=$addr"
+	uci set "network.$RB_WARP_IF.mtu=1280"
+	uci set "network.$RB_WARP_IF.awg_jc=$MIXOMO_AWG_JC"
+	uci set "network.$RB_WARP_IF.awg_jmin=$MIXOMO_AWG_JMIN"
+	uci set "network.$RB_WARP_IF.awg_jmax=$MIXOMO_AWG_JMAX"
+	uci set "network.$RB_WARP_IF.awg_s1=$MIXOMO_AWG_S1"
+	uci set "network.$RB_WARP_IF.awg_s2=$MIXOMO_AWG_S2"
+	uci set "network.$RB_WARP_IF.awg_h1=$MIXOMO_AWG_H1"
+	uci set "network.$RB_WARP_IF.awg_h2=$MIXOMO_AWG_H2"
+	uci set "network.$RB_WARP_IF.awg_h3=$MIXOMO_AWG_H3"
+	uci set "network.$RB_WARP_IF.awg_h4=$MIXOMO_AWG_H4"
+	uci set "network.$RB_WARP_IF.awg_i1=$MIXOMO_AWG_I1"
+	uci set "network.${RB_WARP_IF}_peer=amneziawg_$RB_WARP_IF"
+	uci set "network.${RB_WARP_IF}_peer.description=WARP"
+	uci set "network.${RB_WARP_IF}_peer.public_key=$peer"
+	uci add_list "network.${RB_WARP_IF}_peer.allowed_ips=0.0.0.0/0"
+	# Маршрутов в главную таблицу не ставим: трафик в туннель уводит движок, остальное
+	# идёт как шло.
+	uci set "network.${RB_WARP_IF}_peer.route_allowed_ips=0"
+	uci set "network.${RB_WARP_IF}_peer.persistent_keepalive=25"
+	uci set "network.${RB_WARP_IF}_peer.endpoint_host=$1"
+	uci set "network.${RB_WARP_IF}_peer.endpoint_port=$2"
+	uci commit network
+	_rb_own "net $RB_WARP_IF"
+}
+
+# Зона firewall туннеля: NAT и выравнивание MSS. Без NAT устройства сети уходят в туннель
+# со своими адресами из LAN, и ответы не возвращаются.
+_rb_warp_zone() {
+	if [ "$(uci -q get "firewall.$RB_WARP_ZONE")" != "zone" ]; then
+		uci set "firewall.$RB_WARP_ZONE=zone"
+		uci set "firewall.$RB_WARP_ZONE.name=$RB_WARP_ZONE"
+		uci add_list "firewall.$RB_WARP_ZONE.network=$RB_WARP_IF"
+		uci set "firewall.$RB_WARP_ZONE.input=REJECT"
+		uci set "firewall.$RB_WARP_ZONE.output=ACCEPT"
+		uci set "firewall.$RB_WARP_ZONE.forward=REJECT"
+		uci set "firewall.$RB_WARP_ZONE.masq=1"
+		uci set "firewall.$RB_WARP_ZONE.mtu_fix=1"
+		uci set "firewall.${RB_WARP_ZONE}_fwd=forwarding"
+		uci set "firewall.${RB_WARP_ZONE}_fwd.src=lan"
+		uci set "firewall.${RB_WARP_ZONE}_fwd.dest=$RB_WARP_ZONE"
+		uci commit firewall
+		_rb_own "fw $RB_WARP_ZONE"
+		/etc/init.d/firewall reload >/dev/null 2>&1
+	fi
+}
+
+_rb_warp_handshake() { # ждать рукопожатия до 10 с
+	local i=0 hs
+	while [ "$i" -lt 10 ]; do
+		hs=$(awg show "$RB_WARP_IF" latest-handshakes 2>/dev/null | awk '{print $2}' | head -n1)
+		[ -n "$hs" ] && [ "$hs" != 0 ] && return 0
+		ping -c1 -W1 -I "$RB_WARP_IF" 1.1.1.1 >/dev/null 2>&1
+		i=$((i + 1))
+	done
+	return 1
+}
+
+# Колония Cloudflare ИЗНУТРИ туннеля. Ответ означает, что данные через туннель идут, а не
+# только прошло рукопожатие.
+_rb_warp_colo() {
+	# По https: http-вариант этого адреса теперь отвечает переадресацией без тела.
+	curl -s --interface "$RB_WARP_IF" --connect-timeout 5 --max-time 8 https://1.1.1.1/cdn-cgi/trace 2>/dev/null |
+		sed -n 's/^colo=//p' | head -n1
+}
+
+_rb_warp_is_ru() { case " $RB_RU_COLOS " in *" $1 "*) return 0 ;; esac; return 1; }
+
+_rb_warp_try() { # ХОСТ ПОРТ -> печатает колонию
+	local colo
+	uci set "network.${RB_WARP_IF}_peer.endpoint_host=$1"
+	uci set "network.${RB_WARP_IF}_peer.endpoint_port=$2"
+	uci commit network
+	ifdown "$RB_WARP_IF" >/dev/null 2>&1
+	sleep 1
+	ifup "$RB_WARP_IF" >/dev/null 2>&1
+	sleep 3
+	_rb_warp_handshake || return 1
+	colo="$(_rb_warp_colo)"
+	[ -n "$colo" ] || return 1
+	echo "$colo"
+}
+
+_rb_warp_up() {
+	_rb_install_awg || return 1
+	_rb_say "Получаем ключи WARP"
+	_rb_warp_register || { echo "ОШИБКА: не удалось получить ключи WARP"; return 1; }
+	local host port colo spare="" cand
+	[ "$(uci -q get "network.$RB_WARP_IF.proto")" = amneziawg ] || _rb_warp_iface_write engage.cloudflareclient.com 4500
+	_rb_warp_zone
+	# Прежняя точка работает — не перебираем заново.
+	host="$(uci -q get "network.${RB_WARP_IF}_peer.endpoint_host")"
+	port="$(uci -q get "network.${RB_WARP_IF}_peer.endpoint_port")"
+	ifup "$RB_WARP_IF" >/dev/null 2>&1
+	sleep 3
+	if _rb_warp_handshake && colo="$(_rb_warp_colo)" && [ -n "$colo" ] && ! _rb_warp_is_ru "$colo"; then
+		_rb_say "Туннель WARP работает, колония $colo"
+		echo "$colo" > "$RB_DIR/warp.colo"
+		return 0
+	fi
+	_rb_say "Подбираем точку входа WARP"
+	cand="$(_rb_warp_candidates)"
+	# Порты 4500 и 2408 выколоты из игрового фильтра zapret — туннель не попадёт под обработку.
+	for port in 4500 2408; do
+		for host in $cand; do
+			_rb_stopped && return 1
+			colo="$(_rb_warp_try "$host" "$port")" || continue
+			if _rb_warp_is_ru "$colo"; then
+				[ -n "$spare" ] || spare="$host $port $colo"
+				continue
+			fi
+			_rb_say "Туннель WARP работает: $host:$port, колония $colo"
+			echo "$colo" > "$RB_DIR/warp.colo"
+			return 0
+		done
+	done
+	if [ -n "$spare" ]; then
+		set -- $spare
+		_rb_warp_try "$1" "$2" >/dev/null
+		_rb_warn "Туннель WARP работает только через российскую колонию $3: ИИ-сервисы через него не откроются"
+		echo "$3" > "$RB_DIR/warp.colo"
+		return 0
+	fi
+	ifdown "$RB_WARP_IF" >/dev/null 2>&1
+	rm -f "$RB_DIR/warp.colo"
+	echo "ОШИБКА: туннель WARP не поднялся ни через одну точку входа"
+	return 1
+}
+
+# ── спека steer ──
+
+_rb_json_list() { # файлы через пробел -> "a","b"
+	local f out=""
+	for f in $1; do [ -s "$RB_SHARE/lists/$f" ] && out="$out${out:+,}\"$RB_SHARE/lists/$f\""; done
+	printf '%s' "$out"
+}
+
+_rb_spec_build() { # ID... -> JSON в stdout
+	local id name dom pre match chans="" sep=""
+	for id in "$@"; do
+		name="$(_rb_svc_field "$id" 2)"
+		dom="$(_rb_json_list "$(_rb_svc_field "$id" 3 | tr ',' ' ')")"
+		pre="$(_rb_json_list "$(_rb_svc_field "$id" 4 | tr ',' ' ')")"
+		match=""
+		[ -n "$dom" ] && match="\"domains_files\":[$dom]"
+		[ -n "$pre" ] && match="$match${match:+,}\"prefixes_files\":[$pre]"
+		[ -n "$match" ] || continue
+		chans="$chans$sep{\"name\":\"$name\",\"out\":\"zm_warp\",\"match\":{$match}}"
+		sep=","
+	done
+	[ -n "$chans" ] || return 1
+	printf '{"schema":1,"lan_devices":["br-lan"],"outputs":{"zm_warp":{"kind":"interface","devices":["%s"],"on_fail":"direct"}},"channels":[%s]}\n' \
+		"$RB_WARP_IF" "$chans"
+}
+
+_rb_spec_apply() { # ID...
+	local tmp="$RB_RUN/spec.json" out
+	_rb_spec_build "$@" > "$tmp" || return 1
+	if ! out=$(steer apply --spec "$tmp" --dry-run 2>&1 >/dev/null); then
+		echo "ОШИБКА: движок отверг настройку"
+		printf '%s\n' "$out" | tail -n 5
+		return 1
+	fi
+	mkdir -p /etc/steer
+	if [ -s "$RB_STEER_SPEC" ] && ! _rb_owns "steer-spec" && [ ! -f "$RB_DIR/spec.before" ]; then
+		cp "$RB_STEER_SPEC" "$RB_DIR/spec.before"
+	fi
+	if [ -s "$RB_STEER_SPEC" ] && cmp -s "$tmp" "$RB_STEER_SPEC" && /etc/init.d/steer running >/dev/null 2>&1; then
+		_rb_say "Правила движка не изменились"
+		return 0
+	fi
+	cp "$tmp" "$RB_STEER_SPEC.tmp" && mv "$RB_STEER_SPEC.tmp" "$RB_STEER_SPEC"
+	_rb_own "steer-spec"
+	/etc/init.d/steer enable >/dev/null 2>&1
+	/etc/init.d/steer restart >/dev/null 2>&1
+	_rb_say "Правила движка применены"
+}
+
+_rb_spec_clear() {
+	_rb_owns "steer-spec" || return 0
+	/etc/init.d/steer stop >/dev/null 2>&1
+	/etc/init.d/steer disable >/dev/null 2>&1
+	if [ -s "$RB_DIR/spec.before" ]; then mv "$RB_DIR/spec.before" "$RB_STEER_SPEC"; else rm -f "$RB_STEER_SPEC"; fi
+	sed -i '/^steer-spec$/d' "$RB_OWNED"
+}
+
+# ── DNS: спор за порт 53 ──
+#
+# https-dns-proxy с force_dns=1 (так его всегда пишет страница DoH) заворачивает DNS сети на
+# dnsmasq; движок заворачивает те же запросы на свой резолвер, и только там домены
+# превращаются в правила. Побеждает тот, кто зарегистрировался раньше, а проигравший молчит.
+_rb_dns_conflict() {
+	[ -f /etc/config/https-dns-proxy ] || return 1
+	pidof https-dns-proxy >/dev/null 2>&1 || return 1
+	_rb_owns "steer-spec" || return 1
+	# Ключа нет — у прокси умолчание единица.
+	local fd
+	fd=$(sed -n "s/^[[:space:]]*option force_dns '\([^']*\)'.*/\1/p" /etc/config/https-dns-proxy | head -n1)
+	[ "$fd" != "0" ]
+}
+
+do_redbtn_dns_fix() {
+	sed -i "s/^\([[:space:]]*option force_dns\) .*/\1 '0'/" /etc/config/https-dns-proxy
+	/etc/init.d/https-dns-proxy restart >/dev/null 2>&1
+	/etc/init.d/steer restart >/dev/null 2>&1
+}
+
+# ── Telegram ──
+#
+# Сайт открывается ещё не значит, что работает приложение: оно ходит к дата-центрам по MTProto,
+# и режут именно его. Поэтому каждому дата-центру шлётся настоящий первый запрос протокола —
+# req_pq_multi в транспорте abridged, — и ждётся ответ. Молчание хотя бы одного — ставим tgws:
+# он сам решает по каждому дата-центру, вести его напрямую или через веб-сокет.
+#
+# Код ответа curl по адресу ДЦ здесь ничего не говорит: ДЦ принимает TCP и ждёт MTProto, а не
+# TLS, так что тайм-аут у открытого и у закрытого одинаковый.
+RB_TG_DCS="149.154.175.50 149.154.167.51 149.154.175.100 149.154.167.91 91.108.56.130"
+
+_rb_mtproto_req() { # байты req_pq_multi в виде \ooo для printf
+	local le hex
+	le=$(printf '%08x' "$(date +%s)" | sed 's/\(..\)\(..\)\(..\)\(..\)/\4\3\2\1/')
+	# 0xef — abridged; 0x0a — длина/4; auth_key_id=0; msg_id=время<<32; длина 20; конструктор; nonce.
+	hex="ef0a0000000000000000""00000000${le}14000000f18e7ebe$(head -c16 /dev/urandom | hexdump -ve '1/1 "%02x"')"
+	printf '%s' "$hex" | sed 's/../&\n/g' | while read -r b; do [ -n "$b" ] && printf '\\%03o' "0x$b"; done
+}
+
+_rb_tg_dc_ok() {
+	local req dc pids="" n=0 ok=0
+	req="$(_rb_mtproto_req)"
+	for dc in $RB_TG_DCS; do
+		n=$((n + 1))
+		# nc в busybox OpenWrt без ключей тайм-аута: ограничиваем снаружи.
+		( { printf "$req"; sleep 3; } | nc "$dc" 443 2>/dev/null | head -c 64 > "$RB_RUN/tg.$n" ) &
+		pids="$pids $!"
+	done
+	sleep 5
+	for dc in $pids; do _test_kill_pid_tree "$dc"; done
+	wait 2>/dev/null
+	for dc in $(seq 1 "$n"); do
+		[ -s "$RB_RUN/tg.$dc" ] && ok=$((ok + 1))
+		rm -f "$RB_RUN/tg.$dc"
+	done
+	[ "$ok" -eq "$n" ]
+}
+
+_rb_tg_ok() {
+	_rb_check_service telegram as_is || return 1
+	_rb_tg_dc_ok
+}
+
+# ── zapret: подбор тестером менеджера ──
+
+# Применить победителя теста функциями менеджера.
+_rb_zapret_apply() { # ИМЯ
+	local res
+	case "$1" in
+		v[0-9]*) res=$(strategy_set_v "$1") ;;
+		*)       res=$(strategy_set_flowseal "$1") ;;
+	esac
+	case "$res" in *'"ok":true'*) return 0 ;; esac
+	return 1
+}
+
+_rb_result_num() { printf '%s\n' "$1" | sed -n 's/.* → \([0-9]*\)\/.*/\1/p'; }
+
+# Прогнать тестер. Печатает имя лучшей стратегии, если она лучше, чем без zapret.
+_rb_zapret_pick() { # РЕЖИМ_ТЕСТА
+	local mode="$1" res best name ctrl bok
+	do_test_run "$mode" | grep '^==> \[' | sed 's/^==> /   /' >&2
+	res="$(_test_results_file "$mode")"
+	[ -s "$res" ] || return 1
+	best=$(grep -v '^Контрольный тест' "$res" | head -n1)
+	[ -n "$best" ] || return 1
+	name="${best%% → *}"
+	bok=$(_rb_result_num "$best")
+	ctrl=$(_rb_result_num "$(grep '^Контрольный тест' "$res" | head -n1)")
+	[ -n "$bok" ] || return 1
+	[ -n "$ctrl" ] && [ "$bok" -le "$ctrl" ] && return 1
+	echo "$name $bok"
+}
+
+_rb_youtube_pick() {
+	local res best name
+	do_test_run youtube >/dev/null 2>&1
+	res="$(_test_results_file youtube)"
+	best=$(grep -v '^Контрольный тест' "$res" 2>/dev/null | head -n1)
+	[ -n "$best" ] || return 1
+	name="${best%% → *}"
+	case "$name" in Yv[0-9]*) echo "$name" ;; *) return 1 ;; esac
+}
+
+_rb_result_write() { # ID СОСТОЯНИЕ
+	mkdir -p "$RB_DIR"
+	touch "$RB_RESULTS"
+	sed -i "/^$1|/d" "$RB_RESULTS"
+	echo "$1|$2" >> "$RB_RESULTS"
+}
+
+# ── основной проход ──
+
+do_redbtn_run() {
+	local mode="${1:-quick}" blk before after failed id zbak="$RB_RUN/zapret.before" pick name warp_ids="" warp_need=""
+	rm -f "$RB_STOP_FLAG"
+	mkdir -p "$RB_DIR" "$RB_RUN"
+	_ensure_deps
+	blk="$(_rb_blocker)"
+	case "$blk" in
+		splify2) echo "ОШИБКА: установлен splify2 — туннели и списки настраиваются в нём"; return 1 ;;
+		zapret2) echo "ОШИБКА: установлен Zapret2 — сначала удалите его"; return 1 ;;
+		steer)   echo "ОШИБКА: у движка steer уже есть чужие правила — кнопка их не перезаписывает"; return 1 ;;
+	esac
+	_rb_test_running && { echo "ОШИБКА: идёт тест стратегий — дождитесь его окончания"; return 1; }
+	: > "$RB_RESULTS"
+
+	_rb_phase zapret_install
+	if [ ! -f /etc/init.d/zapret ]; then
+		_rb_say "Устанавливаем Zapret"
+		do_install_zapret_full || { echo "ОШИБКА: Zapret не установился"; return 1; }
+	fi
+	/etc/init.d/zapret enable >/dev/null 2>&1
+	pgrep -f "/opt/zapret/" >/dev/null 2>&1 || zapret_restart
+
+	trap '_rb_probe_nft_down' EXIT INT TERM
+	_rb_probe_nft_up
+
+	_rb_phase check
+	_rb_say "Проверяем сервисы при текущей настройке"
+	before="$(_rb_check_all as_is)"
+	_rb_print_checks "$before" "открывается"
+	_rb_stopped && { _rb_say "Остановлено"; return 0; }
+
+	# Подбор стратегии — только если что-то не открывается: рабочую настройку не трогаем.
+	failed="$(_rb_failed "$before")"
+	if [ -n "$failed" ]; then
+		_rb_phase zapret
+		cp "$CONF" "$zbak"
+		local tmode=v
+		[ "$mode" = full ] && tmode=v_flowseal
+		_rb_say "Подбираем стратегию Zapret — это займёт несколько минут"
+		if pick="$(_rb_zapret_pick "$tmode")"; then
+			name="${pick% *}"
+			_rb_say "Лучшая стратегия: $name (${pick#* } целей)"
+			if _rb_zapret_apply "$name"; then
+				after="$(_rb_check_all as_is)"
+				# Одна проба шумит: сервис, ответивший медленно, выглядит закрытым. Прежде чем
+				# откатывать, перемериваем ещё раз.
+				[ "$(_rb_count_ok "$after")" -lt "$(_rb_count_ok "$before")" ] && after="$(_rb_check_all as_is)"
+				if [ "$(_rb_count_ok "$after")" -lt "$(_rb_count_ok "$before")" ]; then
+					_rb_warn "С новой стратегией открывается меньше сервисов — возвращаем прежнюю настройку"
+					cp "$zbak" "$CONF"
+					zapret_restart
+				else
+					before="$after"
+					_rb_say "Стратегия $name применена"
+				fi
+			fi
+		else
+			_rb_warn "Ни одна стратегия не открыла больше, чем без Zapret — настройку не меняем"
+		fi
+		_rb_stopped && { _rb_say "Остановлено"; return 0; }
+
+		# YouTube отдельно: у менеджера для него свой набор стратегий (Yv).
+		if printf '%s\n' "$before" | grep -qx 'youtube fail'; then
+			_rb_say "Подбираем стратегию для YouTube"
+			cp "$CONF" "$zbak"
+			if name="$(_rb_youtube_pick)"; then
+				case "$(strategy_set_youtube "$name")" in
+					*'"ok":true'*)
+						if _rb_check_service youtube as_is; then
+							before="$(printf '%s\n' "$before" | sed 's/^youtube fail$/youtube ok/')"
+							_rb_say "Для YouTube применена стратегия $name"
+						else
+							cp "$zbak" "$CONF"; zapret_restart
+						fi ;;
+				esac
+			fi
+		fi
+		rm -f "$zbak"
+	fi
+	_rb_stopped && { _rb_say "Остановлено"; return 0; }
+
+	# Что открылось — напрямую или благодаря zapret.
+	_rb_phase check
+	local direct
+	direct="$(_rb_check_all direct)"
+	for id in $(printf '%s\n' "$before" | awk '$2=="ok"{print $1}'); do
+		# «Через Zapret» — только если и повторная проба без обхода не прошла.
+		if printf '%s\n' "$direct" | grep -qx "$id ok" || _rb_check_service "$id" direct; then
+			_rb_result_write "$id" direct
+		else
+			_rb_result_write "$id" zapret
+		fi
+	done
+
+	# WARP — для того, что не открыл zapret.
+	failed="$(_rb_failed "$before")"
+	if [ -n "$failed" ]; then
+		_rb_phase warp
+		_rb_say "Не открылось: $(for id in $failed; do printf '%s, ' "$(_rb_svc_field "$id" 2)"; done | sed 's/, $//')"
+		if _rb_install_steer && _rb_warp_up; then
+			for id in $failed; do
+				if _rb_check_service "$id" warp; then
+					echo "[ OK ] $(_rb_svc_field "$id" 2) — через WARP"
+					warp_ids="$warp_ids $id"
+					_rb_result_write "$id" warp
+				else
+					echo "[FAIL] $(_rb_svc_field "$id" 2) — не открывается и через WARP"
+					_rb_result_write "$id" none
+				fi
+			done
+		else
+			for id in $failed; do _rb_result_write "$id" none; done
+		fi
+	fi
+	_rb_stopped && { _rb_say "Остановлено"; return 0; }
+
+	_rb_phase steer
+	if [ -n "$warp_ids" ]; then
+		_rb_spec_apply $warp_ids || return 1
+	else
+		_rb_spec_clear
+		if _rb_owns "net $RB_WARP_IF"; then ifdown "$RB_WARP_IF" >/dev/null 2>&1; fi
+	fi
+
+	_rb_phase telegram
+	_rb_say "Проверяем Telegram"
+	if [ -x /etc/init.d/tgws ] && [ -n "$(tgws status 2>/dev/null)" ]; then
+		_rb_result_write telegram tgws
+		echo "[ OK ] Telegram — через веб-сокет"
+	elif _rb_tg_ok; then
+		_rb_result_write telegram direct
+		echo "[ OK ] Telegram — открывается"
+	else
+		if do_tgws_install; then
+			_rb_own "pkg tgws"
+			_rb_result_write telegram tgws
+			echo "[ OK ] Telegram — через веб-сокет"
+		else
+			_rb_result_write telegram none
+			echo "[FAIL] Telegram"
+		fi
+	fi
+
+	_rb_phase done
+	date +%s > "$RB_LAST"
+	if _rb_dns_conflict; then
+		_rb_warn "DNS over HTTPS перехватывает DNS сети — правила по доменам не действуют, исправьте на странице кнопки"
+	fi
+	_rb_say "Готово, обход подобран"
+}
+
+do_redbtn_remove() {
+	_rb_say "Снимаем настройки красной кнопки"
+	_rb_spec_clear
+	if _rb_owns "net $RB_WARP_IF"; then
+		ifdown "$RB_WARP_IF" >/dev/null 2>&1
+		uci -q delete "network.$RB_WARP_IF"
+		uci -q delete "network.${RB_WARP_IF}_peer"
+		uci commit network
+		/etc/init.d/network reload >/dev/null 2>&1
+	fi
+	if _rb_owns "fw $RB_WARP_ZONE"; then
+		uci -q delete "firewall.$RB_WARP_ZONE"
+		uci -q delete "firewall.${RB_WARP_ZONE}_fwd"
+		uci commit firewall
+		/etc/init.d/firewall reload >/dev/null 2>&1
+	fi
+	_rb_owns "pkg tgws" && do_tgws_remove
+	if _rb_owns "pkg steer"; then
+		_rb_say "Удаляем движок steer"
+		$DELETE steer >/dev/null 2>&1
+	fi
+	# AmneziaWG — только если других туннелей на нём нет.
+	if ! uci show network 2>/dev/null | grep -q "\.proto='amneziawg'"; then
+		local p
+		for p in luci-proto-amneziawg amneziawg-tools kmod-amneziawg; do
+			_rb_owns "pkg $p" && $DELETE "$p" >/dev/null 2>&1
+		done
+	fi
+	_rb_probe_nft_down
+	rm -rf "$RB_DIR" "$RB_RUN"
+	_rb_say "Готово, настройки красной кнопки сняты"
+}
+
+redbtn_status() {
+	local running=false phase="" last="" blk colo="" warp_up=false steer_ver="" dns=false svc="" sep="" id st name
+	_rb_running && running=true
+	[ -f "$RB_PHASE_FILE" ] && phase=$(cat "$RB_PHASE_FILE")
+	[ -f "$RB_LAST" ] && last=$(cat "$RB_LAST")
+	blk="$(_rb_blocker)"
+	[ -f "$RB_DIR/warp.colo" ] && colo=$(cat "$RB_DIR/warp.colo")
+	[ -d "/sys/class/net/$RB_WARP_IF" ] && warp_up=true
+	command -v steer >/dev/null 2>&1 && steer_ver="$(_rb_steer_ver)"
+	_rb_dns_conflict && dns=true
+	for id in $(_rb_svc_ids); do
+		name="$(_rb_svc_field "$id" 2)"
+		st="$(grep "^$id|" "$RB_RESULTS" 2>/dev/null | head -n1 | cut -d'|' -f2)"
+		svc="$svc$sep{\"id\":\"$id\",\"name\":\"$(esc "$name")\",\"state\":\"$st\"}"
+		sep=","
+	done
+	printf '{"running":%s,"phase":"%s","last":"%s","blocker":"%s","warp_up":%s,"warp_colo":"%s","steer":"%s","dns_conflict":%s,"configured":%s,"services":[%s]}\n' \
+		"$running" "$(esc "$phase")" "$last" "$blk" "$warp_up" "$(esc "$colo")" "$(esc "$steer_ver")" "$dns" \
+		"$([ -s "$RB_OWNED" ] && echo true || echo false)" "$svc"
+}
+
+redbtn_action() {
+	local action="$1" mode="$2"
+	case "$action" in
+		start)
+			case "$mode" in quick|full) ;; *) mode=quick ;; esac
+			_rb_test_running && { echo '{"error":"идёт тест стратегий — дождитесь его окончания"}'; return 1; }
+			job_start redbtn do_redbtn_run "$mode"
+			;;
+		stop)
+			_rb_running || { echo '{"error":"подбор не запущен"}'; return 1; }
+			mkdir -p "$RB_RUN" "$TEST_DIR"
+			touch "$RB_STOP_FLAG" "$TEST_STOP_FLAG"
+			printf '{"ok":true}\n'
+			;;
+		remove)
+			_rb_running && { echo '{"error":"дождитесь окончания подбора"}'; return 1; }
+			job_start redbtn do_redbtn_remove
+			;;
+		dns_fix)
+			do_redbtn_dns_fix
+			printf '{"ok":true}\n'
+			;;
+		*) echo '{"error":"неизвестное действие"}' ;;
+	esac
+}
+
 
 cmd="$1"; shift
 case "$cmd" in
@@ -4776,6 +5635,8 @@ case "$cmd" in
 	mixomo_warp_config_set)               mixomo_warp_config_set "$1" ;;
 	bytetube_installed)                   bytetube_installed ;;
 	health)                               health ;;
+	redbtn_status)                        redbtn_status ;;
+	redbtn_action)                        redbtn_action "$1" "$2" ;;
 	bytetube_action)                      bytetube_action "$1" ;;
 	*) echo '{"error":"неизвестная команда"}'; exit 1 ;;
 esac
@@ -4864,6 +5725,8 @@ list_methods() {
 	json_add_object "mixomo_warp_config_set"; json_add_string "content" "string"; json_close_object
 	json_add_object "bytetube_installed";     json_close_object
 	json_add_object "health";                 json_close_object
+	json_add_object "redbtn_status";          json_close_object
+	json_add_object "redbtn_action";          json_add_string "action" "string"; json_add_string "mode" "string"; json_close_object
 	json_add_object "bytetube_action";        json_add_string "action" "string"; json_close_object
 	json_dump
 }
@@ -4946,6 +5809,8 @@ call_method() {
 		mixomo_warp_config_set) json_get_var content content; "$BACKEND" mixomo_warp_config_set "$content" ;;
 		bytetube_installed)      "$BACKEND" bytetube_installed ;;
 		health)                  "$BACKEND" health ;;
+		redbtn_status)           "$BACKEND" redbtn_status ;;
+		redbtn_action)           json_get_var action action; json_get_var mode mode; "$BACKEND" redbtn_action "$action" "$mode" ;;
 		bytetube_action)         json_get_var action action; "$BACKEND" bytetube_action "$action" ;;
 		*) echo '{"error":"unknown method"}'; return 1 ;;
 	esac
@@ -4974,7 +5839,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"system_status", "mirror_status", "exclusions_status", "exclusions_file_get", "nfqws_opt_get", "tg_status", "tgws_status",
 					"test_status", "test_results", "zm_update_status", "mixomo_status", "mixomo_config_get",
 					"mixomo_warp_status",
-					"zapret_latest_version", "bytetube_installed", "health"
+					"zapret_latest_version", "bytetube_installed", "health", "redbtn_status"
 				],
 				"system": [ "info" ]
 			},
@@ -4999,7 +5864,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"mixomo_action", "mixomo_config_set", "mixomo_subscription_set",
 					"mixomo_magitrickle_list_set", "mixomo_autorestart_set", "mixomo_ui_action",
 					"mixomo_warp_action", "mixomo_warp_integrate_action", "mixomo_warp_config_set",
-					"bytetube_action"
+					"bytetube_action", "redbtn_action"
 				]
 			},
 			"uci": [ "bytetube" ]
@@ -5025,6 +5890,11 @@ cat > '/usr/share/luci/menu.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF
 		"title": "Дашборд",
 		"order": 10,
 		"action": { "type": "view", "path": "zapret-manager/dashboard" }
+	},
+	"admin/services/zapret-manager/redbtn": {
+		"title": "Красная кнопка",
+		"order": 15,
+		"action": { "type": "view", "path": "zapret-manager/redbtn" }
 	},
 	"admin/services/zapret-manager/strategy": {
 		"title": "Zapret",
@@ -5079,6 +5949,8 @@ cat > '/www/luci-static/resources/zapret-manager/common.js' << 'ZM_INSTALLER_EOF
 'require ui';
 
 var callStatus = rpc.declare({ object: 'zapret-manager', method: 'status', expect: {} });
+var callRedbtnStatus = rpc.declare({ object: 'zapret-manager', method: 'redbtn_status', expect: {} });
+var callRedbtnAction = rpc.declare({ object: 'zapret-manager', method: 'redbtn_action', params: ['action', 'mode'], expect: {} });
 var callSystemInfo = rpc.declare({ object: 'zapret-manager', method: 'system_info', expect: {} });
 var callJobStatus = rpc.declare({ object: 'zapret-manager', method: 'job_status', params: ['job'], expect: {} });
 var callLogTail = rpc.declare({ object: 'zapret-manager', method: 'log_tail', params: ['job'], expect: {} });
@@ -5414,6 +6286,8 @@ return baseclass.extend({
 	mixomoWarpConfigSet: callMixomoWarpConfigSet,
 	bytetubeInstalled: callBytetubeInstalled,
 	health: callHealth,
+	redbtnStatus: callRedbtnStatus,
+	redbtnAction: callRedbtnAction,
 	boardInfo: callBoardInfo,
 	parseSize: parseSize,
 	fmtSize: fmtSize,
@@ -5718,6 +6592,1387 @@ return view.extend({
 });
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/doh.js'
+
+cat > '/www/luci-static/resources/view/zapret-manager/redbtn.js' << 'ZM_INSTALLER_EOF'
+'use strict';
+'require view';
+'require zapret-manager.common as zm';
+
+var STATES = {
+	direct: { text: 'напрямую', cls: 'zm-ok' },
+	zapret: { text: 'через Zapret', cls: 'zm-ok' },
+	warp:   { text: 'через WARP', cls: 'zm-ok' },
+	tgws:   { text: 'через веб-сокет', cls: 'zm-ok' },
+	none:   { text: 'не открывается', cls: 'zm-bad' }
+};
+
+var PHASES = {
+	zapret_install: 'Устанавливаем Zapret',
+	check: 'Проверяем сервисы',
+	zapret: 'Подбираем стратегию Zapret',
+	warp: 'Поднимаем туннель WARP',
+	steer: 'Применяем правила',
+	telegram: 'Проверяем Telegram'
+};
+
+var BLOCKERS = {
+	splify2: 'Установлен splify2 — туннели и списки настраиваются в нём.',
+	zapret2: 'Установлен Zapret2 — удалите его на странице Zapret2.',
+	steer: 'Обход на роутере уже настроен вручную — кнопка его не перезаписывает.'
+};
+
+function stateBadge(st) {
+	var s = STATES[st];
+	return E('span', { 'class': 'zm-badge ' + (s ? s.cls : 'zm-off') }, [
+		E('span', { 'class': 'zm-dot' }),
+		s ? s.text : 'не проверен'
+	]);
+}
+
+function fmtTime(ts) {
+	if (!ts) return 'ещё не было';
+	var d = new Date(parseInt(ts, 10) * 1000);
+	return d.toLocaleString();
+}
+
+return view.extend({
+	load: function() {
+		zm.injectCss();
+		return zm.redbtnStatus();
+	},
+
+	render: function(data) {
+		var wrap = E('div', { 'class': 'zm-wrap' });
+		var logEl = E('pre', { 'class': 'zm-log' });
+		var busy = false;
+		var mode = 'quick';
+
+		var mainCard = E('div', { 'class': 'zm-card zm-redbtn-card' });
+		var svcCard = E('div', { 'class': 'zm-card' });
+		var warpCard = E('div', { 'class': 'zm-card' });
+		var dnsCard = E('div', {});
+
+		function refresh() {
+			return zm.redbtnStatus().then(function(res) {
+				data = res || {};
+				renderAll();
+			});
+		}
+
+		function follow() {
+			var ticks = 0;
+			busy = true;
+			renderMain();
+			zm.pollJob('redbtn', logEl, function(ok) {
+				busy = false;
+				zm.toast(ok ? 'Готово' : 'Операция завершилась с ошибкой', ok ? 'info' : 'error');
+				refresh();
+			}, function() {
+				if (++ticks % 5) return;
+				zm.redbtnStatus().then(function(res) {
+					if (!res) return;
+					data.phase = res.phase;
+					renderPhase();
+					data.services = res.services;
+					renderServices();
+				});
+			});
+		}
+
+		function start() {
+			if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+			zm.redbtnAction('start', mode).then(function(res) {
+				if (res.error) { zm.toast(res.error, 'error'); return; }
+				zm.toast('Подбор начат', 'warning');
+				data.running = true;
+				follow();
+			});
+		}
+
+		function stop() {
+			zm.redbtnAction('stop', '').then(function(res) {
+				if (res.error) { zm.toast(res.error, 'error'); return; }
+				zm.toast('Останавливаем подбор', 'warning');
+			});
+		}
+
+		function remove() {
+			if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+			if (!confirm('Снять туннель WARP и правила красной кнопки? Стратегия Zapret останется.')) return;
+			zm.redbtnAction('remove', '').then(function(res) {
+				if (res.error) { zm.toast(res.error, 'error'); return; }
+				follow();
+			});
+		}
+
+		var phaseEl = E('div', { 'class': 'zm-hint' });
+		function renderPhase() {
+			phaseEl.textContent = busy ? (PHASES[data.phase] || 'Работаем') + '…' : '';
+		}
+
+		function renderMain() {
+			mainCard.innerHTML = '';
+			mainCard.appendChild(E('h3', {}, 'Красная кнопка'));
+			mainCard.appendChild(E('p', { 'class': 'zm-hint' },
+				'Роутер проверит сервисы и подберёт каждому способ: напрямую, через Zapret, через WARP, а Telegram — через веб-сокет. Подбор занимает от пяти минут до получаса.'));
+
+			if (data.blocker) {
+				mainCard.appendChild(E('div', { 'class': 'zm-row' }, [
+					E('span', { 'class': 'zm-badge zm-warn' }, [ E('span', { 'class': 'zm-dot' }), BLOCKERS[data.blocker] || data.blocker ])
+				]));
+				mainCard.appendChild(logEl);
+				return;
+			}
+
+			if (!busy) {
+				var grid = E('div', { 'class': 'zm-grid' });
+				[
+					{ id: 'quick', label: 'Быстрый подбор' },
+					{ id: 'full', label: 'Полный подбор (дольше, больше стратегий)' }
+				].forEach(function(m) {
+					grid.appendChild(E('div', {
+						'class': 'zm-tile' + (mode === m.id ? ' zm-active' : ''),
+						'click': function() { mode = m.id; renderMain(); }
+					}, m.label));
+				});
+				mainCard.appendChild(grid);
+			}
+
+			var actions = busy ? [
+				E('button', { 'class': 'cbi-button cbi-button-remove', 'click': stop }, 'Остановить подбор')
+			] : [
+				E('button', { 'class': 'cbi-button zm-redbtn', 'click': start }, 'Подобрать обход')
+			];
+			if (!busy && data.configured)
+				actions.push(E('button', { 'class': 'cbi-button cbi-button-remove', 'click': remove }, 'Снять настройки'));
+			mainCard.appendChild(E('div', { 'class': 'zm-actions' }, actions));
+			renderPhase();
+			mainCard.appendChild(phaseEl);
+			mainCard.appendChild(E('div', { 'class': 'zm-row' }, [
+				E('span', { 'class': 'zm-label' }, 'Последний подбор'),
+				E('span', {}, fmtTime(data.last))
+			]));
+			mainCard.appendChild(logEl);
+		}
+
+		function renderServices() {
+			svcCard.innerHTML = '';
+			svcCard.appendChild(E('h3', {}, 'Сервисы'));
+			(data.services || []).forEach(function(s) {
+				svcCard.appendChild(E('div', { 'class': 'zm-row' }, [
+					E('span', { 'class': 'zm-label' }, s.name),
+					stateBadge(s.state)
+				]));
+			});
+		}
+
+		function renderWarp() {
+			warpCard.innerHTML = '';
+			var used = (data.services || []).some(function(s) { return s.state === 'warp'; });
+			if (!used && !data.warp_up) { warpCard.style.display = 'none'; return; }
+			warpCard.style.display = '';
+			warpCard.appendChild(E('h3', {}, 'Туннель WARP'));
+			warpCard.appendChild(E('div', { 'class': 'zm-row' }, [
+				E('span', { 'class': 'zm-label' }, 'Состояние'),
+				zm.badge(data.warp_up === true, 'работает', 'не поднят')
+			]));
+			if (data.warp_colo)
+				warpCard.appendChild(E('div', { 'class': 'zm-row' }, [
+					E('span', { 'class': 'zm-label' }, 'Точка Cloudflare'),
+					E('span', {}, data.warp_colo)
+				]));
+		}
+
+		function renderDns() {
+			dnsCard.innerHTML = '';
+			if (!data.dns_conflict) return;
+			dnsCard.appendChild(E('div', { 'class': 'zm-card' }, [
+				E('h3', {}, 'DNS'),
+				E('p', { 'class': 'zm-hint' },
+					'DNS over HTTPS забирает запросы сети себе: сервисы, уведённые в WARP, на устройствах пойдут мимо туннеля.'),
+				E('div', { 'class': 'zm-actions' }, [
+					E('button', {
+						'class': 'cbi-button cbi-button-positive',
+						'click': function() {
+							zm.redbtnAction('dns_fix', '').then(function(res) {
+								if (res.error) { zm.toast(res.error, 'error'); return; }
+								zm.toast('DNS исправлен', 'info');
+								refresh();
+							});
+						}
+					}, 'Исправить')
+				])
+			]));
+		}
+
+		function renderAll() {
+			renderMain();
+			renderDns();
+			renderServices();
+			renderWarp();
+		}
+
+		renderAll();
+		wrap.appendChild(mainCard);
+		wrap.appendChild(dnsCard);
+		wrap.appendChild(svcCard);
+		wrap.appendChild(warpCard);
+
+		if (data.running) follow();
+		return wrap;
+	}
+});
+ZM_INSTALLER_EOF
+chmod 0644 '/www/luci-static/resources/view/zapret-manager/redbtn.js'
+
+mkdir -p /usr/share/zm-redbtn/lists
+cat > '/usr/share/zm-redbtn/services.conf' << 'ZM_INSTALLER_EOF'
+# Сервисы красной кнопки. Каталог и цели — из BigRedButton (gitlab.com/xyzmean/brb).
+#
+# ФОРМАТ: id|название|списки доменов|списки адресов|обязательные цели|дополнительные цели|признак отказа
+#
+#   списки    — файлы в /usr/share/zm-redbtn/lists, через запятую; по ним движок уводит сервис в
+#               туннель. Адресные списки только там, где сервис ходит по адресам без DNS
+#               (голос Discord, мессенджеры Meta); у YouTube и ИИ-сервисов адресов Google и
+#               облаков слишком много — туда ушло бы чужое.
+#   обязательные — цели, которые ОБЯЗАНЫ открыться все: у YouTube это видеоузел, у Discord —
+#               шлюз и узел обновлений (без него приложение висит на проверке обновлений).
+#   дополнительные — из них должно открыться не меньше RB_BAR процентов.
+#   признак отказа — фразы в ответе, при которых сервис считается закрытым, хотя ответил
+#               (геоблок отвечает кодом 200 со страницей «недоступно в вашей стране»).
+youtube|YouTube|svc_youtube.lst||www.youtube.com,youtubei.googleapis.com,manifest.googlevideo.com|youtu.be,i.ytimg.com,i9.ytimg.com,yt3.ggpht.com,yt4.ggpht.com,jnn-pa.googleapis.com,signaler-pa.youtube.com,yt3.googleusercontent.com,rr4---sn-4g5e6nze.googlevideo.com,rr4---sn-5go7yner.googlevideo.com,rr5---sn-n8v7knez.googlevideo.com,rr2---sn-q4fl6ndl.googlevideo.com,rr1---sn-q4fl6n6y.googlevideo.com,rr14---sn-n8v7kn7r.googlevideo.com,rr4---sn-jvhnu5g-c35d.googlevideo.com,rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com,rr12---sn-gvnuxaxjvh-bvwz.googlevideo.com,rr1---sn-ug5onuxaxjvh-n8v6.googlevideo.com|
+discord|Discord|svc_discord.lst|discord.lst|discord.com,gateway.discord.gg,updates.discord.com|cdn.discordapp.com,media.discordapp.net|
+instagram|Instagram|svc_meta.lst|meta.lst|www.instagram.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com|
+whatsapp|WhatsApp|svc_meta.lst|whatsapp.lst|web.whatsapp.com|static.whatsapp.net,mmg.whatsapp.net|
+x|X (Twitter)|svc_twitter.lst|twitter_x.lst|x.com|twitter.com,abs.twimg.com,video.twimg.com|
+github|GitHub|own_github.lst||github.com,raw.githubusercontent.com,objects.githubusercontent.com|codeload.github.com,api.github.com,ghcr.io|
+geoblock|ИИ-сервисы|geoblock.lst||chatgpt.com|claude.ai,api.openai.com,gemini.google.com|App unavailable,unsupported_country,not available in your country,not available in your region
+telegram|Telegram|||web.telegram.org|t.me,core.telegram.org,telegra.ph|
+ZM_INSTALLER_EOF
+cat > '/usr/share/zm-redbtn/lists/svc_youtube.lst' << 'ZM_INSTALLER_EOF'
+ggpht.com
+googlevideo.com
+jnn-pa.googleapis.com
+returnyoutubedislikeapi.com
+wide-youtube.l.google.com
+youtu.be
+youtube-nocookie.com
+youtube-ui.l.google.com
+youtube.com
+youtubeembeddedplayer.googleapis.com
+youtubei.googleapis.com
+youtubekids.com
+yt-video-upload.l.google.com
+yt.be
+yt3.googleusercontent.com
+ytimg.com
+ytimg.l.google.com
+yting.com
+ZM_INSTALLER_EOF
+cat > '/usr/share/zm-redbtn/lists/svc_discord.lst' << 'ZM_INSTALLER_EOF'
+dis.gd
+discord-activities.com
+discord-attachments-uploads-prd.storage.googleapis.com
+discord.co
+discord.com
+discord.design
+discord.dev
+discord.gg
+discord.gift
+discord.gifts
+discord.media
+discord.new
+discord.store
+discord.tools
+discordactivities.com
+discordapp.com
+discordapp.net
+discordmerch.com
+discordpartygames.com
+discordsays.com
+ZM_INSTALLER_EOF
+cat > '/usr/share/zm-redbtn/lists/svc_meta.lst' << 'ZM_INSTALLER_EOF'
+cdninstagram.com
+circlecrewpinkcrowd.com
+facebook.com
+facebook.net
+fb.com
+fbcdn.net
+fbsbx.com
+ig.me
+instagram.com
+internalfb.com
+meta.com
+oculus.com
+threads.com
+threads.net
+wa.me
+whatsapp.biz
+whatsapp.com
+whatsapp.net
+ZM_INSTALLER_EOF
+cat > '/usr/share/zm-redbtn/lists/svc_twitter.lst' << 'ZM_INSTALLER_EOF'
+ads-twitter.com
+cms-twdigitalassets.com
+periscope.tv
+pscp.tv
+t.co
+tellapart.com
+tweetdeck.com
+twimg.com
+twitpic.com
+twitter.biz
+twitter.com
+twitter.jp
+twittercommunity.com
+twitterflightschool.com
+twitterinc.com
+twitteroauth.com
+twitterstat.us
+twtrdns.net
+twttr.com
+twttr.net
+twvid.com
+vine.co
+x.com
+ZM_INSTALLER_EOF
+cat > '/usr/share/zm-redbtn/lists/own_github.lst' << 'ZM_INSTALLER_EOF'
+api.github.com
+avatars.githubusercontent.com
+camo.githubusercontent.com
+codeload.github.com
+ghcr.io
+gist.githubusercontent.com
+github.com
+github.dev
+github.io
+githubassets.com
+githubusercontent.com
+npm.pkg.github.com
+objects.githubusercontent.com
+pkg.github.com
+raw.githubusercontent.com
+release-assets.githubusercontent.com
+uploads.github.com
+user-images.githubusercontent.com
+www.github.com
+ZM_INSTALLER_EOF
+cat > '/usr/share/zm-redbtn/lists/geoblock.lst' << 'ZM_INSTALLER_EOF'
+4pda.to
+4pda.ws
+a-vrv.akamaized.net
+abercrombie.com
+adidas.com
+adobe.com
+adobe.io
+adobe.net
+affinity.studio
+ai-chat.bsg.brave.com
+ai.com
+aircanada.com
+akc.org
+all3dp.com
+alphacoders.com
+alza.hu
+amazfitwatchfaces.com
+amplitude.com
+analog.com
+andrevi.ch
+ansys.com
+anthropic.com
+anthropic.qualtrics.com
+api.jetbrains.ai
+api.themoviedb.org
+arc.net
+arduino.cc
+assets.heroku.com
+atlassian.com
+att.com
+augmentcode.com
+autodesk.com
+backend-v2.crixet.com
+bell-sw.com
+bestbuy.com
+bitdefender.com
+bitnami.com
+blinkshot.io
+bosch.com
+boschaftermarket.com
+boschautoparts.com
+brawlstarsgame.com
+broadcom.com
+broncosportforum.com
+btod.com
+buanzo.org
+buf.build
+builds.parsec.app
+buymeacoffee.com
+canva.com
+canva.dev
+capacitorjs.com
+carrefouruae.com
+cats.com
+cdn.web-platform.io
+cdromance.org
+cdw.com
+chainreactioncycles.com
+chaos.com
+chat.com
+chat.openai.com.cdn.cloudflare.net
+chatgpt.com
+cisco.com
+cisecurity.org
+citrix.com
+clamav.net
+clashofclans.com
+clashroyaleapp.com
+claude.ai
+claude.com
+clevelandclinic.org
+clickup.com
+clip.opus.pro
+code.gist.build
+codeium.com
+coingate.com
+community.sophos.com
+connect.ngrok-agent.com
+contabo.com
+copilot.microsoft.com
+corsair.com
+cpu-monkey.com
+credly.com
+crunchyroll.com
+cursor-cdn.com
+cursor.sh
+cursorapi.com
+cvedetails.com
+daemon-tools.cc
+dashboard.algolia.com
+dashboard.gitguardian.com
+data-cdn.mbamupdates.com
+data.cline.bot
+deepl.com
+deezer.com
+dell.com
+dellcdn.com
+designer.microsoft.com
+developer.nvidia.com
+devexpress.com
+diabrowser.com
+digitalcontent.sky
+disctech.com
+disneyplus.com
+docs.liquibase.com
+document360.com
+document360.io
+download3.omnissa.com
+downloads.intercomcdn.com
+ducati.com
+dyson.com
+easydmarc.com
+editorx.com
+elevenlabs.io
+eneba.com
+etsy.com
+exchanger.bits.media
+expandrive.com
+extremetech.com
+f1.com
+fast.com
+filebin.net
+files.manus.cdn
+fivetran.com
+flir.com
+flir.eu
+flourish.studio
+fluke.com
+flukenetworks.com
+flyertalk.com
+footballapi.pulselive.com
+force-user-content.com
+force.com
+formula1.com
+forum.netgate.com
+framer.app
+framer.com
+framercanvas.com
+framercdn.com
+framerstatic.com
+framerusercontent.com
+freeimages.com
+fxnetworks.com
+g2a.com
+gamestop.com
+gaming.amazon.com
+geforcenow.com
+genspark.ai
+geolocation.onetrust.com
+getoutline.com
+gfn.am
+ghostrc.game.idtech.services
+global.fncstatic.com
+glpals.com
+gofund.me
+gofundme.com
+gonift.com
+gpsonextra.net
+gpu-monkey.com
+gql.twitch.tv
+grafana.com
+graylog.org
+grizzlysms.com
+grok.com
+grok.x.com
+groq.com
+groupon.com
+guilded.gg
+habr.com
+hashicorp.com
+haydaygame.com
+hbomax.com
+hc-ping.com
+hchk.io
+healthline.com
+herokucdn.com
+hollisterco.com
+home-connect.com
+home.by.me
+hostinger.com
+hotels.com
+housebrand.com
+htmhell.dev
+httptoolkit.com
+hume.ai
+hybrid-analysis.com
+ibm.com
+iedb.org
+iherb.com
+ikea.com
+image.tmdb.org
+imgur.com
+indeed.com
+install.launcher.omniverse.nvidia.com
+intel.com
+intel.de
+intel.nl
+intelix.sophos.com
+intercom.io
+intuit.com
+intuitibits.com
+itninja.com
+jamf.com
+jetbrains.com
+jetbrains.space
+jetbrains.team
+joesandbox.com
+kaleido.ai
+keysight.com
+kinogo.la
+klarna.com
+kmail-lists.com
+lambdalabs.com
+langdock.com
+last.fm
+ldoceonline.com
+legalshield.com
+lgeapi.com
+lgthinq.com
+lidarr.audio
+lifehacker.com
+lightning.ai
+lookerstudio.google.com
+lyst.com
+mailerlite.com
+mailinator.com
+manus.im
+manybooks.net
+marvelsnap.com
+mattermost.com
+max.com
+medicalnewstoday.com
+meetup.com
+metopera.org
+middlewareinventory.com
+mintmobile.com
+miracleptr.wordpress.com
+mixcloud.com
+mongodb.com
+monoprice.com
+mouser.com
+mouser.fi
+mssg.me
+multisim.com
+myheritage.com
+myjetbrains.com
+myparallels.com
+myqrcode.com
+nba.com
+neo4j.com
+netacad.com
+netapp.com
+netflix.ca
+netflix.com
+netflix.net
+netflixinvestor.com
+netflixtechblog.com
+netlify.com
+new.abb.com
+newark.com
+news.google.com
+newsroom.porsche.com
+nfl.com
+nflxext.com
+nflximg.com
+nflximg.net
+nflxsearch.net
+nflxso.net
+nflxvideo.net
+ngrok.com
+ni.com
+nike.com
+nitropdf.com
+nordaccount.com
+nordcdn.com
+nordvpn.com
+notion-emojis.s3-us-west-2.amazonaws.com
+notion-static.com
+notion.com
+notion.new
+notion.site
+notion.so
+ntp.msn.com
+nxp.com
+oaistatic.com
+oaiusercontent.com
+ocstore.com
+octopus.do
+omnissa.com
+onfastspring.com
+onshape.com
+openai.com
+openh264.org
+openrouter.ai
+oracle.com
+oraclecloud.com
+paddle.com
+paddlestatus.com
+pandasecurity.com
+parallels.cn
+parallels.com
+parallels.net
+parallelsaccess.com
+paritydeals.com
+patreon.com
+patreonusercontent.com
+paywithmoon.com
+pcgamesn.com
+pcmag.com
+penguin.com
+penguinrandomhouse.com
+pexels.com
+philiascans.org
+pingdom.com
+pkgs.tailscale.com
+platform.activestate.com
+plugshare.com
+posthog.com
+premierleague.com
+primark.com
+primevideo.com
+proactivebackend-pa.googleapis.com
+production-openaicom-storage.azureedge.net
+profitwell.com
+prowlarr.com
+public.parsec.app
+qobuz.com
+qodana.cloud
+qoder.com
+qt.io
+qualcomm.com
+quicknode.com
+qwant.com
+reactflow.dev
+recraft.ai
+redis.io
+redislabs.com
+remna.st
+remove.bg
+research.net
+reve.art
+salesforce-experience.com
+salesforce-hub.com
+salesforce-scrt.com
+salesforce-setup.com
+salesforce-sites.com
+salesforce.com
+salesforceiq.com
+salesforceliveagent.com
+schneider-electric.com
+sdxcentral.com
+se.com
+seconddinnertech.com
+semrush.com
+sentry.dev
+sentry.io
+sephora.com
+servarr.com
+sfdcopens.com
+sharefile.com
+sharefile.io
+shinyhardware.co.uk
+shop.gameloft.com
+sigsauer.com
+singlekey-id.com
+site.com
+siteground.com
+sketchup.com
+sky.com
+skycdp.com
+smartbear.co
+smartbear.com
+smartdeploy.com
+snapgametech.com
+snapgene.com
+snort.org
+snyk.io
+solarwinds.com
+sonara.ai
+sora.com
+spacelift.io
+spiceworks.com
+spitfireaudio.com
+spotify.com
+squadbustersgame.com
+squareup.com
+strava.com
+streamable.com
+suggestqueries.google.com
+supercell.com
+support.anydesk.com
+support.xerox.com
+surveymonkey.com
+swagger.io
+swapd.co
+synoforum.com
+syslog-ng.com
+tableau.com
+talosintelligence.com
+teamviewer.com
+techbargains.com
+telemetr.io
+tempmail.plus
+terraform.io
+theaudiodb.com
+themoviedb.org
+ti.com
+tidal.com
+timberland.de
+tmdb-image-prod.b-cdn.net
+tmdb.com
+tmdb.org
+toolbox.app
+torrenteditor.com
+trae.ai
+trailblazer.me
+trailhead.com
+transferwise.com
+tria.ge
+truthsocial.com
+tsmc.com
+tutanota.com
+typing.com
+uaudio.com
+uizard.io
+unscreen.com
+upwork.com
+usher.ttvnw.net
+v.vrv.co
+vagrantcloud.com
+veeam.com
+verificationacademy.com
+vmware.com
+vod-fy.crunchyrollcdn.com
+volkswagen-classic-parts.com
+vyos.io
+w.atwiki.jp
+walmart.com
+watchguard.com
+watermarkremover.io
+wbagora.com
+wbgames.com
+wdfiles.com
+weather.com
+webnames.ca
+weebly.com
+wetransfer.com
+widgetapp.stream
+wikidot.com
+windsurf.com
+wise.com
+wpengine.com
+wunderground.com
+www3.corsair.com
+x-minus.pro
+x.ai
+xiaomi.eu
+xrite.com
+xsts.auth.xboxlive.com
+xtracloud.net
+yeggi.com
+youtrack.cloud
+zapier.com
+zedge.net
+zerossl.com
+ZM_INSTALLER_EOF
+cat > '/usr/share/zm-redbtn/lists/discord.lst' << 'ZM_INSTALLER_EOF'
+104.16.0.0/12
+138.128.137.32/28
+138.128.140.240/28
+162.159.128.0/19
+172.65.202.16/28
+34.0.129.176/28
+34.0.130.176/28
+34.0.130.64/28
+34.0.132.128/28
+34.0.134.48/28
+34.0.140.48/28
+34.0.141.96/28
+35.207.209.32/28
+35.212.102.48/28
+35.212.111.16/28
+35.212.111.32/28
+35.212.120.112/28
+35.212.12.144/28
+35.212.4.128/28
+35.212.88.0/28
+35.213.0.0/28
+35.213.0.176/28
+35.213.101.208/28
+35.213.10.16/28
+35.213.102.160/28
+35.213.102.224/28
+35.213.10.224/28
+35.213.102.32/28
+35.213.10.32/28
+35.213.105.144/28
+35.213.105.32/28
+35.213.106.176/28
+35.213.106.192/28
+35.213.106.224/28
+35.213.107.144/28
+35.213.109.144/28
+35.213.109.16/28
+35.213.110.32/28
+35.213.111.16/28
+35.213.11.16/28
+35.213.111.80/28
+35.213.115.16/28
+35.213.115.48/28
+35.213.115.96/28
+35.213.120.128/28
+35.213.120.32/28
+35.213.122.128/28
+35.213.122.208/28
+35.213.12.224/27
+35.213.122.96/28
+35.213.124.80/28
+35.213.125.32/28
+35.213.126.176/28
+35.213.127.208/28
+35.213.127.48/28
+35.213.128.176/28
+35.213.128.64/28
+35.213.129.0/28
+35.213.130.16/28
+35.213.130.208/28
+35.213.131.128/28
+35.213.13.16/28
+35.213.131.64/28
+35.213.132.48/28
+35.213.132.64/28
+35.213.133.176/28
+35.213.135.48/28
+35.213.136.192/28
+35.213.136.32/28
+35.213.137.48/28
+35.213.139.144/28
+35.213.139.64/28
+35.213.141.160/28
+35.213.14.208/28
+35.213.142.208/28
+35.213.142.224/27
+35.213.143.176/28
+35.213.143.32/28
+35.213.145.112/28
+35.213.145.144/28
+35.213.146.192/28
+35.213.147.176/28
+35.213.149.32/28
+35.213.149.96/27
+35.213.150.160/28
+35.213.150.32/28
+35.213.152.0/28
+35.213.152.144/28
+35.213.153.160/27
+35.213.157.0/28
+35.213.158.96/27
+35.213.160.80/28
+35.213.162.112/28
+35.213.162.48/28
+35.213.163.224/28
+35.213.163.80/28
+35.213.164.160/28
+35.213.164.224/28
+35.213.165.32/28
+35.213.165.96/28
+35.213.16.64/28
+35.213.167.160/27
+35.213.168.176/28
+35.213.168.64/28
+35.213.169.176/28
+35.213.170.0/28
+35.213.172.144/28
+35.213.17.224/28
+35.213.173.0/28
+35.213.173.128/28
+35.213.174.224/28
+35.213.175.176/28
+35.213.176.112/28
+35.213.176.48/28
+35.213.177.112/28
+35.213.180.0/28
+35.213.181.112/28
+35.213.181.32/28
+35.213.181.64/28
+35.213.182.208/28
+35.213.182.96/28
+35.213.183.176/28
+35.213.184.80/28
+35.213.185.240/28
+35.213.185.32/28
+35.213.186.64/28
+35.213.188.176/28
+35.213.188.192/28
+35.213.191.80/28
+35.213.194.64/28
+35.213.195.176/28
+35.213.196.32/28
+35.213.198.32/28
+35.213.199.192/28
+35.213.199.96/28
+35.213.202.112/28
+35.213.2.0/28
+35.213.204.32/28
+35.213.205.160/28
+35.213.210.224/28
+35.213.213.224/28
+35.213.214.16/28
+35.213.217.112/28
+35.213.217.192/28
+35.213.222.208/28
+35.213.223.176/28
+35.213.225.16/28
+35.213.227.224/28
+35.213.229.16/28
+35.213.231.112/28
+35.213.231.224/28
+35.213.23.160/28
+35.213.233.144/28
+35.213.233.64/28
+35.213.238.128/28
+35.213.246.112/28
+35.213.246.32/28
+35.213.247.224/28
+35.213.247.96/28
+35.213.25.160/28
+35.213.252.208/28
+35.213.252.32/28
+35.213.26.48/28
+35.213.27.240/28
+35.213.32.192/28
+35.213.32.32/28
+35.213.32.80/28
+35.213.33.64/28
+35.213.34.192/28
+35.213.37.80/28
+35.213.38.176/28
+35.213.39.240/28
+35.213.4.176/28
+35.213.42.224/27
+35.213.42.64/28
+35.213.43.64/28
+35.213.45.112/28
+35.213.45.128/28
+35.213.45.80/28
+35.213.46.128/28
+35.213.49.16/28
+35.213.50.192/28
+35.213.50.32/28
+35.213.51.208/28
+35.213.52.0/28
+35.213.52.112/28
+35.213.53.128/28
+35.213.53.48/28
+35.213.54.208/28
+35.213.54.64/28
+35.213.56.48/28
+35.213.56.64/28
+35.213.59.208/28
+35.213.59.96/28
+35.213.6.112/28
+35.213.61.48/28
+35.213.65.112/28
+35.213.65.160/28
+35.213.67.0/28
+35.213.67.176/28
+35.213.68.192/28
+35.213.68.224/27
+35.213.70.144/28
+35.213.7.160/28
+35.213.7.192/28
+35.213.72.160/28
+35.213.72.208/28
+35.213.73.240/28
+35.213.74.128/28
+35.213.78.16/28
+35.213.78.176/28
+35.213.78.224/28
+35.213.79.128/28
+35.213.80.0/28
+35.213.80.80/28
+35.213.8.160/28
+35.213.83.176/28
+35.213.83.240/28
+35.213.84.240/28
+35.213.85.144/28
+35.213.85.96/28
+35.213.88.144/28
+35.213.89.80/28
+35.213.90.144/28
+35.213.90.192/28
+35.213.90.48/28
+35.213.91.192/28
+35.213.92.176/28
+35.213.92.240/28
+35.213.92.64/28
+35.213.93.240/28
+35.213.94.64/28
+35.213.95.144/28
+35.213.96.80/28
+35.213.98.112/28
+35.213.98.128/28
+35.213.99.112/28
+35.214.137.128/28
+35.214.140.176/28
+35.214.142.112/28
+35.214.151.176/28
+35.214.163.16/28
+35.214.169.192/28
+35.214.171.16/28
+35.214.181.160/28
+35.214.194.208/28
+35.214.198.0/28
+35.214.205.144/28
+35.214.209.64/28
+35.214.213.16/28
+35.214.216.144/28
+35.214.225.32/28
+35.214.227.32/28
+35.214.245.16/28
+35.214.250.16/28
+35.215.108.96/28
+35.215.115.112/28
+35.215.126.32/28
+35.215.127.32/28
+35.215.128.16/28
+35.215.128.80/28
+35.215.134.224/28
+35.215.135.160/28
+35.215.135.16/28
+35.215.136.16/28
+35.215.137.224/28
+35.215.138.0/28
+35.215.138.176/28
+35.215.138.192/28
+35.215.139.128/28
+35.215.140.0/28
+35.215.140.48/28
+35.215.141.80/28
+35.215.142.0/28
+35.215.145.64/28
+35.215.149.176/28
+35.215.151.112/28
+35.215.152.144/28
+35.215.154.240/28
+35.215.156.160/28
+35.215.160.208/28
+35.215.161.112/28
+35.215.161.224/28
+35.215.163.96/28
+35.215.166.160/28
+35.215.166.240/28
+35.215.168.160/28
+35.215.170.0/28
+35.215.170.64/28
+35.215.171.48/28
+35.215.172.48/28
+35.215.173.192/28
+35.215.174.16/28
+35.215.174.208/28
+35.215.175.32/28
+35.215.178.16/28
+35.215.180.144/28
+35.215.182.176/28
+35.215.184.240/28
+35.215.185.64/28
+35.215.186.32/28
+35.215.186.96/28
+35.215.188.112/28
+35.215.188.192/28
+35.215.189.112/28
+35.215.190.48/28
+35.215.190.96/28
+35.215.192.208/28
+35.215.193.224/28
+35.215.193.80/28
+35.215.194.192/28
+35.215.195.96/28
+35.215.196.0/28
+35.215.196.48/28
+35.215.196.64/28
+35.215.198.224/28
+35.215.200.16/28
+35.215.202.128/28
+35.215.204.128/28
+35.215.205.16/28
+35.215.206.160/28
+35.215.206.32/28
+35.215.207.112/28
+35.215.208.208/28
+35.215.210.240/28
+35.215.211.0/28
+35.215.213.176/28
+35.215.215.32/28
+35.215.216.96/28
+35.215.217.16/28
+35.215.217.80/28
+35.215.218.48/28
+35.215.218.80/28
+35.215.221.160/28
+35.215.221.16/28
+35.215.222.224/28
+35.215.224.16/28
+35.215.225.224/28
+35.215.226.32/28
+35.215.227.80/28
+35.215.228.192/28
+35.215.229.64/28
+35.215.231.80/28
+35.215.232.16/28
+35.215.232.208/28
+35.215.233.48/28
+35.215.235.176/28
+35.215.235.240/28
+35.215.235.96/28
+35.215.238.16/28
+35.215.238.80/28
+35.215.240.160/28
+35.215.240.192/28
+35.215.241.208/28
+35.215.243.192/28
+35.215.244.240/28
+35.215.245.128/28
+35.215.245.32/28
+35.215.247.80/28
+35.215.248.160/28
+35.215.249.80/28
+35.215.250.128/28
+35.215.251.128/28
+35.215.251.224/28
+35.215.254.112/28
+35.215.255.80/28
+35.215.72.80/28
+35.215.73.64/28
+35.215.83.0/28
+5.200.14.240/28
+66.22.196.0/26
+66.22.196.128/27
+66.22.196.224/28
+66.22.196.64/27
+66.22.197.0/28
+66.22.197.128/27
+66.22.197.208/28
+66.22.197.32/27
+66.22.197.64/27
+66.22.197.96/28
+66.22.198.0/26
+66.22.198.128/26
+66.22.198.80/28
+66.22.198.96/28
+66.22.199.128/28
+66.22.199.16/28
+66.22.199.176/28
+66.22.199.192/26
+66.22.199.32/27
+66.22.199.64/27
+66.22.199.96/28
+66.22.200.0/28
+66.22.200.32/28
+66.22.200.64/27
+66.22.202.0/28
+66.22.202.32/28
+66.22.202.64/27
+66.22.202.96/28
+66.22.204.160/27
+66.22.204.16/28
+66.22.204.192/28
+66.22.204.64/28
+66.22.204.96/28
+66.22.206.0/27
+66.22.206.160/27
+66.22.206.32/28
+66.22.206.96/28
+66.22.208.0/27
+66.22.208.32/28
+66.22.210.0/27
+66.22.210.32/28
+66.22.216.0/25
+66.22.216.128/26
+66.22.216.192/28
+66.22.217.0/25
+66.22.217.128/26
+66.22.217.192/28
+66.22.218.0/26
+66.22.218.64/27
+66.22.218.96/28
+66.22.219.0/26
+66.22.219.64/27
+66.22.219.96/28
+66.22.220.0/28
+66.22.220.144/28
+66.22.220.160/28
+66.22.220.48/28
+66.22.220.80/28
+66.22.221.0/28
+66.22.221.128/27
+66.22.221.160/28
+66.22.221.48/28
+66.22.221.64/27
+66.22.221.96/28
+66.22.224.0/26
+66.22.225.0/26
+66.22.226.0/27
+66.22.226.80/28
+66.22.226.96/27
+66.22.227.0/27
+66.22.231.0/25
+66.22.231.128/26
+66.22.231.192/27
+66.22.232.0/28
+66.22.232.128/28
+66.22.239.0/28
+66.22.239.128/28
+66.22.240.0/28
+66.22.240.128/28
+66.22.245.0/26
+66.22.245.128/26
+66.22.246.0/26
+66.22.246.128/26
+66.22.246.192/27
+66.22.246.224/28
+66.22.246.64/27
+66.22.247.0/27
+66.22.247.128/27
+66.22.248.0/25
+66.22.248.128/26
+66.22.248.192/27
+ZM_INSTALLER_EOF
+cat > '/usr/share/zm-redbtn/lists/meta.lst' << 'ZM_INSTALLER_EOF'
+31.13.24.0/21
+31.13.64.0/18
+45.64.40.0/22
+57.141.0.0/24
+57.141.2.0/23
+57.141.4.0/23
+57.141.6.0/24
+57.141.8.0/24
+57.141.10.0/24
+57.141.12.0/23
+57.141.14.0/24
+57.141.16.0/22
+57.141.20.0/24
+57.141.22.0/24
+57.141.24.0/24
+57.144.0.0/14
+66.220.144.0/20
+69.63.176.0/20
+69.171.224.0/19
+74.119.76.0/22
+102.132.96.0/20
+103.4.96.0/22
+129.134.0.0/17
+157.240.0.0/17
+157.240.192.0/18
+163.70.128.0/17
+163.77.132.0/23
+163.77.136.0/23
+173.252.64.0/18
+179.60.192.0/22
+185.60.216.0/22
+185.89.216.0/22
+204.15.20.0/22
+ZM_INSTALLER_EOF
+cat > '/usr/share/zm-redbtn/lists/whatsapp.lst' << 'ZM_INSTALLER_EOF'
+31.13.24.0/21
+31.13.64.0/18
+45.64.40.0/22
+57.141.0.0/24
+57.141.2.0/23
+57.141.4.0/23
+57.141.6.0/24
+57.141.8.0/24
+57.141.10.0/24
+57.141.12.0/23
+57.141.14.0/24
+57.141.16.0/22
+57.141.20.0/24
+57.141.22.0/24
+57.141.24.0/24
+57.144.0.0/14
+66.220.144.0/20
+69.63.176.0/20
+69.171.224.0/19
+74.119.76.0/22
+102.132.96.0/20
+103.4.96.0/22
+129.134.0.0/17
+157.240.0.0/17
+157.240.192.0/18
+163.70.128.0/17
+163.77.132.0/23
+163.77.136.0/23
+173.252.64.0/18
+179.60.192.0/22
+185.60.216.0/22
+185.89.216.0/22
+204.15.20.0/22
+ZM_INSTALLER_EOF
+cat > '/usr/share/zm-redbtn/lists/twitter_x.lst' << 'ZM_INSTALLER_EOF'
+64.63.0.0/18
+103.252.112.0/22
+104.244.41.0/24
+104.244.42.0/24
+104.244.44.0/22
+184.105.99.0/24
+188.64.224.0/21
+192.133.76.0/22
+199.16.156.0/22
+199.59.148.0/22
+199.96.56.0/23
+202.160.128.0/22
+208.91.196.0/23
+ZM_INSTALLER_EOF
+chmod 0644 /usr/share/zm-redbtn/services.conf /usr/share/zm-redbtn/lists/*.lst
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
 chmod 0755 /www/luci-static/resources/view/zapret-manager
@@ -7760,6 +10015,11 @@ html.zm-theme-dark .zm-config-editor { border-color: rgba(255,255,255,.14); }
 }
 
 .cbi-page-actions { display: none !important; }
+.zm-redbtn, .zm-redbtn:focus {
+	background: #d32f2f !important; border-color: #b71c1c !important; color: #fff !important;
+	font-size: 1.1em; font-weight: 600; padding: .7em 2.2em; border-radius: 999px;
+}
+.zm-redbtn:hover { background: #b71c1c !important; }
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/style.css'
 
@@ -10165,6 +12425,7 @@ function toggleTheme() {
 
 var ROUTES = [
 	{ id: 'dashboard', title: 'Дашборд', sub: 'Состояние всех компонентов', icon: 'dashboard', group: 'Обзор' },
+	{ id: 'redbtn', title: 'Красная кнопка', sub: 'Автоподбор обхода по сервисам', icon: 'rocket', group: 'Обход блокировок', dot: 'redbtn' },
 	{ id: 'strategy', title: 'Zapret', sub: 'Стратегии, тесты, YouTube, игры, Discord и исключения', icon: 'shield', group: 'Обход блокировок', dot: 'zapret' },
 	{ id: 'zapret2', title: 'Zapret2', sub: 'Установка и управление Zapret2', icon: 'bolt', group: 'Обход блокировок', dot: 'zapret2' },
 	{ id: 'bytetube', title: 'ByeTube', sub: 'YouTube через ByeDPI', icon: 'play', group: 'Обход блокировок', dot: 'bytetube' },
