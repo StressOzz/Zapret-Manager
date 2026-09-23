@@ -5205,7 +5205,7 @@ _st_warp_ports() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА АДРЕС
 _st_warp_scan() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА ЗАНЯТЫЕ_КОЛОНИИ ЗАНЯТЫЕ_АДРЕСА
 	local dev="$1" peer="$2" busy=" $3 " busyip=" $4 " r="$ST_RUN/scan.$1" cand ip ports port loss rtt colo pick f
 	mkdir -p "$ST_RUN"
-	: > "$r"; : > "$r.same"; : > "$r.nc"; : > "$r.ru"
+	: > "$r"; : > "$r.same"; : > "$r.nc"; : > "$r.ru"; : > "$r.notls"
 	# Якоря .1 первыми: на них указывает сам engage.cloudflareclient.com; случайные — за
 	# разными колониями.
 	cand=$(awk -v p="$ST_WARP_POOLS" -v n="$ST_WARP_RAND" 'BEGIN { srand(); c = split(p, a, " ");
@@ -5225,6 +5225,13 @@ _st_warp_scan() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА ЗАНЯТЫЕ_КОЛО
 		if [ -z "$colo" ]; then
 			echo "$loss $rtt $ip $port ?" >> "$r.nc"; echo "   $ip:$port — потери $loss%, $rtt мс, колония не узналась" >&2; continue
 		fi
+		# HTTPS через туннель — обязательно. CF-RAY приходит по голому HTTP, а на части сетей
+		# через туннель проходят только мелкие пакеты и порт 80, TLS молчит (brb снял это на
+		# живом роутере). Такая точка «работает» по всем замерам, а устройства через неё сайты
+		# не открывают, — поэтому она уходит в последний запас.
+		if ! curl -s -o /dev/null --interface "$dev" --connect-timeout 4 --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null; then
+			echo "$loss $rtt $ip $port $colo" >> "$r.notls"; echo "   $ip:$port — колония $colo, но HTTPS через туннель не проходит" >&2; continue
+		fi
 		echo "   $ip:$port — потери $loss%, $rtt мс, колония $colo" >&2
 		if _st_warp_is_ru "$colo"; then echo "$loss $rtt $ip $port $colo" >> "$r.ru"; continue; fi
 		case "$busy" in *" $colo "*) echo "$loss $rtt $ip $port $colo" >> "$r.same"; continue ;; esac
@@ -5233,12 +5240,13 @@ _st_warp_scan() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА ЗАНЯТЫЕ_КОЛО
 	done
 	# Лучшая — одним числовым ключом: потери в старших разрядах, круг в младших (busybox sort
 	# не понимает модификаторов у ключей, см. brb/warp.sh).
-	for f in "$r" "$r.same" "$r.nc" "$r.ru"; do
+	for f in "$r" "$r.same" "$r.nc" "$r.ru" "$r.notls"; do
 		[ -s "$f" ] || continue
 		pick=$(awk '{ printf "%d\t%s %s %s\n", $1 * 100000 + $2, $3, $4, $5 }' "$f" | sort -n | head -n1 | cut -f2)
 		case "$f" in
 			*.same) echo "   другой колонии нет — та же, но через другой адрес" >&2 ;;
 			*.ru) echo "   наружных колоний нет — беру российскую (геоблок она не снимает)" >&2 ;;
+			*.notls) echo "!! ни через одну точку не проходит HTTPS — беру лучшую из оставшихся" >&2 ;;
 		esac
 		echo "$pick"
 		return 0
@@ -5840,10 +5848,36 @@ steer_status() {
 		svc="$svc$sep{\"id\":\"$id\",\"name\":\"$(esc "$(_rb_svc_field "$id" 2)")\",\"on\":$w,\"skip\":$k,\"auto\":\"$r\"}"
 		sep=","
 	done
-	printf '{"running":%s,"phase":"%s","blocker":"%s","installed":%s,"stopped":%s,"version":"%s","steer_running":%s,"channels":%s,"warp_up":%s,"warp_colo":"%s","warp_host":"%s","warp_port":"%s","warp_hs_age":"%s","warp_rx":%s,"warp_tx":%s,"autorestart":"%s","dns_conflict":%s,"redbtn_running":%s,"services":[%s]}\n' \
+	printf '{"running":%s,"phase":"%s","blocker":"%s","installed":%s,"stopped":%s,"version":"%s","steer_running":%s,"channels":%s,"warp_up":%s,"warp_colo":"%s","warp_host":"%s","warp_port":"%s","warp_hs_age":"%s","warp_rx":%s,"warp_tx":%s,"autorestart":"%s","dns_conflict":%s,"redbtn_running":%s,"tunnels":%s,"services":[%s]}\n' \
 		"$running" "$(esc "$phase")" "$blk" "$installed" "$off" "$(esc "$ver")" "$run" "${chans:-0}" "$warp_up" "$(esc "$colo")" \
 		"$(esc "$host")" "$(esc "$port")" "$age" "${rx:-0}" "${tx:-0}" "$(_st_cron_get)" "$dns" \
-		"$(_job_alive redbtn && echo true || echo false)" "$svc"
+		"$(_job_alive redbtn && echo true || echo false)" "$(_st_tunnels_json)" "$svc"
+}
+
+# Туннели по одному — JSON-массив для страницы steer: у каждого своя точка, колония (из
+# последней разведки), связь и трафик. Только те, что заведены.
+_st_tunnels_json() {
+	local n=1 i up hs age rx tx host port colo out="" sep=""
+	while [ "$n" -le "$ST_WARP_N" ]; do
+		i="$(_st_wif "$n")"
+		if _st_owns "net $i"; then
+			up=false; age=""; rx=0; tx=0
+			[ -d "/sys/class/net/$i" ] && up=true
+			host="$(uci -q get "network.${i}_peer.endpoint_host")"
+			port="$(uci -q get "network.${i}_peer.endpoint_port")"
+			colo="$(awk -v i="$i" '$1 == i {print $2; exit}' "$ST_WARP_UP" 2>/dev/null)"
+			if [ "$up" = true ] && command -v awg >/dev/null 2>&1; then
+				hs=$(awg show "$i" latest-handshakes 2>/dev/null | awk '{print $2; exit}')
+				[ "${hs:-0}" -gt 0 ] 2>/dev/null && age=$(( $(date +%s) - hs ))
+				set -- $(awg show "$i" transfer 2>/dev/null | head -n1)
+				rx="${2:-0}"; tx="${3:-0}"
+			fi
+			out="$out$sep{\"n\":$n,\"if\":\"$i\",\"up\":$up,\"colo\":\"$(esc "$colo")\",\"host\":\"$(esc "$host")\",\"port\":\"$(esc "$port")\",\"hs_age\":\"$age\",\"rx\":$rx,\"tx\":$tx}"
+			sep=","
+		fi
+		n=$((n + 1))
+	done
+	printf '[%s]' "$out"
 }
 
 # Выбор сервисов с страницы: итоговый набор через запятую.
@@ -5899,18 +5933,35 @@ steer_action() {
 			;;
 		autorestart) _st_cron_set "$mode" ;;
 		diag)
-			local trace warp="none" colo=""
+			# Каждый туннель — отдельно: «идёт ли трафик» у одного ничего не говорит о других.
+			# Сначала HTTPS-трассировка (она же подтверждает warp=on); не прошла — голый HTTP с
+			# CF-RAY: если он отвечает, данные идут, но TLS через туннель режется — это другая
+			# поломка и другое действие.
+			local trace warp="none" colo="" tun="" tsep="" wi wn wv wc
 			if _st_installed && [ -n "$(_st_sel)" ] && [ ! -f "$ST_OFF" ]; then
-				trace="$(curl -s --interface "$(_st_warp_first)" --connect-timeout 4 --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)"
-				case "$trace" in *warp=on*|*warp=plus*) warp=on ;; *) warp=off ;; esac
-				colo="$(echo "$trace" | sed -n 's/^colo=//p')"
+				warp=off
+				wn=1
+				while [ "$wn" -le "$ST_WARP_N" ]; do
+					wi="$(_st_wif "$wn")"
+					if _st_owns "net $wi" && [ -d "/sys/class/net/$wi" ]; then
+						trace="$(curl -s --interface "$wi" --connect-timeout 4 --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)"
+						wc="$(echo "$trace" | sed -n 's/^colo=//p')"
+						case "$trace" in
+							*warp=on*|*warp=plus*) wv=on; warp=on; [ -n "$colo" ] || colo="$wc" ;;
+							*) wc="$(_st_colo_of "$wi")"; [ -n "$wc" ] && wv=notls || wv=off ;;
+						esac
+						tun="$tun$tsep{\"n\":$wn,\"warp\":\"$wv\",\"colo\":\"$(esc "$wc")\"}"
+						tsep=","
+					fi
+					wn=$((wn + 1))
+				done
 			fi
 			local d=""
 			if command -v steer >/dev/null 2>&1 && [ -s "$ST_STEER_SPEC" ] && _st_owns "steer-spec"; then
 				d="$(steer diag --spec "$ST_STEER_SPEC" 2>/dev/null | tr '\n' ' ')"
 				case "$d" in '{'*'}'*) ;; *) d="" ;; esac
 			fi
-			printf '{"warp":"%s","colo":"%s","diag":%s}\n' "$warp" "$(esc "$colo")" "${d:-null}"
+			printf '{"warp":"%s","colo":"%s","tunnels":[%s],"diag":%s}\n' "$warp" "$(esc "$colo")" "$tun" "${d:-null}"
 			;;
 		dns_fix)
 			do_steer_dns_fix
@@ -8457,6 +8508,12 @@ function fmtAge(sec) {
 	return Math.floor(sec / 3600) + ' ч назад';
 }
 
+// Туннель жив: поднят и рукопожатие было за последние пять минут.
+function tunnelLive(t) {
+	var a = parseInt(t.hs_age, 10);
+	return t.up && !isNaN(a) && a < 300;
+}
+
 function hh(h) { return (h < 10 ? '0' : '') + h + ':00'; }
 
 return view.extend({
@@ -8572,6 +8629,8 @@ return view.extend({
 		function tunnelState() {
 			var age = parseInt(data.warp_hs_age, 10), n = parseInt(data.channels, 10) || 0;
 			if (!data.warp_up) return (data.stopped || !n) ? [ 'выключен', 'zm-st-off' ] : [ 'не поднят', 'zm-st-bad' ];
+			var t = data.tunnels || [], live = t.filter(tunnelLive).length;
+			if (t.length > 1 && live) return [ 'работает ' + live + ' из ' + t.length + (data.warp_colo ? ' · ' + data.warp_colo : ''), live < t.length ? 'zm-st-warn' : 'zm-st-ok' ];
 			if (!isNaN(age) && age < 300) return [ 'работает' + (data.warp_colo ? ' · ' + data.warp_colo : ''), 'zm-st-ok' ];
 			return [ 'нет связи', 'zm-st-warn' ];
 		}
@@ -8726,8 +8785,15 @@ return view.extend({
 			checkCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Роутер проверит туннель и спросит сам steer, всё ли на месте.'));
 			if (diagRes) {
 				var items = [];
-				if (diagRes.warp === 'on') items.push([ 'ok', 'Трафик идёт через WARP' + (diagRes.colo ? ' (сервер ' + diagRes.colo + ')' : ''), '' ]);
-				else if (diagRes.warp === 'off') items.push([ 'fail', 'Трафик через WARP не идёт', 'Нажмите «Перезапустить туннель» или «Сменить точку входа» ниже' ]);
+				var tn = diagRes.tunnels || [];
+				if (tn.length) tn.forEach(function(t) {
+					var who = tn.length > 1 ? 'Туннель ' + t.n + ': ' : '';
+					if (t.warp === 'on') items.push([ 'ok', who + 'трафик идёт через WARP' + (t.colo ? ' (сервер ' + t.colo + ')' : ''), '' ]);
+					else if (t.warp === 'notls') items.push([ 'warn', who + 'соединение есть, но HTTPS через туннель не проходит', 'Нажмите «Сменить точки входа» ниже' ]);
+					else items.push([ tn.length > 1 && diagRes.warp === 'on' ? 'warn' : 'fail', who + 'трафик через WARP не идёт', 'Нажмите «Перезапустить туннели» или «Сменить точки входа» ниже' ]);
+				});
+				else if (diagRes.warp === 'on') items.push([ 'ok', 'Трафик идёт через WARP' + (diagRes.colo ? ' (сервер ' + diagRes.colo + ')' : ''), '' ]);
+				else if (diagRes.warp === 'off') items.push([ 'fail', 'Трафик через WARP не идёт', 'Нажмите «Перезапустить туннели» или «Сменить точки входа» ниже' ]);
 				var d = diagRes.diag;
 				if (d && d.checks) d.checks.forEach(function(c) {
 					if (c.verdict === 'ok' || c.verdict === 'warn' || c.verdict === 'fail') items.push([ c.verdict, c.what, c.why ]);
@@ -8754,30 +8820,48 @@ return view.extend({
 			warpCard.innerHTML = '';
 			warpCard.style.display = data.installed ? '' : 'none';
 			if (!data.installed) return;
-			warpCard.appendChild(E('h3', {}, 'Туннель WARP'));
-			var ts = tunnelState();
-			var st = plainBadge(ts[1] === 'zm-st-ok' ? 'zm-ok' : ts[1] === 'zm-st-warn' ? 'zm-warn' : ts[1] === 'zm-st-bad' ? 'zm-bad' : 'zm-off', ts[0].split(' · ')[0]);
-			warpCard.appendChild(E('div', { 'class': 'bt-cols' }, [
-				E('div', { 'class': 'bt-col' }, [
-					row('Состояние', st),
-					row('Точка входа', E('span', {}, data.warp_host ? data.warp_host + ':' + data.warp_port : '—')),
-					row('Сервер Cloudflare', E('span', {}, data.warp_colo || '—'))
-				]),
-				E('div', { 'class': 'bt-col' }, [
-					row('Последняя связь', E('span', {}, data.warp_up ? fmtAge(data.warp_hs_age) : '—')),
-					row('Получено', E('span', {}, zm.fmtSize(+data.warp_rx || 0))),
-					row('Отправлено', E('span', {}, zm.fmtSize(+data.warp_tx || 0)))
-				])
-			]));
+			var tl = data.tunnels || [];
+			warpCard.appendChild(E('h3', {}, tl.length > 1 ? 'Туннели WARP' : 'Туннель WARP'));
+			if (tl.length > 1) {
+				warpCard.appendChild(E('p', { 'class': 'zm-hint' },
+					'Трафик идёт через самый быстрый живой туннель; упал один — steer сам переключится на другой.'));
+				warpCard.appendChild(E('div', { 'class': 'zm-st-tunnels' }, tl.map(function(t) {
+					var live = tunnelLive(t);
+					return E('div', { 'class': 'zm-st-tunnel' }, [
+						E('div', { 'class': 'zm-st-tunnel-head' }, [
+							E('span', { 'class': 'zm-st-tunnel-name' }, 'WARP ' + t.n + (t.colo ? ' · ' + t.colo : '')),
+							plainBadge(live ? 'zm-ok' : t.up ? 'zm-warn' : 'zm-bad', live ? 'работает' : t.up ? 'нет связи' : 'не поднят')
+						]),
+						row('Точка входа', E('span', {}, t.host ? t.host + ':' + t.port : '—')),
+						row('Последняя связь', E('span', {}, t.up ? fmtAge(t.hs_age) : '—')),
+						row('Получено / отправлено', E('span', {}, zm.fmtSize(+t.rx || 0) + ' / ' + zm.fmtSize(+t.tx || 0)))
+					]);
+				})));
+			} else {
+				var ts = tunnelState();
+				var st = plainBadge(ts[1] === 'zm-st-ok' ? 'zm-ok' : ts[1] === 'zm-st-warn' ? 'zm-warn' : ts[1] === 'zm-st-bad' ? 'zm-bad' : 'zm-off', ts[0].split(' · ')[0]);
+				warpCard.appendChild(E('div', { 'class': 'bt-cols' }, [
+					E('div', { 'class': 'bt-col' }, [
+						row('Состояние', st),
+						row('Точка входа', E('span', {}, data.warp_host ? data.warp_host + ':' + data.warp_port : '—')),
+						row('Сервер Cloudflare', E('span', {}, data.warp_colo || '—'))
+					]),
+					E('div', { 'class': 'bt-col' }, [
+						row('Последняя связь', E('span', {}, data.warp_up ? fmtAge(data.warp_hs_age) : '—')),
+						row('Получено', E('span', {}, zm.fmtSize(+data.warp_rx || 0))),
+						row('Отправлено', E('span', {}, zm.fmtSize(+data.warp_tx || 0)))
+					])
+				]));
+			}
 			warpCard.appendChild(E('div', { 'class': 'zm-actions' }, [
-				E('button', { 'class': 'cbi-button', 'click': function() { act('warp_restart', '', 'Перезапускаем туннель'); } }, 'Перезапустить туннель'),
-				E('button', { 'class': 'cbi-button', 'click': function() { act('warp_endpoint', '', 'Ищем быструю точку входа'); } }, 'Сменить точку входа'),
+				E('button', { 'class': 'cbi-button', 'click': function() { act('warp_restart', '', 'Перезапускаем туннели'); } }, 'Перезапустить туннели'),
+				E('button', { 'class': 'cbi-button', 'click': function() { act('warp_endpoint', '', 'Ищем точки входа'); } }, 'Сменить точки входа'),
 				E('button', { 'class': 'cbi-button', 'click': function() {
-					if (!confirm('Пересоздать WARP?\n\nБудут получены новые ключи, туннель переподключится. Помогает, если Cloudflare перестал пускать старые ключи.')) return;
+					if (!confirm('Пересоздать WARP?\n\nБудут получены новые ключи, туннели переподключатся. Помогает, если Cloudflare перестал пускать старые ключи.')) return;
 					act('warp_recreate', '', 'Пересоздаём WARP');
 				} }, 'Новые ключи')
 			]));
-			warpCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Не работает — «Перезапустить туннель». Медленно — «Сменить точку входа». Совсем не помогает — «Новые ключи».'));
+			warpCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Не работает — «Перезапустить туннели». Медленно — «Сменить точки входа». Совсем не помогает — «Новые ключи».'));
 		}
 
 		// ── автоперезапуск ──
@@ -12259,6 +12343,10 @@ html.zm-theme-dark .zm-svc { background: #22272e; border-color: rgba(255,255,255
 	.zm-ab-step-label { font-size: 11.5px; }
 	.zm-ab-svc { grid-template-columns: 1fr; }
 }
+.zm-st-tunnels { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 10px 0 14px; }
+.zm-st-tunnel { border: 1px solid rgba(127,127,127,.25); border-radius: 12px; padding: 10px 14px; }
+.zm-st-tunnel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.zm-st-tunnel-name { font-weight: 600; }
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/style.css'
 
