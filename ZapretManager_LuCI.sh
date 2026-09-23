@@ -1,6 +1,6 @@
 #!/bin/sh
 # Zapret Manager by StressOzz for LuCI installer
-# Version: 1.33
+# Version: 1.34
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -53,7 +53,7 @@ chmod 0755 /opt/zapret-manager-luci
 cat > '/opt/zapret-manager-luci/backend.sh' << 'ZM_INSTALLER_EOF'
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.33"
+ZM_VERSION="1.34"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -1320,7 +1320,9 @@ rm -rf /opt/zapret-manager-luci /usr/libexec/rpcd/zapret-manager \
 	/www/luci-static/resources/zapret-manager \
 	/www/luci-static/resources/bytetube \
 	/www/luci-static/resources/view/bytetube \
-	/tmp/zapret-manager-luci /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null
+	/tmp/zapret-manager-luci /tmp/luci-indexcache* /tmp/luci-modulecache/* \
+	/www/zm /www/zm-webui.html 2>/dev/null
+uci -q delete uhttpd.zmweb && uci -q commit uhttpd
 /etc/init.d/rpcd restart >/dev/null 2>&1
 /etc/init.d/uhttpd restart >/dev/null 2>&1
 rm -f "$0"
@@ -3045,6 +3047,36 @@ _bytetube_fetch() { # URL OUT
 	fi
 }
 
+health() {
+	# Быстрая сводка без сетевых запросов: 0 — не установлено, 1 — работает, 2 — установлено, но не работает
+	local zr=0 zr2=0 bt=0 tg=0 mx=0 doh=0 hs=0 inst=0 bad=0 out=""
+	if [ -f /etc/init.d/zapret ]; then zr=2; pgrep -f "/opt/zapret/" >/dev/null 2>&1 && zr=1; fi
+	if [ -f /etc/init.d/zapret2 ]; then zr2=2; /etc/init.d/zapret2 status >/dev/null 2>&1 && zr2=1; fi
+	if [ -x /usr/bin/bytetube ]; then
+		bt=2
+		out=$(/usr/bin/bytetube status 2>/dev/null)
+		case "$out" in *'"enabled":true'*'"byedpi":true'*'"hev":true'*) bt=1 ;; esac
+	fi
+	if [ -f /etc/init.d/tg-ws-proxy ]; then inst=1; pidof tg-ws-proxy >/dev/null 2>&1 || bad=1; fi
+	if [ -f "$TG_INIT_GO" ]; then inst=1; pidof tg-ws-proxy-go >/dev/null 2>&1 || bad=1; fi
+	if [ -f "$TG_INIT_RS" ]; then inst=1; pidof tg-ws-proxy-rs >/dev/null 2>&1 || bad=1; fi
+	if [ -x /etc/init.d/tgws ]; then inst=1; [ -n "$(tgws status 2>/dev/null)" ] || bad=1; fi
+	if [ "$inst" = "1" ]; then tg=1; [ "$bad" = "1" ] && tg=2; fi
+	if [ -x "$MIHOMO_BIN" ]; then
+		mx=1
+		pidof mihomo >/dev/null 2>&1 || mx=2
+		if [ -x /etc/init.d/magitrickle ]; then /etc/init.d/magitrickle status >/dev/null 2>&1 || mx=2; fi
+		if [ -x /etc/init.d/hev-socks5-tunnel ]; then /etc/init.d/hev-socks5-tunnel status >/dev/null 2>&1 || mx=2; fi
+	fi
+	if [ "$PKG" = "apk" ]; then apk info -e https-dns-proxy >/dev/null 2>&1 && doh=2
+	else opkg list-installed 2>/dev/null | grep -q '^https-dns-proxy ' && doh=2; fi
+	if [ "$doh" = "2" ]; then pidof https-dns-proxy >/dev/null 2>&1 && doh=1; fi
+	out=$(hosts_status 2>/dev/null)
+	case "$out" in *'"enabled":true'*|*'"geohide":"'[a-z]*) hs=1 ;; esac
+	printf '{"zapret":%s,"zapret2":%s,"bytetube":%s,"tg":%s,"mixomo":%s,"doh":%s,"hosts":%s}\n' \
+		"$zr" "$zr2" "$bt" "$tg" "$mx" "$doh" "$hs"
+}
+
 bytetube_installed() {
 	if [ -x /usr/bin/bytetube ]; then
 		printf '{"installed":true}\n'
@@ -4743,6 +4775,7 @@ case "$cmd" in
 	mixomo_warp_integrate_action)         mixomo_warp_integrate_action ;;
 	mixomo_warp_config_set)               mixomo_warp_config_set "$1" ;;
 	bytetube_installed)                   bytetube_installed ;;
+	health)                               health ;;
 	bytetube_action)                      bytetube_action "$1" ;;
 	*) echo '{"error":"неизвестная команда"}'; exit 1 ;;
 esac
@@ -4830,6 +4863,7 @@ list_methods() {
 	json_add_object "mixomo_warp_integrate_action"; json_close_object
 	json_add_object "mixomo_warp_config_set"; json_add_string "content" "string"; json_close_object
 	json_add_object "bytetube_installed";     json_close_object
+	json_add_object "health";                 json_close_object
 	json_add_object "bytetube_action";        json_add_string "action" "string"; json_close_object
 	json_dump
 }
@@ -4911,6 +4945,7 @@ call_method() {
 		mixomo_warp_integrate_action) "$BACKEND" mixomo_warp_integrate_action ;;
 		mixomo_warp_config_set) json_get_var content content; "$BACKEND" mixomo_warp_config_set "$content" ;;
 		bytetube_installed)      "$BACKEND" bytetube_installed ;;
+		health)                  "$BACKEND" health ;;
 		bytetube_action)         json_get_var action action; "$BACKEND" bytetube_action "$action" ;;
 		*) echo '{"error":"unknown method"}'; return 1 ;;
 	esac
@@ -4939,8 +4974,9 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"system_status", "mirror_status", "exclusions_status", "exclusions_file_get", "nfqws_opt_get", "tg_status", "tgws_status",
 					"test_status", "test_results", "zm_update_status", "mixomo_status", "mixomo_config_get",
 					"mixomo_warp_status",
-					"zapret_latest_version", "bytetube_installed"
-				]
+					"zapret_latest_version", "bytetube_installed", "health"
+				],
+				"system": [ "info" ]
 			},
 			"uci": [ "bytetube" ],
 			"file": {
@@ -5112,6 +5148,33 @@ var callMixomoWarpAction = rpc.declare({ object: 'zapret-manager', method: 'mixo
 var callMixomoWarpIntegrateAction = rpc.declare({ object: 'zapret-manager', method: 'mixomo_warp_integrate_action', expect: {} });
 var callMixomoWarpConfigSet = rpc.declare({ object: 'zapret-manager', method: 'mixomo_warp_config_set', params: ['content'], expect: {} });
 var callBytetubeInstalled = rpc.declare({ object: 'zapret-manager', method: 'bytetube_installed', expect: {} });
+var callHealth = rpc.declare({ object: 'zapret-manager', method: 'health', expect: {} });
+var callBoardInfo = rpc.declare({ object: 'system', method: 'info', expect: {} });
+
+function parseSize(v) {
+	var m = String(v == null ? '' : v).trim().match(/^([\d.,]+)\s*([KMGT]?)i?B?$/i);
+	if (!m) return NaN;
+	return parseFloat(m[1].replace(',', '.')) * ({ '': 1, K: 1024, M: 1048576, G: 1073741824, T: 1099511627776 })[m[2].toUpperCase()];
+}
+
+function fmtSize(b) {
+	if (!isFinite(b)) return '—';
+	var u = [ 'Б', 'КБ', 'МБ', 'ГБ', 'ТБ' ], i = 0;
+	while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+	return (b >= 100 || i === 0 ? Math.round(b) : b.toFixed(1).replace(/\.0$/, '')) + ' ' + u[i];
+}
+
+function usageText(used, total) {
+	if (!isFinite(used) || !isFinite(total) || total <= 0) return '—';
+	return fmtSize(used) + ' из ' + fmtSize(total) + ' (' + Math.round(used / total * 100) + '%)';
+}
+
+/* Единый бейдж состояния службы: 1 — запущен, 2 — остановлен, 0 — не установлен */
+function stateBadge(st, textOk) {
+	if (st === 1) return badge(true, textOk || 'запущен', '');
+	if (st === 2) return badge(false, '', 'остановлен');
+	return badge(false, '', 'не установлен');
+}
 
 function detectMissingThemeVar() {
 	if (document.documentElement.hasAttribute('data-zm-theme-checked')) return;
@@ -5145,7 +5208,7 @@ function injectCss() {
 }
 
 function badge(ok, textOk, textBad) {
-	var cls = ok ? 'zm-ok' : 'zm-bad';
+	var cls = ok ? 'zm-ok' : (textBad === 'не установлен' ? 'zm-off' : 'zm-bad');
 	return E('span', { 'class': 'zm-badge ' + cls }, [
 		E('span', { 'class': 'zm-dot' }),
 		ok ? textOk : textBad
@@ -5349,7 +5412,13 @@ return baseclass.extend({
 	mixomoWarpAction: callMixomoWarpAction,
 	mixomoWarpIntegrateAction: callMixomoWarpIntegrateAction,
 	mixomoWarpConfigSet: callMixomoWarpConfigSet,
-	bytetubeInstalled: callBytetubeInstalled
+	bytetubeInstalled: callBytetubeInstalled,
+	health: callHealth,
+	boardInfo: callBoardInfo,
+	parseSize: parseSize,
+	fmtSize: fmtSize,
+	usageText: usageText,
+	stateBadge: stateBadge
 });
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/zapret-manager/common.js'
@@ -5372,10 +5441,8 @@ return view.extend({
 			zm.systemStatus().catch(function() { return {}; }),
 			zm.systemInfo().catch(function() { return {}; }),
 			zm.zmUpdateStatus().catch(function() { return {}; }),
-			zm.mixomoStatus().catch(function() { return {}; }),
-			zm.tgStatus().catch(function() { return {}; }),
-			zm.tgwsStatus().catch(function() { return {}; }),
-			zm.bytetubeInstalled().catch(function() { return {}; })
+			zm.health().catch(function() { return {}; }),
+			zm.boardInfo().catch(function() { return {}; })
 		]);
 	},
 
@@ -5384,10 +5451,8 @@ return view.extend({
 		var data = all[0], dohData = all[1], hostsData = all[2], sysData = all[3];
 		var sysInfo = all[4] || {};
 		var zmUpdate = all[5] || {};
-		var mixomoData = all[6] || {};
-		var tgData = all[7] || {};
-		var tgwsData = all[8] || {};
-		var bytetubeData = all[9] || {};
+		var healthData = all[6] || {};
+		var boardInfo = all[7] || {};
 		var wrap = E('div', { 'class': 'zm-wrap' });
 		var overviewEl = E('div', {});
 		var cards = E('div', { 'class': 'zm-cards' });
@@ -5398,7 +5463,11 @@ return view.extend({
 			return E('div', { 'class': 'zm-row' }, [ E('span', { 'class': 'zm-label' }, label), node ]);
 		}
 
-		function renderOverview(d, doh, hosts, sys, tg, tgws, mixomo, bytetube) {
+		function st(h, key, fallback) {
+			return (h && typeof h[key] === 'number') ? h[key] : fallback;
+		}
+
+		function renderOverview(d, doh, hosts, sys, h) {
 			var hostsEnabled = (hosts.items || []).filter(function(it) { return it.enabled; }).length;
 			var hostsTotal = (hosts.items || []).length;
 
@@ -5407,36 +5476,34 @@ return view.extend({
 			if (sys.ipv6_enabled) sysFlags.push('IPv6 в Zapret включён');
 			if (sys.flow_offloading_fix) sysFlags.push('Flow Offloading fix');
 
-			var tgInstalled = !!(tg && (tg.mtproto === 'installed' || tg.socks5 === 'installed' || tg.rust === 'installed'))
-				|| !!(tgws && tgws.installed === 'installed');
-			var mixomoInstalled = mixomo && mixomo.mihomo === 'installed';
-			var bytetubeInstalled = bytetube && bytetube.installed === true;
+			var zrSt = st(h, 'zapret', d.zapret === 'installed' ? (d.zapret_running ? 1 : 2) : 0);
+			var zr2St = st(h, 'zapret2', d.zapret2 === 'installed' ? (d.zapret2_running ? 1 : 2) : 0);
+			var dohSt = st(h, 'doh', doh.installed ? 1 : 0);
+			var dohNode = zm.stateBadge(dohSt);
+			if (dohSt !== 0) dohNode = E('span', { 'style': 'display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap' }, [
+				dohNode, E('span', {}, DOH_LABELS[doh.current] || doh.current || 'провайдер не определён')
+			]);
 
 			var items = [];
-			items.push(row('Zapret', d.zapret === 'installed'
-				? zm.badge(d.zapret_running === true, 'запущен', 'остановлен')
-				: zm.badge(false, '', 'не установлен')));
-			if (d.zapret === 'installed' && d.zapret_version) items.push(row('Версия Zapret', E('span', {}, d.zapret_version)));
-			if (d.zapret === 'installed' && d.strategy) items.push(row('Стратегия', E('span', {}, d.strategy)));
-			items.push(row('Zapret2', d.zapret2 === 'installed'
-				? zm.badge(d.zapret2_running === true, 'запущен', 'остановлен')
-				: zm.badge(false, '', 'не установлен')));
-			items.push(row('DNS over HTTPS', doh.installed
-				? zm.badge(true, DOH_LABELS[doh.current] || doh.current || 'установлен, провайдер не определён', '')
-				: zm.badge(false, '', 'не установлен')));
+			items.push(row('Zapret', zm.stateBadge(zrSt)));
+			if (zrSt !== 0 && d.zapret_version) items.push(row('Версия Zapret', E('span', {}, d.zapret_version)));
+			if (zrSt !== 0 && d.strategy) items.push(row('Стратегия', E('span', {}, d.strategy)));
+			items.push(row('Zapret2', zm.stateBadge(zr2St)));
+			items.push(row('ByeTube', zm.stateBadge(st(h, 'bytetube', 0))));
+			items.push(row('TG WS Proxy', zm.stateBadge(st(h, 'tg', 0))));
+			items.push(row('Mixomo', zm.stateBadge(st(h, 'mixomo', 0))));
+			items.push(row('DNS over HTTPS', dohNode));
 			items.push(row('Домены в hosts', hosts.geohide
 				? zm.badge(true, 'GeoHide ' + hosts.geohide.toUpperCase(), '')
 				: hostsTotal
-					? zm.badge(hostsEnabled > 0, hostsEnabled + ' из ' + hostsTotal + ' включено', 'ничего не включено')
+					? (hostsEnabled > 0 ? zm.badge(true, 'включено ' + hostsEnabled + ' из ' + hostsTotal, '') : E('span', { 'class': 'zm-badge zm-off' }, [ E('span', { 'class': 'zm-dot' }), 'ничего не включено' ]))
 					: E('span', {}, '—')));
 			if (sysFlags.length) items.push(row('Система', E('span', { 'style': 'overflow-wrap:anywhere' }, sysFlags.join(', '))));
-			items.push(row('TG WS Proxy', zm.badge(tgInstalled, 'установлен', 'не установлен')));
-			items.push(row('Mixomo', zm.badge(mixomoInstalled, 'установлен', 'не установлен')));
-			items.push(row('ByeTube', zm.badge(bytetubeInstalled, 'установлен', 'не установлен')));
 
 			var half = Math.ceil(items.length / 2);
 
 			return E('div', { 'class': 'zm-card', 'style': 'margin-bottom:4px' }, [
+				E('h3', {}, 'Компоненты'),
 				E('div', { 'class': 'bt-cols' }, [
 					E('div', { 'class': 'bt-col' }, items.slice(0, half)),
 					E('div', { 'class': 'bt-col' }, items.slice(half))
@@ -5447,29 +5514,28 @@ return view.extend({
 		function renderCards() {
 			cards.innerHTML = '';
 
-			var sysCard = E('div', { 'class': 'zm-card' }, [
-				E('h3', {}, 'Система'),
-				E('div', { 'class': 'zm-row' }, [
-					E('span', { 'class': 'zm-label' }, 'Модель:'), E('span', {}, sysInfo.model || '—')
-				]),
-				E('div', { 'class': 'zm-row' }, [
-					E('span', { 'class': 'zm-label' }, 'Архитектура:'), E('span', {}, sysInfo.arch || '—')
-				]),
-				E('div', { 'class': 'zm-row' }, [
-					E('span', { 'class': 'zm-label' }, 'OpenWrt:'), E('span', {}, sysInfo.openwrt || '—')
-				]),
-				E('p', { 'class': 'zm-hint', 'style': 'margin-top:10px; margin-bottom:2px' }, 'Место на роутере:'),
-				E('div', { 'class': 'zm-row' }, [
-					E('span', { 'class': 'zm-label' }, '/tmp'),
-					E('span', {}, sysInfo.tmp_free ? ('занято ' + sysInfo.tmp_used + ' · свободно ' + sysInfo.tmp_free) : '—')
-				]),
-				E('div', { 'class': 'zm-row' }, [
-					E('span', { 'class': 'zm-label' }, '/root'),
-					E('span', {}, sysInfo.root_free ? ('занято ' + sysInfo.root_used + ' · свободно ' + sysInfo.root_free) : '—')
-				])
-			]);
+			var mem = boardInfo.memory || {};
+			var ramAvail = mem.available != null ? mem.available : ((mem.free || 0) + (mem.buffered || 0) + (mem.cached || 0));
+			var ru = zm.parseSize(sysInfo.root_used), rf = zm.parseSize(sysInfo.root_free);
+			var tu = zm.parseSize(sysInfo.tmp_used), tf = zm.parseSize(sysInfo.tmp_free);
 
-			cards.appendChild(sysCard);
+			var rows = [
+				row('Модель', E('span', {}, sysInfo.model || '—')),
+				row('Архитектура', E('span', {}, sysInfo.arch || '—')),
+				row('OpenWrt', E('span', {}, sysInfo.openwrt || '—'))
+			];
+			var memRows = [];
+			if (mem.total) memRows.push(row('ОЗУ', E('span', {}, zm.usageText(mem.total - ramAvail, mem.total))));
+			memRows.push(row('Флеш', E('span', {}, zm.usageText(ru, ru + rf))));
+			memRows.push(row('/tmp', E('span', {}, zm.usageText(tu, tu + tf))));
+
+			cards.appendChild(E('div', { 'class': 'zm-card' }, [
+				E('h3', {}, 'Система'),
+				E('div', { 'class': 'bt-cols' }, [
+					E('div', { 'class': 'bt-col' }, rows),
+					E('div', { 'class': 'bt-col' }, memRows)
+				])
+			]));
 		}
 
 		function refreshOverview() {
@@ -5478,17 +5544,14 @@ return view.extend({
 				zm.dohStatus().catch(function() { return {}; }),
 				zm.hostsStatus().catch(function() { return { items: [] }; }),
 				zm.systemStatus().catch(function() { return {}; }),
-				zm.mixomoStatus().catch(function() { return {}; }),
-				zm.tgStatus().catch(function() { return {}; }),
-				zm.tgwsStatus().catch(function() { return {}; }),
-				zm.bytetubeInstalled().catch(function() { return {}; })
+				zm.health().catch(function() { return {}; })
 			]).then(function(res) {
 				overviewEl.innerHTML = '';
-				overviewEl.appendChild(renderOverview(res[0], res[1], res[2], res[3], res[5], res[6], res[4], res[7]));
+				overviewEl.appendChild(renderOverview(res[0], res[1], res[2], res[3], res[4]));
 			});
 		}
 
-		overviewEl.appendChild(renderOverview(data, dohData, hostsData, sysData, tgData, tgwsData, mixomoData, bytetubeData));
+		overviewEl.appendChild(renderOverview(data, dohData, hostsData, sysData, healthData));
 		renderCards();
 		var updateEl = E('div', {});
 		wrap.appendChild(updateEl);
@@ -5497,7 +5560,8 @@ return view.extend({
 			E('span', { 'class': 'zm-header-by' }, 'by StressOzz · v' + (zmUpdate.current || '?')),
 			E('div', { 'class': 'zm-header-links' }, [
 				E('a', { 'href': 'http://stresskvn.lol/', 'target': '_blank', 'rel': 'noreferrer' }, 'StressKVN — обход белых списков!'),
-				E('a', { 'href': 'https://t.me/stressozz_manager', 'target': '_blank', 'rel': 'noreferrer' }, 'Сообщество Telegram')
+				E('a', { 'href': 'https://t.me/stressozz_manager', 'target': '_blank', 'rel': 'noreferrer' }, 'Сообщество Telegram'),
+				E('a', { 'href': 'http://' + window.location.hostname + ':7788/', 'target': '_blank', 'rel': 'noreferrer', 'class': 'zm-webui-link' }, 'Web UI ↗')
 			])
 		]));
 		wrap.appendChild(overviewEl);
@@ -5999,7 +6063,7 @@ return view.extend({
 				return;
 			}
 			panelCard.appendChild(E('div', { 'class': 'zm-row' }, [
-				E('span', { 'class': 'zm-label' }, 'Сейчас установлена'),
+				E('span', { 'class': 'zm-label' }, 'Сейчас'),
 				E('span', {}, d.ui_panel === 'zashboard' ? 'Zashboard' : d.ui_panel === 'metacubexd' ? 'MetaCubeXD' : 'не выбрана')
 			]));
 			panelCard.appendChild(E('div', { 'class': 'zm-grid' }, [
@@ -6100,25 +6164,38 @@ return view.extend({
 			autoCard.appendChild(E('h3', {}, 'Автоперезапуск Mihomo'));
 			autoCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Периодический перезапуск по расписанию — полезно для VPN-подписок, у которых иногда «зависает» соединение.'));
 			var cur = d.autorestart || '';
-			autoCard.appendChild(E('div', { 'class': 'zm-row' }, [
-				E('span', { 'class': 'zm-label' }, 'Сейчас'),
-				E('span', {}, cur === '' ? 'выключен' : (cur.indexOf('every:') === 0 ? 'каждые ' + cur.split(':')[1] + ' ч.' : 'ежедневно в ' + cur.split(':')[1].padStart(2, '0') + ':00'))
-			]));
-			var hourInput = E('input', { 'type': 'number', 'min': '0', 'max': '23', 'placeholder': 'час (0-23)', 'class': 'cbi-input-text', 'style': 'max-width:120px' });
-			autoCard.appendChild(E('div', { 'class': 'zm-actions' }, [
-				E('button', { 'class': 'cbi-button', 'click': function() { doAuto('off', ''); } }, 'Выключить'),
-				E('button', { 'class': 'cbi-button', 'click': function() { doAuto('every', '2'); } }, 'Каждые 2 часа'),
-				E('button', { 'class': 'cbi-button', 'click': function() { doAuto('every', '6'); } }, 'Каждые 6 часов'),
-				hourInput,
+			var mode = cur === '' ? 'off' : (cur.indexOf('every:') === 0 ? 'every' + cur.split(':')[1] : 'daily');
+			var curHour = mode === 'daily' ? parseInt(cur.split(':')[1], 10) : 4;
+			if (isNaN(curHour) || curHour < 0 || curHour > 23) curHour = 4;
+			function hh(h) { return (h < 10 ? '0' : '') + h + ':00'; }
+
+			var opts = [];
+			for (var h = 0; h < 24; h++)
+				opts.push(E('option', { 'value': String(h), 'selected': h === curHour ? 'selected' : null }, hh(h)));
+			var hourSel = E('select', { 'class': 'cbi-input-select zm-hour-select' }, opts);
+
+			var dailyRow = E('div', { 'class': 'zm-actions', 'style': mode === 'daily' ? '' : 'display:none' }, [
+				E('span', { 'class': 'zm-label' }, 'Время перезапуска'),
+				hourSel,
 				E('button', {
-					'class': 'cbi-button',
-					'click': function() {
-						var h = hourInput.value.trim();
-						if (!/^\d+$/.test(h) || +h < 0 || +h > 23) { zm.toast('Введите час от 0 до 23', 'error'); return; }
-						doAuto('daily', h);
-					}
-				}, 'Ежедневно в это время')
+					'class': 'cbi-button cbi-button-positive',
+					'click': function() { doAuto('daily', hourSel.value); }
+				}, mode === 'daily' ? 'Сохранить время' : 'Включить')
+			]);
+
+			function tile(id, label, onclick) {
+				return E('div', { 'class': 'zm-tile' + (mode === id ? ' zm-active' : ''), 'click': onclick }, label);
+			}
+			autoCard.appendChild(E('div', { 'class': 'zm-grid' }, [
+				tile('off', 'Выключен', function() { if (mode !== 'off') doAuto('off', ''); }),
+				tile('every2', 'Каждые 2 часа', function() { if (mode !== 'every2') doAuto('every', '2'); }),
+				tile('every6', 'Каждые 6 часов', function() { if (mode !== 'every6') doAuto('every', '6'); }),
+				tile('daily', mode === 'daily' ? 'Ежедневно в ' + hh(curHour) : 'Ежедневно в заданное время', function() {
+					dailyRow.style.display = '';
+					hourSel.focus();
+				})
 			]));
+			autoCard.appendChild(dailyRow);
 		}
 
 		function doAuto(mode, value) {
@@ -6503,14 +6580,14 @@ return view.extend({
 				}
 
 				var fields = [
-					E('span', {}, [ E('span', { 'class': 'zm-label' }, 'Статус: '),
+					E('span', { 'style': 'display:inline-flex; align-items:center; gap:8px' }, [ E('span', { 'class': 'zm-label' }, 'Статус'),
 						d.zapret === 'installed'
 							? zm.badge(d.zapret_running === true, 'запущен', 'остановлен')
 							: zm.badge(false, '', 'не установлен')
 					])
 				];
-				if (d.zapret_version) fields.push(E('span', {}, [ E('span', { 'class': 'zm-label' }, 'Версия: '), E('span', {}, d.zapret_version) ]));
-				if (d.strategy) fields.push(E('span', {}, [ E('span', { 'class': 'zm-label' }, 'Стратегия: '), E('span', {}, d.strategy) ]));
+				if (d.zapret_version) fields.push(E('span', { 'style': 'display:inline-flex; align-items:center; gap:8px' }, [ E('span', { 'class': 'zm-label' }, 'Версия'), E('span', {}, d.zapret_version) ]));
+				if (d.strategy) fields.push(E('span', { 'style': 'display:inline-flex; align-items:center; gap:8px' }, [ E('span', { 'class': 'zm-label' }, 'Стратегия'), E('span', {}, d.strategy) ]));
 
 				zCardWrap.appendChild(E('div', { 'class': 'zm-card', 'style': 'margin-bottom:10px' }, [
 					E('h3', {}, 'Zapret'),
@@ -7804,11 +7881,11 @@ return view.extend({
 							netEl.innerHTML = '';
 							netEl.appendChild(E('div', { 'class': 'zm-row' }, [
 								E('span', { 'class': 'zm-label' }, 'IPv4 (google.com)'),
-								zm.badge(res.ipv4_ok === true, 'ok, ' + res.ipv4_ms + ' ms', 'недоступен')
+								zm.badge(res.ipv4_ok === true, 'доступен, ' + res.ipv4_ms + ' мс', 'недоступен')
 							]));
 							netEl.appendChild(E('div', { 'class': 'zm-row' }, [
 								E('span', { 'class': 'zm-label' }, 'IPv6 (google.com)'),
-								zm.badge(res.ipv6_ok === true, 'ok, ' + res.ipv6_ms + ' ms', 'недоступен')
+								zm.badge(res.ipv6_ok === true, 'доступен, ' + res.ipv6_ms + ' мс', 'недоступен')
 							]));
 						}).catch(function() { netBusy = false; });
 					}
@@ -7852,7 +7929,7 @@ return view.extend({
 		var mirrorCard = E('div', { 'class': 'zm-card' }, [
 			E('h3', {}, 'Зеркало OpenWrt'),
 			E('div', { 'class': 'zm-row' }, [
-				E('span', { 'class': 'zm-label' }, 'Текущее'), mirrorCurrentEl
+				E('span', { 'class': 'zm-label' }, 'Сейчас'), mirrorCurrentEl
 			]),
 			mirrorGrid,
 			mirrorLog
@@ -7937,7 +8014,7 @@ cat > '/www/luci-static/resources/view/zapret-manager/tgproxy.js' << 'ZM_INSTALL
 'require zapret-manager.common as zm';
 
 var VARIANTS = [
-	{ id: 'mtproto', title: 'MTProto (пакет)', port: 1443, kind: 'proto' },
+	{ id: 'mtproto', title: 'Go (MTProto)', port: 1443, kind: 'proto' },
 	{ id: 'socks5', title: 'SOCKS5', port: 2080, kind: 'socks' },
 	{ id: 'rust', title: 'Rust (MTProto)', port: 2443, kind: 'proto' }
 ];
@@ -8279,7 +8356,7 @@ function injectCss() {
 }
 
 function badge(ok, textOk, textBad) {
-	var cls = ok ? 'zm-ok' : 'zm-bad';
+	var cls = ok ? 'zm-ok' : (textBad === 'не установлен' ? 'zm-off' : 'zm-bad');
 	return E('span', { 'class': 'zm-badge ' + cls }, [
 		E('span', { 'class': 'zm-dot' }),
 		ok ? textOk : textBad
@@ -9524,4 +9601,1871 @@ else PM="opkg"; INSTALL="opkg install"; fi
 command -v curl >/dev/null 2>&1 || $INSTALL curl >/dev/null 2>&1 || true
 command -v unzip >/dev/null 2>&1 || $INSTALL unzip >/dev/null 2>&1 || true
 
-echo -e "Zapret Manager ${GREEN}для ${NC}LuCI ${GREEN}установлен!${NC}\n"
+
+# ─────────────── Web UI (отдельный веб-интерфейс на порту 7788) ───────────────
+mkdir -p /www/zm
+chmod 0755 /www/zm
+cat > '/www/zm/app.js' << 'ZM_INSTALLER_EOF'
+/*
+ * Zapret Manager — Web UI
+ * Самостоятельный веб-интерфейс поверх того же rpcd-бэкенда (ubus: zapret-manager).
+ * Страницы LuCI (view/zapret-manager/*.js) исполняются как есть — здесь лишь
+ * лёгкая совместимая прослойка: E(), rpc, view, fs, uci, poll, ui, baseclass.
+ */
+(function () {
+'use strict';
+
+var BUILD = '__ZMW_BUILD__';
+var RES = '/luci-static/resources/';
+var NULL_SID = '00000000000000000000000000000000';
+var K_SID = 'zmw.sid', K_THEME = 'zmw.theme', K_USER = 'zmw.user';
+
+/* ───────────────────────── storage ───────────────────────── */
+
+function store(kind) {
+	try { return kind === 'local' ? window.localStorage : window.sessionStorage; } catch (e) { return null; }
+}
+function sget(k) {
+	var v = null;
+	try { var s = store('session'); v = s && s.getItem(k); } catch (e) {}
+	if (v) return v;
+	try { var l = store('local'); v = l && l.getItem(k); } catch (e) {}
+	return v || null;
+}
+function sset(k, v, persist) {
+	['session', 'local'].forEach(function (kind) {
+		try {
+			var s = store(kind); if (!s) return;
+			if (v == null || (kind === 'local') !== !!persist) s.removeItem(k);
+			else s.setItem(k, v);
+		} catch (e) {}
+	});
+}
+
+var sid = sget(K_SID);
+
+/* ───────────────────────── DOM helpers (LuCI-совместимые) ───────────────────────── */
+
+function isNode(x) { return x != null && typeof x === 'object' && typeof x.nodeType === 'number'; }
+function isObj(x) { return x != null && typeof x === 'object' && !Array.isArray(x) && !isNode(x); }
+function typeOf(x) { return x === null ? 'null' : Array.isArray(x) ? 'array' : typeof x; }
+
+function domAttr(node, attrs) {
+	for (var k in attrs) {
+		if (!Object.prototype.hasOwnProperty.call(attrs, k)) continue;
+		var v = attrs[k];
+		if (v == null) continue;
+		if (typeof v === 'function') node.addEventListener(k, v);
+		else if (typeof v === 'object') node.setAttribute(k, JSON.stringify(v));
+		else node.setAttribute(k, v);
+	}
+}
+
+function domAppend(node, ch) {
+	if (Array.isArray(ch)) {
+		for (var i = 0; i < ch.length; i++) {
+			var c = ch[i];
+			if (isNode(c)) node.appendChild(c);
+			else if (Array.isArray(c)) domAppend(node, c);
+			else if (c != null) node.appendChild(document.createTextNode(String(c)));
+		}
+	}
+	else if (typeof ch === 'function') domAppend(node, ch(node));
+	else if (isNode(ch)) node.appendChild(ch);
+	else if (ch != null) node.innerHTML = String(ch);
+}
+
+function E(tag, attrs, data) {
+	var node;
+	if (isNode(tag)) node = tag;
+	else if (Array.isArray(tag)) {
+		node = document.createDocumentFragment();
+		domAppend(node, tag);
+		return node;
+	}
+	else if (typeof tag === 'string' && tag.charAt(0) === '<') {
+		var t = document.createElement('template');
+		t.innerHTML = tag.trim();
+		node = t.content.firstChild;
+	}
+	else node = document.createElement(tag);
+	if (attrs != null && !isObj(attrs)) { data = attrs; attrs = null; }
+	if (attrs) domAttr(node, attrs);
+	if (data !== undefined) domAppend(node, data);
+	return node;
+}
+
+function tr(s) { return s; }
+
+var dom = {
+	elem: isNode,
+	create: E,
+	attr: function (n, k, v) { if (isObj(k)) domAttr(n, k); else { var o = {}; o[k] = v; domAttr(n, o); } },
+	append: domAppend,
+	content: function (n, ch) { while (n.firstChild) n.removeChild(n.firstChild); domAppend(n, ch); return n; },
+	parse: function (html) { return E(html); }
+};
+
+/* ───────────────────────── Классы ───────────────────────── */
+
+function extend(Base, props) {
+	var C = function () {
+		if (typeof this.__init__ === 'function') return this.__init__.apply(this, arguments);
+	};
+	C.prototype = Object.create(Base.prototype);
+	C.prototype.constructor = C;
+	for (var k in props) if (Object.prototype.hasOwnProperty.call(props, k)) C.prototype[k] = props[k];
+	C.prototype.super = function (name, args) {
+		var fn = Base.prototype[name];
+		return typeof fn === 'function' ? fn.apply(this, args || []) : undefined;
+	};
+	C.extend = function (p) { return extend(C, p); };
+	C.__zmClass = true;
+	return C;
+}
+function RootClass() {}
+var baseclass = { extend: function (p) { return extend(RootClass, p); } };
+baseclass.singleton = function (p) { return new (baseclass.extend(p))(); };
+
+/* ───────────────────────── ubus JSON-RPC ───────────────────────── */
+
+var UBUS_ERR = [ 'OK', 'неверная команда', 'неверный аргумент', 'метод не найден', 'объект не найден',
+	'нет данных', 'доступ запрещён', 'таймаут', 'не поддерживается', 'неизвестная ошибка', 'нет соединения' ];
+
+var rpcSeq = 0;
+
+function ubus(object, method, params, useSid) {
+	return fetch('/ubus', {
+		method: 'POST',
+		headers: { 'Content-Type': 'application/json' },
+		cache: 'no-store',
+		credentials: 'omit',
+		body: JSON.stringify({
+			jsonrpc: '2.0', id: ++rpcSeq, method: 'call',
+			params: [ useSid || sid || NULL_SID, object, method, params || {} ]
+		})
+	}).then(function (r) {
+		if (r.status === 404) {
+			var e404 = new Error('На роутере не отвечает /ubus — нужен пакет uhttpd-mod-ubus.');
+			e404.noUbus = true;
+			throw e404;
+		}
+		return r.json().catch(function () { throw new Error('Некорректный ответ роутера (HTTP ' + r.status + ')'); });
+	}).then(function (msg) {
+		if (msg && msg.error) {
+			var e = new Error(msg.error.message || 'Ошибка RPC');
+			e.rpcCode = msg.error.code;
+			if (msg.error.code === -32002 && !useSid) { e.authLost = true; authLost(); }
+			throw e;
+		}
+		if (!msg || !Array.isArray(msg.result)) throw new Error('Некорректный ответ ubus');
+		return msg.result;
+	});
+}
+
+function declare(o) {
+	return function () {
+		var args = arguments, params = {};
+		(o.params || []).forEach(function (p, i) { if (args[i] !== undefined) params[p] = args[i]; });
+		return ubus(o.object, o.method, params).then(function (res) {
+			var code = res[0];
+			var ret = res.length > 1 ? res[1] : res[0];
+			if (code !== 0) {
+				var text = 'ubus ' + o.object + '.' + o.method + ': ' + (UBUS_ERR[code] || ('код ' + code));
+				if (code === 6) toast('Недостаточно прав: ' + o.object + '.' + o.method, 'error');
+				if (!o.expect) return code;
+				var k0 = Object.keys(o.expect)[0];
+				if (k0 === undefined || isObj(o.expect[k0])) return { error: text };
+				return o.expect[k0];
+			}
+			if (o.expect) {
+				for (var key in o.expect) {
+					if (ret != null && key !== '') ret = ret[key];
+					if (ret == null || typeOf(ret) !== typeOf(o.expect[key])) ret = o.expect[key];
+					break;
+				}
+			}
+			if (typeof o.filter === 'function') ret = o.filter(ret, params);
+			return ret;
+		});
+	};
+}
+
+var rpc = { declare: declare, getSessionID: function () { return sid; }, setSessionID: function (s) { sid = s; } };
+
+/* ───────────────────────── fs / uci / poll / ui ───────────────────────── */
+
+function fsCall(method, params, pick) {
+	return ubus('file', method, params).then(function (res) {
+		if (res[0] !== 0) throw new Error((UBUS_ERR[res[0]] || ('код ' + res[0])) + ' (' + (params.path || params.command || method) + ')');
+		var r = res[1] || {};
+		return pick ? r[pick] : r;
+	});
+}
+
+var fs = {
+	exec: function (command, params, env) {
+		var p = { command: command };
+		if (Array.isArray(params)) p.params = params;
+		if (isObj(env)) p.env = env;
+		return fsCall('exec', p);
+	},
+	exec_direct: function (command, params) {
+		return fs.exec(command, params).then(function (r) { return r.stdout || ''; });
+	},
+	read: function (path) { return fsCall('read', { path: path }, 'data'); },
+	read_direct: function (path) { return fs.read(path); },
+	write: function (path, data, mode) { return fsCall('write', { path: path, data: data == null ? '' : String(data), mode: mode }); },
+	stat: function (path) { return fsCall('stat', { path: path }); },
+	list: function (path) { return fsCall('list', { path: path }, 'entries'); },
+	remove: function (path) { return fsCall('remove', { path: path }); }
+};
+
+var uciValues = {}, uciChanges = {};
+var uci = {
+	load: function (confs) {
+		var list = Array.isArray(confs) ? confs : [ confs ];
+		return Promise.all(list.map(function (c) {
+			return ubus('uci', 'get', { config: c }).then(function (res) {
+				uciValues[c] = (res[0] === 0 && res[1] && res[1].values) || {};
+				return c;
+			});
+		}));
+	},
+	unload: function (confs) {
+		(Array.isArray(confs) ? confs : [ confs ]).forEach(function (c) { delete uciValues[c]; delete uciChanges[c]; });
+	},
+	get: function (conf, sec, opt) {
+		var ch = uciChanges[conf] && uciChanges[conf][sec];
+		if (opt == null) {
+			var base = uciValues[conf] && uciValues[conf][sec];
+			if (!base && !ch) return null;
+			var o = {}, k;
+			for (k in base) o[k] = base[k];
+			for (k in ch) { if (ch[k] === null) delete o[k]; else o[k] = ch[k]; }
+			return o;
+		}
+		if (ch && Object.prototype.hasOwnProperty.call(ch, opt)) return ch[opt] === null ? null : ch[opt];
+		var s = uciValues[conf] && uciValues[conf][sec];
+		return s && s[opt] != null ? s[opt] : null;
+	},
+	get_first: function (conf, type, opt) {
+		var vals = uciValues[conf] || {};
+		for (var s in vals) if (!type || vals[s]['.type'] === type) return uci.get(conf, s, opt);
+		return null;
+	},
+	set: function (conf, sec, opt, val) {
+		uciChanges[conf] = uciChanges[conf] || {};
+		uciChanges[conf][sec] = uciChanges[conf][sec] || {};
+		uciChanges[conf][sec][opt] = (val == null || val === '') ? null : val;
+	},
+	unset: function (conf, sec, opt) { uci.set(conf, sec, opt, null); },
+	sections: function (conf, type, cb) {
+		var vals = uciValues[conf] || {}, out = [];
+		Object.keys(vals).forEach(function (s) {
+			if (!type || vals[s]['.type'] === type) { out.push(vals[s]); if (cb) cb(vals[s], s); }
+		});
+		return out;
+	},
+	changes: function () { return Promise.resolve(uciChanges); },
+	save: function () {
+		var jobs = [];
+		Object.keys(uciChanges).forEach(function (conf) {
+			Object.keys(uciChanges[conf]).forEach(function (sec) {
+				var ch = uciChanges[conf][sec], sets = {}, dels = [], hasSet = false;
+				Object.keys(ch).forEach(function (k) {
+					if (ch[k] === null) dels.push(k); else { sets[k] = ch[k]; hasSet = true; }
+				});
+				if (hasSet) jobs.push(ubus('uci', 'set', { config: conf, section: sec, values: sets }));
+				if (dels.length) jobs.push(ubus('uci', 'delete', { config: conf, section: sec, options: dels }));
+			});
+		});
+		var confs = Object.keys(uciChanges);
+		uciChanges = {};
+		return Promise.all(jobs).then(function () { return confs.length ? uci.load(confs) : []; });
+	},
+	apply: function () {
+		return uci.save().then(function () { return ubus('uci', 'apply', { rollback: false }); });
+	}
+};
+
+var pollJobs = [], pollTimer = null, pollTickN = 0;
+function pollEnsure() {
+	if (pollTimer) return;
+	pollTimer = setInterval(function () {
+		pollTickN++;
+		if (document.hidden) return;
+		pollJobs.forEach(function (j) {
+			if (j.busy || pollTickN % j.interval !== 0) return;
+			j.busy = true;
+			Promise.resolve().then(j.fn).catch(function () {}).then(function () { j.busy = false; });
+		});
+	}, 1000);
+}
+var poll = {
+	add: function (fn, interval) {
+		pollJobs.push({ fn: fn, interval: Math.max(1, +interval || 5), busy: false });
+		pollEnsure();
+		return true;
+	},
+	remove: function (fn) {
+		var n = pollJobs.length;
+		pollJobs = pollJobs.filter(function (j) { return j.fn !== fn; });
+		return n !== pollJobs.length;
+	},
+	start: function () { pollEnsure(); return true; },
+	stop: function () { return true; },
+	active: function () { return pollJobs.length > 0; },
+	_reset: function () { pollJobs = []; }
+};
+
+var modalEl = null;
+var ui = {
+	changes: { setIndicator: function () {}, renderChangeIndicator: function () {}, init: function () {} },
+	addNotification: function (title, content, cls) {
+		var txt = (title ? title + ': ' : '') + (isNode(content) ? content.textContent : (content || ''));
+		toast(txt, /danger|error/.test(cls || '') ? 'error' : (/warning/.test(cls || '') ? 'warning' : 'info'));
+		return null;
+	},
+	showModal: function (title, children) {
+		ui.hideModal();
+		modalEl = E('div', { 'class': 'zmw-modal-wrap' }, [
+			E('div', { 'class': 'zmw-modal' }, [ title ? E('h3', {}, [ title ]) : null, E('div', {}, children) ])
+		]);
+		document.body.appendChild(modalEl);
+		requestAnimationFrame(function () { modalEl && modalEl.classList.add('zmw-in'); });
+		return modalEl;
+	},
+	hideModal: function () { if (modalEl) { modalEl.remove(); modalEl = null; } },
+	createHandlerFn: function (ctx, fn) {
+		var args = [].slice.call(arguments, 2);
+		if (typeof fn === 'string') fn = ctx[fn];
+		return function (ev) { return fn.apply(ctx, args.concat([ ev ])); };
+	},
+	awaitReconnect: function () { setTimeout(function () { location.reload(); }, 5000); }
+};
+
+/* ───────────────────────── view ───────────────────────── */
+
+var ViewBase = extend(RootClass, {
+	load: function () {},
+	render: function () {},
+	handleSave: null,
+	handleSaveApply: null,
+	handleReset: null,
+	addFooter: function () { return E('div'); }
+});
+var viewMod = { extend: function (p) { return ViewBase.extend(p); } };
+
+/* ───────────────────────── L ───────────────────────── */
+
+var L = {
+	env: { resource: RES.replace(/\/$/, ''), sessionid: sid },
+	resource: function () { return RES + [].slice.call(arguments).join('/'); },
+	url: function () {
+		var p = [].slice.call(arguments).join('/').replace(/^\/+/, '');
+		if (/(^|\/)logout$/.test(p)) return '/?logout=1' + location.hash;
+		return '/cgi-bin/luci/' + p;
+	},
+	bind: function (fn, self) { var a = [].slice.call(arguments, 2); return function () { return fn.apply(self, a.concat([].slice.call(arguments))); }; },
+	isObject: isObj,
+	toArray: function (x) { return x == null ? [] : Array.isArray(x) ? x : [ x ]; },
+	resolveDefault: function (p, d) { return Promise.resolve(p).catch(function () { return d; }); },
+	sortedKeys: function (o) { return Object.keys(o || {}).sort(); },
+	hasSystemFeature: function () { return false; },
+	raise: function (t, m) { var e = new Error(m || t); e.name = t; throw e; },
+	error: function (t, m) { L.raise(t, m); },
+	dom: dom, ui: ui, Poll: poll, Class: baseclass,
+	require: function (n) { return requireModule(n); }
+};
+window.L = L;
+window.E = E;
+window._ = tr;
+
+/* ───────────────────────── Загрузчик модулей ───────────────────────── */
+
+var BUILTIN = { baseclass: baseclass, rpc: rpc, ui: ui, view: viewMod, fs: fs, uci: uci, poll: poll, dom: dom };
+var srcCache = {}, modCache = {};
+
+function modUrl(name) { return RES + name.replace(/\./g, '/') + '.js'; }
+
+function fetchSrc(name) {
+	if (!srcCache[name]) {
+		srcCache[name] = fetch(modUrl(name) + '?v=' + BUILD, { cache: 'no-cache' }).then(function (r) {
+			if (!r.ok) throw new Error('Не удалось загрузить ' + name + ' (HTTP ' + r.status + ')');
+			return r.text();
+		});
+		srcCache[name].catch(function () { delete srcCache[name]; });
+	}
+	return srcCache[name];
+}
+
+/* Точечные правки текста: в Web UI нет «выхода из LuCI» и меню LuCI */
+var SRC_PATCHES = [
+	[ /E\('h2', \{\}, 'Zapret Manager LuCI'\)/g, "E('h2', {}, 'Zapret Manager')" ],
+	[ /E\('h3', \{\}, 'Удалить Zapret Manager LuCI'\)/g, "E('h3', {}, 'Удалить Zapret Manager')" ],
+	[ /выведены из LuCI/g, 'выведены из панели' ],
+	[ /закрытие LuCI/g, 'закрытие вкладки' ],
+	[ /Выходим из LuCI/g, 'Выходим из панели' ],
+	[ /Удалить панель из LuCI/g, 'Удалить панель' ],
+	[ /саму программу-оболочку из LuCI/g, 'саму программу-оболочку (приложение LuCI и этот Web UI)' ],
+	[ /(var tabBar = E\('div', \{ 'class': 'zm-actions)'/g, "$1 zmw-tabs'" ]
+];
+
+var REQ_RE = /^[ \t]*'require[ \t]+([A-Za-z0-9_.\-\/]+)(?:[ \t]+as[ \t]+([A-Za-z_$][A-Za-z0-9_$]*))?[ \t]*'[ \t]*;?/gm;
+
+function evaluate(name, src) {
+	SRC_PATCHES.forEach(function (p) { src = src.replace(p[0], p[1]); });
+	var deps = [], m;
+	REQ_RE.lastIndex = 0;
+	while ((m = REQ_RE.exec(src))) deps.push({ name: m[1], as: m[2] || m[1].split(/[.\/]/).pop() });
+	return Promise.all(deps.map(function (d) { return requireModule(d.name); })).then(function (insts) {
+		var names = [ 'E', '_', 'N_', 'L' ].concat(deps.map(function (d) { return d.as; }));
+		var fn = Function.apply(null, names.concat([ src + '\n//# sourceURL=' + location.origin + modUrl(name) ]));
+		return fn.apply(window, [ E, tr, tr, L ].concat(insts));
+	});
+}
+
+function postPatch(name, inst) {
+	if (name === 'zapret-manager.common' && inst) {
+		inst.refreshBanner = function () {
+			return E('div', { 'class': 'zm-refresh-banner zm-show' }, [
+				E('span', {}, 'Состав компонентов изменился — обновите страницу, чтобы увидеть актуальное состояние.'),
+				E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function () { location.reload(); } }, 'Обновить')
+			]);
+		};
+		var origPoll = inst.pollJob;
+		inst.pollJob = function (job, logEl, onDone, onTick) {
+			return origPoll.call(this, job, logEl, function (ok) {
+				try { if (typeof onDone === 'function') onDone(ok); }
+				finally { setTimeout(function () { refreshShellStatus(); refreshMemory(); }, 1000); }
+			}, onTick);
+		};
+		setTimeout(refreshShellStatus, 300);
+	}
+	return inst;
+}
+
+function requireModule(name) {
+	if (BUILTIN[name]) return Promise.resolve(BUILTIN[name]);
+	if (!modCache[name]) {
+		modCache[name] = fetchSrc(name).then(function (src) { return evaluate(name, src); }).then(function (res) {
+			return postPatch(name, (typeof res === 'function' && res.__zmClass) ? new res() : res);
+		});
+		modCache[name].catch(function () { delete modCache[name]; });
+	}
+	return modCache[name];
+}
+
+/* ───────────────────────── Иконки ───────────────────────── */
+
+var ICONS = {
+	dashboard: '<rect x="3" y="3" width="7.5" height="9" rx="2"/><rect x="13.5" y="3" width="7.5" height="5.5" rx="2"/><rect x="13.5" y="11.5" width="7.5" height="9.5" rx="2"/><rect x="3" y="15" width="7.5" height="6" rx="2"/>',
+	shield: '<path d="M12 3l7.5 3v5.6c0 4.6-3.2 8.4-7.5 9.4-4.3-1-7.5-4.8-7.5-9.4V6L12 3z"/><path d="M8.8 12.2l2.2 2.2 4.3-4.4"/>',
+	bolt: '<path d="M13.2 2.8L5 13.5h6.2l-1.1 7.7 8.4-10.9h-6.3l1-7.5z"/>',
+	list: '<path d="M8.5 6.5h11.5M8.5 12h11.5M8.5 17.5h11.5"/><circle cx="4.3" cy="6.5" r="1"/><circle cx="4.3" cy="12" r="1"/><circle cx="4.3" cy="17.5" r="1"/>',
+	globe: '<circle cx="12" cy="12" r="9"/><path d="M3.5 9h17M3.5 15h17M12 3c2.6 2.6 3.8 5.6 3.8 9s-1.2 6.4-3.8 9c-2.6-2.6-3.8-5.6-3.8-9S9.4 5.6 12 3z"/>',
+	send: '<path d="M21 3.5L3.5 10.3l6.7 2.8 2.8 6.9L21 3.5z"/><path d="M10.2 13.1l4.6-4.6"/>',
+	layers: '<path d="M12 3.2l9 4.9-9 4.9-9-4.9 9-4.9z"/><path d="M3 12.3l9 4.9 9-4.9"/><path d="M3 16.4l9 4.9 9-4.9"/>',
+	play: '<rect x="2.5" y="5" width="19" height="14" rx="4.5"/><path d="M10.2 9.3v5.4l4.6-2.7-4.6-2.7z"/>',
+	cpu: '<rect x="6" y="6" width="12" height="12" rx="2.5"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/><path d="M9.5 2.5v3.5M14.5 2.5v3.5M9.5 18v3.5M14.5 18v3.5M2.5 9.5H6M2.5 14.5H6M18 9.5h3.5M18 14.5h3.5"/>',
+	logout: '<path d="M14.5 4h3a2.5 2.5 0 0 1 2.5 2.5v11a2.5 2.5 0 0 1-2.5 2.5h-3"/><path d="M10 16.5L5.5 12 10 7.5M5.5 12H15"/>',
+	sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4L6 18M18 6l1.4-1.4"/>',
+	moon: '<path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7z"/>',
+	refresh: '<path d="M20 11.5A8 8 0 0 0 5.6 6.8L4 8.5"/><path d="M4 4v4.5h4.5"/><path d="M4 12.5a8 8 0 0 0 14.4 4.7l1.6-1.7"/><path d="M20 20v-4.5h-4.5"/>',
+	menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+	close: '<path d="M6 6l12 12M18 6L6 18"/>',
+	external: '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
+	eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
+	eyeOff: '<path d="M3 3l18 18"/><path d="M10.6 5.6A10 10 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-3.1 3.9M6.2 6.9C3.9 8.6 2.5 12 2.5 12S6 18.5 12 18.5c1.7 0 3.2-.5 4.5-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
+	user: '<circle cx="12" cy="8" r="4"/><path d="M4 20.5c1.3-3.8 4.3-5.5 8-5.5s6.7 1.7 8 5.5"/>',
+	lock: '<rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
+	arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
+	alert: '<path d="M12 3.5l9.5 16.5h-19L12 3.5z"/><path d="M12 10v4.5M12 17.3v.2"/>',
+	rocket: '<path d="M14.5 4.2c2.6-1.1 5-1.2 5.3-.9.3.3.2 2.7-.9 5.3-1 2.4-3.1 4.9-6.2 6.9l-3.2-3.2c2-3.1 4.5-5.2 6.9-6.2z"/><circle cx="15.2" cy="8.8" r="1.6"/><path d="M9.5 12.3l-3.6-.4 2.4-3.2 3.3-.2M11.7 14.5l.4 3.6 3.2-2.4.2-3.3"/><path d="M6.8 16.2c-1.3.4-2.1 2.2-2.3 3.3 1.1-.2 2.9-1 3.3-2.3"/>',
+	telegram: '<path d="M21 4.5L2.8 11.4c-.8.3-.8 1.4 0 1.7l4.4 1.5 1.7 5.3c.2.7 1.1.9 1.6.4l2.5-2.4 4.6 3.4c.6.4 1.4.1 1.6-.6L22.3 5.8c.2-.9-.6-1.6-1.3-1.3z"/><path d="M7.3 14.6l10-6.6-7.4 8"/>'
+};
+
+function icon(name, cls) {
+	var s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+	s.setAttribute('viewBox', '0 0 24 24');
+	s.setAttribute('fill', 'none');
+	s.setAttribute('stroke', 'currentColor');
+	s.setAttribute('stroke-width', '1.8');
+	s.setAttribute('stroke-linecap', 'round');
+	s.setAttribute('stroke-linejoin', 'round');
+	s.setAttribute('aria-hidden', 'true');
+	s.setAttribute('class', 'zmw-i' + (cls ? ' ' + cls : ''));
+	s.innerHTML = ICONS[name] || '';
+	return s;
+}
+
+var logoSeq = 0;
+function logo(cls) {
+	var id = 'zmwz' + (++logoSeq);
+	return E('div', { 'class': 'zmw-logo' + (cls ? ' ' + cls : '') }, [
+		E('<svg viewBox="0 0 1254 1254" aria-hidden="true">' +
+			'<defs><linearGradient id="' + id + '" x1="0" y1="0" x2="0.35" y2="1">' +
+			'<stop offset="0" stop-color="#5fd8ff"/><stop offset=".5" stop-color="#1aa3ff"/><stop offset="1" stop-color="#0a7cff"/>' +
+			'</linearGradient></defs>' +
+			'<g fill="url(#' + id + ')" stroke="#04101f" stroke-width="22" stroke-linejoin="miter">' +
+			'<path d="M455 170L1072 118L1240 18L685 615L30 1240L742 335L258 385Z"/>' +
+			'<path d="M1030 458L722 862L1222 797L1008 1022L310 1100Z"/>' +
+			'</g></svg>')
+	]);
+}
+
+/* ───────────────────────── Тосты ───────────────────────── */
+
+function toast(message, kind, duration) {
+	var c = document.getElementById('zm-toast-container');
+	if (!c) { c = E('div', { id: 'zm-toast-container' }); document.body.appendChild(c); }
+	var el = E('div', { 'class': 'zm-toast zm-toast-' + (kind || 'info') }, [
+		E('span', { 'class': 'zm-toast-icon' }, [ kind === 'error' ? '✕' : (kind === 'warning' ? '!' : '✓') ]),
+		E('span', { 'class': 'zm-toast-text' }, [ message ])
+	]);
+	c.appendChild(el);
+	requestAnimationFrame(function () { el.classList.add('zm-toast-show'); });
+	var hide = function () {
+		el.classList.remove('zm-toast-show');
+		setTimeout(function () { el.remove(); }, 250);
+	};
+	el.addEventListener('click', hide);
+	setTimeout(hide, duration || (kind === 'error' ? 12000 : 6000));
+}
+
+/* ───────────────────────── Тема ───────────────────────── */
+
+var mqDark = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+function themePref() { var t = sget(K_THEME); return t === 'light' || t === 'dark' ? t : 'auto'; }
+function themeEffective() { var p = themePref(); return p === 'auto' ? ((mqDark && !mqDark.matches) ? 'light' : 'dark') : p; }
+function applyTheme() {
+	var t = themeEffective();
+	var h = document.documentElement;
+	h.setAttribute('data-theme', t);
+	h.classList.toggle('zm-theme-dark', t === 'dark');
+	h.setAttribute('data-zm-theme-checked', '1');
+	var mc = document.querySelector('meta[name="theme-color"]');
+	if (mc) mc.setAttribute('content', t === 'dark' ? '#0a0c12' : '#f3f5fa');
+	Array.prototype.forEach.call(document.querySelectorAll('.zmw-theme-toggle'), function (b) {
+		b.innerHTML = '';
+		b.appendChild(icon(t === 'dark' ? 'sun' : 'moon'));
+		b.title = t === 'dark' ? 'Светлая тема' : 'Тёмная тема';
+	});
+}
+if (mqDark && mqDark.addEventListener) mqDark.addEventListener('change', function () { if (themePref() === 'auto') applyTheme(); });
+function toggleTheme() {
+	sset(K_THEME, themeEffective() === 'dark' ? 'light' : 'dark', true);
+	document.documentElement.classList.add('zmw-theme-anim');
+	applyTheme();
+	setTimeout(function () { document.documentElement.classList.remove('zmw-theme-anim'); }, 400);
+}
+
+/* ───────────────────────── Маршруты ───────────────────────── */
+
+var ROUTES = [
+	{ id: 'dashboard', title: 'Дашборд', sub: 'Состояние всех компонентов', icon: 'dashboard', group: 'Обзор' },
+	{ id: 'strategy', title: 'Zapret', sub: 'Стратегии, тесты, YouTube, игры, Discord и исключения', icon: 'shield', group: 'Обход блокировок', dot: 'zapret' },
+	{ id: 'zapret2', title: 'Zapret2', sub: 'Установка и управление Zapret2', icon: 'bolt', group: 'Обход блокировок', dot: 'zapret2' },
+	{ id: 'bytetube', title: 'ByeTube', sub: 'YouTube через ByeDPI', icon: 'play', group: 'Обход блокировок', dot: 'bytetube' },
+	{ id: 'tgproxy', title: 'TG WS Proxy', sub: 'Прокси для Telegram', icon: 'send', group: 'Обход блокировок', dot: 'tg' },
+	{ id: 'mixomo', title: 'Mixomo', sub: 'Mihomo, MagiTrickle и WARP', icon: 'layers', group: 'Обход блокировок', dot: 'mixomo' },
+	{ id: 'hosts', title: 'Hosts', sub: 'Домены в hosts и списки GeoHide', icon: 'list', group: 'Сеть', dot: 'hosts' },
+	{ id: 'doh', title: 'DNS over HTTPS', sub: 'Шифрованный DNS для всей сети', icon: 'globe', group: 'Сеть', dot: 'doh' },
+	{ id: 'system', title: 'Система', sub: 'Параметры роутера, зеркала и обслуживание', icon: 'cpu', group: 'Сервис' }
+];
+var ROUTE_BY_ID = {};
+ROUTES.forEach(function (r) { ROUTE_BY_ID[r.id] = r; });
+
+function currentRoute() {
+	var id = (location.hash || '').replace(/^#\/?/, '').split(/[/?]/)[0];
+	return ROUTE_BY_ID[id] ? id : 'dashboard';
+}
+
+/* ───────────────────────── Оболочка ───────────────────────── */
+
+var root, shell = null, viewEl, titleEl, subEl, navLinks = {}, navDots = {}, statusPill, deviceEl, verEl, updateEl, memEl;
+
+function buildShell() {
+	var nav = E('nav', { 'class': 'zmw-nav', 'aria-label': 'Разделы' });
+	var lastGroup = null;
+	ROUTES.forEach(function (r) {
+		if (r.group !== lastGroup) { nav.appendChild(E('div', { 'class': 'zmw-nav-group' }, [ r.group ])); lastGroup = r.group; }
+		var dot = r.dot ? E('span', { 'class': 'zmw-nav-dot' }) : null;
+		var a = E('a', { 'class': 'zmw-nav-item', 'href': '#/' + r.id, 'data-route': r.id }, [
+			E('span', { 'class': 'zmw-nav-ico' }, [ icon(r.icon) ]),
+			E('span', { 'class': 'zmw-nav-label' }, [ r.title ]),
+			dot
+		]);
+		a.addEventListener('click', function () { closeDrawer(); });
+		navLinks[r.id] = a;
+		if (dot) navDots[r.dot] = dot;
+		nav.appendChild(a);
+	});
+
+	deviceEl = E('div', { 'class': 'zmw-device' }, [ E('div', { 'class': 'zmw-device-model' }, [ 'Роутер' ]), E('div', { 'class': 'zmw-device-sub' }, [ location.hostname ]) ]);
+	verEl = E('div', { 'class': 'zmw-brand-sub' }, [ 'Web UI' ]);
+	updateEl = E('a', { 'class': 'zmw-update', 'href': '#/dashboard', 'hidden': '' }, [ 'Доступно обновление' ]);
+	memEl = E('div', { 'class': 'zmw-mem' });
+
+	var side = E('aside', { 'class': 'zmw-side', 'id': 'zmw-side' }, [
+		E('div', { 'class': 'zmw-brand' }, [
+			logo(),
+			E('div', { 'class': 'zmw-brand-text' }, [ E('div', { 'class': 'zmw-brand-name' }, [ 'Zapret Manager' ]), verEl ]),
+			E('button', { 'class': 'zmw-icon-btn zmw-drawer-close', 'type': 'button', 'aria-label': 'Закрыть меню', 'click': closeDrawer }, [ icon('close') ])
+		]),
+		updateEl,
+		nav,
+		E('div', { 'class': 'zmw-side-foot' }, [
+			deviceEl,
+			memEl,
+			E('div', { 'class': 'zmw-side-links' }, [
+				E('a', { 'href': luciUrl(), 'target': '_blank', 'rel': 'noreferrer' }, [ icon('external'), 'Открыть LuCI' ])
+			]),
+			E('div', { 'class': 'zmw-credit' }, [ 'by StressOzz' ])
+		])
+	]);
+
+	titleEl = E('h1', { 'class': 'zmw-title' }, [ '' ]);
+	subEl = E('div', { 'class': 'zmw-sub' }, [ '' ]);
+	viewEl = E('main', { 'class': 'zmw-view', 'id': 'zmw-view' });
+
+	var themeBtn = E('button', { 'class': 'zmw-icon-btn zmw-theme-toggle', 'type': 'button', 'click': toggleTheme });
+	var top = E('header', { 'class': 'zmw-top' }, [
+		E('button', { 'class': 'zmw-icon-btn zmw-burger', 'type': 'button', 'aria-label': 'Меню', 'click': openDrawer }, [ icon('menu') ]),
+		E('div', { 'class': 'zmw-titles' }, [ titleEl, subEl ]),
+		E('div', { 'class': 'zmw-top-actions' }, [
+			E('a', { 'class': 'zmw-icon-btn zmw-link-btn zmw-link-kvn', 'href': 'http://stresskvn.lol/', 'target': '_blank', 'rel': 'noreferrer', 'title': 'StressKVN — обход белых списков!' }, [
+				icon('rocket'), E('span', { 'class': 'zmw-lbl-full' }, [ 'StressKVN — обход белых списков!' ]), E('span', { 'class': 'zmw-lbl-short' }, [ 'StressKVN' ])
+			]),
+			E('a', { 'class': 'zmw-icon-btn zmw-link-btn zmw-link-tg', 'href': 'https://t.me/stressozz_manager', 'target': '_blank', 'rel': 'noreferrer', 'title': 'Сообщество Telegram' }, [
+				icon('telegram'), E('span', { 'class': 'zmw-lbl-full' }, [ 'Сообщество Telegram' ]), E('span', { 'class': 'zmw-lbl-short' }, [ 'Telegram' ])
+			]),
+			E('span', { 'class': 'zmw-top-sep' }),
+			E('button', { 'class': 'zmw-icon-btn', 'type': 'button', 'title': 'Обновить страницу', 'click': function (ev) {
+				var b = ev.currentTarget; b.classList.add('zmw-spin'); setTimeout(function () { b.classList.remove('zmw-spin'); }, 700);
+				route(true);
+			} }, [ icon('refresh') ]),
+			themeBtn,
+			E('button', { 'class': 'zmw-icon-btn zmw-logout', 'type': 'button', 'title': 'Выйти', 'click': function () { logout(); } }, [ icon('logout'), E('span', {}, [ 'Выйти' ]) ])
+		])
+	]);
+
+	shell = E('div', { 'class': 'zmw-shell' }, [
+		side,
+		E('div', { 'class': 'zmw-main' }, [ top, viewEl, E('footer', { 'class': 'zmw-foot' }, [ 'Zapret Manager Web UI · тот же бэкенд, что и в LuCI' ]) ]),
+		E('div', { 'class': 'zmw-scrim', 'click': closeDrawer })
+	]);
+	root.appendChild(shell);
+	applyTheme();
+}
+
+function luciUrl() {
+	return location.protocol + '//' + location.hostname + '/cgi-bin/luci/admin/services/zapret-manager/dashboard';
+}
+
+function openDrawer() { document.body.classList.add('zmw-drawer-open'); }
+function closeDrawer() { document.body.classList.remove('zmw-drawer-open'); }
+
+var callStatus = declare({ object: 'zapret-manager', method: 'status', expect: {} });
+var callSysInfo = declare({ object: 'zapret-manager', method: 'system_info', expect: {} });
+var callHealth = declare({ object: 'zapret-manager', method: 'health', expect: {} });
+var callUpd = declare({ object: 'zapret-manager', method: 'zm_update_status', expect: {} });
+var callBoardInfo = declare({ object: 'system', method: 'info', expect: {} });
+
+function parseSize(v) {
+	var m = String(v || '').trim().match(/^([\d.,]+)\s*([KMGT]?)i?B?$/i);
+	if (!m) return NaN;
+	var n = parseFloat(m[1].replace(',', '.'));
+	var mul = { '': 1, K: 1024, M: 1048576, G: 1073741824, T: 1099511627776 }[m[2].toUpperCase()];
+	return n * mul;
+}
+function fmtSize(b) {
+	if (!isFinite(b)) return '—';
+	var u = [ 'Б', 'КБ', 'МБ', 'ГБ', 'ТБ' ], i = 0;
+	while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+	return (b >= 100 || i === 0 ? Math.round(b) : b.toFixed(1).replace(/\.0$/, '')) + ' ' + u[i];
+}
+var memRows = {};
+function memRow(key, label, used, total) {
+	var pct = total > 0 ? Math.max(0, Math.min(100, used / total * 100)) : 0;
+	var r = memRows[key];
+	if (!r) {
+		r = memRows[key] = {
+			el: E('div', { 'class': 'zmw-mem-row' }, [
+				E('div', { 'class': 'zmw-mem-head' }, [ E('span', { 'class': 'zmw-mem-label' }, [ label ]), E('span', { 'class': 'zmw-mem-val' }) ]),
+				E('div', { 'class': 'zmw-mem-bar' }, [ E('i') ])
+			])
+		};
+		r.order = key === 'ram' ? 0 : key === 'flash' ? 1 : 2;
+		var before = null;
+		Object.keys(memRows).forEach(function (k) { var o = memRows[k]; if (o !== r && o.el.parentNode && o.order > r.order && (!before || o.order < before.order)) before = o; });
+		memEl.insertBefore(r.el, before ? before.el : null);
+	}
+	r.el.querySelector('.zmw-mem-val').textContent = fmtSize(used) + ' из ' + fmtSize(total);
+	var bar = r.el.querySelector('i');
+	bar.style.width = pct.toFixed(1) + '%';
+	r.el.classList.toggle('zmw-mem-hi', pct >= 85);
+	r.el.classList.toggle('zmw-mem-mid', pct >= 65 && pct < 85);
+	r.el.title = label + ': занято ' + Math.round(pct) + '%';
+}
+function refreshMemory() {
+	if (!shell || !sid) return;
+	callBoardInfo().then(function (i) {
+		var m = i && i.memory;
+		if (!m || !m.total) return;
+		var avail = m.available != null ? m.available : (m.free + (m.buffered || 0) + (m.cached || 0));
+		memRow('ram', 'ОЗУ', m.total - avail, m.total);
+	}).catch(function () {});
+	callSysInfo().then(function (i) {
+		if (!i || i.error) return;
+		var ru = parseSize(i.root_used), rf = parseSize(i.root_free);
+		if (isFinite(ru) && isFinite(rf)) memRow('flash', 'Флеш', ru, ru + rf);
+	}).catch(function () {});
+}
+
+var statusBusy = false;
+var DOT_TEXT = { 1: 'работает', 2: 'не работает' };
+function refreshShellStatus() {
+	if (!shell || !sid || statusBusy) return;
+	statusBusy = true;
+	callHealth().then(function (h) {
+		if (h && typeof h.zapret === 'number') return h;
+		/* старый бэкенд без health — хотя бы Zapret/Zapret2 */
+		return callStatus().then(function (d) {
+			d = d || {};
+			return {
+				zapret: d.zapret === 'installed' ? (d.zapret_running ? 1 : 2) : 0,
+				zapret2: d.zapret2 === 'installed' ? (d.zapret2_running ? 1 : 2) : 0
+			};
+		});
+	}).then(function (h) {
+		Object.keys(navDots).forEach(function (k) { setDot(navDots[k], h[k]); });
+	}).catch(function () {}).then(function () { statusBusy = false; });
+}
+function setDot(el, st) {
+	if (!el) return;
+	el.className = 'zmw-nav-dot' + (st === 1 ? ' zmw-on' : st === 2 ? ' zmw-stop' : '');
+	el.title = DOT_TEXT[st] || '';
+}
+
+function loadShellInfo() {
+	callSysInfo().then(function (i) {
+		if (!i || i.error) return;
+		deviceEl.firstChild.textContent = String(i.model || 'Роутер').replace(/\s*\(.*\)\s*$/, '') || i.model;
+		deviceEl.title = [ i.model, i.openwrt ? 'OpenWrt ' + i.openwrt : '', i.arch ].filter(Boolean).join('\n');
+		deviceEl.lastChild.textContent = [ i.openwrt ? 'OpenWrt ' + i.openwrt : '', i.arch || '' ].filter(Boolean).join(' · ') || location.hostname;
+	}).catch(function () {});
+	callUpd().then(function (u) {
+		if (!u || u.error) return;
+		if (u.current) verEl.textContent = 'Web UI · v' + u.current;
+		if (u.latest && u.current && u.latest !== u.current) {
+			updateEl.hidden = false;
+			updateEl.textContent = 'Доступна версия ' + u.latest;
+		}
+	}).catch(function () {});
+}
+
+var shellTimer = null;
+function startShellPolling() {
+	if (shellTimer) return;
+	shellTimer = setInterval(function () { if (!document.hidden) { refreshShellStatus(); refreshMemory(); } }, 15000);
+}
+
+/* ───────────────────────── Рендер страниц ───────────────────────── */
+
+var routeToken = 0;
+
+function skeleton() {
+	return E('div', { 'class': 'zmw-skel-wrap' }, [
+		E('div', { 'class': 'zmw-skel zmw-skel-bar' }),
+		E('div', { 'class': 'zmw-skel-grid' }, [
+			E('div', { 'class': 'zmw-skel zmw-skel-card' }),
+			E('div', { 'class': 'zmw-skel zmw-skel-card' }),
+			E('div', { 'class': 'zmw-skel zmw-skel-card' })
+		]),
+		E('div', { 'class': 'zmw-skel zmw-skel-wide' })
+	]);
+}
+
+function errorCard(err, retry) {
+	return E('div', { 'class': 'zmw-error' }, [
+		E('div', { 'class': 'zmw-error-ico' }, [ icon('alert') ]),
+		E('div', {}, [
+			E('h3', {}, [ 'Не удалось открыть страницу' ]),
+			E('p', {}, [ (err && err.message) || String(err) ]),
+			E('button', { 'class': 'cbi-button cbi-button-positive', 'click': retry }, [ 'Повторить' ])
+		])
+	]);
+}
+
+function route(force) {
+	if (!shell || !sid) return;
+	var id = currentRoute();
+	var r = ROUTE_BY_ID[id];
+	var token = ++routeToken;
+
+	Object.keys(navLinks).forEach(function (k) { navLinks[k].classList.toggle('zmw-active', k === id); });
+	titleEl.textContent = r.title;
+	subEl.textContent = r.sub;
+	document.title = r.title + ' · Zapret Manager';
+
+	poll._reset();
+	ui.hideModal();
+	refreshShellStatus();
+	viewEl.innerHTML = '';
+	viewEl.appendChild(skeleton());
+	if (!force) window.scrollTo(0, 0);
+
+	fetchSrc('view.zapret-manager.' + id)
+		.then(function (src) { return evaluate('view.zapret-manager.' + id, src); })
+		.then(function (Cls) {
+			if (token !== routeToken) return;
+			var v = (typeof Cls === 'function' && Cls.__zmClass) ? new Cls() : Cls;
+			return Promise.resolve(v.load()).then(function (data) {
+				if (token !== routeToken) return;
+				return Promise.resolve(v.render(data));
+			}).then(function (node) {
+				if (token !== routeToken || !node) return;
+				var page = E('div', { 'class': 'zmw-page' }, [ node ]);
+				viewEl.innerHTML = '';
+				viewEl.appendChild(page);
+			});
+		})
+		.catch(function (err) {
+			if (token !== routeToken || (err && err.authLost)) return;
+			console.error(err);
+			viewEl.innerHTML = '';
+			viewEl.appendChild(errorCard(err, function () { route(true); }));
+		});
+}
+
+/* ───────────────────────── Вход / выход ───────────────────────── */
+
+var loginEl = null, authLostShown = false;
+
+function showLogin(note, noteKind) {
+	if (loginEl) return;
+	var user = E('input', { 'type': 'text', 'name': 'username', 'autocomplete': 'username', 'autocapitalize': 'off', 'spellcheck': 'false', 'value': sget(K_USER) || 'root', 'required': '' });
+	var pass = E('input', { 'type': 'password', 'name': 'password', 'autocomplete': 'current-password', 'placeholder': '••••••••' });
+	var eye = E('button', { 'type': 'button', 'class': 'zmw-eye', 'tabindex': '-1', 'aria-label': 'Показать пароль' }, [ icon('eye') ]);
+	eye.addEventListener('click', function () {
+		var show = pass.type === 'password';
+		pass.type = show ? 'text' : 'password';
+		eye.innerHTML = ''; eye.appendChild(icon(show ? 'eyeOff' : 'eye'));
+		pass.focus();
+	});
+	var remember = E('input', { 'type': 'checkbox', 'checked': '' });
+	var errEl = E('div', { 'class': 'zmw-login-msg' + (note ? ' zmw-show zmw-' + (noteKind || 'info') : '') }, [ note || '' ]);
+	var btn = E('button', { 'type': 'submit', 'class': 'zmw-btn-primary' }, [ E('span', {}, [ 'Войти' ]), icon('arrow') ]);
+
+	var card = E('form', { 'class': 'zmw-login-card', 'autocomplete': 'on' }, [
+		logo('zmw-logo-lg'),
+		E('h1', {}, [ 'Zapret Manager' ]),
+		E('p', { 'class': 'zmw-login-sub' }, [ 'Панель управления роутером ', E('b', {}, [ location.hostname ]) ]),
+		E('label', { 'class': 'zmw-field' }, [ E('span', { 'class': 'zmw-field-label' }, [ 'Пользователь' ]), E('div', { 'class': 'zmw-input' }, [ icon('user'), user ]) ]),
+		E('label', { 'class': 'zmw-field' }, [ E('span', { 'class': 'zmw-field-label' }, [ 'Пароль' ]), E('div', { 'class': 'zmw-input' }, [ icon('lock'), pass, eye ]) ]),
+		E('label', { 'class': 'zmw-check' }, [ remember, E('span', { 'class': 'zmw-check-box' }), E('span', {}, [ 'Запомнить на этом устройстве' ]) ]),
+		errEl,
+		btn,
+		E('div', { 'class': 'zmw-login-foot' }, [ 'Логин и пароль те же, что и для LuCI' ])
+	]);
+
+	function fail(msg) {
+		errEl.className = 'zmw-login-msg zmw-show zmw-error';
+		errEl.textContent = msg;
+		card.classList.remove('zmw-shake'); void card.offsetWidth; card.classList.add('zmw-shake');
+		btn.disabled = false;
+		btn.classList.remove('zmw-loading');
+	}
+
+	card.addEventListener('submit', function (ev) {
+		ev.preventDefault();
+		if (btn.disabled) return;
+		btn.disabled = true;
+		btn.classList.add('zmw-loading');
+		errEl.className = 'zmw-login-msg';
+		ubus('session', 'login', { username: user.value.trim(), password: pass.value, timeout: 3600 }, NULL_SID).then(function (res) {
+			if (res[0] === 6 || !res[1] || !res[1].ubus_rpc_session) { fail('Неверный логин или пароль'); return; }
+			var s = res[1].ubus_rpc_session;
+			var acl = res[1].acls && res[1].acls.ubus;
+			if (acl && !acl['zapret-manager'] && !acl['*']) { fail('У пользователя нет доступа к Zapret Manager'); return; }
+			return ubus('zapret-manager', 'status', {}, s).then(function (st) {
+				if (st[0] === 3 || st[0] === 4) { fail('rpcd-плагин zapret-manager не найден — переустановите панель'); return; }
+				sid = s;
+				L.env.sessionid = s;
+				sset(K_SID, s, remember.checked);
+				sset(K_USER, user.value.trim(), true);
+				closeLogin();
+				startApp();
+			});
+		}).catch(function (e) {
+			fail(e && e.noUbus ? e.message : ('Роутер не отвечает: ' + ((e && e.message) || e)));
+		});
+	});
+
+	loginEl = E('div', { 'class': 'zmw-login' }, [
+		E('div', { 'class': 'zmw-orbs', 'aria-hidden': 'true' }, [ E('i'), E('i'), E('i') ]),
+		E('div', { 'class': 'zmw-grid-bg', 'aria-hidden': 'true' }),
+		card,
+		E('button', { 'type': 'button', 'class': 'zmw-icon-btn zmw-login-theme zmw-theme-toggle', 'click': toggleTheme })
+	]);
+	document.body.classList.add('zmw-locked');
+	root.appendChild(loginEl);
+	applyTheme();
+	setTimeout(function () { (user.value ? pass : user).focus(); }, 60);
+}
+
+function closeLogin() {
+	if (!loginEl) return;
+	var el = loginEl;
+	loginEl = null;
+	authLostShown = false;
+	el.classList.add('zmw-leave');
+	document.body.classList.remove('zmw-locked');
+	setTimeout(function () { el.remove(); }, 380);
+}
+
+function authLost() {
+	if (authLostShown || loginEl) return;
+	authLostShown = true;
+	sid = null;
+	sset(K_SID, null);
+	showLogin('Сессия истекла — войдите снова', 'warning');
+}
+
+function logout() {
+	var s = sid;
+	sid = null;
+	sset(K_SID, null);
+	var done = function () {
+		poll._reset();
+		if (viewEl) viewEl.innerHTML = '';
+		showLogin('Вы вышли из панели.', 'info');
+	};
+	if (!s) return done();
+	ubus('session', 'destroy', {}, s).catch(function () {}).then(done);
+}
+
+var started = false;
+function startApp() {
+	if (!shell) buildShell();
+	document.body.classList.add('zmw-ready');
+	if (!started) {
+		started = true;
+		window.addEventListener('hashchange', function () { route(); });
+		startShellPolling();
+	}
+	loadShellInfo();
+	refreshShellStatus();
+	refreshMemory();
+	route();
+}
+
+/* ───────────────────────── Старт ───────────────────────── */
+
+function boot() {
+	root = document.getElementById('zmw-root');
+	document.body.classList.add('zmw-body');
+	applyTheme();
+
+	document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeDrawer(); } });
+
+	if (/[?&]logout=1/.test(location.search)) {
+		var s = sid;
+		sid = null;
+		sset(K_SID, null);
+		try { history.replaceState(null, '', '/' + location.hash); } catch (e) {}
+		if (s) ubus('session', 'destroy', {}, s).catch(function () {});
+		showLogin('Вы вышли из панели. Войдите снова.', 'info');
+		return;
+	}
+
+	if (!sid) { showLogin(); return; }
+
+	/* Проверяем, жива ли сохранённая сессия */
+	ubus('session', 'access', { scope: 'ubus', object: 'zapret-manager', 'function': 'status' }, sid).then(function (res) {
+		if (res[0] === 0 && res[1] && res[1].access) startApp();
+		else { sid = null; sset(K_SID, null); showLogin(); }
+	}).catch(function (e) {
+		sid = null; sset(K_SID, null);
+		showLogin(e && e.noUbus ? e.message : null, 'error');
+	});
+}
+
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+else boot();
+
+})();
+ZM_INSTALLER_EOF
+cat > '/www/zm/app.css' << 'ZM_INSTALLER_EOF'
+/* Zapret Manager — Web UI theme */
+
+:root {
+	--font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+	--mono: ui-monospace, "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", monospace;
+
+	--a1: #7c5cff;
+	--a2: #3b82f6;
+	--a3: #22d3ee;
+	--grad: linear-gradient(135deg, var(--a1) 0%, var(--a2) 55%, var(--a3) 100%);
+	--grad-soft: linear-gradient(135deg, rgba(124,92,255,.16), rgba(34,211,238,.10));
+	--ring: 0 0 0 3px rgba(124,92,255,.28);
+
+	--radius: 18px;
+	--radius-sm: 12px;
+	--side-w: 272px;
+
+	/* светлая тема */
+	--bg: #f3f5fa;
+	--bg-glow-1: rgba(124,92,255,.12);
+	--bg-glow-2: rgba(34,211,238,.10);
+	--surface: rgba(255,255,255,.82);
+	--surface-solid: #ffffff;
+	--surface-2: #f5f6fb;
+	--surface-3: #eceff6;
+	--side-bg: rgba(255,255,255,.66);
+	--border: rgba(15,23,42,.08);
+	--border-2: rgba(15,23,42,.14);
+	--text: #0f172a;
+	--text-2: #334155;
+	--muted: #64748b;
+	--shadow: 0 1px 2px rgba(15,23,42,.04), 0 12px 32px -18px rgba(15,23,42,.18);
+	--shadow-lg: 0 24px 60px -24px rgba(15,23,42,.35);
+	--input-bg: #ffffff;
+	--console: #0b1020;
+	--console-border: rgba(15,23,42,.12);
+
+	--ok: #059669; --ok-bg: rgba(16,185,129,.12); --ok-dot: #10b981;
+	--bad: #dc2626; --bad-bg: rgba(239,68,68,.10); --bad-dot: #ef4444;
+	--warn: #b45309; --warn-bg: rgba(245,158,11,.14); --warn-dot: #f59e0b;
+	--off: #64748b; --off-bg: rgba(100,116,139,.12);
+
+	/* для detectMissingThemeVar() в страницах LuCI */
+	--background-color-medium: var(--surface-solid);
+	--background-color-low: var(--surface-2);
+	color-scheme: light;
+}
+
+html[data-theme="dark"] {
+	--bg: #07090f;
+	--bg-glow-1: rgba(124,92,255,.20);
+	--bg-glow-2: rgba(34,211,238,.10);
+	--surface: rgba(22,27,38,.72);
+	--surface-solid: #121722;
+	--surface-2: rgba(255,255,255,.045);
+	--surface-3: rgba(255,255,255,.08);
+	--side-bg: rgba(12,15,23,.72);
+	--border: rgba(255,255,255,.07);
+	--border-2: rgba(255,255,255,.13);
+	--text: #e8ebf4;
+	--text-2: #c3c9d8;
+	--muted: #8a93a8;
+	--shadow: 0 1px 0 rgba(255,255,255,.03) inset, 0 16px 40px -22px rgba(0,0,0,.8);
+	--shadow-lg: 0 30px 80px -30px rgba(0,0,0,.9);
+	--input-bg: rgba(255,255,255,.04);
+	--console: #070a12;
+	--console-border: rgba(255,255,255,.08);
+
+	--ok: #34d399; --ok-bg: rgba(52,211,153,.12); --ok-dot: #34d399;
+	--bad: #f87171; --bad-bg: rgba(248,113,113,.12); --bad-dot: #f87171;
+	--warn: #fbbf24; --warn-bg: rgba(251,191,36,.12); --warn-dot: #fbbf24;
+	--off: #94a3b8; --off-bg: rgba(148,163,184,.12);
+	color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body { margin: 0; padding: 0; }
+body.zmw-body {
+	font-family: var(--font);
+	font-size: 14px;
+	line-height: 1.5;
+	color: var(--text);
+	background-color: var(--bg);
+	background-image:
+		radial-gradient(900px 600px at -10% -20%, var(--bg-glow-1), transparent 60%),
+		radial-gradient(800px 520px at 110% -10%, var(--bg-glow-2), transparent 60%);
+	background-attachment: fixed;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	min-height: 100vh;
+	overflow-x: hidden;
+}
+body.zmw-locked { overflow: hidden; }
+html.zmw-theme-anim body, html.zmw-theme-anim .zmw-side, html.zmw-theme-anim .zm-card,
+html.zmw-theme-anim .zmw-top, html.zmw-theme-anim .cbi-button { transition: background-color .35s, color .35s, border-color .35s !important; }
+
+a { color: inherit; }
+::selection { background: rgba(124,92,255,.35); }
+
+* { scrollbar-width: thin; scrollbar-color: var(--border-2) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 10px; border: 2px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-track { background: transparent; }
+
+.zmw-i { width: 20px; height: 20px; flex-shrink: 0; display: block; }
+
+/* ───────────── Логотип ───────────── */
+
+.zmw-logo {
+	width: 42px; height: 42px; border-radius: 13px;
+	background:
+		radial-gradient(120% 90% at 30% 0%, rgba(56,189,248,.35), transparent 60%),
+		linear-gradient(160deg, #13223f 0%, #0a1426 55%, #060c18 100%);
+	display: grid; place-items: center; flex-shrink: 0;
+	box-shadow: 0 8px 22px -8px rgba(14,165,233,.75), inset 0 1px 0 rgba(255,255,255,.14), inset 0 0 0 1px rgba(56,189,248,.28);
+	position: relative;
+	overflow: visible;
+}
+.zmw-logo svg { width: 32px; height: 32px; filter: drop-shadow(0 0 6px rgba(56,189,248,.55)) drop-shadow(0 2px 2px rgba(0,0,0,.45)); }
+.zmw-logo-lg { width: 76px; height: 76px; border-radius: 22px; margin: 0 auto 18px; }
+.zmw-logo-lg svg { width: 58px; height: 58px; animation: zmw-zap 4.5s ease-in-out infinite; }
+.zmw-logo-lg::after {
+	content: ""; position: absolute; inset: -12px; border-radius: 30px;
+	background: radial-gradient(circle, rgba(14,165,233,.55), rgba(124,92,255,.25) 60%, transparent 75%);
+	filter: blur(18px); z-index: -1;
+}
+@keyframes zmw-zap {
+	0%, 86%, 100% { filter: drop-shadow(0 0 8px rgba(56,189,248,.55)) drop-shadow(0 2px 2px rgba(0,0,0,.45)); }
+	90% { filter: drop-shadow(0 0 18px rgba(125,211,252,1)) drop-shadow(0 0 4px #fff); }
+	94% { filter: drop-shadow(0 0 6px rgba(56,189,248,.45)) drop-shadow(0 2px 2px rgba(0,0,0,.45)); }
+}
+
+/* ───────────── Кнопки-иконки ───────────── */
+
+.zmw-icon-btn {
+	display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+	height: 40px; min-width: 40px; padding: 0 10px;
+	border-radius: 12px; border: 1px solid var(--border);
+	background: var(--surface); color: var(--text-2);
+	cursor: pointer; font: 600 13px/1 var(--font);
+	transition: background .15s, border-color .15s, color .15s, transform .1s;
+	backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.zmw-icon-btn:hover { border-color: var(--border-2); color: var(--text); background: var(--surface-solid); }
+.zmw-icon-btn:active { transform: scale(.96); }
+.zmw-icon-btn:focus-visible { outline: none; box-shadow: var(--ring); }
+.zmw-icon-btn .zmw-i { width: 19px; height: 19px; }
+.zmw-spin .zmw-i { animation: zmw-spin .7s cubic-bezier(.4,0,.2,1); }
+@keyframes zmw-spin { to { transform: rotate(360deg); } }
+
+/* ───────────── Оболочка ───────────── */
+
+.zmw-shell { display: flex; min-height: 100vh; opacity: 0; transition: opacity .35s; }
+body.zmw-ready .zmw-shell { opacity: 1; }
+body.zmw-locked .zmw-shell { filter: blur(6px); pointer-events: none; }
+
+.zmw-side {
+	position: sticky; top: 0; height: 100vh;
+	width: var(--side-w); flex-shrink: 0;
+	display: flex; flex-direction: column;
+	padding: 20px 14px 16px;
+	background: var(--side-bg);
+	border-right: 1px solid var(--border);
+	backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%);
+	z-index: 40;
+	overflow-y: auto;
+}
+
+.zmw-brand { display: flex; align-items: center; gap: 12px; padding: 2px 8px 14px; }
+.zmw-brand-text { min-width: 0; flex: 1; }
+.zmw-brand-name { font-weight: 750; font-size: 16px; letter-spacing: -.01em; }
+.zmw-brand-sub { font-size: 12px; color: var(--muted); margin-top: 1px; }
+.zmw-drawer-close { display: none; }
+
+.zmw-update {
+	display: block; margin: 0 6px 12px; padding: 9px 12px;
+	border-radius: 12px; font-size: 12.5px; font-weight: 600; text-decoration: none;
+	color: var(--text); background: var(--grad-soft); border: 1px solid rgba(124,92,255,.35);
+}
+.zmw-update::before { content: "✦ "; color: var(--a1); }
+.zmw-update[hidden] { display: none; }
+
+.zmw-nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.zmw-nav-group {
+	font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+	color: var(--muted); opacity: .8; padding: 12px 12px 4px;
+}
+.zmw-nav-group:first-child { padding-top: 4px; }
+.zmw-nav-item {
+	position: relative;
+	display: flex; align-items: center; gap: 12px;
+	padding: 6px 12px; border-radius: 12px;
+	text-decoration: none; color: var(--text-2);
+	font-weight: 550; font-size: 14px;
+	transition: background .15s, color .15s;
+}
+.zmw-nav-item:hover { background: var(--surface-2); color: var(--text); }
+.zmw-nav-ico {
+	width: 30px; height: 30px; border-radius: 10px;
+	display: grid; place-items: center; flex-shrink: 0;
+	background: var(--surface-2); border: 1px solid var(--border);
+	color: var(--muted);
+	transition: background .2s, color .2s, border-color .2s, box-shadow .2s;
+}
+.zmw-nav-ico .zmw-i { width: 18px; height: 18px; }
+.zmw-nav-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zmw-nav-item.zmw-active { background: var(--grad-soft); color: var(--text); }
+.zmw-nav-item.zmw-active::before {
+	content: ""; position: absolute; left: -14px; top: 10px; bottom: 10px; width: 4px;
+	border-radius: 0 4px 4px 0; background: var(--grad);
+}
+.zmw-nav-item.zmw-active .zmw-nav-ico {
+	background: var(--grad); color: #fff; border-color: transparent;
+	box-shadow: 0 6px 16px -6px rgba(99,102,241,.8);
+}
+.zmw-nav-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: none; }
+.zmw-nav-dot.zmw-on, .zmw-nav-dot.zmw-stop { display: block; }
+.zmw-nav-dot.zmw-on { background: var(--ok-dot); box-shadow: 0 0 0 3px var(--ok-bg), 0 0 10px var(--ok-dot); }
+.zmw-nav-dot.zmw-stop { background: var(--bad-dot); box-shadow: 0 0 0 3px var(--bad-bg), 0 0 10px var(--bad-dot); animation: zmw-blink 1.6s ease-in-out infinite; }
+@keyframes zmw-blink { 50% { opacity: .45; } }
+
+.zmw-side-foot { display: flex; flex-direction: column; gap: 9px; padding: 14px 6px 0; margin-top: 12px; border-top: 1px solid var(--border); }
+.zmw-pill {
+	display: flex; align-items: center; gap: 10px;
+	padding: 8px 12px; border-radius: 12px; text-decoration: none;
+	font-weight: 650; font-size: 13px;
+	border: 1px solid var(--border);
+	background: var(--surface-2);
+}
+.zmw-pill-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; background: var(--off); }
+.zmw-pill-ok { color: var(--ok); background: var(--ok-bg); border-color: transparent; }
+.zmw-pill-ok .zmw-pill-dot { background: var(--ok-dot); animation: zmw-pulse 2.2s infinite; }
+.zmw-pill-bad { color: var(--bad); background: var(--bad-bg); border-color: transparent; }
+.zmw-pill-bad .zmw-pill-dot { background: var(--bad-dot); }
+.zmw-pill-off { color: var(--muted); }
+@keyframes zmw-pulse {
+	0% { box-shadow: 0 0 0 0 rgba(16,185,129,.55); }
+	70% { box-shadow: 0 0 0 8px rgba(16,185,129,0); }
+	100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+}
+.zmw-device { padding: 2px 6px; }
+.zmw-device-model { font-size: 12.5px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 650; color: var(--text); overflow-wrap: anywhere; }
+.zmw-device-sub { font-size: 11.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zmw-side-links { display: flex; gap: 6px; }
+.zmw-side-links a {
+	flex: 1; padding: 8px 10px !important; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+	padding: 7px 8px; border-radius: 10px; border: 1px solid var(--border);
+	font-size: 12.5px; font-weight: 600; text-decoration: none; color: var(--text-2);
+	transition: background .15s, color .15s;
+}
+.zmw-side-links a:hover { background: var(--surface-2); color: var(--text); }
+.zmw-side-links .zmw-i { width: 15px; height: 15px; }
+.zmw-mem { display: flex; flex-direction: column; gap: 9px; padding: 2px 6px; }
+.zmw-mem:empty { display: none; }
+.zmw-mem-head { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; margin-bottom: 4px; }
+.zmw-mem-label { color: var(--muted); font-weight: 600; }
+.zmw-mem-val { color: var(--text-2); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.zmw-mem-bar { height: 6px; border-radius: 6px; background: var(--surface-3); overflow: hidden; }
+.zmw-mem-bar i { display: block; height: 100%; width: 0; border-radius: 6px; background: var(--grad); transition: width .6s cubic-bezier(.2,.8,.2,1); }
+.zmw-mem-mid .zmw-mem-bar i { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+.zmw-mem-hi .zmw-mem-bar i { background: linear-gradient(90deg, #ef4444, #f87171); }
+.zmw-credit { font-size: 11.5px; color: var(--muted); text-align: center; opacity: .7; }
+
+.zmw-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+.zmw-top {
+	position: sticky; top: 0; z-index: 30;
+	display: flex; align-items: center; gap: 14px;
+	padding: 18px 32px;
+	background: linear-gradient(to bottom, var(--bg) 30%, transparent);
+}
+html[data-theme="dark"] .zmw-top { background: linear-gradient(to bottom, rgba(7,9,15,.92) 35%, rgba(7,9,15,0)); }
+html[data-theme="light"] .zmw-top { background: linear-gradient(to bottom, rgba(243,245,250,.94) 35%, rgba(243,245,250,0)); }
+.zmw-burger { display: none; }
+.zmw-titles { flex: 1; min-width: 0; }
+.zmw-title { margin: 0; font-size: 24px; font-weight: 750; letter-spacing: -.02em; line-height: 1.2; }
+.zmw-sub { font-size: 13px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zmw-top-actions { display: flex; gap: 8px; align-items: center; }
+.zmw-logout span { padding-right: 2px; }
+.zmw-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zmw-link-btn { text-decoration: none; padding: 0 13px; }
+.zmw-link-btn .zmw-i { width: 18px; height: 18px; }
+.zmw-lbl-short { display: none; }
+.zmw-link-kvn {
+	color: #fff; border-color: transparent;
+	background: var(--grad); background-size: 160% 100%;
+	box-shadow: 0 8px 20px -10px rgba(99,102,241,.9), inset 0 1px 0 rgba(255,255,255,.22);
+	transition: background-position .35s, transform .1s, box-shadow .2s;
+}
+.zmw-link-kvn:hover { color: #fff; border-color: transparent; background: var(--grad); background-size: 160% 100%; background-position: 100% 0; box-shadow: 0 10px 24px -10px rgba(99,102,241,1), inset 0 1px 0 rgba(255,255,255,.22); }
+.zmw-link-tg { color: #229ed9; border-color: rgba(34,158,217,.35); background: rgba(34,158,217,.10); }
+.zmw-link-tg:hover { color: #229ed9; border-color: rgba(34,158,217,.6); background: rgba(34,158,217,.16); }
+html[data-theme="dark"] .zmw-link-tg, html[data-theme="dark"] .zmw-link-tg:hover { color: #5cc1f0; }
+.zmw-top-sep { width: 1px; height: 24px; background: var(--border-2); margin: 0 4px; }
+#zmw-view .zm-header-links { display: none; }
+
+.zmw-view { padding: 6px 32px 24px; flex: 1; width: 100%; max-width: 1320px; }
+.zmw-foot { padding: 8px 32px 24px; font-size: 12px; color: var(--muted); opacity: .6; }
+
+.zmw-page { animation: zmw-page-in .42s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes zmw-page-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+
+.zmw-scrim { display: none; }
+
+/* ───────────── Скелетон / ошибка ───────────── */
+
+.zmw-skel-wrap { display: flex; flex-direction: column; gap: 16px; }
+.zmw-skel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.zmw-skel {
+	border-radius: var(--radius);
+	background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 40%, var(--surface-2) 80%);
+	background-size: 300% 100%;
+	animation: zmw-shimmer 1.4s infinite linear;
+	border: 1px solid var(--border);
+}
+.zmw-skel-bar { height: 64px; }
+.zmw-skel-card { height: 170px; }
+.zmw-skel-wide { height: 240px; }
+@keyframes zmw-shimmer { from { background-position: 100% 0; } to { background-position: -200% 0; } }
+
+.zmw-error {
+	display: flex; gap: 16px; align-items: flex-start;
+	padding: 22px 24px; border-radius: var(--radius);
+	background: var(--surface); border: 1px solid rgba(239,68,68,.3);
+	box-shadow: var(--shadow);
+}
+.zmw-error-ico { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; background: var(--bad-bg); color: var(--bad); flex-shrink: 0; }
+.zmw-error h3 { margin: 0 0 6px; font-size: 16px; }
+.zmw-error p { margin: 0 0 14px; color: var(--muted); overflow-wrap: anywhere; }
+
+/* ───────────── Вход ───────────── */
+
+.zmw-login {
+	position: fixed; inset: 0; z-index: 200;
+	display: grid; place-items: center; padding: 20px;
+	background: var(--bg);
+	overflow: auto;
+	animation: zmw-fade .4s ease both;
+}
+.zmw-login.zmw-leave { animation: zmw-fade-out .38s ease both; }
+@keyframes zmw-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes zmw-fade-out { to { opacity: 0; transform: scale(1.02); } }
+
+.zmw-orbs { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.zmw-orbs i { position: absolute; border-radius: 50%; filter: blur(70px); opacity: .55; }
+.zmw-orbs i:nth-child(1) { width: 520px; height: 520px; background: #7c5cff; left: -140px; top: -160px; animation: zmw-float1 18s ease-in-out infinite alternate; }
+.zmw-orbs i:nth-child(2) { width: 460px; height: 460px; background: #22d3ee; right: -140px; bottom: -160px; opacity: .38; animation: zmw-float2 22s ease-in-out infinite alternate; }
+.zmw-orbs i:nth-child(3) { width: 320px; height: 320px; background: #3b82f6; right: 18%; top: 12%; opacity: .25; animation: zmw-float1 26s ease-in-out infinite alternate-reverse; }
+html[data-theme="light"] .zmw-orbs i { opacity: .28; }
+@keyframes zmw-float1 { to { transform: translate(120px, 80px) scale(1.1); } }
+@keyframes zmw-float2 { to { transform: translate(-100px, -60px) scale(1.15); } }
+
+.zmw-grid-bg {
+	position: absolute; inset: 0; pointer-events: none;
+	background-image:
+		linear-gradient(var(--border) 1px, transparent 1px),
+		linear-gradient(90deg, var(--border) 1px, transparent 1px);
+	background-size: 44px 44px;
+	-webkit-mask-image: radial-gradient(ellipse at center, #000 20%, transparent 70%);
+	mask-image: radial-gradient(ellipse at center, #000 20%, transparent 70%);
+	opacity: .7;
+}
+
+.zmw-login-card {
+	position: relative; z-index: 1;
+	width: 100%; max-width: 400px;
+	padding: 36px 32px 28px;
+	border-radius: 26px;
+	background: var(--surface);
+	border: 1px solid var(--border-2);
+	box-shadow: var(--shadow-lg);
+	backdrop-filter: blur(24px) saturate(150%); -webkit-backdrop-filter: blur(24px) saturate(150%);
+	text-align: center;
+	animation: zmw-card-in .6s cubic-bezier(.2,.8,.2,1) both;
+}
+@keyframes zmw-card-in { from { opacity: 0; transform: translateY(18px) scale(.98); } to { opacity: 1; transform: none; } }
+.zmw-login-card h1 {
+	margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -.02em;
+	background: linear-gradient(135deg, var(--text) 30%, var(--a1) 75%, var(--a3));
+	-webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.zmw-login-sub { margin: 6px 0 24px; color: var(--muted); font-size: 13.5px; }
+.zmw-login-sub b { color: var(--text-2); font-weight: 650; }
+.zmw-shake { animation: zmw-shake .45s cubic-bezier(.36,.07,.19,.97) both; }
+@keyframes zmw-shake { 10%,90% { transform: translateX(-1px); } 20%,80% { transform: translateX(3px); } 30%,50%,70% { transform: translateX(-6px); } 40%,60% { transform: translateX(6px); } }
+
+.zmw-field { display: block; text-align: left; margin-bottom: 14px; }
+.zmw-field-label { display: block; font-size: 12.5px; font-weight: 650; color: var(--text-2); margin: 0 0 6px 2px; }
+.zmw-input {
+	display: flex; align-items: center; gap: 10px;
+	height: 48px; padding: 0 6px 0 14px;
+	border-radius: 14px; border: 1px solid var(--border-2);
+	background: var(--input-bg);
+	color: var(--muted);
+	transition: border-color .15s, box-shadow .15s;
+}
+.zmw-input:focus-within { border-color: var(--a1); box-shadow: var(--ring); color: var(--a1); }
+.zmw-input .zmw-i { width: 18px; height: 18px; }
+.zmw-input input {
+	flex: 1; min-width: 0; height: 100%;
+	border: 0; outline: 0; background: transparent;
+	color: var(--text); font: 500 15px/1 var(--font);
+}
+.zmw-input input::placeholder { color: var(--muted); opacity: .6; }
+.zmw-eye { border: 0; background: transparent; color: var(--muted); width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; cursor: pointer; }
+.zmw-eye:hover { background: var(--surface-2); color: var(--text); }
+
+.zmw-check { display: flex; align-items: center; gap: 10px; margin: 4px 2px 16px; font-size: 13px; color: var(--text-2); cursor: pointer; text-align: left; user-select: none; }
+.zmw-check input { position: absolute; opacity: 0; pointer-events: none; }
+.zmw-check-box {
+	width: 20px; height: 20px; border-radius: 7px; flex-shrink: 0;
+	border: 1.5px solid var(--border-2); background: var(--input-bg);
+	display: grid; place-items: center; transition: background .15s, border-color .15s;
+}
+.zmw-check input:checked + .zmw-check-box { background: var(--grad); border-color: transparent; }
+.zmw-check input:checked + .zmw-check-box::after { content: ""; width: 10px; height: 5px; border: 2px solid #fff; border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px, -1px); }
+.zmw-check input:focus-visible + .zmw-check-box { box-shadow: var(--ring); }
+
+.zmw-login-msg { display: none; text-align: left; font-size: 13px; font-weight: 550; padding: 10px 12px; border-radius: 12px; margin-bottom: 14px; }
+.zmw-login-msg.zmw-show { display: block; }
+.zmw-login-msg.zmw-error { background: var(--bad-bg); color: var(--bad); }
+.zmw-login-msg.zmw-warning { background: var(--warn-bg); color: var(--warn); }
+.zmw-login-msg.zmw-info { background: var(--grad-soft); color: var(--text-2); }
+
+.zmw-btn-primary {
+	position: relative; width: 100%; height: 50px;
+	display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+	border: 0; border-radius: 14px; cursor: pointer;
+	background: var(--grad); background-size: 160% 100%; background-position: 0 0;
+	color: #fff; font: 700 15px/1 var(--font); letter-spacing: .01em;
+	box-shadow: 0 12px 28px -10px rgba(99,102,241,.8), inset 0 1px 0 rgba(255,255,255,.25);
+	transition: background-position .35s, transform .1s, box-shadow .2s;
+}
+.zmw-btn-primary:hover { background-position: 100% 0; box-shadow: 0 16px 32px -10px rgba(99,102,241,.9), inset 0 1px 0 rgba(255,255,255,.25); }
+.zmw-btn-primary:active { transform: scale(.985); }
+.zmw-btn-primary:focus-visible { outline: none; box-shadow: var(--ring), 0 12px 28px -10px rgba(99,102,241,.8); }
+.zmw-btn-primary .zmw-i { width: 18px; height: 18px; transition: transform .2s; }
+.zmw-btn-primary:hover .zmw-i { transform: translateX(3px); }
+.zmw-btn-primary.zmw-loading span, .zmw-btn-primary.zmw-loading .zmw-i { opacity: 0; }
+.zmw-btn-primary.zmw-loading::after {
+	content: ""; position: absolute; width: 20px; height: 20px; border-radius: 50%;
+	border: 2.5px solid rgba(255,255,255,.35); border-top-color: #fff;
+	animation: zmw-spin .7s linear infinite;
+}
+.zmw-login-foot { margin-top: 18px; font-size: 12.5px; color: var(--muted); }
+.zmw-login-theme { position: absolute; top: 18px; right: 18px; z-index: 2; }
+
+/* ───────────── Модальное окно ───────────── */
+
+.zmw-modal-wrap { position: fixed; inset: 0; z-index: 300; display: grid; place-items: center; padding: 20px; background: rgba(5,7,12,.55); backdrop-filter: blur(6px); opacity: 0; transition: opacity .2s; }
+.zmw-modal-wrap.zmw-in { opacity: 1; }
+.zmw-modal { width: 100%; max-width: 560px; max-height: 85vh; overflow: auto; padding: 24px; border-radius: 20px; background: var(--surface-solid); border: 1px solid var(--border-2); box-shadow: var(--shadow-lg); }
+.zmw-modal h3 { margin: 0 0 12px; }
+
+/* ═════════════ Компоненты страниц (перекрывают style.css LuCI) ═════════════ */
+
+#zmw-view .zm-wrap { max-width: none; gap: 18px; }
+#zmw-view .zm-webui-link { display: none !important; }
+
+#zmw-view .zm-header { align-items: center; gap: 12px; margin: 0; padding: 20px 24px; border-radius: var(--radius); background: var(--grad-soft); border: 1px solid rgba(124,92,255,.22); position: relative; overflow: hidden; }
+#zmw-view .zm-header::after { content: ""; position: absolute; right: -60px; top: -80px; width: 240px; height: 240px; border-radius: 50%; background: var(--grad); filter: blur(60px); opacity: .22; pointer-events: none; }
+#zmw-view .zm-header h2 { font-size: 22px; font-weight: 800; letter-spacing: -.02em; background: linear-gradient(135deg, var(--text) 35%, var(--a1) 80%, var(--a3)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+#zmw-view .zm-header-by { opacity: 1; color: var(--muted); font-size: 13px; }
+#zmw-view .zm-header-links { position: relative; z-index: 1; }
+#zmw-view .zm-header-links a {
+	color: var(--text); background: var(--surface); border: 1px solid var(--border-2);
+	padding: 7px 14px; font-size: 12.5px; font-weight: 650; border-radius: 999px;
+	backdrop-filter: blur(8px);
+	transition: border-color .15s, transform .15s, background .15s;
+}
+#zmw-view .zm-header-links a:hover { border-color: var(--a1); transform: translateY(-1px); background: var(--surface-solid); }
+
+#zmw-view :not(.zm-cards) > .zm-card + .zm-current-banner,
+#zmw-view .zm-current-banner + .zm-card,
+#zmw-view :not(.zm-cards) > .zm-card + .zm-log,
+#zmw-view .zm-card + .zm-refresh-banner,
+#zmw-view .zm-card + .zm-cards,
+#zmw-view .zm-cards + .zm-card { margin-top: 18px; }
+#zmw-view .zm-wrap > * + * { margin-top: 0 !important; }
+#zmw-view :not(.zm-cards):not(.bt-cols):not(.zm-wrap) > .zm-card:not(:last-child) { margin-bottom: 18px; }
+#zmw-view .zm-current-banner { margin-bottom: 0; }
+
+#zmw-view .zm-cards { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; }
+
+#zmw-view .zm-card {
+	background: var(--surface);
+	border: 1px solid var(--border);
+	border-radius: var(--radius);
+	padding: 22px 24px;
+	box-shadow: var(--shadow);
+	backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+	color: var(--text);
+	transition: border-color .2s, box-shadow .2s;
+}
+#zmw-view .zm-card:hover { border-color: var(--border-2); box-shadow: var(--shadow); }
+#zmw-view .zm-card h3 { margin: 0 0 14px; font-size: 16px; font-weight: 700; letter-spacing: -.01em; color: var(--text); }
+#zmw-view .zm-card h3::before {
+	content: ""; width: 4px; height: 18px; border-radius: 4px; background: var(--grad); flex-shrink: 0;
+}
+#zmw-view .zm-card h4 { color: var(--text); }
+#zmw-view .zm-card p { color: var(--text-2); }
+
+#zmw-view .zm-row { font-size: 13.5px; margin: 9px 0; gap: 12px; }
+#zmw-view .zm-row .zm-label { opacity: 1; color: var(--muted); }
+#zmw-view .bt-cols { column-gap: 48px; }
+#zmw-view .bt-col .zm-row { padding: 6px 0; margin: 0; border-bottom: 1px dashed var(--border); }
+#zmw-view .bt-col .zm-row:last-child { border-bottom: 0; }
+
+#zmw-view .zm-hint, #zmw-view p.zm-hint { opacity: 1; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+#zmw-view a:not(.cbi-button) { color: var(--a2); text-decoration-color: rgba(59,130,246,.35); text-underline-offset: 3px; }
+html[data-theme="dark"] #zmw-view a:not(.cbi-button) { color: #8ab4ff; }
+
+/* бейджи */
+#zmw-view .zm-badge { padding: 4px 11px 4px 9px; font-size: 12px; font-weight: 650; gap: 7px; letter-spacing: .01em; }
+#zmw-view .zm-ok { background: var(--ok-bg); color: var(--ok); }
+#zmw-view .zm-ok .zm-dot { background: var(--ok-dot); box-shadow: 0 0 8px var(--ok-dot); animation: zmw-pulse 2.4s infinite; }
+#zmw-view .zm-bad { background: var(--bad-bg); color: var(--bad); }
+#zmw-view .zm-bad .zm-dot { background: var(--bad-dot); }
+#zmw-view .zm-warn { background: var(--warn-bg); color: var(--warn); }
+#zmw-view .zm-warn .zm-dot { background: var(--warn-dot); }
+#zmw-view .zm-off { background: var(--off-bg); color: var(--off); }
+#zmw-view .zm-off .zm-dot { background: var(--off); }
+
+/* кнопки */
+#zmw-view .cbi-button, .zmw-modal .cbi-button, .zm-refresh-banner .cbi-button {
+	display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+	min-height: 38px; height: auto; padding: 8px 16px; margin: 0;
+	border-radius: 12px; border: 1px solid var(--border-2);
+	background: var(--surface-solid); color: var(--text);
+	font: 600 13.5px/1.25 var(--font); letter-spacing: .005em;
+	text-decoration: none; white-space: normal; text-align: center;
+	cursor: pointer; box-shadow: 0 1px 2px rgba(0,0,0,.06);
+	transition: border-color .15s, background .15s, transform .1s, box-shadow .15s, color .15s;
+	-webkit-appearance: none; appearance: none;
+}
+html[data-theme="dark"] #zmw-view .cbi-button { background: rgba(255,255,255,.05); }
+#zmw-view .cbi-button:hover { border-color: rgba(124,92,255,.55); background: var(--surface-solid); transform: translateY(-1px); box-shadow: 0 6px 16px -10px rgba(99,102,241,.6); }
+html[data-theme="dark"] #zmw-view .cbi-button:hover { background: rgba(255,255,255,.08); }
+#zmw-view .cbi-button:active { transform: translateY(0) scale(.98); }
+#zmw-view .cbi-button:focus-visible { outline: none; box-shadow: var(--ring); }
+#zmw-view .cbi-button[disabled], #zmw-view .cbi-button:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+#zmw-view .cbi-button-positive, .zm-refresh-banner .cbi-button-positive,
+html[data-theme="dark"] #zmw-view .cbi-button-positive {
+	background: var(--grad); background-size: 150% 100%; color: #fff; border-color: transparent;
+	box-shadow: 0 8px 20px -10px rgba(99,102,241,.9), inset 0 1px 0 rgba(255,255,255,.22);
+}
+#zmw-view .cbi-button-positive:hover, html[data-theme="dark"] #zmw-view .cbi-button-positive:hover {
+	background: var(--grad); background-size: 150% 100%; background-position: 100% 0;
+	border-color: transparent; color: #fff;
+	box-shadow: 0 12px 26px -10px rgba(99,102,241,1), inset 0 1px 0 rgba(255,255,255,.22);
+}
+#zmw-view .cbi-button-remove, html[data-theme="dark"] #zmw-view .cbi-button-remove {
+	background: var(--bad-bg); color: var(--bad); border-color: rgba(239,68,68,.28); box-shadow: none;
+}
+#zmw-view .cbi-button-remove:hover, html[data-theme="dark"] #zmw-view .cbi-button-remove:hover {
+	background: rgba(239,68,68,.18); border-color: rgba(239,68,68,.5); color: var(--bad);
+	box-shadow: 0 8px 20px -12px rgba(239,68,68,.8);
+}
+
+#zmw-view .zm-actions { gap: 10px; margin: 16px 0; }
+
+/* вкладки внутри страниц — сегментированный переключатель */
+#zmw-view .zm-actions.zmw-tabs {
+	display: flex; flex-wrap: nowrap; gap: 4px;
+	padding: 5px; margin: 0 0 4px !important;
+	border-radius: 16px; background: var(--surface); border: 1px solid var(--border);
+	box-shadow: var(--shadow);
+	overflow-x: auto; scrollbar-width: none;
+	backdrop-filter: blur(14px);
+	width: max-content; max-width: 100%;
+}
+#zmw-view .zm-actions.zmw-tabs::-webkit-scrollbar { display: none; }
+#zmw-view .zmw-tabs .cbi-button {
+	flex-shrink: 0; white-space: nowrap;
+	border: 0; background: transparent; box-shadow: none; color: var(--muted);
+	min-height: 36px; padding: 7px 16px; border-radius: 11px;
+}
+#zmw-view .zmw-tabs .cbi-button:hover { background: var(--surface-2); color: var(--text); transform: none; box-shadow: none; }
+#zmw-view .zmw-tabs .cbi-button-positive, #zmw-view .zmw-tabs .cbi-button-positive:hover {
+	background: var(--grad); color: #fff;
+	box-shadow: 0 6px 16px -8px rgba(99,102,241,.9);
+}
+
+/* поля ввода */
+#zmw-view .cbi-input-text, #zmw-view input[type="text"], #zmw-view input[type="number"],
+#zmw-view input[type="password"], #zmw-view input[type="url"], #zmw-view select, #zmw-view .bt-input,
+.zmw-modal input[type="text"], .zmw-modal select {
+	height: 40px; padding: 0 14px;
+	border-radius: 12px; border: 1px solid var(--border-2);
+	background: var(--input-bg); color: var(--text);
+	font: 500 14px/1 var(--font);
+	outline: none; box-shadow: none;
+	transition: border-color .15s, box-shadow .15s;
+	max-width: 100%;
+}
+#zmw-view select, .zmw-modal select {
+	-webkit-appearance: none; appearance: none; cursor: pointer;
+	padding-right: 38px;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%238a93a8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+	background-repeat: no-repeat; background-position: right 12px center; background-size: 16px;
+}
+#zmw-view select option { background: var(--surface-solid); color: var(--text); }
+#zmw-view .zm-hour-select { min-width: 120px; font-variant-numeric: tabular-nums; }
+#zmw-view .zm-actions > .cbi-input-text[type="text"] { flex: 1 1 240px; min-width: 0; }
+#zmw-view .cbi-input-text:focus, #zmw-view input:focus, #zmw-view select:focus, #zmw-view .bt-input:focus { border-color: var(--a1); box-shadow: var(--ring); }
+#zmw-view input::placeholder { color: var(--muted); opacity: .7; }
+
+/* плитки */
+#zmw-view .zm-grid { gap: 10px; }
+#zmw-view .zm-grid-devices { gap: 10px; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+#zmw-view .zm-tile {
+	background: var(--surface-2);
+	border: 1px solid var(--border);
+	border-radius: 13px;
+	padding: 11px 16px;
+	font-size: 13.5px; font-weight: 550; color: var(--text-2);
+	transition: border-color .15s, background .15s, transform .12s, box-shadow .15s, color .15s;
+}
+html.zm-theme-dark #zmw-view .zm-tile:not(.zm-active):not(.zm-tile-off) { background: var(--surface-2); border-color: var(--border); }
+#zmw-view .zm-tile:hover { border-color: rgba(124,92,255,.55); color: var(--text); transform: translateY(-2px); box-shadow: 0 10px 20px -14px rgba(99,102,241,.7); }
+html.zm-theme-dark #zmw-view .zm-tile:not(.zm-active):not(.zm-tile-off):hover { border-color: rgba(124,92,255,.55); }
+#zmw-view .zm-tile.zm-active {
+	background: var(--grad-soft);
+	border-color: rgba(124,92,255,.65);
+	color: var(--text); font-weight: 700;
+	box-shadow: 0 0 0 1px rgba(124,92,255,.45) inset, 0 10px 24px -14px rgba(99,102,241,.9);
+}
+#zmw-view .zm-tile.zm-active::before { content: "✓ "; color: var(--a1); font-weight: 800; }
+html[data-theme="dark"] #zmw-view .zm-tile.zm-active::before { color: #a594ff; }
+#zmw-view .zm-tile.zm-tile-off { background: var(--bad-bg); border-color: rgba(239,68,68,.35); color: var(--bad); }
+#zmw-view .zm-tile.zm-tile-pending { opacity: .5; }
+
+/* консоль */
+#zmw-view .zm-log {
+	background: var(--console);
+	color: #dfe6f3;
+	border: 1px solid var(--console-border);
+	border-radius: 16px;
+	padding: 44px 20px 18px;
+	font: 13px/1.75 var(--mono);
+	box-shadow: inset 0 1px 0 rgba(255,255,255,.04), var(--shadow);
+	position: relative;
+	background-image:
+		radial-gradient(circle at 20px 20px, #ff5f57 5px, transparent 5.5px),
+		radial-gradient(circle at 38px 20px, #febc2e 5px, transparent 5.5px),
+		radial-gradient(circle at 56px 20px, #28c840 5px, transparent 5.5px),
+		linear-gradient(to bottom, rgba(255,255,255,.035) 0, rgba(255,255,255,.035) 40px, transparent 40px);
+	background-repeat: no-repeat;
+}
+#zmw-view .zm-log.bt-panel { padding-top: 16px; background-image: none; }
+#zmw-view .zm-log:empty::before { color: #8b949e; }
+#zmw-view .zm-log-arrow { color: #67e8f9; }
+#zmw-view .zm-log-msg-info { color: #fcd34d; }
+#zmw-view .zm-log-msg-ok { color: #4ade80; }
+#zmw-view .zm-log-msg-error { color: #fb7185; }
+#zmw-view .zm-log-msg-warn { color: #fdba74; }
+#zmw-view .zm-log-code { color: #94a3b8; }
+
+#zmw-view .zm-config-editor {
+	background: var(--console); color: #e2e8f0;
+	border: 1px solid var(--console-border); border-radius: 16px;
+	padding: 16px 18px; font: 13px/1.65 var(--mono);
+	outline: none;
+	transition: border-color .15s, box-shadow .15s;
+}
+#zmw-view .zm-config-editor:focus { border-color: var(--a1); box-shadow: var(--ring); }
+
+/* баннеры */
+#zmw-view .zm-refresh-banner, .zm-refresh-banner {
+	background: var(--warn-bg); border: 1px solid rgba(245,158,11,.35);
+	color: var(--warn); border-radius: var(--radius); padding: 14px 18px;
+	font-size: 14px; font-weight: 600; margin-top: 0;
+}
+#zmw-view .zm-current-banner {
+	background: var(--grad-soft); border: 1px solid rgba(124,92,255,.28);
+	border-radius: 14px; padding: 12px 16px; font-size: 13.5px; color: var(--text);
+}
+#zmw-view .zm-current-banner.zm-current-empty { background: var(--surface-2); border-color: var(--border); color: var(--muted); }
+#zmw-view .bt-current-cmd { background: var(--console); color: #86efac; border-radius: 12px; font-family: var(--mono); }
+
+/* Telegram */
+#zmw-view .zm-tg-link-card { background: var(--ok-bg); border: 1px solid rgba(16,185,129,.28); border-radius: 16px; }
+#zmw-view .zm-tg-link-box { background: var(--console); color: #86efac; border-radius: 12px; font-family: var(--mono); font-size: 13.5px; }
+#zmw-view .zm-tg-qr-box img { border-radius: 14px; box-shadow: var(--shadow); }
+
+/* авторы */
+#zmw-view .zm-credits-grid { gap: 12px; }
+#zmw-view .zm-credit-tile, html.zm-theme-dark #zmw-view .zm-credit-tile {
+	background: var(--surface-2); border: 1px solid var(--border); border-radius: 14px; padding: 14px;
+	transition: border-color .15s, transform .15s;
+}
+#zmw-view .zm-credit-tile:hover { border-color: var(--border-2); transform: translateY(-1px); }
+#zmw-view .zm-credit-tile.zm-credit-self { background: var(--grad-soft); border-color: rgba(124,92,255,.35); }
+#zmw-view .zm-credit-author { color: var(--muted); opacity: 1; }
+
+/* ByeTube таблица */
+#zmw-view .bt-table td { border-top-color: rgba(255,255,255,.08); }
+#zmw-view .bt-chip { border-radius: 7px; }
+
+/* MagiTrickle и прочие iframe */
+#zmw-view iframe { border: 1px solid var(--border-2) !important; border-radius: 16px !important; background: #fff; box-shadow: var(--shadow); }
+
+#zmw-view pre:not(.zm-log) { font-family: var(--mono); }
+#zmw-view hr { border: 0; border-top: 1px solid var(--border); }
+
+/* ───────────── Тосты ───────────── */
+
+.zmw-body #zm-toast-container {
+	top: auto; bottom: 24px; right: 24px; left: auto;
+	gap: 10px; max-width: 420px; width: calc(100% - 48px);
+	align-items: flex-end;
+	z-index: 400;
+	pointer-events: none;
+}
+.zmw-body .zm-toast {
+	pointer-events: auto;
+	align-items: center; gap: 12px;
+	width: 100%;
+	padding: 14px 16px 14px 14px;
+	border-radius: 16px;
+	border: 1px solid var(--border-2); border-left: 1px solid var(--border-2);
+	background: var(--surface-solid);
+	color: var(--text);
+	box-shadow: var(--shadow-lg);
+	font-size: 14px; font-weight: 550; line-height: 1.45;
+	opacity: 0; transform: translateY(16px) scale(.98);
+	transition: opacity .25s ease, transform .3s cubic-bezier(.2,.8,.2,1);
+}
+.zmw-body .zm-toast.zm-toast-show { opacity: 1; transform: none; }
+.zmw-body .zm-toast-icon {
+	width: 30px; height: 30px; border-radius: 10px;
+	display: grid; place-items: center; flex-shrink: 0;
+	font-size: 14px; font-weight: 800; line-height: 1;
+}
+.zmw-body .zm-toast-info .zm-toast-icon { background: var(--ok-bg); color: var(--ok); }
+.zmw-body .zm-toast-error .zm-toast-icon { background: var(--bad-bg); color: var(--bad); }
+.zmw-body .zm-toast-warning .zm-toast-icon { background: var(--warn-bg); color: var(--warn); }
+
+/* ───────────── Адаптив ───────────── */
+
+@media (max-width: 1360px) {
+	.zmw-lbl-full { display: none; }
+	.zmw-lbl-short { display: inline; }
+}
+@media (max-width: 1180px) {
+	.zmw-logout span { display: none; }
+}
+@media (max-width: 1080px) and (min-width: 961px), (max-width: 760px) {
+	.zmw-lbl-short { display: none; }
+	.zmw-link-btn { padding: 0 10px; }
+	.zmw-sub { display: none; }
+}
+
+@media (max-width: 960px) {
+	:root { --side-w: min(86vw, 300px); }
+	.zmw-side {
+		position: fixed; left: 0; top: 0; bottom: 0; height: auto;
+		transform: translateX(-104%);
+		transition: transform .32s cubic-bezier(.2,.8,.2,1);
+		box-shadow: var(--shadow-lg);
+		background: var(--surface-solid);
+	}
+	body.zmw-drawer-open .zmw-side { transform: none; }
+	.zmw-drawer-close { display: inline-flex; }
+	.zmw-scrim {
+		display: block; position: fixed; inset: 0; z-index: 35;
+		background: rgba(5,7,12,.5); backdrop-filter: blur(3px);
+		opacity: 0; pointer-events: none; transition: opacity .3s;
+	}
+	body.zmw-drawer-open .zmw-scrim { opacity: 1; pointer-events: auto; }
+	body.zmw-drawer-open { overflow: hidden; }
+	.zmw-burger { display: inline-flex; }
+	.zmw-top { padding: 12px 16px; gap: 10px; }
+	.zmw-view { padding: 4px 16px 20px; }
+	.zmw-foot { padding: 4px 16px 20px; }
+	.zmw-title { font-size: 20px; }
+}
+
+@media (max-width: 600px) {
+	.zmw-sub { display: none; }
+	.zmw-top-actions { gap: 5px; }
+	.zmw-top-sep { display: none; }
+	.zmw-icon-btn { height: 36px; min-width: 36px; padding: 0 8px; border-radius: 11px; }
+	.zmw-link-btn { padding: 0 8px; }
+	.zmw-top { gap: 8px; }
+	.zmw-title { font-size: 18px; }
+	#zmw-view .zm-card { padding: 18px 16px; border-radius: 16px; }
+	#zmw-view .zm-cards { grid-template-columns: 1fr; }
+	#zmw-view .zm-header { padding: 16px; }
+	#zmw-view .zm-header-links { margin-left: 0; }
+	#zmw-view .zm-actions .cbi-button { flex: 1 1 auto; }
+	#zmw-view .zmw-tabs .cbi-button { flex: 0 0 auto; }
+	#zmw-view .zm-actions.zmw-tabs { width: 100%; }
+	#zmw-view .zm-refresh-banner, .zm-refresh-banner { flex-direction: column; align-items: stretch; text-align: left; }
+	.zmw-brand-name { font-size: 15px; white-space: nowrap; }
+	.zmw-nav-item { padding: 7px 12px; }
+	.zmw-login-card { padding: 30px 20px 22px; border-radius: 22px; }
+	.zmw-body #zm-toast-container { left: 12px; right: 12px; bottom: 12px; width: auto; max-width: none; }
+	#zmw-view .zm-log { font-size: 12.5px; padding: 40px 14px 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+ZM_INSTALLER_EOF
+cat > '/www/zm-webui.html' << 'ZM_INSTALLER_EOF'
+<!doctype html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0a0c12">
+<meta name="robots" content="noindex, nofollow">
+<title>Zapret Manager</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20viewBox=%270%200%201254%201254%27%3E%3Cdefs%3E%3ClinearGradient%20id=%27b%27%20x1=%270%27%20y1=%270%27%20x2=%270%27%20y2=%271%27%3E%3Cstop%20offset=%270%27%20stop-color=%27%2315264a%27/%3E%3Cstop%20offset=%271%27%20stop-color=%27%23060c18%27/%3E%3C/linearGradient%3E%3ClinearGradient%20id=%27z%27%20x1=%270%27%20y1=%270%27%20x2=%27.35%27%20y2=%271%27%3E%3Cstop%20offset=%270%27%20stop-color=%27%235fd8ff%27/%3E%3Cstop%20offset=%27.5%27%20stop-color=%27%231aa3ff%27/%3E%3Cstop%20offset=%271%27%20stop-color=%27%230a7cff%27/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width=%271254%27%20height=%271254%27%20rx=%27280%27%20fill=%27url%28%23b%29%27/%3E%3Cg%20transform=%27translate%2890%2090%29%20scale%28.856%29%27%20fill=%27url%28%23z%29%27%20stroke=%27%2304101f%27%20stroke-width=%2726%27%20stroke-linejoin=%27miter%27%3E%3Cpath%20d=%27M455%20170L1072%20118L1240%2018L685%20615L30%201240L742%20335L258%20385Z%27/%3E%3Cpath%20d=%27M1030%20458L722%20862L1222%20797L1008%201022L310%201100Z%27/%3E%3C/g%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg%20xmlns=%27http://www.w3.org/2000/svg%27%20viewBox=%270%200%201254%201254%27%3E%3Cdefs%3E%3ClinearGradient%20id=%27b%27%20x1=%270%27%20y1=%270%27%20x2=%270%27%20y2=%271%27%3E%3Cstop%20offset=%270%27%20stop-color=%27%2315264a%27/%3E%3Cstop%20offset=%271%27%20stop-color=%27%23060c18%27/%3E%3C/linearGradient%3E%3ClinearGradient%20id=%27z%27%20x1=%270%27%20y1=%270%27%20x2=%27.35%27%20y2=%271%27%3E%3Cstop%20offset=%270%27%20stop-color=%27%235fd8ff%27/%3E%3Cstop%20offset=%27.5%27%20stop-color=%27%231aa3ff%27/%3E%3Cstop%20offset=%271%27%20stop-color=%27%230a7cff%27/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect%20width=%271254%27%20height=%271254%27%20rx=%27280%27%20fill=%27url%28%23b%29%27/%3E%3Cg%20transform=%27translate%2890%2090%29%20scale%28.856%29%27%20fill=%27url%28%23z%29%27%20stroke=%27%2304101f%27%20stroke-width=%2726%27%20stroke-linejoin=%27miter%27%3E%3Cpath%20d=%27M455%20170L1072%20118L1240%2018L685%20615L30%201240L742%20335L258%20385Z%27/%3E%3Cpath%20d=%27M1030%20458L722%20862L1222%20797L1008%201022L310%201100Z%27/%3E%3C/g%3E%3C/svg%3E">
+<link rel="stylesheet" href="/zm/app.css?v=__ZMW_BUILD__">
+<script>
+(function(){try{var t=localStorage.getItem('zmw.theme')||sessionStorage.getItem('zmw.theme');if(t!=='light'&&t!=='dark')t=(window.matchMedia&&!matchMedia('(prefers-color-scheme: dark)').matches)?'light':'dark';document.documentElement.setAttribute('data-theme',t);if(t==='dark')document.documentElement.classList.add('zm-theme-dark');}catch(e){}})();
+</script>
+</head>
+<body class="zmw-body">
+<div id="zmw-root"></div>
+<noscript><p style="padding:24px;font-family:sans-serif">Для работы панели Zapret Manager нужен JavaScript.</p></noscript>
+<script src="/zm/app.js?v=__ZMW_BUILD__"></script>
+</body>
+</html>
+ZM_INSTALLER_EOF
+ZMW_BUILD="$(date +%s)"
+sed -i "s/__ZMW_BUILD__/$ZMW_BUILD/g" /www/zm/app.js /www/zm/app.css /www/zm-webui.html
+chmod 0644 /www/zm/app.js /www/zm/app.css /www/zm-webui.html
+
+ZMW_RESTART=0
+# JSON-RPC /ubus для uhttpd — обычно уже стоит вместе с LuCI
+if [ ! -e /usr/lib/uhttpd_ubus.so ]; then
+	echo -e "${CYAN}Устанавливаем ${NC}uhttpd-mod-ubus${CYAN} для Web UI${NC}"
+	$INSTALL uhttpd-mod-ubus >/dev/null 2>&1 || { $PM update >/dev/null 2>&1; $INSTALL uhttpd-mod-ubus >/dev/null 2>&1; } || true
+	ZMW_RESTART=1
+fi
+
+# Отдельный экземпляр uhttpd. Если секция уже есть — не трогаем (порт мог быть изменён вручную)
+if ! uci -q get uhttpd.zmweb >/dev/null; then
+	uci set uhttpd.zmweb=uhttpd
+	uci add_list uhttpd.zmweb.listen_http='0.0.0.0:7788'
+	uci add_list uhttpd.zmweb.listen_http='[::]:7788'
+	uci set uhttpd.zmweb.home='/www'
+	uci set uhttpd.zmweb.index_page='zm-webui.html'
+	uci set uhttpd.zmweb.ubus_prefix='/ubus'
+	uci set uhttpd.zmweb.no_dirlists='1'
+	uci set uhttpd.zmweb.rfc1918_filter='1'
+	uci set uhttpd.zmweb.max_requests='12'
+	uci set uhttpd.zmweb.max_connections='100'
+	uci set uhttpd.zmweb.script_timeout='120'
+	uci set uhttpd.zmweb.network_timeout='30'
+	uci set uhttpd.zmweb.http_keepalive='20'
+	uci set uhttpd.zmweb.tcp_keepalive='1'
+	uci commit uhttpd
+	ZMW_RESTART=1
+fi
+[ "$ZMW_RESTART" = "1" ] && { /etc/init.d/uhttpd restart >/dev/null 2>&1 || true; }
+
+ZMW_PORT="$(uci -q get uhttpd.zmweb.listen_http | tr ' ' '\n' | head -n1 | sed 's/.*://')"
+ZMW_IP="$(uci -q get network.lan.ipaddr | cut -d/ -f1)"
+[ -n "$ZMW_IP" ] || ZMW_IP="192.168.1.1"
+
+echo -e "Zapret Manager ${GREEN}для ${NC}LuCI ${GREEN}установлен!${NC}"
+echo -e "\n${CYAN}Web UI: ${NC}http://${ZMW_IP}:${ZMW_PORT:-7788}/${NC}\n"
+
