@@ -1568,7 +1568,7 @@ nfqws_opt_set() {
 
 
 TG_MTPROTO_VER="0.10"
-TGWS_VERSION="0.2.5"
+TGWS_VERSION="0.2.8"
 TGWS_BASE_URL="https://gitlab.com/xyzmean/brb/-/raw/main/dist"
 TGWS_VERSION_URL="https://gitlab.com/xyzmean/brb/-/raw/main/VERSION"
 TG_GO_VER="1.4.1"
@@ -7915,8 +7915,8 @@ var VIDEO_BASES = [
 // Запас для стандартного ролика: он же лежит в репозитории автора кнопки. Плеер берёт первый
 // источник, который открылся, так что пока на нашем сервере файла нет, играет этот.
 var VIDEO_SPARE = [
-	'https://cdn.jsdelivr.net/gh/xyzmean/Zapret-Manager-Exp@main/files/RedButton/',
-	'https://raw.githubusercontent.com/xyzmean/Zapret-Manager-Exp/main/files/RedButton/'
+	'https://cdn.jsdelivr.net/gh/xyzmean/Zapret-Manager-Exp@main/files/AutoBypass/',
+	'https://raw.githubusercontent.com/xyzmean/Zapret-Manager-Exp/main/files/AutoBypass/'
 ];
 var VIDEO_DEFAULT = { file: 'wait.mp4', name: 'Стандартное', poster: 'poster.jpg' };
 
