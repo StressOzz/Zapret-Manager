@@ -6645,10 +6645,10 @@ var BLOCKERS = {
 // Ролик на время подбора. Лежит в репозитории форка; jsDelivr первым, потому что он отдаёт
 // правильный тип файла и чаще открывается там, где raw.githubusercontent закрыт.
 var WAIT_VIDEO = [
-	'https://cdn.jsdelivr.net/gh/xyzmean/Zapret-Manager@main/files/RedButton/wait.mp4',
-	'https://raw.githubusercontent.com/xyzmean/Zapret-Manager/main/files/RedButton/wait.mp4'
+	'https://cdn.jsdelivr.net/gh/xyzmean/Zapret-Manager-Exp@main/files/RedButton/wait.mp4',
+	'https://raw.githubusercontent.com/xyzmean/Zapret-Manager-Exp/main/files/RedButton/wait.mp4'
 ];
-var WAIT_POSTER = 'https://cdn.jsdelivr.net/gh/xyzmean/Zapret-Manager@main/files/RedButton/poster.jpg';
+var WAIT_POSTER = 'https://cdn.jsdelivr.net/gh/xyzmean/Zapret-Manager-Exp@main/files/RedButton/poster.jpg';
 
 function stateBadge(st) {
 	var s = STATES[st];
