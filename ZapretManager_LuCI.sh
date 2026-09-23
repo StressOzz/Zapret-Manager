@@ -7,6 +7,14 @@ GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"
 
 echo -e "\n${MAGENTA}Устанавливаем Zapret Manager для LuCI${NC}"
 
+# Пока идёт подбор красной кнопки, переустанавливать нельзя: ниже стирается каталог задач, а с
+# ним журнал идущего подбора, и страница показывает пустой журнал до самого конца. Тестер при
+# этом меняет стратегии zapret, и обрывать его посередине значит оставить роутер на случайной.
+if [ -f /tmp/zapret-manager-luci/redbtn.pid ] && kill -0 "$(cat /tmp/zapret-manager-luci/redbtn.pid 2>/dev/null)" 2>/dev/null; then
+	echo -e "${YELLOW}Идёт подбор красной кнопки — дождитесь его окончания и запустите установку снова${NC}"
+	exit 1
+fi
+
 rm -rf \
 	/usr/lib/zapret-manager* \
 	/etc/zapret_manager_expert_mode* \
@@ -4876,6 +4884,7 @@ _rb_check_all() { # РЕЖИМ [ПОДПИСЬ]
 	local id
 	for id in $(_rb_svc_ids); do
 		[ "$id" = telegram ] && continue
+		_rb_stopped && return 0
 		if _rb_check_service "$id" "$1"; then
 			echo "$id ok"
 			[ -n "${2:-}" ] && echo "[ OK ] $(_rb_svc_field "$id" 2) — $2" >&2
@@ -5386,7 +5395,8 @@ do_redbtn_run() {
 		local tmode=v
 		[ "$mode" = full ] && tmode=v_flowseal
 		_rb_say "Подбираем стратегию Zapret — это займёт несколько минут"
-		if pick="$(_rb_zapret_pick "$tmode")"; then
+		# Остановленный тестер возвращает настройку сам; его неполный победитель не применяем.
+		if pick="$(_rb_zapret_pick "$tmode")" && ! _rb_stopped; then
 			name="${pick% *}"
 			_rb_say "Лучшая стратегия: $name (${pick#* } целей)"
 			if _rb_zapret_apply "$name"; then
@@ -5410,7 +5420,7 @@ do_redbtn_run() {
 		_rb_stopped && { _rb_say "Остановлено"; return 0; }
 
 		# YouTube отдельно: у менеджера для него свой набор стратегий (Yv).
-		if printf '%s\n' "$before" | grep -qx 'youtube fail'; then
+		if ! _rb_stopped && printf '%s\n' "$before" | grep -qx 'youtube fail'; then
 			_rb_say "Подбираем стратегию для YouTube"
 			cp "$CONF" "$zbak"
 			if name="$(_rb_youtube_pick)"; then
@@ -6680,6 +6690,9 @@ return view.extend({
 		var svcCard = E('div', { 'class': 'zm-card' });
 		var warpCard = E('div', { 'class': 'zm-card' });
 		var dnsCard = E('div', {});
+		// Плеер и журнал — отдельными блоками под главным: плеер крупный, журнал сразу под ним.
+		var videoCard = E('div', { 'class': 'zm-card zm-redbtn-player', 'style': 'display:none' });
+		var logCard = E('div', { 'class': 'zm-card zm-redbtn-logcard' }, [ logEl ]);
 		var videoEl = null, videoBox = null, soundBtn = null;
 
 		// Выбор «без звука» запоминается в браузере: кто выключил звук один раз, не хочет его
@@ -6703,9 +6716,13 @@ return view.extend({
 				'class': 'cbi-button',
 				'click': function() { if (videoEl) videoEl.muted = !videoEl.muted; }
 			}, '');
-			videoBox = E('div', { 'class': 'zm-redbtn-player' }, [
+			videoBox = E('div', {}, [
+				E('h3', {}, 'А пока подбираем…'),
 				videoEl, E('div', { 'class': 'zm-actions' }, [ soundBtn ])
 			]);
+			videoCard.innerHTML = '';
+			videoCard.appendChild(videoBox);
+			videoCard.style.display = '';
 			soundLabel();
 			setTimeout(function() {
 				if (!videoEl) return;
@@ -6725,7 +6742,8 @@ return view.extend({
 			videoEl.removeAttribute('src');
 			while (videoEl.firstChild) videoEl.removeChild(videoEl.firstChild);
 			videoEl.load();
-			if (videoBox && videoBox.parentNode) videoBox.parentNode.removeChild(videoBox);
+			videoCard.innerHTML = '';
+			videoCard.style.display = 'none';
 			videoEl = videoBox = soundBtn = null;
 		}
 
@@ -6799,7 +6817,6 @@ return view.extend({
 				mainCard.appendChild(E('div', { 'class': 'zm-row' }, [
 					E('span', { 'class': 'zm-badge zm-warn' }, [ E('span', { 'class': 'zm-dot' }), BLOCKERS[data.blocker] || data.blocker ])
 				]));
-				mainCard.appendChild(logEl);
 				return;
 			}
 
@@ -6831,8 +6848,7 @@ return view.extend({
 				E('span', { 'class': 'zm-label' }, 'Последний подбор'),
 				E('span', {}, fmtTime(data.last))
 			]));
-			if (busy && videoBox) mainCard.appendChild(videoBox);
-			mainCard.appendChild(logEl);
+
 		}
 
 		function renderServices() {
@@ -6894,6 +6910,8 @@ return view.extend({
 
 		renderAll();
 		wrap.appendChild(mainCard);
+		wrap.appendChild(videoCard);
+		wrap.appendChild(logCard);
 		wrap.appendChild(dnsCard);
 		wrap.appendChild(svcCard);
 		wrap.appendChild(warpCard);
@@ -10100,9 +10118,10 @@ html.zm-theme-dark .zm-config-editor { border-color: rgba(255,255,255,.14); }
 	font-size: 1.1em; font-weight: 600; padding: .7em 2.2em; border-radius: 999px;
 }
 .zm-redbtn:hover { background: #b71c1c !important; }
-.zm-redbtn-player { margin: 12px 0 0; }
-.zm-redbtn-player video { display: block; width: 100%; max-width: 560px; max-height: 360px; border-radius: 10px; background: #000; }
-.zm-redbtn-player .zm-actions { margin-top: 8px; }
+.zm-redbtn-player video { display: block; width: 100%; max-height: 82vh; aspect-ratio: 16 / 9; object-fit: contain; border-radius: 12px; background: #000; }
+.zm-redbtn-player .zm-actions { margin-top: 10px; }
+.zm-redbtn-logcard .zm-log:not(.zm-show) { display: none; }
+.zm-redbtn-logcard:not(:has(.zm-log.zm-show)) { display: none; }
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/style.css'
 
