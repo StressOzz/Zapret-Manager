@@ -12,7 +12,7 @@ echo -e "\n${MAGENTA}Устанавливаем Zapret Manager для LuCI${NC}"
 # этом меняет стратегии zapret, и обрывать его посередине значит оставить роутер на случайной.
 for _zm_job in redbtn steer; do
 	if [ -f /tmp/zapret-manager-luci/$_zm_job.pid ] && kill -0 "$(cat /tmp/zapret-manager-luci/$_zm_job.pid 2>/dev/null)" 2>/dev/null; then
-		echo -e "${YELLOW}Идёт автообход или операция steer — дождитесь окончания и запустите установку снова${NC}"
+		echo -e "${YELLOW}Идёт автообход или операция Steer — дождитесь окончания и запустите установку снова${NC}"
 		exit 1
 	fi
 done
@@ -4886,14 +4886,14 @@ _st_steer_ver() { steer --version 2>/dev/null | head -n1 | awk '{print $2}'; }
 
 _st_install_steer() {
 	if command -v steer >/dev/null 2>&1; then
-		_rb_say "Движок steer уже установлен: $(_st_steer_ver)"
+		_rb_say "Движок Steer уже установлен: $(_st_steer_ver)"
 		return 0
 	fi
 	local arch tmp base url ver
 	arch="$(_rb_arch)"
 	[ -n "$arch" ] || { echo "ОШИБКА: не удалось определить архитектуру роутера"; return 1; }
 	tmp="$ST_RUN/steer.$RAZ"
-	_rb_say "Устанавливаем движок steer $ST_STEER_VER"
+	_rb_say "Устанавливаем движок Steer $ST_STEER_VER"
 	$UPDATE >/dev/null 2>&1
 	for base in $ST_STEER_URLS; do
 		ver="$ST_STEER_VER"
@@ -4913,12 +4913,12 @@ _st_install_steer() {
 			/etc/init.d/steer stop >/dev/null 2>&1
 			/etc/init.d/steer disable >/dev/null 2>&1
 			_rb_rpcd_ensure
-			_rb_say "Движок steer $ver установлен"
+			_rb_say "Движок Steer $ver установлен"
 			return 0
 		fi
 	done
 	rm -f "$tmp"
-	echo "ОШИБКА: не удалось установить движок steer"
+	echo "ОШИБКА: не удалось установить движок Steer"
 	return 1
 }
 
@@ -5487,7 +5487,7 @@ _st_spec_apply() { # ID...
 	local tmp="$ST_RUN/spec.json" out
 	_st_spec_build "$@" > "$tmp" || { echo "ОШИБКА: для выбранных сервисов нет ни одного списка"; return 1; }
 	if ! out=$(steer apply --spec "$tmp" --dry-run 2>&1 >/dev/null); then
-		echo "ОШИБКА: движок steer отверг настройку"
+		echo "ОШИБКА: движок Steer отверг настройку"
 		printf '%s\n' "$out" | tail -n 5
 		return 1
 	fi
@@ -5496,14 +5496,14 @@ _st_spec_apply() { # ID...
 		cp "$ST_STEER_SPEC" "$ST_DIR/spec.before"
 	fi
 	if [ -s "$ST_STEER_SPEC" ] && cmp -s "$tmp" "$ST_STEER_SPEC" && /etc/init.d/steer running >/dev/null 2>&1; then
-		_rb_say "Правила steer не изменились"
+		_rb_say "Правила Steer не изменились"
 		return 0
 	fi
 	cp "$tmp" "$ST_STEER_SPEC.tmp" && mv "$ST_STEER_SPEC.tmp" "$ST_STEER_SPEC"
 	_st_own "steer-spec"
 	/etc/init.d/steer enable >/dev/null 2>&1
 	/etc/init.d/steer restart >/dev/null 2>&1
-	_rb_say "Правила steer применены"
+	_rb_say "Правила Steer применены"
 }
 
 _st_spec_clear() {
@@ -5525,7 +5525,7 @@ _st_kick() {
 	sel="$(_st_sel | tr '\n' ' ')"
 	if [ -n "$(echo $sel)" ] && _st_spec_apply $sel; then return 0; fi
 	/etc/init.d/steer restart >/dev/null 2>&1
-	_rb_say "steer перезапущен"
+	_rb_say "Steer перезапущен"
 }
 
 
@@ -5635,7 +5635,7 @@ _st_apply() { # [tunnel_ready] — туннель только что прове
 	if [ -z "$(echo $sel)" ]; then
 		_st_spec_clear
 		_st_down
-		_rb_say "Ничего не выбрано — туннель и steer выключены"
+		_rb_say "Ничего не выбрано — туннель и Steer выключены"
 		return 0
 	fi
 	[ "$1" = tunnel_ready ] || _st_warp_up || return 1
@@ -5661,7 +5661,7 @@ _st_selfcheck() {
 			*warp=on*|*warp=plus*) echo "[ OK ] Туннель WARP: трафик идёт через Cloudflare ($(echo "$trace" | sed -n 's/^colo=//p'))" ;;
 			*) echo "[FAIL] Туннель WARP: трафик через него не идёт"; bad=1 ;;
 		esac
-		/etc/init.d/steer running >/dev/null 2>&1 && echo "[ OK ] Служба steer запущена" || { echo "[FAIL] Служба steer не запущена"; bad=1; }
+		/etc/init.d/steer running >/dev/null 2>&1 && echo "[ OK ] Служба Steer запущена" || { echo "[FAIL] Служба Steer не запущена"; bad=1; }
 	fi
 	command -v steer >/dev/null 2>&1 || return $bad
 	[ -s "$ST_STEER_SPEC" ] || return $bad
@@ -5699,7 +5699,7 @@ do_steer_install() {
 	blk="$(_st_blocker)"
 	case "$blk" in
 		splify2) echo "ОШИБКА: установлен splify2 — туннели и списки настраиваются в нём"; return 1 ;;
-		steer)   echo "ОШИБКА: у движка steer уже есть чужие правила — не перезаписываем их"; return 1 ;;
+		steer)   echo "ОШИБКА: у движка Steer уже есть чужие правила — не перезаписываем их"; return 1 ;;
 	esac
 	_ensure_deps
 	mkdir -p "$ST_DIR"
@@ -5728,14 +5728,14 @@ do_steer_install() {
 	_st_phase check
 	sleep 2
 	_st_selfcheck
-	_rb_say "Готово, steer установлен и работает"
+	_rb_say "Готово, Steer установлен и работает"
 }
 
 do_steer_apply() {
 	_st_phase rules
 	rm -f "$ST_STOP_FLAG"
-	_st_installed || { echo "ОШИБКА: steer ещё не установлен"; return 1; }
-	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: спеку steer сейчас ведёт не Zapret Manager"; return 1; }
+	_st_installed || { echo "ОШИБКА: Steer ещё не установлен"; return 1; }
+	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: спеку Steer сейчас ведёт не Zapret Manager"; return 1; }
 	rm -f "$ST_OFF"
 	_st_apply || return 1
 	_st_phase check
@@ -5746,16 +5746,16 @@ do_steer_apply() {
 
 do_steer_stop() {
 	_st_phase rules
-	_st_installed || { echo "ОШИБКА: steer ещё не установлен"; return 1; }
+	_st_installed || { echo "ОШИБКА: Steer ещё не установлен"; return 1; }
 	touch "$ST_OFF"
 	_st_down
-	_rb_say "Готово, steer и туннель выключены — всё идёт напрямую"
+	_rb_say "Готово, Steer и туннель выключены — всё идёт напрямую"
 }
 
 _st_need_warp() {
-	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: движок steer сейчас настраивает не Zapret Manager"; return 1; }
+	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: движок Steer сейчас настраивает не Zapret Manager"; return 1; }
 	_st_owns "net $ST_WARP_IF" && [ -s "$ST_WARP_CONF" ] && return 0
-	echo "ОШИБКА: туннеля WARP ещё нет — сначала установите steer"
+	echo "ОШИБКА: туннеля WARP ещё нет — сначала установите Steer"
 	return 1
 }
 
@@ -5809,14 +5809,14 @@ do_steer_warp_recreate() {
 
 do_steer_remove() {
 	_st_phase remove
-	_rb_say "Удаляем steer и туннель WARP"
+	_rb_say "Удаляем Steer и туннель WARP"
 	# Встал splify2 — движок и спека теперь его: их не трогаем, снимаем только своё (туннели,
 	# зону, cron).
 	local foreign=0
 	[ "$(_st_blocker)" = splify2 ] && foreign=1
 	if [ "$foreign" = 1 ]; then
 		sed -i '/^steer-spec$/d; /^pkg steer$/d' "$ST_OWNED" 2>/dev/null
-		_rb_warn "Установлен splify2 — движок steer и его правила оставляем ему"
+		_rb_warn "Установлен splify2 — движок Steer и его правила оставляем ему"
 	else
 		_st_spec_clear
 		/etc/init.d/steer stop >/dev/null 2>&1
@@ -5841,7 +5841,7 @@ do_steer_remove() {
 		/etc/init.d/cron restart >/dev/null 2>&1
 	fi
 	if _st_owns "pkg steer"; then
-		_rb_say "Удаляем движок steer"
+		_rb_say "Удаляем движок Steer"
 		$DELETE steer >/dev/null 2>&1
 	fi
 	_st_owns "pkg conntrack" && $DELETE conntrack >/dev/null 2>&1
@@ -5856,7 +5856,7 @@ do_steer_remove() {
 	sed -i 's/|warp$/|none/' /etc/zm-redbtn/services 2>/dev/null
 	_rb_rpcd_ensure
 	rm -rf "$ST_DIR" "$ST_RUN"
-	_rb_say "Готово, steer удалён"
+	_rb_say "Готово, Steer удалён"
 }
 
 steer_status() {
@@ -5983,11 +5983,11 @@ steer_action() {
 			;;
 		restart)
 			_st_running && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
-			_st_owns "steer-spec" || { echo '{"error":"правил для steer нет — выберите сервисы"}'; return 1; }
+			_st_owns "steer-spec" || { echo '{"error":"правил для Steer нет — выберите сервисы"}'; return 1; }
 			/etc/init.d/steer enable >/dev/null 2>&1
 			/etc/init.d/steer restart >/dev/null 2>&1
 			sleep 1
-			/etc/init.d/steer running >/dev/null 2>&1 || { echo '{"error":"steer не запустился — загляните в системный журнал"}'; return 1; }
+			/etc/init.d/steer running >/dev/null 2>&1 || { echo '{"error":"Steer не запустился — загляните в системный журнал"}'; return 1; }
 			printf '{"ok":true}\n'
 			;;
 		autorestart) _st_cron_set "$mode" ;;
@@ -6688,7 +6688,7 @@ do_redbtn_run() {
 		zapret2) echo "ОШИБКА: установлен Zapret2 — сначала удалите его"; return 1 ;;
 	esac
 	_rb_test_running && { echo "ОШИБКА: идёт тест стратегий — дождитесь его окончания"; return 1; }
-	_job_alive steer && { echo "ОШИБКА: на странице steer идёт операция — дождитесь её окончания"; return 1; }
+	_job_alive steer && { echo "ОШИБКА: на странице Steer идёт операция — дождитесь её окончания"; return 1; }
 	: > "$RB_RESULTS"
 
 	_rb_phase zapret_install
@@ -6799,7 +6799,7 @@ do_redbtn_run() {
 				if ! _rb_routable "$id"; then
 					_rb_result_write "$id" none
 				elif _rb_in "$id" "$ST_SKIP"; then
-					echo "[ -- ] $(_rb_svc_field "$id" 2) — через WARP не пускаем: вы убрали его на странице steer"
+					echo "[ -- ] $(_rb_svc_field "$id" 2) — через WARP не пускаем: вы убрали его на странице Steer"
 					_rb_result_write "$id" none
 				elif _rb_check_service "$id" warp; then
 					echo "[ OK ] $(_rb_svc_field "$id" 2) — через WARP"
@@ -6814,14 +6814,14 @@ do_redbtn_run() {
 			if [ -n "$warp_ids" ]; then
 				_rb_phase steer
 				# Туннели только что подняты и проверены — второй раз не поднимаем.
-				_st_apply tunnel_ready || _rb_warn "steer не принял правила — загляните на страницу steer"
+				_st_apply tunnel_ready || _rb_warn "Steer не принял правила — загляните на страницу Steer"
 			fi
 		else
 			for id in $failed; do _rb_result_write "$id" none; done
 		fi
 	elif [ -n "$failed" ]; then
 		for id in $failed; do _rb_result_write "$id" none; done
-		_rb_warn "Не открылось: $(_rb_svc_names "$failed"). Их можно пустить через WARP — установите steer на странице «steer»"
+		_rb_warn "Не открылось: $(_rb_svc_names "$failed"). Их можно пустить через WARP — установите Steer на странице «Steer»"
 	fi
 	_rb_stopped && { _rb_say "Остановлено"; return 0; }
 
@@ -6834,7 +6834,7 @@ do_redbtn_run() {
 	if _st_ready && _rb_in telegram "$ST_SEL"; then
 		# Telegram отмечен на странице steer — он уже идёт через WARP, веб-сокет не нужен.
 		_rb_result_write telegram warp
-		echo "[ OK ] Telegram — через WARP (выбран на странице steer)"
+		echo "[ OK ] Telegram — через WARP (выбран на странице Steer)"
 	elif [ -x /etc/init.d/tgws ] && [ -n "$(tgws status 2>/dev/null)" ]; then
 		_rb_result_write telegram tgws
 		echo "[ OK ] Telegram — через веб-сокет"
@@ -6856,7 +6856,7 @@ do_redbtn_run() {
 	_rb_phase done
 	date +%s > "$RB_LAST"
 	if [ -n "$warp_ids" ] && _st_dns_conflict; then
-		_rb_warn "DNS over HTTPS перехватывает DNS сети — сервисы через WARP работать не будут, нажмите «Исправить» на странице steer"
+		_rb_warn "DNS over HTTPS перехватывает DNS сети — сервисы через WARP работать не будут, нажмите «Исправить» на странице Steer"
 	fi
 	_rb_say "Готово, обход подобран"
 }
@@ -6935,7 +6935,7 @@ redbtn_action() {
 		start)
 			case "$mode" in quick|full) ;; *) mode=quick ;; esac
 			_rb_test_running && { echo '{"error":"идёт тест стратегий — дождитесь его окончания"}'; return 1; }
-			_job_alive steer && { echo '{"error":"на странице steer идёт операция — дождитесь её окончания"}'; return 1; }
+			_job_alive steer && { echo '{"error":"на странице Steer идёт операция — дождитесь её окончания"}'; return 1; }
 			job_start redbtn do_redbtn_run "$mode"
 			;;
 		stop)
@@ -7302,7 +7302,7 @@ cat > '/usr/share/luci/menu.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF
 		"action": { "type": "view", "path": "zapret-manager/redbtn" }
 	},
 	"admin/services/zapret-manager/steer": {
-		"title": "steer",
+		"title": "Steer",
 		"order": 16,
 		"action": { "type": "view", "path": "zapret-manager/steer" }
 	},
@@ -7781,7 +7781,7 @@ return view.extend({
 			items.push(row('Автообход', rbSt === 1 ? zm.badge(true, 'настроен', '')
 				: E('span', { 'class': 'zm-badge ' + (rbSt === 2 ? 'zm-warn' : 'zm-off') }, [ E('span', { 'class': 'zm-dot' }), rbSt === 2 ? 'требует внимания' : 'не запускался' ])));
 			var stSt = st(h, 'steer', 0);
-			items.push(row('steer (WARP)', stSt === 1 ? zm.badge(true, 'работает', '') : stSt === 2
+			items.push(row('Steer (WARP)', stSt === 1 ? zm.badge(true, 'работает', '') : stSt === 2
 				? E('span', { 'class': 'zm-badge zm-warn' }, [ E('span', { 'class': 'zm-dot' }), 'выключен' ]) : zm.badge(false, '', 'не установлен')));
 			items.push(row('ByeTube', zm.stateBadge(st(h, 'bytetube', 0))));
 			items.push(row('TG WS Proxy', zm.stateBadge(st(h, 'tg', 0))));
@@ -8371,7 +8371,7 @@ return view.extend({
 				E('div', { 'class': 'zm-ab-icon' }, [ E(ICON_BOLT) ]),
 				E('div', { 'class': 'zm-ab-title' }, [
 					E('h3', {}, 'Автообход'),
-					E('p', { 'class': 'zm-hint' }, 'Одна кнопка — и роутер сам подберёт каждому сервису рабочий способ: напрямую или через Zapret, а если установлен steer — и через WARP.')
+					E('p', { 'class': 'zm-hint' }, 'Одна кнопка — и роутер сам подберёт каждому сервису рабочий способ: напрямую или через Zapret, а если установлен Steer — и через WARP.')
 				]),
 				status
 			]));
@@ -8380,7 +8380,7 @@ return view.extend({
 				heroCard.appendChild(E('div', { 'class': 'zm-ab-note zm-ab-note-warn' }, BLOCKERS[data.blocker] || data.blocker));
 				return;
 			}
-			if (!busy && data.steer_busy) heroCard.appendChild(E('div', { 'class': 'zm-ab-note zm-ab-note-warn' }, 'На странице steer идёт операция — запуск станет доступен, когда она закончится.'));
+			if (!busy && data.steer_busy) heroCard.appendChild(E('div', { 'class': 'zm-ab-note zm-ab-note-warn' }, 'На странице Steer идёт операция — запуск станет доступен, когда она закончится.'));
 
 			if (busy) {
 				if (RUN_PHASES.indexOf(data.phase) >= 0 || lastAction === 'start') heroCard.appendChild(renderSteps());
@@ -8456,9 +8456,9 @@ return view.extend({
 			steerCard.style.display = '';
 			steerCard.appendChild(E('div', { 'class': 'zm-card' }, [
 				E('h3', {}, 'Не всё открылось'),
-				E('p', { 'class': 'zm-hint' }, bad.map(function(s) { return s.name; }).join(', ') + ' — не помог и Zapret. Их можно пустить через бесплатный туннель WARP: установите steer, и они сразу пойдут через него.'),
+				E('p', { 'class': 'zm-hint' }, bad.map(function(s) { return s.name; }).join(', ') + ' — не помог и Zapret. Их можно пустить через бесплатный туннель WARP: установите Steer, и они сразу пойдут через него.'),
 				E('div', { 'class': 'zm-actions' }, [
-					E('a', { 'class': 'cbi-button cbi-button-positive', 'style': 'text-decoration:none', 'href': steerHref() }, 'Открыть steer')
+					E('a', { 'class': 'cbi-button cbi-button-positive', 'style': 'text-decoration:none', 'href': steerHref() }, 'Открыть Steer')
 				])
 			]));
 		}
@@ -8573,7 +8573,7 @@ cat > '/www/luci-static/resources/view/zapret-manager/steer.js' << 'ZM_INSTALLER
 // Страница ставит и связывает всё сама: движок steer, AmneziaWG, ключи WARP, туннель и правила.
 
 var STEPS = [
-	{ id: 'pkgs', label: 'steer' },
+	{ id: 'pkgs', label: 'Steer' },
 	{ id: 'awg', label: 'AmneziaWG' },
 	{ id: 'keys', label: 'Ключи WARP' },
 	{ id: 'tunnel', label: 'Туннель' },
@@ -8582,14 +8582,14 @@ var STEPS = [
 ];
 
 var PHASE_TEXT = {
-	install: 'Устанавливаем', pkgs: 'Ставим steer', awg: 'Ставим AmneziaWG', keys: 'Получаем ключи WARP',
+	install: 'Устанавливаем', pkgs: 'Ставим Steer', awg: 'Ставим AmneziaWG', keys: 'Получаем ключи WARP',
 	tunnel: 'Поднимаем туннель', warp: 'Настраиваем туннель', rules: 'Применяем правила',
 	check: 'Проверяем', remove: 'Удаляем'
 };
 
 var BLOCKERS = {
 	splify2: 'Установлен splify2 — туннели и списки настраиваются в нём.',
-	steer: 'Движок steer уже настроен вручную — Zapret Manager его не перезаписывает.'
+	steer: 'Движок Steer уже настроен вручную — Zapret Manager его не перезаписывает.'
 };
 
 // Значок сервиса: буква на фирменном цвете.
@@ -8662,9 +8662,9 @@ return view.extend({
 			if (res) data = res;
 			var msg = 'Готово';
 			if (!ok) msg = 'Не получилось — подробности в журнале';
-			else if (lastAction === 'install') msg = 'steer установлен и работает';
-			else if (lastAction === 'remove') msg = 'steer удалён';
-			else if (lastAction === 'stop') msg = 'steer выключен — всё идёт напрямую';
+			else if (lastAction === 'install') msg = 'Steer установлен и работает';
+			else if (lastAction === 'remove') msg = 'Steer удалён';
+			else if (lastAction === 'stop') msg = 'Steer выключен — всё идёт напрямую';
 			else if (lastAction === 'lists' || lastAction === 'start') msg = 'Готово, выбор применён';
 			zm.toast(msg, ok ? 'info' : 'error');
 			var done = lastAction;
@@ -8770,7 +8770,7 @@ return view.extend({
 			heroCard.appendChild(E('div', { 'class': 'zm-ab-head' }, [
 				E('div', { 'class': 'zm-ab-icon' }, [ E(ICON_ROUTE) ]),
 				E('div', { 'class': 'zm-ab-title' }, [
-					E('h3', {}, 'steer'),
+					E('h3', {}, 'Steer'),
 					E('p', { 'class': 'zm-hint' }, 'Выбранные сервисы идут через бесплатный туннель Cloudflare WARP. Остальной интернет — как обычно.')
 				]),
 				status
@@ -8798,12 +8798,12 @@ return view.extend({
 			if (!data.installed) {
 				heroCard.appendChild(E('div', { 'class': 'zm-st-promo' }, [
 					E('div', {}, [ E('b', {}, '1 кнопка'), E('span', {}, 'всё ставится и настраивается само') ]),
-					E('div', {}, [ E('b', {}, '2–4 минуты'), E('span', {}, 'steer, AmneziaWG, ключи WARP, туннель') ]),
+					E('div', {}, [ E('b', {}, '2–4 минуты'), E('span', {}, 'Steer, AmneziaWG, ключи WARP, туннель') ]),
 					E('div', {}, [ E('b', {}, 'Только выбранное'), E('span', {}, 'остальной трафик не трогается') ])
 				]));
 				heroCard.appendChild(E('div', { 'class': 'zm-actions' }, [
 					E('button', { 'class': 'cbi-button cbi-button-positive zm-ab-go', 'click': function() {
-						act('install', '', 'Устанавливаем steer — это займёт пару минут');
+						act('install', '', 'Устанавливаем Steer — это займёт пару минут');
 					} }, [ E(ICON_ROUTE), 'Установить и включить' ])
 				]));
 				heroCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сразу через WARP пойдут сервисы, отмеченные ниже. Выбор можно поменять в любой момент.'));
@@ -8819,18 +8819,18 @@ return view.extend({
 			]));
 
 			var actions = [];
-			if (data.stopped) actions.push(E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() { act('start', '', 'Включаем steer'); } }, 'Включить'));
+			if (data.stopped) actions.push(E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() { act('start', '', 'Включаем Steer'); } }, 'Включить'));
 			else {
 				actions.push(E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() { act('apply', '', 'Перезапускаем туннель и правила'); } }, 'Перезапустить'));
-				actions.push(E('button', { 'class': 'cbi-button', 'click': function() { act('stop', '', 'Выключаем steer'); } }, 'Выключить'));
+				actions.push(E('button', { 'class': 'cbi-button', 'click': function() { act('stop', '', 'Выключаем Steer'); } }, 'Выключить'));
 			}
 			actions.push(E('button', { 'class': 'cbi-button cbi-button-remove', 'click': function() {
-				if (!confirm('Удалить steer?\n\nБудут удалены steer, туннель WARP и всё, что для них ставилось. Сервисы, которые шли через WARP, пойдут напрямую.')) return;
-				act('remove', '', 'Удаляем steer');
+				if (!confirm('Удалить Steer?\n\nБудут удалены Steer, туннель WARP и всё, что для них ставилось. Сервисы, которые шли через WARP, пойдут напрямую.')) return;
+				act('remove', '', 'Удаляем Steer');
 			} }, 'Удалить'));
 			heroCard.appendChild(E('div', { 'class': 'zm-actions' }, actions));
 			heroCard.appendChild(E('div', { 'class': 'zm-ab-foot' }, [
-				E('span', {}, 'Версия steer: ' + (data.version || '—')),
+				E('span', {}, 'Версия Steer: ' + (data.version || '—')),
 				E('span', {}, 'Выключить — всё пойдёт напрямую, настройки сохранятся.')
 			]));
 		}
@@ -8906,7 +8906,7 @@ return view.extend({
 			checkCard.style.display = data.installed && !data.blocker ? '' : 'none';
 			if (!data.installed || data.blocker) return;
 			checkCard.appendChild(E('h3', {}, 'Проверка'));
-			checkCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Роутер проверит туннель и спросит сам steer, всё ли на месте.'));
+			checkCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Роутер проверит туннель и спросит сам Steer, всё ли на месте.'));
 			if (diagRes) {
 				var items = [];
 				var tn = diagRes.tunnels || [];
@@ -8948,7 +8948,7 @@ return view.extend({
 			warpCard.appendChild(E('h3', {}, tl.length > 1 ? 'Туннели WARP' : 'Туннель WARP'));
 			if (tl.length > 1) {
 				warpCard.appendChild(E('p', { 'class': 'zm-hint' },
-					'Трафик идёт через самый быстрый живой туннель; упал один — steer сам переключится на другой.'));
+					'Трафик идёт через самый быстрый живой туннель; упал один — Steer сам переключится на другой.'));
 				warpCard.appendChild(E('div', { 'class': 'zm-st-tunnels' }, tl.map(function(t) {
 					var live = tunnelLive(t);
 					return E('div', { 'class': 'zm-st-tunnel' }, [
@@ -8995,7 +8995,7 @@ return view.extend({
 			autoCard.style.display = data.installed && !data.blocker ? '' : 'none';
 			if (!data.installed || data.blocker) return;
 			autoCard.appendChild(E('h3', {}, 'Автоперезапуск'));
-			autoCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Туннель и steer перезапускаются по расписанию — помогает, если обход со временем «подвисает».'));
+			autoCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Туннель и Steer перезапускаются по расписанию — помогает, если обход со временем «подвисает».'));
 			var cur = data.autorestart || '';
 			var am = cur === '' ? 'off' : (cur.indexOf('every:') === 0 ? 'every' + cur.split(':')[1] : 'daily');
 			var curHour = am === 'daily' ? parseInt(cur.split(':')[1], 10) : 4;
@@ -14889,7 +14889,7 @@ function toggleTheme() {
 var ROUTES = [
 	{ id: 'dashboard', title: 'Дашборд', sub: 'Состояние всех компонентов', icon: 'dashboard', group: 'Обзор' },
 	{ id: 'redbtn', title: 'Автообход', sub: 'Роутер сам подберёт обход для каждого сервиса', icon: 'wand', group: 'Обход блокировок', dot: 'redbtn' },
-	{ id: 'steer', title: 'steer', sub: 'Выбранные сервисы через туннель WARP', icon: 'route', group: 'Обход блокировок', dot: 'steer' },
+	{ id: 'steer', title: 'Steer', sub: 'Выбранные сервисы через туннель WARP', icon: 'route', group: 'Обход блокировок', dot: 'steer' },
 	{ id: 'strategy', title: 'Zapret', sub: 'Стратегии, тесты, YouTube, игры, Discord и исключения', icon: 'shield', group: 'Обход блокировок', dot: 'zapret' },
 	{ id: 'zapret2', title: 'Zapret2', sub: 'Установка и управление Zapret2', icon: 'bolt', group: 'Обход блокировок', dot: 'zapret2' },
 	{ id: 'bytetube', title: 'ByeTube', sub: 'YouTube через ByeDPI', icon: 'play', group: 'Обход блокировок', dot: 'bytetube' },
@@ -15611,10 +15611,11 @@ html[data-theme="light"] .zmw-top { background: linear-gradient(to bottom, rgba(
 .zmw-link-kvn {
 	color: #fff; border-color: transparent;
 	background: var(--grad); background-size: 160% 100%;
+	background-origin: border-box; background-repeat: no-repeat;
 	box-shadow: 0 8px 20px -10px rgba(99,102,241,.9), inset 0 1px 0 rgba(255,255,255,.22);
 	transition: background-position .35s, transform .1s, box-shadow .2s;
 }
-.zmw-link-kvn:hover { color: #fff; border-color: transparent; background: var(--grad); background-size: 160% 100%; background-position: 100% 0; box-shadow: 0 10px 24px -10px rgba(99,102,241,1), inset 0 1px 0 rgba(255,255,255,.22); }
+.zmw-link-kvn:hover { color: #fff; border-color: transparent; background: var(--grad); background-size: 160% 100%; background-origin: border-box; background-repeat: no-repeat; background-position: 100% 0; box-shadow: 0 10px 24px -10px rgba(99,102,241,1), inset 0 1px 0 rgba(255,255,255,.22); }
 .zmw-link-tg { color: #229ed9; border-color: rgba(34,158,217,.35); background: rgba(34,158,217,.10); }
 .zmw-link-tg:hover { color: #229ed9; border-color: rgba(34,158,217,.6); background: rgba(34,158,217,.16); }
 html[data-theme="dark"] .zmw-link-tg, html[data-theme="dark"] .zmw-link-tg:hover { color: #5cc1f0; }
