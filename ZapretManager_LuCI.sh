@@ -4848,7 +4848,8 @@ ST_CRON_CMD="/etc/init.d/steer enabled && { for i in zmwarp zmwarp2 zmwarp3; do 
 # на трёх устройствах Cloudflare считает одним клиентом.
 ST_WARP_N=3
 ST_WARP_UP="$ST_DIR/warp.up"          # поднятые туннели «интерфейс колония», лучший первым
-# Российские колонии Cloudflare: туннель через них геоблок не снимает, берутся только в запас.
+# Российские колонии Cloudflare: выход у них внутри страны, за теми же ТСПУ, что и без туннеля, —
+# через них не снимается ни геоблок, ни остальные блокировки. Берутся только в запас.
 ST_RU_COLOS="DME SVX LED KJA REN OVB KZN AER VVO"
 # Что выбрать при первой установке, если ничего не выбрано: ИИ-сервисы закрывает геоблок,
 # и кроме туннеля им ничего не поможет.
@@ -5297,7 +5298,7 @@ _st_warp_scan() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА ЗАНЯТЫЕ_КОЛО
 		pick=$(awk '{ printf "%d\t%s %s %s\n", $1 * 100000 + $2, $3, $4, $5 }' "$f" | sort -n | head -n1 | cut -f2)
 		case "$f" in
 			*.same) echo "   другой колонии нет — та же, но через другой адрес" >&2 ;;
-			*.ru) echo "   наружных колоний нет — беру российскую (геоблок она не снимает)" >&2 ;;
+			*.ru) echo "   наружных колоний нет — беру российскую: блокировки через неё не снимаются" >&2 ;;
 			*.notls) echo "!! ни через одну точку не проходит HTTPS — беру лучшую из оставшихся" >&2 ;;
 		esac
 		echo "$pick"
@@ -5412,7 +5413,7 @@ _st_warp_up() { # [repick]
 	fi
 	echo "$colos" > "$ST_DIR/warp.colo"
 	_st_tgws_warp
-	[ "$ru" = 1 ] && _rb_warn "Часть туннелей WARP идёт через российские колонии: ИИ-сервисы через них не откроются"
+	[ "$ru" = 1 ] && _rb_warn "Часть туннелей WARP идёт через российские колонии: заблокированное через них не откроется"
 	return 0
 }
 
@@ -6592,7 +6593,7 @@ do_redbtn_deep() { # ПРИМЕНЁННАЯ
 	[ -s "$RB_RUN/deep.res" ] && [ -s "$RB_RUN/deep.cand" ] || return 0
 	sum="$(md5sum "$CONF" | cut -d' ' -f1)"
 	RB_PROBE_DOH="$(_rb_doh_pick)"
-	win="$(_rb_zt_deep_pick "$RB_RUN/deep.res")"
+	win="$(_rb_zt_deep_pick "$RB_RUN/deep.res" "$cur")"
 	rm -f "$RB_RUN/deep.res" "$RB_RUN/deep.cand"
 	[ -n "$win" ] && [ "$win" != "$cur" ] || { echo "Оставляем $cur"; return 0; }
 	# За это время настройку могли сменить руками или тестером — тогда чужое не трогаем.
@@ -6642,8 +6643,8 @@ _rb_zt_ties() { # ФАЙЛ_РЕЗУЛЬТАТОВ -> имена, по строк
 # счёт — узлы CDN, до которых дошёл поток, — и итоговый счёт = основной + дополнительный.
 # Печатает имя победителя по итоговому (или первой, если проверить не удалось). Первая —
 # применённая: другая побеждает, только набрав строго больше.
-_rb_zt_deep_pick() { # ФАЙЛ_РЕЗУЛЬТАТОВ
-	local res="$1" best key ties n name blk="$RB_RUN/zt.dblock" tgt="$RB_RUN/zt.deep" r sc main tot top=-1 win
+_rb_zt_deep_pick() { # ФАЙЛ_РЕЗУЛЬТАТОВ [ПРИМЕНЁННАЯ]
+	local res="$1" cur="${2:-}" best key ties n name blk="$RB_RUN/zt.dblock" tgt="$RB_RUN/zt.deep" r sc main tot top=-1 win
 	best=$(tail -n +2 "$res" | head -n1)
 	win="${best%% → *}"
 	ties="$(_rb_zt_ties "$res")"
@@ -6663,7 +6664,12 @@ _rb_zt_deep_pick() { # ФАЙЛ_РЕЗУЛЬТАТОВ
 		main=$(awk -v n="$name" 'NR > 1 { m = $0; sub(/ → .*/, "", m); if (m == n) { sub(/^.* → /, ""); split($0, a, "/"); print a[1]; exit } }' "$res")
 		tot=$(( ${main:-0} + sc ))
 		echo "      основной ${main:-0} + дополнительный $sc из ${r#* } = $tot" >&2
-		[ "$tot" -gt "$top" ] && { top="$tot"; win="$name"; }
+		# При равном итоге остаётся применённая: переключение ради той же суммы — лишний
+		# перезапуск обхода (на тестовом роутере v4 и v7 сошлись на 137, и сравнение
+		# переключало на v7 только потому, что та шла в списке первой).
+		if [ "$tot" -gt "$top" ] || { [ "$tot" -eq "$top" ] && [ "$name" = "$cur" ]; }; then
+			top="$tot"; win="$name"
+		fi
 	done < "$RB_RUN/zt.ties"
 	_rb_zt_down
 	rm -f "$RB_RUN/zt.ties" "$blk" "$tgt"
