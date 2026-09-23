@@ -5314,9 +5314,10 @@ _st_warp_up() { # [repick]
 		peer="$(_st_with "$n" _st_warp_field PublicKey)"
 		_st_warp_ready_if "$i" || { _rb_warn "WARP $n: устройство не поднялось"; continue; }
 		got=""
-		# Живой туннель с прошлого раза не трогаем, если колония у него своя.
-		if [ "$repick" != repick ] && _st_warp_alive_if "$i" && c="$(_st_colo_of "$i")" &&
-		   case " $busy " in *" $c "*) false ;; *) true ;; esac; then
+		# Живой туннель с прошлого раза не трогаем — даже если колония совпала с соседом: её
+		# выбрала разведка, когда другой не нашлось, и пересканировать его на каждом «Применить»
+		# значило бы рвать соединения ради того же результата. Развести заново — «Сменить точки входа».
+		if [ "$repick" != repick ] && _st_warp_alive_if "$i" && c="$(_st_colo_of "$i")"; then
 			got="$(uci -q get "network.${i}_peer.endpoint_host") $(uci -q get "network.${i}_peer.endpoint_port") $c"
 			_rb_say "WARP $n работает: колония $c"
 		else
@@ -6812,7 +6813,8 @@ do_redbtn_run() {
 			done
 			if [ -n "$warp_ids" ]; then
 				_rb_phase steer
-				_st_apply || _rb_warn "steer не принял правила — загляните на страницу steer"
+				# Туннели только что подняты и проверены — второй раз не поднимаем.
+				_st_apply tunnel_ready || _rb_warn "steer не принял правила — загляните на страницу steer"
 			fi
 		else
 			for id in $failed; do _rb_result_write "$id" none; done
