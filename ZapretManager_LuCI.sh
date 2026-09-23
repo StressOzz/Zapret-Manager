@@ -1,6 +1,6 @@
 #!/bin/sh
 # Zapret Manager by StressOzz for LuCI installer
-# Version: 1.32
+# Version: 1.33
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -53,7 +53,7 @@ chmod 0755 /opt/zapret-manager-luci
 cat > '/opt/zapret-manager-luci/backend.sh' << 'ZM_INSTALLER_EOF'
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.32"
+ZM_VERSION="1.33"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -7470,6 +7470,8 @@ cat > '/www/luci-static/resources/view/zapret-manager/style.css' << 'ZM_INSTALLE
 .zm-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
 
 .zm-card {
+	min-width: 0;
+	box-sizing: border-box;
 	background: var(--background-color-medium, #fff);
 	border: 1px solid rgba(0,0,0,.08);
 	border-radius: 12px;
@@ -7515,6 +7517,8 @@ html.zm-theme-dark .zm-card {
 @media (max-width: 720px) { .zm-credits-grid { grid-template-columns: repeat(2, 1fr); } }
 @media (max-width: 460px) { .zm-credits-grid { grid-template-columns: 1fr; } }
 .zm-credit-tile {
+	min-width: 0;
+	box-sizing: border-box;
 	border: 1px solid rgba(0,0,0,.1);
 	border-radius: 10px;
 	padding: 12px 14px;
@@ -7523,9 +7527,9 @@ html.zm-theme-dark .zm-card {
 }
 html.zm-theme-dark .zm-credit-tile { border-color: rgba(255,255,255,.12); background: rgba(255,255,255,.03); }
 .zm-credit-tile.zm-credit-self { border-color: rgba(26,127,55,.35); background: rgba(26,127,55,.06); }
-.zm-credit-product { font-weight: 700; font-size: 13.5px; margin-bottom: 2px; }
+.zm-credit-product { font-weight: 700; font-size: 13.5px; margin-bottom: 2px; overflow-wrap: anywhere; }
 .zm-credit-author { font-size: 12px; opacity: .75; margin-bottom: 6px; }
-.zm-credit-tile a { font-size: 12px; word-break: break-all; }
+.zm-credit-tile a { font-size: 12px; word-break: break-all; overflow-wrap: anywhere; }
 
 .zm-tile {
 	flex: 0 1 auto;
@@ -7588,6 +7592,10 @@ html.zm-theme-dark .zm-tile:not(.zm-active):not(.zm-tile-off) {
 	white-space: pre; overflow: auto; resize: vertical;
 }
 html.zm-theme-dark .zm-config-editor { border-color: rgba(255,255,255,.14); }
+@media (max-width: 600px) {
+	/* 16px — чтобы iOS Safari не увеличивал масштаб страницы при тапе в поле */
+	.zm-config-editor { font-size: 16px; min-height: 320px; }
+}
 
 .zm-log-arrow { color: #56d4dd; font-weight: 700; }
 .zm-log-msg-info { color: #e3c04a; }
@@ -7647,11 +7655,11 @@ html.zm-theme-dark .zm-config-editor { border-color: rgba(255,255,255,.14); }
 	white-space: pre-wrap; word-break: break-all; overflow-wrap: anywhere;
 	margin-bottom: 8px;
 }
-.zm-tg-link-row { display: flex; align-items: flex-start; gap: 10px; }
-.zm-tg-link-row .zm-tg-link-box { flex: 1 1 auto; }
+.zm-tg-link-row { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.zm-tg-link-row .zm-tg-link-box { flex: 1 1 220px; min-width: 0; }
 .zm-tg-qr-btn { white-space: nowrap; }
 .zm-tg-qr-box { margin-top: 10px; text-align: center; }
-.zm-tg-qr-box img { border-radius: 8px; background: #fff; padding: 8px; box-shadow: 0 0 0 1px rgba(0,0,0,.08); }
+.zm-tg-qr-box img { max-width: 100%; height: auto; border-radius: 8px; background: #fff; padding: 8px; box-shadow: 0 0 0 1px rgba(0,0,0,.08); box-sizing: border-box; }
 
 .zm-current-banner {
 	display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -7668,9 +7676,10 @@ html.zm-theme-dark .zm-config-editor { border-color: rgba(255,255,255,.14); }
 .bt-col .zm-label { flex: 0 0 170px; }
 @media (max-width: 860px) {
 	.bt-cols { grid-template-columns: 1fr; }
-	.bt-col .zm-row { justify-content: space-between; }
-	.bt-col .zm-label { flex: 0 1 auto; }
-	.bt-col .zm-row > :last-child { margin-left: auto; }
+	.bt-col .zm-label { flex: 0 0 128px; }
+}
+@media (max-width: 420px) {
+	.bt-col .zm-label { flex: 0 0 108px; font-size: 12px; }
 }
 
 .cbi-page-actions { display: none !important; }
@@ -8601,6 +8610,8 @@ cat > '/www/luci-static/resources/view/bytetube/style.css' << 'ZM_INSTALLER_EOF'
 .zm-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; }
 
 .zm-card {
+	min-width: 0;
+	box-sizing: border-box;
 	background: var(--background-color-medium, #fff);
 	border: 1px solid rgba(0,0,0,.08);
 	border-radius: 12px;
@@ -8703,6 +8714,10 @@ html.zm-theme-dark .zm-tile:not(.zm-active):not(.zm-tile-off) {
 	white-space: pre; overflow: auto; resize: vertical;
 }
 html.zm-theme-dark .zm-config-editor { border-color: rgba(255,255,255,.14); }
+@media (max-width: 600px) {
+	/* 16px — чтобы iOS Safari не увеличивал масштаб страницы при тапе в поле */
+	.zm-config-editor { font-size: 16px; min-height: 320px; }
+}
 
 .zm-log-arrow { color: #56d4dd; font-weight: 700; }
 .zm-log-msg-info { color: #e3c04a; }
@@ -8753,9 +8768,10 @@ html.zm-theme-dark .zm-config-editor { border-color: rgba(255,255,255,.14); }
 .bt-col .zm-label { flex: 0 0 170px; }
 @media (max-width: 860px) {
 	.bt-cols { grid-template-columns: 1fr; }
-	.bt-col .zm-row { justify-content: space-between; }
-	.bt-col .zm-label { flex: 0 1 auto; }
-	.bt-col .zm-row > :last-child { margin-left: auto; }
+	.bt-col .zm-label { flex: 0 0 128px; }
+}
+@media (max-width: 420px) {
+	.bt-col .zm-label { flex: 0 0 108px; font-size: 12px; }
 }
 .bt-current { flex-direction: column; align-items: stretch; gap: 8px; padding: 14px 18px; }
 .bt-current-label { font-size: 13px; font-weight: 700; }
