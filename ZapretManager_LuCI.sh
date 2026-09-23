@@ -13,10 +13,16 @@ echo -e "\n${MAGENTA}Устанавливаем Zapret Manager для LuCI${NC}"
 # Сравнение равных стратегий в фоне — не повод отказывать: оно снимается, а стратегию меняет только
 # в самом конце.
 if [ -f /tmp/zapret-manager-luci/redbtn_deep.pid ]; then
+	# Снимается ВСЁ ДЕРЕВО: замер идёт в дочерних оболочках, и убитый верхний процесс оставлял
+	# цикл, который продолжал запускать curl. pkill в busybox OpenWrt нет — ищем по ps.
 	# `|| true` обязательно: установщик идёт под set -e, и kill уже завершившегося процесса
 	# молча обрывал установку сразу после заголовка.
-	kill "$(cat /tmp/zapret-manager-luci/redbtn_deep.pid 2>/dev/null)" 2>/dev/null || true
-	pkill -f "qnum=8397" 2>/dev/null || true
+	_zm_kill_tree() {
+		for _c in $(cat "/proc/$1/task/$1/children" 2>/dev/null); do _zm_kill_tree "$_c"; done
+		kill -9 "$1" 2>/dev/null || true
+	}
+	_zm_kill_tree "$(cat /tmp/zapret-manager-luci/redbtn_deep.pid 2>/dev/null)"
+	for _p in $(ps w | grep "[q]num=8397" | awk '{print $1}'); do kill "$_p" 2>/dev/null || true; done
 	nft delete table inet zm_rb_ztest >/dev/null 2>&1 || true
 fi
 for _zm_job in redbtn steer; do
@@ -4772,6 +4778,14 @@ _rb_routable() { [ -n "$(_rb_svc_field "$1" 3)$(_rb_svc_field "$1" 4)" ]; }
 _rb_in() { grep -qxF "$1" "$2" 2>/dev/null; }
 _job_alive() { _job_running "$1"; }
 
+# pkill в busybox OpenWrt нет: процессы по подстроке командной строки — через ps.
+_kill_match() { # ПОДСТРОКА
+	local p
+	for p in $(ps w | grep -F -- "$1" | grep -v -e grep -e "_kill_match" | awk '{print $1}'); do
+		[ "$p" = "$$" ] || kill "$p" 2>/dev/null
+	done
+}
+
 # Наш объект в ubus должен пережить установку пакетов: luci-proto-amneziawg в post-install
 # зовёт `rpcd reload`, следом идёт перезапуск сети, и rpcd поднимался без объекта
 # zapret-manager — страница получала «Object not found» до конца операции.
@@ -5397,8 +5411,25 @@ _st_warp_up() { # [repick]
 		return 1
 	fi
 	echo "$colos" > "$ST_DIR/warp.colo"
+	_st_tgws_warp
 	[ "$ru" = 1 ] && _rb_warn "Часть туннелей WARP идёт через российские колонии: ИИ-сервисы через них не откроются"
 	return 0
+}
+
+# Туннели для моста Telegram (stgws): он ходит через WARP сам — к настоящим дата-центрам или
+# веб-сокетом — и бросает туннель, когда тот ложится (см. «WARP: путь поверх туннеля» в
+# tgws.c). Российские колонии в список не идут: выход у них внутри страны. Мост перечитывает
+# файл сам, перезапускать его не нужно.
+ST_TGWS_WARP="/etc/stgws/warp.lst"
+_st_tgws_warp() {
+	local i c
+	[ -d /etc/stgws ] || return 0
+	: > "$ST_TGWS_WARP.tmp"
+	while read -r i c; do
+		[ -n "$i" ] || continue
+		_st_warp_is_ru "$c" || echo "$i" >> "$ST_TGWS_WARP.tmp"
+	done < "$ST_WARP_UP" 2>/dev/null
+	mv "$ST_TGWS_WARP.tmp" "$ST_TGWS_WARP"
 }
 
 # ── списки для туннеля ──
@@ -5781,6 +5812,7 @@ do_steer_stop() {
 	_st_installed || { echo "ОШИБКА: Steer ещё не установлен"; return 1; }
 	touch "$ST_OFF"
 	_st_down
+	rm -f "$ST_TGWS_WARP"
 	_rb_say "Готово, Steer и туннель выключены — всё идёт напрямую"
 }
 
@@ -5888,6 +5920,7 @@ do_steer_remove() {
 	sed -i 's/|warp$/|none/' /etc/zm-redbtn/services 2>/dev/null
 	_rb_rpcd_ensure
 	rm -rf "$ST_DIR" "$ST_RUN"
+	rm -f "$ST_TGWS_WARP"
 	_rb_say "Готово, Steer удалён"
 }
 
@@ -6437,7 +6470,11 @@ _rb_zt_deep() { # ФАЙЛ_УЗЛОВ -> «выдержавших всего»
 			urls=""; k=0
 			# -o у каждого адреса свой: без него заголовки второго и дальше шли в вывод.
 			while [ "$k" -lt "$RB_DEEP_REQS" ]; do urls="$urls -o /dev/null $u"; k=$((k + 1)); done
-			n=$(curl -sk -I $res --local-port "$RB_ZT_LO-$RB_ZT_HI" --connect-timeout 8 --max-time 12 \
+			# Срок у curl — на КАЖДЫЙ из десяти запросов, поэтому: --fail-early — первый обрыв
+			# кончает замер узла (дальше всё равно не засчитать), пять секунд на запрос (ответ на
+			# HEAD — сотня байт). С прежними двенадцатью секундами на
+			# запрос стратегия, рвущая соединения, мерилась по часу.
+			n=$(curl -sk -I --fail-early $res --local-port "$RB_ZT_LO-$RB_ZT_HI" --connect-timeout 5 --max-time 5 \
 				-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36" \
 				-H "X-Pad: $pad" -w '%{http_code}\n' $urls 2>/dev/null | grep -c '^[1-5][0-9][0-9]$')
 			[ "${n:-0}" -ge "$RB_DEEP_REQS" ] 2>/dev/null && echo "$id" >> "$okf"
@@ -6490,7 +6527,7 @@ _rb_ztest() { # РЕЖИМ [ЦЕЛИ_СЕРВИСОВ]
 	# Остатки прошлого подбора, убитого без уборки (kill -9, перезагрузка панели): чужой nfqws
 	# на нашей очереди не дал бы запуститься ни одной стратегии.
 	_rb_zt_down
-	pkill -f "qnum=$RB_ZT_QUEUE" 2>/dev/null
+	_kill_match "qnum=$RB_ZT_QUEUE"
 	_add_gp_domains
 	_refresh_exclude_file
 	chmod -R a+rX /opt/zapret/ipset /opt/zapret/files 2>/dev/null
@@ -6546,7 +6583,7 @@ _rb_deep_stop() {
 	_job_alive redbtn_deep || return 0
 	_test_kill_pid_tree "$(cat "$JOBS_DIR/redbtn_deep.pid" 2>/dev/null)"
 	_rb_zt_down
-	pkill -f "qnum=$RB_ZT_QUEUE" 2>/dev/null
+	_kill_match "qnum=$RB_ZT_QUEUE"
 	rm -f "$JOBS_DIR/redbtn_deep.pid"
 }
 
@@ -6891,7 +6928,7 @@ redbtn_geo_watch() {
 # ── основной проход ──
 
 do_redbtn_run() {
-	local mode="${1:-quick}" blk before after failed zfailed id zbak="$RB_RUN/zapret.before" pick name warp_ids="" deep_cur=""
+	local mode="${1:-quick}" blk before after failed zfailed id zbak="$RB_RUN/zapret.before" pick name warp_ids="" deep_cur="" warp_done=""
 	# Все три флага: «Стоп» ставит и флаг страницы steer, и без его снятия следующий подбор
 	# сразу выходил из подъёма туннелей.
 	rm -f "$RB_STOP_FLAG" "$ST_STOP_FLAG" "$TEST_STOP_FLAG"
@@ -6906,6 +6943,13 @@ do_redbtn_run() {
 	_rb_test_running && { echo "ОШИБКА: идёт тест стратегий — дождитесь его окончания"; return 1; }
 	_job_alive steer && { echo "ОШИБКА: на странице Steer идёт операция — дождитесь её окончания"; return 1; }
 	: > "$RB_RESULTS"
+	# Нажатая кнопка — согласие на всё, что подбор умеет. Выключенное руками (Steer целиком или
+	# сервис, снятый на его странице) снова участвует: иначе подбор честно находил бы, что
+	# сервис открывается через WARP, и не включал бы его.
+	if _st_installed; then
+		[ -f "$ST_OFF" ] && { rm -f "$ST_OFF"; _rb_say "Steer был выключен — включаем"; }
+		[ -s "$ST_SKIP" ] && { rm -f "$ST_SKIP"; _rb_say "Сервисы, снятые на странице Steer, снова участвуют в подборе"; }
+	fi
 
 	_rb_phase zapret_install
 	if [ ! -f /etc/init.d/zapret ]; then
@@ -7015,13 +7059,16 @@ do_redbtn_run() {
 	if [ -n "$failed" ] && _st_ready; then
 		_rb_phase warp
 		_rb_say "Не открылось: $(_rb_svc_names "$failed") — пробуем через WARP"
+		warp_done=1
 		if _st_warp_up; then
 			for id in $failed; do
 				if ! _rb_routable "$id"; then
 					_rb_result_write "$id" none
 				elif _rb_in "$id" "$ST_SKIP"; then
 					echo "[ -- ] $(_rb_svc_field "$id" 2) — через WARP не пускаем: вы убрали его на странице Steer"
-					_rb_result_write "$id" none
+					# Не «none»: это выбор человека, а не отказ, и точка раздела в меню не должна
+					# краснеть из-за него.
+					_rb_result_write "$id" off
 				elif _rb_check_service "$id" warp; then
 					echo "[ OK ] $(_rb_svc_field "$id" 2) — через WARP"
 					_st_sel_add "$id"
@@ -7043,6 +7090,15 @@ do_redbtn_run() {
 	elif [ -n "$failed" ]; then
 		for id in $failed; do _rb_result_write "$id" none; done
 		_rb_warn "Не открылось: $(_rb_svc_names "$failed"). Их можно пустить через WARP — установите Steer на странице «Steer»"
+	fi
+	_rb_stopped && { _rb_say "Остановлено"; return 0; }
+
+	# Туннели нужны не только сервисам: мост Telegram ходит через WARP сам (см. _st_tgws_warp).
+	# Если шаг WARP в этот раз не понадобился, туннели всё равно проверяются: живые в своих
+	# колониях остаются как есть, российские разводятся заново, список для моста переписывается.
+	if [ "$warp_done" != 1 ] && _st_ready && [ -s "$ST_WARP_UP" ]; then
+		_rb_phase warp
+		_st_warp_up || _rb_warn "Туннели WARP не поднялись — Telegram идёт без них"
 	fi
 	_rb_stopped && { _rb_say "Остановлено"; return 0; }
 
@@ -8261,7 +8317,8 @@ var STATES = {
 	tgws:   { text: 'через веб-сокет', cls: 'zm-ok' },
 	doh:    { text: 'через DoH', cls: 'zm-ok' },
 	hosts:  { text: 'через hosts', cls: 'zm-ok' },
-	none:   { text: 'не открывается', cls: 'zm-bad' }
+	none:   { text: 'не открывается', cls: 'zm-bad' },
+	off:    { text: 'выключен в Steer', cls: 'zm-off' }
 };
 
 // Шаги подбора в том порядке, в каком их проходит роутер.
