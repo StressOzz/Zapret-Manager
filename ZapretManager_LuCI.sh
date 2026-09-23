@@ -10,6 +10,13 @@ echo -e "\n${MAGENTA}Устанавливаем Zapret Manager для LuCI${NC}"
 # Пока идёт автообход, переустанавливать нельзя: ниже стирается каталог задач, а с
 # ним журнал идущего подбора, и страница показывает пустой журнал до самого конца. Тестер при
 # этом меняет стратегии zapret, и обрывать его посередине значит оставить роутер на случайной.
+# Сравнение равных стратегий в фоне — не повод отказывать: оно снимается, а стратегию меняет только
+# в самом конце.
+if [ -f /tmp/zapret-manager-luci/redbtn_deep.pid ]; then
+	kill "$(cat /tmp/zapret-manager-luci/redbtn_deep.pid 2>/dev/null)" 2>/dev/null
+	pkill -f "qnum=8397" 2>/dev/null
+	nft delete table inet zm_rb_ztest >/dev/null 2>&1
+fi
 for _zm_job in redbtn steer; do
 	if [ -f /tmp/zapret-manager-luci/$_zm_job.pid ] && kill -0 "$(cat /tmp/zapret-manager-luci/$_zm_job.pid 2>/dev/null)" 2>/dev/null; then
 		echo -e "${YELLOW}Идёт автообход или операция Steer — дождитесь окончания и запустите установку снова${NC}"
@@ -61,6 +68,12 @@ fi
 mkdir -p /opt/zapret-manager-luci
 chmod 0755 /opt/zapret-manager-luci
 cat > '/opt/zapret-manager-luci/backend.sh' << 'ZM_INSTALLER_EOF'
+
+# rpcd запускает бэкенд с umask 077, и всё, что он пишет — списки zapret, файлы fake при
+# установке, — получалось с правами 600. nfqws сбрасывает права до пользователя daemon и такие
+# файлы уже не читает: стратегия с --hostlist не запускается, а обход после перезапуска
+# молча перестаёт действовать.
+umask 022
 
 CONF="/etc/config/zapret"
 ZM_VERSION="1.38"
@@ -164,6 +177,8 @@ log_tail() {
 }
 
 zapret_restart() {
+	# Файлы, записанные прежними версиями с правами 600 (см. umask выше), nfqws не прочтёт.
+	chmod -R a+rX /opt/zapret/ipset /opt/zapret/files 2>/dev/null
 	[ -x /opt/zapret/sync_config.sh ] && /opt/zapret/sync_config.sh >/dev/null 2>&1
 	/etc/init.d/zapret restart >/dev/null 2>&1
 }
@@ -1568,7 +1583,7 @@ nfqws_opt_set() {
 
 
 TG_MTPROTO_VER="0.10"
-TGWS_VERSION="0.2.8"
+TGWS_VERSION="0.2.9"
 TGWS_BASE_URL="https://gitlab.com/xyzmean/brb/-/raw/main/dist"
 TGWS_VERSION_URL="https://gitlab.com/xyzmean/brb/-/raw/main/VERSION"
 TG_GO_VER="1.4.1"
@@ -6069,7 +6084,10 @@ RB_PROBE_DOH=""
 # «без обхода» не требует останавливать zapret всей сети.
 RB_LANE_DIRECT="21000-21199"
 RB_SYS_DNS=""
+# Проб разом: каждый curl — три-четыре мегабайта памяти, и на роутере со 128 МБ, где рядом
+# живут Steer, мост Telegram и dnsmasq со списком ИИ-доменов, восемь разом доводили до OOM.
 RB_PARALLEL=8
+[ "$(awk '/^MemTotal/ {print $2}' /proc/meminfo 2>/dev/null)" -lt 262144 ] 2>/dev/null && RB_PARALLEL=4
 RB_BAR=60
 
 mkdir -p "$RB_RUN" 2>/dev/null
@@ -6329,13 +6347,15 @@ _rb_zt_stop_nfqws() {
 
 _rb_zt_down() { _rb_zt_stop_nfqws; nft delete table inet "$RB_ZT_TABLE" >/dev/null 2>&1; }
 
-# Проверить набор «имя|ссылка» с портов изоляции. Печатает «удачи всего».
+# Проверить набор «имя|ссылка» с портов изоляции. Печатает «удачи всего удачи_сервисов»: цели с
+# именем «svc:…» — адреса сервисов, которые сейчас не открываются. В общий счёт они не входят и
+# считаются отдельно: из стратегий с равным общим счётом лучше та, что открыла их больше.
 _rb_zt_check() { # ФАЙЛ_ЦЕЛЕЙ
 	# Ждём ТОЛЬКО свои пробы: в этой же оболочке фоном живёт nfqws проверяемой стратегии, и
 	# голый `wait` ждал бы и его.
-	local okf="$RB_RUN/zt.ok" run=0 e total pids=""
+	local okf="$RB_RUN/zt.ok" run=0 e total svc pids=""
 	: > "$okf"
-	total=$(grep -c '|' "$1")
+	total=$(grep -v '^svc:' "$1" | grep -c '|')
 	while IFS= read -r e; do
 		[ -n "$e" ] || continue
 		_rb_stopped && break
@@ -6343,7 +6363,58 @@ _rb_zt_check() { # ФАЙЛ_ЦЕЛЕЙ
 			curl -sL --local-port "$RB_ZT_LO-$RB_ZT_HI" ${RB_PROBE_DOH:+--doh-url "$RB_PROBE_DOH"} \
 				--connect-timeout 4 --max-time 6 --speed-time 3 --speed-limit 1 --range 0-65535 \
 				-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o /dev/null "${e#*|}" >/dev/null 2>&1 &&
-				echo 1 >> "$okf"
+				echo "${e%%|*}" >> "$okf"
+		) &
+		pids="$pids $!"
+		run=$((run + 1))
+		if [ "$run" -ge "$RB_PARALLEL" ]; then wait $pids 2>/dev/null; pids=""; run=0; fi
+	done < "$1"
+	[ -n "$pids" ] && wait $pids 2>/dev/null
+	svc=$(grep -c '^svc:' "$okf")
+	echo "$(grep -vc '^svc:' "$okf") $total $svc"
+	rm -f "$okf"
+}
+
+# Углублённая проверка равных лучших — по узлам CDN из списка dpi-detector (Runnin4ik), как в
+# brb-deep. Короткие запросы основного прохода не различают стратегии, набравшие одинаково, а
+# российский DPI рвёт поток к CDN и хостингам на 16-20 КБ, когда страница уже «открылась». Здесь
+# с каждого узла берётся диапазон в 64 КБ, и узел, отдавший меньше 20 КБ, считается оборванным.
+# В списке есть узлы, которые столько не отдают и без DPI, поэтому числа сравниваются только
+# между стратегиями на одном и том же наборе. Узел без имени — идём по адресу, сертификат не
+# проверяется: важен объём дошедшего, а не подлинность узла.
+RB_DEEP_URLS="https://raw.githubusercontent.com/Runnin4ik/dpi-detector/main/tcp16.json https://cdn.jsdelivr.net/gh/Runnin4ik/dpi-detector@main/tcp16.json"
+RB_DEEP_MIN=20480
+# Больше равных не проверяем: минута на стратегию, а дюжина равных — это уже четверть часа.
+RB_DEEP_MAX=6
+
+# Цели: «id|адрес|порт», каждый третий узел списка — так в выборку попадают все провайдеры, а не
+# только первые в файле (Hetzner и Cloudflare).
+_rb_zt_deep_targets() { # ФАЙЛ
+	local u src="$RB_RUN/zt.tcp16.json"
+	for u in $RB_DEEP_URLS; do
+		curl -fsSL ${RB_PROBE_DOH:+--doh-url "$RB_PROBE_DOH"} --connect-timeout 6 --max-time 20 -o "$src" "$u" 2>/dev/null && [ -s "$src" ] && break
+		rm -f "$src"
+	done
+	[ -s "$src" ] || return 1
+	sed -n 's/.*"id":[[:space:]]*"\([^"]*\)".*"ip":[[:space:]]*"\([^"]*\)".*"port":[[:space:]]*\([0-9]*\).*/\1|\2|\3/p' "$src" |
+		awk 'NR % 3 == 1' > "$1"
+	rm -f "$src"
+	[ -s "$1" ]
+}
+
+_rb_zt_deep() { # ФАЙЛ_УЗЛОВ -> «необорванных всего»
+	local okf="$RB_RUN/zt.dok" run=0 id ip port sc total pids=""
+	: > "$okf"
+	total=$(grep -c '|' "$1")
+	while IFS='|' read -r id ip port; do
+		[ -n "$ip" ] || continue
+		_rb_stopped && break
+		sc=https; [ "$port" = 80 ] && sc=http
+		(
+			n=$(curl -sk --local-port "$RB_ZT_LO-$RB_ZT_HI" --connect-timeout 4 --max-time 12 --range 0-65535 \
+				-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o /dev/null -w '%{size_download}' \
+				"$sc://$ip:$port/" 2>/dev/null)
+			[ "${n:-0}" -ge "$RB_DEEP_MIN" ] 2>/dev/null && echo "$id" >> "$okf"
 		) &
 		pids="$pids $!"
 		run=$((run + 1))
@@ -6354,11 +6425,17 @@ _rb_zt_check() { # ФАЙЛ_ЦЕЛЕЙ
 	rm -f "$okf"
 }
 
+# Блок стратегии по имени из кандидатов последнего прогона.
+_rb_zt_block() { # ИМЯ ФАЙЛ [КАНДИДАТЫ]
+	awk -v n="#$1" '/^#/ { p = ($0 == n) } p' "${3:-$RB_RUN/zt.cand}" > "$2"
+	[ -s "$2" ]
+}
+
 # Одна стратегия: поднять обработчик с её ключами, промерить, снять. -1 — не поднялась.
-_rb_zt_one() { # ФАЙЛ_БЛОКА ФАЙЛ_ЦЕЛЕЙ
+_rb_zt_one() { # ФАЙЛ_БЛОКА ФАЙЛ_ЦЕЛЕЙ [ПРОВЕРКА]
 	# Аргументы — сразу в переменные: ниже `set --` собирает ключи стратегии в позиционные
 	# параметры и затирает $1 и $2.
-	local blk="$1" tgt="$2" l opts="$RB_RUN/zt.opts" pid
+	local blk="$1" tgt="$2" chk="${3:-_rb_zt_check}" l opts="$RB_RUN/zt.opts" pid
 	grep -v '^[[:space:]]*#' "$blk" | grep -v '^[[:space:]]*$' > "$opts"
 	[ -s "$opts" ] || { echo "-1 0"; return; }
 	set --
@@ -6371,16 +6448,18 @@ _rb_zt_one() { # ФАЙЛ_БЛОКА ФАЙЛ_ЦЕЛЕЙ
 	echo "$pid" > "$RB_ZT_PID"
 	sleep 1
 	kill -0 "$pid" 2>/dev/null || { rm -f "$RB_ZT_PID"; echo "-1 0"; return; }
-	_rb_zt_check "$tgt"
+	"$chk" "$tgt"
 	kill "$pid" 2>/dev/null
 	wait "$pid" 2>/dev/null
 	rm -f "$RB_ZT_PID"
 }
 
 # Прогон режима менеджера (v | v_flowseal | youtube). Пишет результаты в формате тестера ZM
-# («имя → удачи/всего», первой строкой контроль) и печатает путь к файлу.
-_rb_ztest() { # РЕЖИМ
-	local mode="$1" cand="$RB_RUN/zt.cand" urls="$RB_RUN/zt.urls" res="$RB_RUN/zt.res.$1" lines total cur=0 start next r ok tot name
+# («имя → удачи/всего», первой строкой контроль) и печатает путь к файлу. С файлом целей
+# сервисов («svc:хост|ссылка») у строки есть хвост « · сервисы N»: сколько адресов
+# неоткрывшихся сервисов стратегия открыла. Сортировка — по общему счёту, хвост решает при равном.
+_rb_ztest() { # РЕЖИМ [ЦЕЛИ_СЕРВИСОВ]
+	local mode="$1" svcf="${2:-}" cand="$RB_RUN/zt.cand" urls="$RB_RUN/zt.urls" res="$RB_RUN/zt.res.$1" lines total cur=0 start next r ok tot sv name
 	[ -x "$RB_ZT_NFQWS" ] || return 1
 	# Остатки прошлого подбора, убитого без уборки (kill -9, перезагрузка панели): чужой nfqws
 	# на нашей очереди не дал бы запуститься ни одной стратегии.
@@ -6388,11 +6467,13 @@ _rb_ztest() { # РЕЖИМ
 	pkill -f "qnum=$RB_ZT_QUEUE" 2>/dev/null
 	_add_gp_domains
 	_refresh_exclude_file
+	chmod -R a+rX /opt/zapret/ipset /opt/zapret/files 2>/dev/null
 	echo "   Собираем стратегии" >&2
 	_test_build_candidates "$mode" "$cand"
 	[ -s "$cand" ] || return 1
 	echo "   Собираем адреса для проверки" >&2
 	if [ "$mode" = youtube ]; then _test_yt_urls > "$urls"; else _test_prepare_urls "$urls"; fi
+	[ -n "$svcf" ] && [ -s "$svcf" ] && cat "$svcf" >> "$urls"
 	total=$(grep -c '^#' "$cand")
 	echo "   Стратегий в подборе: $total" >&2
 	# Правила не встали (нет kmod-nft-queue) — каждая стратегия мерилась бы как контроль.
@@ -6400,8 +6481,9 @@ _rb_ztest() { # РЕЖИМ
 		{ echo "!! Не удалось поставить правила проверки — нужен пакет kmod-nft-queue" >&2; return 1; }
 	echo "   Проверяем, что открывается без Zapret" >&2
 	r="$(_rb_zt_check "$urls")"
-	echo "      открылось ${r% *} из ${r#* }" >&2
-	echo "Контрольный тест (Zapret выключен) → ${r% *}/${r#* }" > "$res"
+	set -- $r; ok=$1 tot=$2 sv=$3
+	echo "      открылось $ok из $tot" >&2
+	echo "Контрольный тест (Zapret выключен) → $ok/$tot · сервисы $sv" > "$res"
 	lines=$(grep -n '^#' "$cand" | cut -d: -f1)
 	for start in $lines; do
 		_rb_stopped && break
@@ -6412,30 +6494,128 @@ _rb_ztest() { # РЕЖИМ
 		name=$(head -n1 "$RB_RUN/zt.block"); name="${name#\#}"
 		echo "   [$cur/$total] $name" >&2
 		r="$(_rb_zt_one "$RB_RUN/zt.block" "$urls")"
-		ok="${r% *}"; tot="${r#* }"
+		set -- $r; ok=$1 tot=$2 sv=${3:-0}
 		if [ "$ok" = -1 ]; then echo "      не запустилась" >&2; continue; fi
 		echo "      открылось $ok из $tot" >&2
-		echo "$name → $ok/$tot" >> "$res"
+		echo "$name → $ok/$tot · сервисы $sv" >> "$res"
 	done
 	_rb_zt_down
-	# По числу удач, лучшие первыми. Разделитель «→» многобайтный — sort -t его не примет.
-	{ head -n1 "$res"; tail -n +2 "$res" | awk '{ n = $0; sub(/.* → /, "", n); split(n, a, "/"); print a[1] "\t" $0 }' |
+	# Лучшие первыми: сначала по общему счёту, при равном — по адресам неоткрывшихся сервисов. Ключ —
+	# одно число: sort в busybox без модификаторов ключа, а «→» многобайтный для sort -t.
+	{ head -n1 "$res"; tail -n +2 "$res" | awk '{ n = $0; sub(/.* → /, "", n); split(n, a, "/"); v = $0; sub(/.* · сервисы /, "", v); print (a[1] * 10000 + v) "\t" $0 }' |
 		sort -rn | cut -f2-; } > "$res.s" && mv "$res.s" "$res"
 	echo "$res"
 }
 
+# ── равные лучшие: в фоне, после подбора ──
+#
+# Бонус, а не часть подбора: к этому моменту победитель применён и у человека всё работает.
+# Здесь только выясняется, нет ли среди равных такой, у которой поток не рвётся, — и если есть,
+# стратегия меняется молча. Всё в той же изоляции, что и подбор; прерывание безопасно, потому
+# что настройка меняется одним движением в конце. Новый подбор или переустановка фон просто
+# снимают.
+RB_DEEP_NOTE="$RB_DIR/deep.note"
+
+_rb_deep_stop() {
+	_job_alive redbtn_deep || return 0
+	_test_kill_pid_tree "$(cat "$JOBS_DIR/redbtn_deep.pid" 2>/dev/null)"
+	_rb_zt_down
+	pkill -f "qnum=$RB_ZT_QUEUE" 2>/dev/null
+	rm -f "$JOBS_DIR/redbtn_deep.pid"
+}
+
+do_redbtn_deep() { # ПРИМЕНЁННАЯ
+	local cur="$1" win sum before after
+	[ -s "$RB_RUN/deep.res" ] && [ -s "$RB_RUN/deep.cand" ] || return 0
+	sum="$(md5sum "$CONF" | cut -d' ' -f1)"
+	RB_PROBE_DOH="$(_rb_doh_pick)"
+	win="$(_rb_zt_deep_pick "$RB_RUN/deep.res")"
+	rm -f "$RB_RUN/deep.res" "$RB_RUN/deep.cand"
+	[ -n "$win" ] && [ "$win" != "$cur" ] || { echo "Оставляем $cur"; return 0; }
+	# За это время настройку могли сменить руками или тестером — тогда чужое не трогаем.
+	[ "$(md5sum "$CONF" | cut -d' ' -f1)" = "$sum" ] || { echo "Настройку Zapret успели сменить — не трогаем"; return 0; }
+	_rb_test_running && return 0
+	_rb_running && return 0
+	cp "$CONF" "$RB_RUN/deep.bak"
+	before="$(_rb_count_ok "$(_rb_check_all as_is)")"
+	_rb_zapret_apply "$win" || { rm -f "$RB_RUN/deep.bak"; return 0; }
+	after="$(_rb_count_ok "$(_rb_check_all as_is)")"
+	if [ "$after" -lt "$before" ]; then
+		cp "$RB_RUN/deep.bak" "$CONF"; zapret_restart
+		echo "С $win открывается меньше сервисов — вернули $cur"
+	else
+		echo "Переключили на $win"
+		printf '%s\n' "Лучшая стратегия: $win" > "$RB_DEEP_NOTE"
+	fi
+	rm -f "$RB_RUN/deep.bak"
+}
+
+_rb_result_svc() { printf '%s\n' "$1" | sed -n 's/.* · сервисы \([0-9]*\)$/\1/p'; }
+
+# Цели неоткрывшихся сервисов для подбора: обязательные и дополнительные адреса каждого.
+_rb_svc_targets() { # "id id..." ФАЙЛ
+	local id h
+	: > "$2"
+	for id in $1; do
+		for h in $(_rb_svc_field "$id" 5 | tr ',' ' ') $(_rb_svc_field "$id" 6 | tr ',' ' '); do
+			printf 'svc:%s|https://%s/\n' "$h" "$h" >> "$2"
+		done
+	done
+}
+
+_rb_zt_ties() { # ФАЙЛ_РЕЗУЛЬТАТОВ -> имена равных первому, не больше RB_DEEP_MAX
+	local key
+	key="$(tail -n +2 "$1" | head -n1)"; key="${key#* → }"
+	tail -n +2 "$1" | awk -v k="$key" '{ v = $0; sub(/^.* → /, "", v) } v == k { sub(/ → .*/, ""); print }' | head -n "$RB_DEEP_MAX"
+}
+
+# Равные лучшие — тот же общий счёт и те же адреса сервисов, что у первого. Если их больше
+# одного, решает углублённая проверка: печатает имя победителя (или первого, если проверить не
+# удалось или все набрали одинаково). Первый — применённый: другой побеждает, только набрав
+# строго больше.
+_rb_zt_deep_pick() { # ФАЙЛ_РЕЗУЛЬТАТОВ
+	local res="$1" best key ties n name blk="$RB_RUN/zt.dblock" tgt="$RB_RUN/zt.deep" r sc top=-1 win
+	best=$(tail -n +2 "$res" | head -n1)
+	win="${best%% → *}"
+	ties="$(_rb_zt_ties "$res")"
+	n=$(printf '%s\n' "$ties" | grep -c .)
+	[ "$n" -gt 1 ] || { echo "$win"; return 0; }
+	echo "Сравниваем $n равные стратегии" >&2
+	_rb_zt_deep_targets "$tgt" || { echo "      список для сравнения не скачался — оставляем применённую" >&2; echo "$win"; return 0; }
+	_rb_zt_rules_up || { echo "$win"; return 0; }
+	printf '%s\n' "$ties" > "$RB_RUN/zt.ties"
+	while IFS= read -r name; do
+		_rb_stopped && break
+		_rb_zt_block "$name" "$blk" "$RB_RUN/deep.cand" || continue
+		echo "   $name" >&2
+		r="$(_rb_zt_one "$blk" "$tgt" _rb_zt_deep)"
+		sc="${r%% *}"
+		[ "$sc" = -1 ] && { echo "      не запустилась" >&2; continue; }
+		echo "      $sc из ${r#* }" >&2
+		[ "$sc" -gt "$top" ] && { top="$sc"; win="$name"; }
+	done < "$RB_RUN/zt.ties"
+	_rb_zt_down
+	rm -f "$RB_RUN/zt.ties" "$blk" "$tgt"
+	echo "$win"
+}
+
 _rb_result_num() { printf '%s\n' "$1" | sed -n 's/.* → \([0-9]*\)\/.*/\1/p'; }
 
-# Печатает «имя удачи» лучшей стратегии, если она открыла больше, чем без Zapret.
-_rb_zapret_pick() { # РЕЖИМ_ТЕСТА
-	local res best ctrl bok
-	res="$(_rb_ztest "$1")" || return 1
+# Печатает «имя удачи» лучшей стратегии, если она открыла больше, чем без Zapret: больше общих
+# целей или, при равных, больше адресов неоткрывшихся сервисов.
+_rb_zapret_pick() { # РЕЖИМ_ТЕСТА [ЦЕЛИ_СЕРВИСОВ]
+	local res best ctrl bok bsv csv name
+	res="$(_rb_ztest "$1" "${2:-}")" || return 1
 	best=$(tail -n +2 "$res" | head -n1)
 	[ -n "$best" ] || return 1
-	bok=$(_rb_result_num "$best")
-	ctrl=$(_rb_result_num "$(head -n1 "$res")")
+	bok=$(_rb_result_num "$best"); bsv=$(_rb_result_svc "$best")
+	ctrl=$(_rb_result_num "$(head -n1 "$res")"); csv=$(_rb_result_svc "$(head -n1 "$res")")
 	[ -n "$bok" ] || return 1
-	[ -n "$ctrl" ] && [ "$bok" -le "$ctrl" ] && return 1
+	if [ -n "$ctrl" ]; then
+		[ "$bok" -lt "$ctrl" ] && return 1
+		[ "$bok" -eq "$ctrl" ] && [ "${bsv:-0}" -le "${csv:-0}" ] && return 1
+	fi
+	cp "$res" "$RB_RUN/deep.res"; cp "$RB_RUN/zt.cand" "$RB_RUN/deep.cand"
 	echo "${best%% → *} $bok"
 }
 
@@ -6677,11 +6857,13 @@ redbtn_geo_watch() {
 # ── основной проход ──
 
 do_redbtn_run() {
-	local mode="${1:-quick}" blk before after failed zfailed id zbak="$RB_RUN/zapret.before" pick name warp_ids=""
+	local mode="${1:-quick}" blk before after failed zfailed id zbak="$RB_RUN/zapret.before" pick name warp_ids="" deep_cur=""
 	# Все три флага: «Стоп» ставит и флаг страницы steer, и без его снятия следующий подбор
 	# сразу выходил из подъёма туннелей.
 	rm -f "$RB_STOP_FLAG" "$ST_STOP_FLAG" "$TEST_STOP_FLAG"
+	_rb_deep_stop
 	mkdir -p "$RB_DIR" "$RB_RUN"
+	rm -f "$RB_RUN/deep.res" "$RB_RUN/deep.cand" "$RB_DEEP_NOTE"
 	_ensure_deps
 	blk="$(_rb_blocker)"
 	case "$blk" in
@@ -6713,17 +6895,21 @@ do_redbtn_run() {
 	# Подбор стратегии — только если что-то не открывается: рабочую настройку не трогаем.
 	# ИИ-сервисы не в счёт: их закрывает геоблок, а его стратегия Zapret не снимает — ради них
 	# одних гонять тестер десять минут бессмысленно, им сразу WARP.
+	# Полный подбор человек выбирает сам — обычно после быстрого, когда что-то ушло в WARP или не
+	# открылось вовсе. Он идёт всегда: иначе после быстрого подбора, где всё уже открывается
+	# (в том числе через WARP), стратегии Flowseal не проверялись бы ни разу.
 	failed="$(_rb_failed "$before")"
 	zfailed="$(printf '%s\n' "$failed" | grep -vx 'geoblock')"
-	if [ -n "$zfailed" ]; then
+	if [ -n "$zfailed" ] || [ "$mode" = full ]; then
 		_rb_phase zapret
 		cp "$CONF" "$zbak"
-		local tmode=v
+		local tmode=v svcf="$RB_RUN/zt.svc"
 		[ "$mode" = full ] && tmode=v_flowseal
+		_rb_svc_targets "$zfailed" "$svcf"
 		_rb_say "Подбираем стратегию Zapret — сеть работает на прежней настройке до конца подбора"
 		# Подбор идёт в изоляции: клиенты до конца на прежней настройке. Неполный победитель
 		# остановленного подбора не применяется.
-		if pick="$(_rb_zapret_pick "$tmode")" && ! _rb_stopped; then
+		if pick="$(_rb_zapret_pick "$tmode" "$svcf")" && ! _rb_stopped; then
 			name="${pick% *}"
 			_rb_say "Лучшая стратегия: $name (${pick##* } целей)"
 			if _rb_zapret_apply "$name"; then
@@ -6746,6 +6932,7 @@ do_redbtn_run() {
 				else
 					before="$after"
 					_rb_say "Стратегия $name применена"
+					deep_cur="$name"
 				fi
 			fi
 		elif ! _rb_stopped; then
@@ -6859,6 +7046,15 @@ do_redbtn_run() {
 		_rb_warn "DNS over HTTPS перехватывает DNS сети — сервисы через WARP работать не будут, нажмите «Исправить» на странице Steer"
 	fi
 	_rb_say "Готово, обход подобран"
+	# Равные лучшие сравниваются уже после — обход к этому моменту работает.
+	if [ -n "$deep_cur" ] && [ -s "$RB_RUN/deep.res" ] && [ "$(_rb_zt_ties "$RB_RUN/deep.res" | grep -c .)" -gt 1 ]; then
+		# Правила проб снимаются ловушкой на выходе, а с ними и таблица изоляции — снимаем
+		# сейчас, чтобы ловушка не выдернула её из-под фоновой проверки.
+		_rb_probe_nft_down
+		trap - EXIT INT TERM
+		job_start redbtn_deep do_redbtn_deep "$deep_cur" >/dev/null
+		_rb_say "Лучшая стратегия определится позже — идёт сравнение равных"
+	fi
 }
 
 
@@ -6924,8 +7120,11 @@ redbtn_status() {
 	done
 	local geo=""
 	[ -s "$RB_GEO_RESOLVER" ] && geo=$(sed -n "s/^GEO_TITLE='\(.*\)'$/\1/p" "$RB_GEO_RESOLVER")
-	printf '{"running":%s,"phase":"%s","last":"%s","blocker":"%s","steer":%s,"steer_installed":%s,"steer_busy":%s,"video":"%s","geo_dns":"%s","configured":%s,"services":[%s]}\n' \
-		"$running" "$(esc "$phase")" "$last" "$blk" "$steer" "$(_st_installed && echo true || echo false)" "$(_job_alive steer && echo true || echo false)" "$(esc "$video")" "$(esc "$geo")" \
+	local deep=false note=""
+	_job_alive redbtn_deep && deep=true
+	[ -s "$RB_DEEP_NOTE" ] && note="$(head -n1 "$RB_DEEP_NOTE")"
+	printf '{"running":%s,"deep":%s,"deep_note":"%s","phase":"%s","last":"%s","blocker":"%s","steer":%s,"steer_installed":%s,"steer_busy":%s,"video":"%s","geo_dns":"%s","configured":%s,"services":[%s]}\n' \
+		"$running" "$deep" "$(esc "$note")" "$(esc "$phase")" "$last" "$blk" "$steer" "$(_st_installed && echo true || echo false)" "$(_job_alive steer && echo true || echo false)" "$(esc "$video")" "$(esc "$geo")" \
 		"$([ -s "$RB_LAST" ] && echo true || echo false)" "$svc"
 }
 
@@ -8381,6 +8580,8 @@ return view.extend({
 				return;
 			}
 			if (!busy && data.steer_busy) heroCard.appendChild(E('div', { 'class': 'zm-ab-note zm-ab-note-warn' }, 'На странице Steer идёт операция — запуск станет доступен, когда она закончится.'));
+			if (!busy && data.deep) heroCard.appendChild(E('div', { 'class': 'zm-ab-note zm-st-note-ok' }, 'Лучшая стратегия определится позже — идёт сравнение равных.'));
+			else if (!busy && data.deep_note) heroCard.appendChild(E('div', { 'class': 'zm-ab-note zm-st-note-ok' }, data.deep_note));
 
 			if (busy) {
 				if (RUN_PHASES.indexOf(data.phase) >= 0 || lastAction === 'start') heroCard.appendChild(renderSteps());
