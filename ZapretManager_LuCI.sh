@@ -4796,12 +4796,20 @@ ST_AWG_MIRROR_FLAT="https://gitlab.com/xyzmean/brb/-/raw/main/deps/awg"
 # Автоперезапуск: строка crontab помечается хвостом-комментарием. Команда самодостаточна —
 # переживает и удаление панели: туннель поднимается заново, steer перезапускается, если включён.
 ST_CRON_TAG="# zm-steer"
-ST_CRON_CMD="/etc/init.d/steer enabled && { ifup $ST_WARP_IF; sleep 15; /etc/init.d/steer restart; }"
+ST_CRON_CMD="/etc/init.d/steer enabled && { for i in zmwarp zmwarp2 zmwarp3; do ifup \$i; done; sleep 15; /etc/init.d/steer restart; }"
+# ТРИ ТУННЕЛЯ В РАЗНЫХ КОЛОНИЯХ, как в brb. Один туннель — одна точка отказа: колония уходит
+# на обслуживание, провайдер начинает резать адрес — и все сервисы в WARP встают разом. Три
+# туннеля отказывают порознь; steer держит их одним выходом и ведёт через самый быстрый живой
+# (prefer: latency), сторож движка переключает сам. Первый — прежний zmwarp: его показывает
+# страница, его ключи и точка переживают обновление. У каждого своя регистрация: одни ключи
+# на трёх устройствах Cloudflare считает одним клиентом.
+ST_WARP_N=3
+ST_WARP_UP="$ST_DIR/warp.up"          # поднятые туннели «интерфейс колония», лучший первым
 # Российские колонии Cloudflare: туннель через них геоблок не снимает, берутся только в запас.
 ST_RU_COLOS="DME SVX LED KJA REN OVB KZN AER VVO"
 # Что выбрать при первой установке, если ничего не выбрано: ИИ-сервисы закрывает геоблок,
 # и кроме туннеля им ничего не поможет.
-ST_DEFAULT_SEL="geoblock"
+ST_DEFAULT_SEL=""
 
 _st_phase() { printf '%s\n' "$1" > "$ST_PHASE_FILE"; }
 _st_stopped() { [ -f "$ST_STOP_FLAG" ]; }
@@ -4833,16 +4841,6 @@ _st_migrate() {
 	[ -s "$old/warp.skip" ] && [ ! -s "$ST_SKIP" ] && mv "$old/warp.skip" "$ST_SKIP"
 	rm -f "$old/warp.pick" "$old/warp.skip"
 	sed -i 's/# zm-autobypass$/# zm-steer/' "$CRON_FILE" 2>/dev/null
-	# Красная кнопка 1.34 из форка держала для ИИ-сервисов свой DNS (zm-geodns). Его сторож
-	# звал команду, которой здесь нет: умри прокси — и ИИ-сервисы перестали бы разрешаться
-	# вовсе. Теперь они идут через WARP, поэтому этот DNS выключаем.
-	if grep -qx 'svc zm-geodns' "$old/owned" 2>/dev/null || [ -x /etc/init.d/zm-geodns ]; then
-		/etc/init.d/zm-geodns stop >/dev/null 2>&1
-		/etc/init.d/zm-geodns disable >/dev/null 2>&1
-		rm -f /etc/init.d/zm-geodns "$old/geo.resolver"
-		sed -i '/redbtn_geo_watch/d' "$CRON_FILE" 2>/dev/null
-		sed -i '/^svc zm-geodns$/d' "$old/owned" 2>/dev/null
-	fi
 }
 _st_migrate
 mkdir -p "$ST_RUN" 2>/dev/null
@@ -5030,25 +5028,6 @@ _st_warp_register() {
 	[ -n "$(_st_warp_field PrivateKey)" ] && [ -n "$(_st_warp_field PublicKey)" ]
 }
 
-# Кандидаты в точку входа: адреса Cloudflare, ответившие быстрее всех по HTTP. Это только
-# отсев — годность точки решает настоящее рукопожатие туннеля и данные через него.
-_st_warp_candidates() {
-	local prefixes="188.114.96. 188.114.97. 188.114.98. 188.114.99. 162.159.192. 162.159.193. 162.159.195. 8.34.146. 8.39.214. 8.39.204. 8.6.112. 8.35.211. 8.39.125. 8.47.69."
-	local pings="$ST_RUN/pings" ip count=0
-	rm -f "$pings"
-	for ip in $(awk -v prefixes="$prefixes" 'BEGIN { srand(); n = split(prefixes, arr, " "); for (i = 0; i < 40; i++) { print arr[int(rand() * n) + 1] int(rand() * 256) } }'); do
-		(
-			t=$(curl -s --connect-timeout 2 -o /dev/null -w '%{time_total}' -H "Host: trace.cloudflare.com" "http://$ip/cdn-cgi/trace" 2>/dev/null) || exit 0
-			[ -n "$t" ] && echo "$t $ip" | awk '{printf "%d %s\n", $1 * 1000, $2}' >> "$pings"
-		) &
-		count=$((count + 1))
-		[ $((count % 20)) -eq 0 ] && wait
-	done
-	wait
-	[ -s "$pings" ] && sort -n "$pings" | head -n 5 | awk '{print $2}'
-	echo "engage.cloudflareclient.com"
-}
-
 _st_warp_iface_write() { # ХОСТ ПОРТ
 	local priv addr peer
 	priv="$(_st_warp_field PrivateKey)"
@@ -5073,7 +5052,7 @@ _st_warp_iface_write() { # ХОСТ ПОРТ
 	uci set "network.$ST_WARP_IF.awg_h4=$MIXOMO_AWG_H4"
 	uci set "network.$ST_WARP_IF.awg_i1=$MIXOMO_AWG_I1"
 	uci set "network.${ST_WARP_IF}_peer=amneziawg_$ST_WARP_IF"
-	uci set "network.${ST_WARP_IF}_peer.description=WARP"
+	uci set "network.${ST_WARP_IF}_peer.description=WARP ${ST_WARP_IF#zmwarp}"
 	uci set "network.${ST_WARP_IF}_peer.public_key=$peer"
 	uci add_list "network.${ST_WARP_IF}_peer.allowed_ips=0.0.0.0/0"
 	# Маршрутов в главную таблицу не ставим: трафик в туннель уводит движок, остальное
@@ -5089,10 +5068,20 @@ _st_warp_iface_write() { # ХОСТ ПОРТ
 # Зона firewall туннеля: NAT и выравнивание MSS. Без NAT устройства сети уходят в туннель
 # со своими адресами из LAN, и ответы не возвращаются.
 _st_warp_zone() {
+	local want i changed=0
+	# Зона держит все туннели. Прежние версии заводили её на один zmwarp — список пишется
+	# заново, если отличается.
+	want="$(_st_wifs_all | tr '\n' ' ' | sed 's/ $//')"
+	if [ "$(uci -q get "firewall.$ST_WARP_ZONE")" = "zone" ] && [ "$(uci -q get "firewall.$ST_WARP_ZONE.network")" != "$want" ]; then
+		uci -q delete "firewall.$ST_WARP_ZONE.network"
+		for i in $want; do uci add_list "firewall.$ST_WARP_ZONE.network=$i"; done
+		uci commit firewall
+		/etc/init.d/firewall reload >/dev/null 2>&1
+	fi
 	if [ "$(uci -q get "firewall.$ST_WARP_ZONE")" != "zone" ]; then
 		uci set "firewall.$ST_WARP_ZONE=zone"
 		uci set "firewall.$ST_WARP_ZONE.name=$ST_WARP_ZONE"
-		uci add_list "firewall.$ST_WARP_ZONE.network=$ST_WARP_IF"
+		for i in $want; do uci add_list "firewall.$ST_WARP_ZONE.network=$i"; done
 		uci set "firewall.$ST_WARP_ZONE.input=REJECT"
 		uci set "firewall.$ST_WARP_ZONE.output=ACCEPT"
 		uci set "firewall.$ST_WARP_ZONE.forward=REJECT"
@@ -5120,78 +5109,314 @@ _st_warp_handshake() { # ждать рукопожатия до 10 с
 	return 1
 }
 
-# Колония Cloudflare ИЗНУТРИ туннеля. Ответ означает, что данные через туннель идут, а не
-# только прошло рукопожатие.
-_st_warp_colo() {
-	curl -s --interface "$ST_WARP_IF" --connect-timeout 5 --max-time 8 https://1.1.1.1/cdn-cgi/trace 2>/dev/null |
-		sed -n 's/^colo=//p' | head -n1
-}
-
 _st_warp_is_ru() { case " $ST_RU_COLOS " in *" $1 "*) return 0 ;; esac; return 1; }
 
-_st_warp_try() { # ХОСТ ПОРТ -> печатает колонию
-	local colo
-	uci set "network.${ST_WARP_IF}_peer.endpoint_host=$1"
-	uci set "network.${ST_WARP_IF}_peer.endpoint_port=$2"
-	uci commit network
-	# ifup сам перечитывает настройку сети (ubus call network reload) и перезапускает интерфейс.
-	ifup "$ST_WARP_IF" >/dev/null 2>&1
-	sleep 3
-	_st_warp_handshake || return 1
-	colo="$(_st_warp_colo)"
-	[ -n "$colo" ] || return 1
-	echo "$colo"
+# ── несколько туннелей ──
+#
+# Функции выше написаны на один туннель и читают ST_WARP_IF и ST_WARP_CONF. Туннель N — это
+# те же функции с подставленными интерфейсом и файлом ключей: 1 — zmwarp и warp.conf, 2 и 3 —
+# zmwarpN и warpN.conf.
+_st_wif() { [ "$1" = 1 ] && echo zmwarp || echo "zmwarp$1"; }
+_st_wconf() { [ "$1" = 1 ] && echo "$ST_DIR/warp.conf" || echo "$ST_DIR/warp$1.conf"; }
+_st_with() { # N КОМАНДА... — выполнить команду в контексте туннеля N
+	local n="$1" oi="$ST_WARP_IF" oc="$ST_WARP_CONF" rc
+	shift
+	ST_WARP_IF="$(_st_wif "$n")"; ST_WARP_CONF="$(_st_wconf "$n")"
+	"$@"; rc=$?
+	ST_WARP_IF="$oi"; ST_WARP_CONF="$oc"
+	return $rc
+}
+_st_wifs_all() { local n=1; while [ "$n" -le "$ST_WARP_N" ]; do _st_wif "$n"; n=$((n + 1)); done; }
+# Первый живой туннель — им пробуются сервисы и качаются списки.
+_st_warp_first() {
+	local i
+	[ -s "$ST_WARP_UP" ] && while read -r i _; do [ -d "/sys/class/net/$i" ] && { echo "$i"; return 0; }; done < "$ST_WARP_UP"
+	echo "$ST_WARP_IF"
 }
 
-_st_warp_up() { # [repick] — не пробовать прежнюю точку входа, подобрать заново
-	local repick="$1" host port colo spare="" cand
-	_st_install_awg || return 1
-	_rb_say "Получаем ключи WARP"
-	_st_warp_register || { echo "ОШИБКА: не удалось получить ключи WARP"; return 1; }
-	[ "$(uci -q get "network.$ST_WARP_IF.proto")" = amneziawg ] || _st_warp_iface_write engage.cloudflareclient.com 4500
-	_st_warp_zone
-	if [ "$repick" != repick ]; then
-		# Прежняя точка работает — не перебираем заново.
-		ifup "$ST_WARP_IF" >/dev/null 2>&1
-		sleep 3
-		if _st_warp_handshake && colo="$(_st_warp_colo)" && [ -n "$colo" ] && ! _st_warp_is_ru "$colo"; then
-			_rb_say "Туннель WARP работает, колония $colo"
-			echo "$colo" > "$ST_DIR/warp.colo"
-			return 0
-		fi
-	fi
-	_rb_say "Подбираем точку входа WARP"
-	cand="$(_st_warp_candidates)"
-	_rb_say "Кандидатов: $(echo "$cand" | grep -c .)"
-	# Порты 4500 и 2408 выколоты из игрового фильтра zapret — туннель не попадёт под обработку.
-	for port in 4500 2408; do
-		for host in $cand; do
-			_st_stopped && return 1
-			echo "   Пробуем $host:$port"
-			colo="$(_st_warp_try "$host" "$port")" || { echo "      не отвечает"; continue; }
-			echo "      работает, колония $colo"
-			if _st_warp_is_ru "$colo"; then
-				[ -n "$spare" ] || spare="$host $port $colo"
-				continue
-			fi
-			_rb_say "Туннель WARP работает: $host:$port, колония $colo"
-			echo "$colo" > "$ST_DIR/warp.colo"
-			return 0
-		done
+# ── выбор точки: методом warpscout (как в brb) ──
+#
+# Годность точки решает ТОЛЬКО поднятый туннель. HTTP к краю Cloudflare меряет не то: он идёт
+# по TCP на 80-й, туннель — по UDP на свой порт, провайдер режет их по-разному, а колония в
+# ответе края — колония ВХОДА (на стенде кандидаты по HTTP вели в DUS/FRA/CPH, а изнутри
+# туннеля все оказались в HEL). Поэтому: точка ставится на живой интерфейс, настоящее
+# рукопожатие, потери и круг пингом, колония — изнутри туннеля.
+ST_WARP_POOLS="188.114.96. 188.114.97. 188.114.98. 188.114.99. 162.159.192. 162.159.193. 162.159.195. 8.34.146. 8.39.214. 8.39.204. 8.6.112. 8.35.211. 8.39.125. 8.47.69."
+# Порты — только вне игрового фильтра zapret (88, 1024-2407, 2409-4499, 4502-19293, …): иначе
+# пакеты туннеля разбирал бы общий обход.
+ST_WARP_PORTS="2408 500 4500 987"
+ST_WARP_RAND=10          # случайных адресов к якорям — за разными колониями
+ST_WARP_HS_WAIT=8        # секунд ждать рукопожатия: на живом роутере оно бывало и 1,25 с
+
+# Поставить узлу точку на живом интерфейсе и дождаться рукопожатия. Узел сначала удаляется:
+# WireGuard не начинает нового рукопожатия, пока жива прежняя сессия.
+_st_warp_link() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА АДРЕС ПОРТ
+	local dev="$1" peer="$2" push w=0 hs
+	awg set "$dev" peer "$peer" remove 2>/dev/null
+	awg set "$dev" peer "$peer" endpoint "$3:$4" allowed-ips 0.0.0.0/0 persistent-keepalive 25 2>/dev/null || return 1
+	ping -I "$dev" -c 1 -W 2 1.1.1.1 >/dev/null 2>&1 &
+	push=$!
+	while [ "$w" -lt $((ST_WARP_HS_WAIT * 4)) ]; do
+		hs=$(awg show "$dev" latest-handshakes 2>/dev/null | awk '{print $2; exit}')
+		if [ "${hs:-0}" -gt 0 ] 2>/dev/null; then wait "$push" 2>/dev/null; return 0; fi
+		w=$((w + 1))
+		sleep 0.25 2>/dev/null || sleep 1
 	done
-	if [ -n "$spare" ]; then
-		set -- $spare
-		_st_warp_try "$1" "$2" >/dev/null
-		_rb_warn "Туннель WARP работает только через российскую колонию $3: ИИ-сервисы через него не откроются"
-		echo "$3" > "$ST_DIR/warp.colo"
-		return 0
-	fi
-	ifdown "$ST_WARP_IF" >/dev/null 2>&1
-	rm -f "$ST_DIR/warp.colo"
-	echo "ОШИБКА: туннель WARP не поднялся ни через одну точку входа"
+	kill "$push" 2>/dev/null; wait "$push" 2>/dev/null
 	return 1
 }
 
+_st_warp_probe() { # ИНТЕРФЕЙС -> «потери% круг_мс»
+	local out loss rtt
+	out=$(ping -I "$1" -c 3 -W 2 1.1.1.1 2>/dev/null)
+	loss=$(printf '%s' "$out" | sed -n 's/.*[^0-9]\([0-9]*\)% packet loss.*/\1/p' | head -n1)
+	rtt=$(printf '%s' "$out" | sed -n 's|.*= [0-9.]*/\([0-9]*\)\.[0-9]*/.*|\1|p' | head -n1)
+	echo "${loss:-100} ${rtt:-99999}"
+}
+
+# Колония ИЗНУТРИ туннеля — по заголовку CF-RAY (`<ид>-<город>`), который Cloudflare
+# дописывает к любому своему ответу: один HTTP-запрос по адресу, без DNS и без TLS (TLS через
+# туннель на части роутеров не проходит, см. brb/warp.sh). Запасной ход — trace по https.
+_st_colo_of() { # ИНТЕРФЕЙС
+	local c
+	c=$(curl -sI --interface "$1" --max-time 8 -H 'Host: www.cloudflare.com' http://104.16.132.229/ 2>/dev/null |
+		sed -n 's/^[Cc][Ff]-[Rr][Aa][Yy]: *[0-9a-f]*-\([A-Z][A-Z][A-Z]\).*/\1/p' | head -n1)
+	[ -n "$c" ] || c=$(curl -s --interface "$1" --connect-timeout 5 --max-time 8 https://1.1.1.1/cdn-cgi/trace 2>/dev/null |
+		sed -n 's/^colo=//p' | head -n1)
+	[ -n "$c" ] && echo "$c"
+}
+_st_warp_colo() { _st_colo_of "$ST_WARP_IF"; }
+
+# Какие порты провайдер выпускает к WARP — один раз, дальше из файла.
+_st_warp_ports() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА АДРЕС
+	local f="$ST_DIR/warp.ports" ok="" p
+	[ -s "$f" ] && { cat "$f"; return 0; }
+	for p in $ST_WARP_PORTS; do
+		_st_warp_link "$1" "$2" "$3" "$p" && ok="${ok:+$ok }$p"
+		[ "$(echo "$ok" | wc -w)" -ge 2 ] && break
+	done
+	[ -n "$ok" ] || return 1
+	echo "$ok" > "$f"
+	echo "$ok"
+}
+
+# Разведка для одного туннеля. Печатает «адрес порт колония» лучшей точки. Занятая колония —
+# запас (другой адрес в той же колонии лучше никакого), российская — последний запас.
+_st_warp_scan() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА ЗАНЯТЫЕ_КОЛОНИИ ЗАНЯТЫЕ_АДРЕСА
+	local dev="$1" peer="$2" busy=" $3 " busyip=" $4 " r="$ST_RUN/scan.$1" cand ip ports port loss rtt colo pick f
+	mkdir -p "$ST_RUN"
+	: > "$r"; : > "$r.same"; : > "$r.nc"; : > "$r.ru"
+	# Якоря .1 первыми: на них указывает сам engage.cloudflareclient.com; случайные — за
+	# разными колониями.
+	cand=$(awk -v p="$ST_WARP_POOLS" -v n="$ST_WARP_RAND" 'BEGIN { srand(); c = split(p, a, " ");
+		for (i = 1; i <= c; i++) print a[i] "1"; for (i = 0; i < n; i++) print a[int(rand() * c) + 1] int(rand() * 254) + 2 }')
+	ports=""
+	for ip in $cand; do [ -n "$ports" ] && break; ports="$(_st_warp_ports "$dev" "$peer" "$ip")"; done
+	[ -n "$ports" ] || { echo "!! WARP: провайдер не выпускает ни один порт ($ST_WARP_PORTS)" >&2; return 1; }
+	port="${ports%% *}"
+	for ip in $cand; do
+		_st_stopped && return 1
+		_rb_stopped 2>/dev/null && return 1
+		case "$busyip" in *" $ip "*) continue ;; esac
+		_st_warp_link "$dev" "$peer" "$ip" "$port" || { echo "   $ip:$port — рукопожатия нет" >&2; continue; }
+		set -- $(_st_warp_probe "$dev"); loss="$1"; rtt="$2"
+		[ "$loss" -ge 100 ] 2>/dev/null && { echo "   $ip:$port — туннель молчит" >&2; continue; }
+		colo="$(_st_colo_of "$dev")"
+		if [ -z "$colo" ]; then
+			echo "$loss $rtt $ip $port ?" >> "$r.nc"; echo "   $ip:$port — потери $loss%, $rtt мс, колония не узналась" >&2; continue
+		fi
+		echo "   $ip:$port — потери $loss%, $rtt мс, колония $colo" >&2
+		if _st_warp_is_ru "$colo"; then echo "$loss $rtt $ip $port $colo" >> "$r.ru"; continue; fi
+		case "$busy" in *" $colo "*) echo "$loss $rtt $ip $port $colo" >> "$r.same"; continue ;; esac
+		echo "$loss $rtt $ip $port $colo" >> "$r"
+		[ "$(grep -c . "$r")" -ge 3 ] && break
+	done
+	# Лучшая — одним числовым ключом: потери в старших разрядах, круг в младших (busybox sort
+	# не понимает модификаторов у ключей, см. brb/warp.sh).
+	for f in "$r" "$r.same" "$r.nc" "$r.ru"; do
+		[ -s "$f" ] || continue
+		pick=$(awk '{ printf "%d\t%s %s %s\n", $1 * 100000 + $2, $3, $4, $5 }' "$f" | sort -n | head -n1 | cut -f2)
+		case "$f" in
+			*.same) echo "   другой колонии нет — та же, но через другой адрес" >&2 ;;
+			*.ru) echo "   наружных колоний нет — беру российскую (геоблок она не снимает)" >&2 ;;
+		esac
+		echo "$pick"
+		return 0
+	done
+	return 1
+}
+
+_st_warp_alive_if() { # ИНТЕРФЕЙС — рукопожатие не старше трёх минут
+	local hs
+	hs=$(awg show "$1" latest-handshakes 2>/dev/null | awk '{print $2; exit}')
+	[ "${hs:-0}" -gt 0 ] 2>/dev/null && [ $(( $(date +%s) - hs )) -lt 180 ]
+}
+_st_warp_ready_if() { ifstatus "$1" 2>/dev/null | grep -q '"up": true' && awg show "$1" peers 2>/dev/null | grep -q .; }
+
+# Поднять туннели. repick — не держаться прежних точек, подобрать заново.
+#
+# Сначала ключи и интерфейсы ВСЕХ туннелей одним reload, и только потом разведка на живых
+# интерфейсах через `awg set`: запись в uci с ifup посреди разведки делала `network reload`, и
+# netifd перезапускал соседние туннели (на стенде так пропадал уже подобранный первый).
+_st_warp_up() { # [repick]
+	local repick="$1" n i peer got busy="" busyip="" ru=0 c ready="" w need=0 colos=""
+	_st_install_awg || return 1
+	_rb_say "Поднимаем туннели WARP в разных колониях"
+	n=1
+	while [ "$n" -le "$ST_WARP_N" ]; do
+		if _st_with "$n" _st_warp_register; then
+			ready="$ready $n"
+			i="$(_st_wif "$n")"
+			if [ "$(uci -q get "network.$i.proto")" != amneziawg ]; then
+				_st_with "$n" _st_warp_iface_write 162.159.192.1 2408
+				need=1
+			fi
+		else
+			[ "$n" = 1 ] && { echo "ОШИБКА: не удалось получить ключи WARP"; return 1; }
+			_rb_warn "WARP $n: не удалось получить ключи — туннелей будет меньше"
+		fi
+		n=$((n + 1))
+	done
+	_st_warp_zone
+	[ "$need" = 1 ] && ubus call network reload >/dev/null 2>&1
+	for n in $ready; do ubus call "network.interface.$(_st_wif "$n")" up >/dev/null 2>&1; done
+	for n in $ready; do
+		i="$(_st_wif "$n")"; w=0
+		while [ "$w" -lt 20 ] && ! _st_warp_ready_if "$i"; do w=$((w + 1)); sleep 1; done
+	done
+	: > "$ST_WARP_UP.tmp"
+	for n in $ready; do
+		_st_stopped && break
+		i="$(_st_wif "$n")"
+		peer="$(_st_with "$n" _st_warp_field PublicKey)"
+		_st_warp_ready_if "$i" || { _rb_warn "WARP $n: устройство не поднялось"; continue; }
+		got=""
+		# Живой туннель с прошлого раза не трогаем, если колония у него своя.
+		if [ "$repick" != repick ] && _st_warp_alive_if "$i" && c="$(_st_colo_of "$i")" &&
+		   case " $busy " in *" $c "*) false ;; *) true ;; esac; then
+			got="$(uci -q get "network.${i}_peer.endpoint_host") $(uci -q get "network.${i}_peer.endpoint_port") $c"
+			_rb_say "WARP $n работает: колония $c"
+		else
+			echo "   WARP $n: разведка"
+			if got="$(_st_warp_scan "$i" "$peer" "$busy" "$busyip")"; then
+				set -- $got
+				awg set "$i" peer "$peer" endpoint "$1:$2" allowed-ips 0.0.0.0/0 persistent-keepalive 25 2>/dev/null
+				_rb_say "WARP $n работает: $1:$2, колония $3"
+			else
+				_rb_warn "WARP $n не поднялся"
+				continue
+			fi
+		fi
+		set -- $got
+		busy="$busy $3"; busyip="$busyip $1"
+		_st_warp_is_ru "$3" && ru=1
+		colos="${colos:+$colos, }$3"
+		echo "$i $3" >> "$ST_WARP_UP.tmp"
+		# В uci — для следующей загрузки. Без reload: живой интерфейс уже на этой точке.
+		uci set "network.${i}_peer.endpoint_host=$1"
+		uci set "network.${i}_peer.endpoint_port=$2"
+	done
+	uci commit network
+	mv "$ST_WARP_UP.tmp" "$ST_WARP_UP"
+	# Не поднявшиеся — погасить: висящий без рукопожатия туннель движок принял бы за живой.
+	for n in $ready; do
+		i="$(_st_wif "$n")"
+		grep -q "^$i " "$ST_WARP_UP" || ifdown "$i" >/dev/null 2>&1
+	done
+	if [ ! -s "$ST_WARP_UP" ]; then
+		rm -f "$ST_DIR/warp.colo"
+		echo "ОШИБКА: туннель WARP не поднялся ни через одну точку входа"
+		return 1
+	fi
+	echo "$colos" > "$ST_DIR/warp.colo"
+	[ "$ru" = 1 ] && _rb_warn "Часть туннелей WARP идёт через российские колонии: ИИ-сервисы через них не откроются"
+	return 0
+}
+
+# ── списки для туннеля ──
+#
+# Списки сервисов берутся наборами .srs из каталога splify2-lists (github.com/xyzmean/splify2-lists):
+# его lists.json называет для каждого набора ссылку на релиз издателя С ЗАФИКСИРОВАННЫМ тегом,
+# так что два роутера с одним каталогом уводят в туннель одно и то же. Набор раскладывает сам
+# движок (`steer srs-read`) на домены, подсети и сужение по протоколу и портам.
+#
+# Качается сначала напрямую, потом ЧЕРЕЗ ТУННЕЛЬ: списки нужны ровно тем сервисам, которые
+# уходят в WARP, значит туннель к этому моменту уже поднят, а GitHub у аудитории кнопки часто
+# закрыт. Не скачалось вовсе — берётся список из пакета: хуже свежего, но лучше никакого.
+ST_LISTS_MANIFEST="https://github.com/xyzmean/splify2-lists/releases/latest/download/lists.json"
+ST_SRS_FALLBACK="https://github.com/itdoginfo/allow-domains/releases/latest/download"
+
+_st_fetch() { # URL ФАЙЛ — напрямую, потом через туннель
+	curl -fsSL --connect-timeout 6 --max-time 60 -o "$2" "$1" 2>/dev/null && [ -s "$2" ] && return 0
+	local i
+	i="$(_st_warp_first)"
+	[ -d "/sys/class/net/$i" ] &&
+		curl -fsSL --interface "$i" --connect-timeout 6 --max-time 60 -o "$2" "$1" 2>/dev/null && [ -s "$2" ]
+}
+
+_st_srs_url() { # НАБОР -> ссылка из каталога или «последний релиз» издателя
+	local m="$ST_RUN/lists.json" u=""
+	[ -s "$m" ] || _st_fetch "$ST_LISTS_MANIFEST" "$m" || rm -f "$m"
+	[ -s "$m" ] && u=$(grep -o '"url"[[:space:]]*:[[:space:]]*"[^"]*/allow-domains/releases/download/[^"]*/'"$1"'\.srs"' "$m" |
+		head -n1 | sed 's/.*"\(https[^"]*\)"$/\1/')
+	echo "${u:-$ST_SRS_FALLBACK/$1.srs}"
+}
+
+# Набор -> $ST_DIR/lists/НАБОР.dom / .pfx / .meta. Код 0 — разложен.
+_st_srs_get() { # НАБОР
+	local d="$ST_DIR/lists" f
+	mkdir -p "$d"
+	[ -f "$ST_RUN/srs.$1.done" ] && return 0
+	f="$ST_RUN/$1.srs"
+	_st_fetch "$(_st_srs_url "$1")" "$f" || return 1
+	steer srs-read "$f" --out "$d/$1.dom.tmp" --prefixes-out "$d/$1.pfx.tmp" --meta-out "$d/$1.meta.tmp" >/dev/null 2>&1 || {
+		rm -f "$f" "$d/$1".*.tmp; return 1; }
+	for x in dom pfx meta; do touch "$d/$1.$x.tmp"; mv "$d/$1.$x.tmp" "$d/$1.$x"; done
+	rm -f "$f"
+	touch "$ST_RUN/srs.$1.done"
+}
+
+# Каналы сервиса в спеке: печатает JSON-объекты через запятую (без внешних скобок).
+_st_svc_channels() { # ID
+	local id="$1" name sets set dom="" pfx="" narrow="" f proto ports ch="" sep=""
+	name="$(_rb_svc_field "$id" 2)"
+	sets="$(_rb_svc_field "$id" 8 | tr ',' ' ')"
+	for set in $sets; do
+		# Один набор на несколько сервисов (Instagram и WhatsApp — оба meta) — в спеку один раз.
+		# Пометка файлом: функцию зовут в подоболочке, переменная оттуда не возвращается.
+		[ -f "$ST_RUN/used.$set" ] && continue
+		if _st_srs_get "$set"; then
+			touch "$ST_RUN/used.$set"
+			f="$ST_DIR/lists/$set"
+			[ -s "$f.dom" ] && dom="$dom${dom:+,}\"$f.dom\""
+			if [ -s "$f.pfx" ]; then
+				if [ -s "$f.meta" ]; then narrow="$narrow $set"; else pfx="$pfx${pfx:+,}\"$f.pfx\""; fi
+			fi
+		else
+			_rb_warn "Список $set не скачался — беру список из пакета" >&2
+			sets=""
+			break
+		fi
+	done
+	# Ни одного набора или набор не скачался — списки из пакета.
+	if [ -z "$sets" ]; then
+		dom="$(_st_json_list "$(_rb_svc_field "$id" 3 | tr ',' ' ')")"
+		pfx="$(_st_json_list "$(_rb_svc_field "$id" 4 | tr ',' ' ')")"
+		narrow=""
+	fi
+	[ -n "$dom" ] && { ch="$ch$sep{\"name\":\"$name\",\"out\":\"zm_warp\",\"match\":{\"domains_files\":[$dom]}}"; sep=","; }
+	[ -n "$pfx" ] && { ch="$ch$sep{\"name\":\"$name (адреса)\",\"out\":\"zm_warp\",\"match\":{\"prefixes_files\":[$pfx]}}"; sep=","; }
+	# Подсети с сужением — отдельным каналом с протоколом и портами (схема 2): без сужения
+	# в туннель ушёл бы весь TCP к подсетям Cloudflare, а не только голос Discord.
+	for set in $narrow; do
+		f="$ST_DIR/lists/$set"
+		proto=$(sed -n 's/^proto=//p' "$f.meta" | head -n1)
+		ports=$(sed -n 's/^ports=//p' "$f.meta" | head -n1 | sed 's/,/","/g')
+		ch="$ch$sep{\"name\":\"$name (голос)\",\"out\":\"zm_warp\",\"match\":{\"prefixes_files\":[\"$f.pfx\"]${proto:+,\"proto\":\"$proto\"}${ports:+,\"ports\":[\"$ports\"]}}}"
+		sep=","
+	done
+	printf '%s' "$ch"
+}
 
 # ── спека steer ──
 
@@ -5202,21 +5427,19 @@ _st_json_list() { # файлы через пробел -> "a","b"
 }
 
 _st_spec_build() { # ID... -> JSON в stdout
-	local id name dom pre match chans="" sep=""
+	local id c chans="" schema=1 devs
+	rm -f "$ST_RUN"/used.*
+	mkdir -p "$ST_RUN"
 	for id in "$@"; do
-		name="$(_rb_svc_field "$id" 2)"
-		dom="$(_st_json_list "$(_rb_svc_field "$id" 3 | tr ',' ' ')")"
-		pre="$(_st_json_list "$(_rb_svc_field "$id" 4 | tr ',' ' ')")"
-		match=""
-		[ -n "$dom" ] && match="\"domains_files\":[$dom]"
-		[ -n "$pre" ] && match="$match${match:+,}\"prefixes_files\":[$pre]"
-		[ -n "$match" ] || continue
-		chans="$chans$sep{\"name\":\"$name\",\"out\":\"zm_warp\",\"match\":{$match}}"
-		sep=","
+		c="$(_st_svc_channels "$id")"
+		[ -n "$c" ] && chans="$chans${chans:+,}$c"
 	done
 	[ -n "$chans" ] || return 1
-	printf '{"schema":1,"lan_devices":["br-lan"],"outputs":{"zm_warp":{"kind":"interface","devices":["%s"],"on_fail":"direct"}},"channels":[%s]}\n' \
-		"$ST_WARP_IF" "$chans"
+	case "$chans" in *'"ports"'*|*'"proto"'*) schema=2 ;; esac
+	devs="$(awk '{printf "%s\"%s\"", (NR > 1 ? "," : ""), $1}' "$ST_WARP_UP" 2>/dev/null)"
+	[ -n "$devs" ] || devs="\"$ST_WARP_IF\""
+	printf '{"schema":%s,"lan_devices":["br-lan"],"outputs":{"zm_warp":{"kind":"interface","devices":[%s],"prefer":"latency","on_fail":"direct"}},"channels":[%s]}\n' \
+		"$schema" "$devs" "$chans"
 }
 
 _st_spec_apply() { # ID...
@@ -5266,7 +5489,9 @@ _st_kick() {
 # превращаются в правила. Побеждает тот, кто зарегистрировался раньше, а проигравший молчит.
 _st_dns_conflict() {
 	[ -f /etc/config/https-dns-proxy ] || return 1
-	pidof https-dns-proxy >/dev/null 2>&1 || return 1
+	# Служба самого пакета, а не любой процесс https-dns-proxy: свой экземпляр для ИИ-сервисов
+	# (zm-geodns) порт 53 не трогает, и принимать его за перехват было бы ложной тревогой.
+	/etc/init.d/https-dns-proxy running >/dev/null 2>&1 || return 1
 	_st_owns "steer-spec" || return 1
 	# Ключа нет — у прокси умолчание единица.
 	[ "$(uci -q get https-dns-proxy.config.force_dns)" != "0" ]
@@ -5275,7 +5500,9 @@ _st_dns_conflict() {
 # Перехват порта 53 DoH включён — независимо от того, стоят ли уже наши правила.
 _st_doh_force_on() {
 	[ -f /etc/config/https-dns-proxy ] || return 1
-	pidof https-dns-proxy >/dev/null 2>&1 || return 1
+	# Служба самого пакета, а не любой процесс https-dns-proxy: свой экземпляр для ИИ-сервисов
+	# (zm-geodns) порт 53 не трогает, и принимать его за перехват было бы ложной тревогой.
+	/etc/init.d/https-dns-proxy running >/dev/null 2>&1 || return 1
 	[ "$(uci -q get https-dns-proxy.config.force_dns)" != "0" ]
 }
 
@@ -5285,7 +5512,9 @@ _st_doh_unforce() {
 	uci -q get https-dns-proxy.config >/dev/null 2>&1 || uci set https-dns-proxy.config=main
 	uci set https-dns-proxy.config.force_dns='0'
 	uci commit https-dns-proxy
-	/etc/init.d/https-dns-proxy restart >/dev/null 2>&1
+	# Перезапуск — только работающей службы: остановленную (так её оставляет автообход, если
+	# поставил пакет сам) restart поднял бы и отдал бы ей dnsmasq.
+	/etc/init.d/https-dns-proxy running >/dev/null 2>&1 && /etc/init.d/https-dns-proxy restart >/dev/null 2>&1
 }
 
 do_steer_dns_fix() {
@@ -5339,7 +5568,8 @@ _st_cron_set() { # off | every:N | daily:H
 _st_down() {
 	/etc/init.d/steer stop >/dev/null 2>&1
 	/etc/init.d/steer disable >/dev/null 2>&1
-	_st_owns "net $ST_WARP_IF" && ifdown "$ST_WARP_IF" >/dev/null 2>&1
+	local i
+	for i in $(_st_wifs_all); do _st_owns "net $i" && ifdown "$i" >/dev/null 2>&1; done
 }
 
 # Применить выбор: туннель и правила, или, если ничего не выбрано, всё выключить.
@@ -5370,7 +5600,7 @@ _st_selfcheck() {
 	local f="$ST_RUN/diag.json" n i v what why bad=0 trace
 	_rb_say "Проверяем, что всё работает"
 	if [ "$(_st_sel)" ]; then
-		trace="$(curl -s --interface "$ST_WARP_IF" --connect-timeout 5 --max-time 10 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)"
+		trace="$(curl -s --interface "$(_st_warp_first)" --connect-timeout 5 --max-time 10 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)"
 		case "$trace" in
 			*warp=on*|*warp=plus*) echo "[ OK ] Туннель WARP: трафик идёт через Cloudflare ($(echo "$trace" | sed -n 's/^colo=//p'))" ;;
 			*) echo "[FAIL] Туннель WARP: трафик через него не идёт"; bad=1 ;;
@@ -5477,17 +5707,8 @@ do_steer_warp_restart() {
 	_st_need_warp || return 1
 	rm -f "$ST_STOP_FLAG"
 	_rb_say "Перезапускаем туннель WARP"
-	_st_install_awg || return 1
-	ifup "$ST_WARP_IF" >/dev/null 2>&1
-	sleep 3
-	local colo=""
-	if _st_warp_handshake && colo="$(_st_warp_colo)" && [ -n "$colo" ]; then
-		echo "$colo" > "$ST_DIR/warp.colo"
-		_rb_say "Туннель WARP работает, колония $colo"
-	else
-		_rb_warn "Точка входа не отвечает — подбираем новую"
-		_st_warp_up repick || return 1
-	fi
+	# Живые туннели оставляются как есть, умершие подбираются заново (см. _st_warp_up).
+	_st_warp_up || return 1
 	_st_kick
 	_rb_say "Готово"
 }
@@ -5505,19 +5726,26 @@ do_steer_warp_recreate() {
 	_st_phase warp
 	_st_need_warp || return 1
 	rm -f "$ST_STOP_FLAG"
-	local host port
-	host="$(uci -q get "network.${ST_WARP_IF}_peer.endpoint_host")"
-	port="$(uci -q get "network.${ST_WARP_IF}_peer.endpoint_port")"
+	local n c host port
 	_rb_say "Пересоздаём WARP с новыми ключами"
-	mv "$ST_WARP_CONF" "$ST_WARP_CONF.old"
-	if ! _st_warp_register; then
-		mv "$ST_WARP_CONF.old" "$ST_WARP_CONF"
-		echo "ОШИБКА: не удалось получить новые ключи — оставляем прежние"
-		return 1
-	fi
-	rm -f "$ST_WARP_CONF.old"
-	_st_warp_iface_write "${host:-engage.cloudflareclient.com}" "${port:-4500}"
-	_st_warp_up || return 1
+	n=1
+	while [ "$n" -le "$ST_WARP_N" ]; do
+		c="$(_st_wconf "$n")"
+		[ -f "$c" ] && mv "$c" "$c.old"
+		if ! _st_with "$n" _st_warp_register; then
+			[ -f "$c.old" ] && mv "$c.old" "$c"
+			[ "$n" = 1 ] && { echo "ОШИБКА: не удалось получить новые ключи — оставляем прежние"; return 1; }
+			_rb_warn "WARP $n: новых ключей нет — оставляем прежние"
+		else
+			rm -f "$c.old"
+			host="$(uci -q get "network.$(_st_wif "$n")_peer.endpoint_host")"
+			port="$(uci -q get "network.$(_st_wif "$n")_peer.endpoint_port")"
+			_st_with "$n" _st_warp_iface_write "${host:-162.159.192.1}" "${port:-2408}"
+		fi
+		n=$((n + 1))
+	done
+	ubus call network reload >/dev/null 2>&1
+	_st_warp_up repick || return 1
 	_st_kick
 	_rb_say "Готово, WARP пересоздан"
 }
@@ -5527,13 +5755,15 @@ do_steer_remove() {
 	_rb_say "Удаляем steer и туннель WARP"
 	_st_spec_clear
 	/etc/init.d/steer stop >/dev/null 2>&1
-	if _st_owns "net $ST_WARP_IF"; then
-		ifdown "$ST_WARP_IF" >/dev/null 2>&1
-		uci -q delete "network.$ST_WARP_IF"
-		uci -q delete "network.${ST_WARP_IF}_peer"
-		uci commit network
-		/etc/init.d/network reload >/dev/null 2>&1
-	fi
+	local wi netrl=0
+	for wi in $(_st_wifs_all); do
+		_st_owns "net $wi" || continue
+		ifdown "$wi" >/dev/null 2>&1
+		uci -q delete "network.$wi"
+		uci -q delete "network.${wi}_peer"
+		netrl=1
+	done
+	[ "$netrl" = 1 ] && { uci commit network; /etc/init.d/network reload >/dev/null 2>&1; }
 	if _st_owns "fw $ST_WARP_ZONE"; then
 		uci -q delete "firewall.$ST_WARP_ZONE"
 		uci -q delete "firewall.${ST_WARP_ZONE}_fwd"
@@ -5571,17 +5801,28 @@ steer_status() {
 	blk="$(_st_blocker)"
 	_st_installed && installed=true
 	[ -f "$ST_OFF" ] && off=true
-	[ -f "$ST_DIR/warp.colo" ] && colo=$(cat "$ST_DIR/warp.colo")
-	[ -d "/sys/class/net/$ST_WARP_IF" ] && warp_up=true
+	# Колонии живых туннелей через запятую, лучший первым; «работает» — если жив хоть один.
+	if [ -s "$ST_WARP_UP" ]; then
+		colo=$(while read -r w k; do [ -d "/sys/class/net/$w" ] && printf '%s\n' "$k"; done < "$ST_WARP_UP" | tr '\n' ',' | sed 's/,$//; s/,/, /g')
+		[ -n "$colo" ] && warp_up=true
+	elif [ -f "$ST_DIR/warp.colo" ]; then
+		colo=$(cat "$ST_DIR/warp.colo")
+		[ -d "/sys/class/net/$ST_WARP_IF" ] && warp_up=true
+	fi
 	if _st_owns "net $ST_WARP_IF"; then
 		host="$(uci -q get "network.${ST_WARP_IF}_peer.endpoint_host")"
 		port="$(uci -q get "network.${ST_WARP_IF}_peer.endpoint_port")"
 	fi
 	if [ "$warp_up" = true ] && command -v awg >/dev/null 2>&1; then
-		hs=$(_st_warp_hs_epoch)
+		# Свежайшее рукопожатие и суммарный трафик по всем живым туннелям.
+		for w in $(_st_wifs_all); do
+			[ -d "/sys/class/net/$w" ] || continue
+			k=$(awg show "$w" latest-handshakes 2>/dev/null | awk '{print $2; exit}')
+			[ "${k:-0}" -gt "${hs:-0}" ] 2>/dev/null && hs="$k"
+			set -- $(awg show "$w" transfer 2>/dev/null | head -n1)
+			rx=$((rx + ${2:-0})); tx=$((tx + ${3:-0}))
+		done
 		[ -n "$hs" ] && [ "$hs" != 0 ] && age=$(( $(date +%s) - hs ))
-		set -- $(awg show "$ST_WARP_IF" transfer 2>/dev/null | head -n1)
-		rx="${2:-0}"; tx="${3:-0}"
 	fi
 	if command -v steer >/dev/null 2>&1; then
 		ver="$(_st_steer_ver)"
@@ -5660,7 +5901,7 @@ steer_action() {
 		diag)
 			local trace warp="none" colo=""
 			if _st_installed && [ -n "$(_st_sel)" ] && [ ! -f "$ST_OFF" ]; then
-				trace="$(curl -s --interface "$ST_WARP_IF" --connect-timeout 4 --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)"
+				trace="$(curl -s --interface "$(_st_warp_first)" --connect-timeout 4 --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)"
 				case "$trace" in *warp=on*|*warp=plus*) warp=on ;; *) warp=off ;; esac
 				colo="$(echo "$trace" | sed -n 's/^colo=//p')"
 			fi
@@ -5717,6 +5958,7 @@ RB_PROBE_DOH=""
 # тот самый, по которому общий zapret пропускает пакет мимо себя (DESYNC_MARK). Так проба
 # «без обхода» не требует останавливать zapret всей сети.
 RB_LANE_DIRECT="21000-21199"
+RB_SYS_DNS=""
 RB_PARALLEL=8
 RB_BAR=60
 
@@ -5751,7 +5993,13 @@ _rb_probe_nft_up() {
 	}
 	RBNFT
 }
-_rb_probe_nft_down() { nft delete table inet zm_rb_probe >/dev/null 2>&1; }
+_rb_probe_nft_down() {
+	nft delete table inet zm_rb_probe >/dev/null 2>&1
+	# Изоляция подбора zapret — тоже здесь: снимается тем же trap при любом выходе.
+	[ -s "$RB_RUN/zt.nfqws.pid" ] && kill "$(cat "$RB_RUN/zt.nfqws.pid")" 2>/dev/null
+	rm -f "$RB_RUN/zt.nfqws.pid"
+	nft delete table inet zm_rb_ztest >/dev/null 2>&1
+}
 
 _rb_doh_pick() {
 	local u
@@ -5764,10 +6012,11 @@ _rb_doh_pick() {
 _rb_check_one() { # ХОСТ РЕЖИМ(as_is|direct|warp) ОТКАЗ ФАЙЛ_УСПЕХОВ
 	local host="$1" mode="$2" deny="$3" okf="$4" body res code size rc extra=""
 	body="$RB_RUN/body.$$.$host"
-	[ -n "$RB_PROBE_DOH" ] && extra="--doh-url $RB_PROBE_DOH"
+	# Свой DNS — для всех, кроме ИИ-сервисов: их открывает именно системный (geo-резолвер).
+	[ -n "$RB_PROBE_DOH" ] && [ -z "$RB_SYS_DNS" ] && extra="--doh-url $RB_PROBE_DOH"
 	case "$mode" in
 		direct) extra="$extra --local-port $RB_LANE_DIRECT" ;;
-		warp)   extra="$extra --interface $ST_WARP_IF" ;;
+		warp)   extra="$extra --interface $(_st_warp_first)" ;;
 	esac
 	res=$(curl -sL $extra --connect-timeout 4 --max-time 8 --speed-time 4 --speed-limit 1 --range 0-65535 \
 		-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o "$body" -w '%{http_code} %{size_download}' "https://$host/" 2>/dev/null)
@@ -5825,7 +6074,8 @@ _rb_check_service() { # ID РЕЖИМ -> код 0, если сервис раб�
 _rb_check_all() { # РЕЖИМ [ПОДПИСЬ]
 	local id
 	for id in $(_rb_svc_ids); do
-		[ "$id" = telegram ] && continue
+		# Telegram и ИИ-сервисы проверяются своими шагами.
+		case "$id" in telegram|geoblock) continue ;; esac
 		_rb_stopped && return 0
 		if _rb_check_service "$id" "$1"; then
 			echo "$id ok"
@@ -5896,7 +6146,7 @@ _rb_tg_ok() {
 }
 
 
-# ── zapret: подбор тестером менеджера ──
+# ── zapret: подбор ──
 
 # Применить победителя теста функциями менеджера.
 _rb_zapret_apply() { # ИМЯ
@@ -5909,29 +6159,171 @@ _rb_zapret_apply() { # ИМЯ
 	return 1
 }
 
+# ── подбор zapret В ИЗОЛЯЦИИ ──
+#
+# Кандидаты и цели — менеджерские (_test_build_candidates, _test_prepare_urls, _test_yt_urls),
+# способ проверки — нет. Тестер ZM переписывает /etc/config/zapret каждой стратегией и
+# перезапускает обход: все минуты подбора клиентам сети достаётся то одна случайная
+# стратегия, то другая. Здесь /etc/config/zapret и общий обход не трогаются вовсе: клиенты
+# живут на прежней стратегии (или без обхода, если его не было) до конца подбора, а каждая
+# стратегия мерится СВОИМ экземпляром nfqws на СВОЕЙ очереди, куда попадает только
+# собственный трафик проверки. Устройство — то же, что у тестера splify2
+# (splify2-zapret-test), он объясняет каждое правило; здесь коротко:
+#   - наш трафик — по диапазону исходящих портов (curl --local-port), ниже эфемерных;
+#   - метка 0x40000000 после очереди — чтобы общий zapret его пропустил;
+#   - свой обработчик с --dpi-desync-fwmark=0x60000000, своя predefrag;
+#   - контроль «без Zapret» — тот же путь без обработчика (у очереди bypass).
+# Победитель уходит клиентам один раз, в конце, функциями менеджера (strategy_set_*).
+RB_ZT_QUEUE=8397
+RB_ZT_TABLE=zm_rb_ztest
+RB_ZT_LO=20000
+RB_ZT_HI=20999
+RB_ZT_PID="$RB_RUN/zt.nfqws.pid"
+RB_ZT_NFQWS=/opt/zapret/nfq/nfqws
+
+_rb_zt_rules_up() {
+	nft delete table inet "$RB_ZT_TABLE" >/dev/null 2>&1
+	nft -f - <<-RBZT
+	table inet $RB_ZT_TABLE {
+		chain out {
+			type filter hook output priority mangle + 5; policy accept;
+			meta mark and 0x20000000 == 0x20000000 counter return
+			tcp sport $RB_ZT_LO-$RB_ZT_HI tcp dport { 80, 443, 2053, 2083, 2087, 2096, 8443 } ct original packets 1-9 counter queue num $RB_ZT_QUEUE bypass
+		}
+		chain skip {
+			type filter hook output priority mangle + 6; policy accept;
+			tcp sport $RB_ZT_LO-$RB_ZT_HI meta mark set mark or 0x40000000
+		}
+		chain in {
+			type filter hook prerouting priority mangle; policy accept;
+			tcp dport $RB_ZT_LO-$RB_ZT_HI tcp sport { 80, 443, 2053, 2083, 2087, 2096, 8443 } ct reply packets 1-3 counter queue num $RB_ZT_QUEUE bypass
+		}
+		chain predefrag {
+			type filter hook output priority -401; policy accept;
+			meta mark and 0x40000000 != 0x00000000 jump predefrag_nfqws
+		}
+		chain predefrag_nfqws {
+			meta mark and 0x20000000 != 0x00000000 notrack
+			ip frag-off and 0x1fff != 0x0 notrack
+			exthdr frag exists notrack
+			tcp flags ! syn,rst,ack notrack
+		}
+	}
+	RBZT
+}
+
+_rb_zt_stop_nfqws() {
+	[ -s "$RB_ZT_PID" ] && kill "$(cat "$RB_ZT_PID")" 2>/dev/null
+	rm -f "$RB_ZT_PID"
+}
+
+_rb_zt_down() { _rb_zt_stop_nfqws; nft delete table inet "$RB_ZT_TABLE" >/dev/null 2>&1; }
+
+# Проверить набор «имя|ссылка» с портов изоляции. Печатает «удачи всего».
+_rb_zt_check() { # ФАЙЛ_ЦЕЛЕЙ
+	local okf="$RB_RUN/zt.ok" run=0 e total
+	: > "$okf"
+	total=$(grep -c '|' "$1")
+	while IFS= read -r e; do
+		[ -n "$e" ] || continue
+		_rb_stopped && break
+		(
+			curl -sL --local-port "$RB_ZT_LO-$RB_ZT_HI" ${RB_PROBE_DOH:+--doh-url "$RB_PROBE_DOH"} \
+				--connect-timeout 4 --max-time 6 --speed-time 3 --speed-limit 1 --range 0-65535 \
+				-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o /dev/null "${e#*|}" >/dev/null 2>&1 &&
+				echo 1 >> "$okf"
+		) &
+		run=$((run + 1))
+		if [ "$run" -ge "$RB_PARALLEL" ]; then wait; run=0; fi
+	done < "$1"
+	wait
+	echo "$(wc -l < "$okf" | tr -d ' ') $total"
+	rm -f "$okf"
+}
+
+# Одна стратегия: поднять обработчик с её ключами, промерить, снять. -1 — не поднялась.
+_rb_zt_one() { # ФАЙЛ_БЛОКА ФАЙЛ_ЦЕЛЕЙ
+	# Аргументы — сразу в переменные: ниже `set --` собирает ключи стратегии в позиционные
+	# параметры и затирает $1 и $2.
+	local blk="$1" tgt="$2" l opts="$RB_RUN/zt.opts" pid
+	grep -v '^[[:space:]]*#' "$blk" | grep -v '^[[:space:]]*$' > "$opts"
+	[ -s "$opts" ] || { echo "-1 0"; return; }
+	set --
+	while IFS= read -r l || [ -n "$l" ]; do set -- "$@" "$l"; done < "$opts"
+	# Ключи — до запуска: негодная стратегия иначе даёт мгновенно умерший процесс и «ноль из
+	# полусотни», неотличимый от «не работает».
+	"$RB_ZT_NFQWS" --dry-run --qnum="$RB_ZT_QUEUE" "$@" >/dev/null 2>&1 || { echo "-1 0"; return; }
+	"$RB_ZT_NFQWS" --qnum="$RB_ZT_QUEUE" --dpi-desync-fwmark=0x60000000 "$@" >/dev/null 2>&1 &
+	pid=$!
+	echo "$pid" > "$RB_ZT_PID"
+	sleep 1
+	kill -0 "$pid" 2>/dev/null || { rm -f "$RB_ZT_PID"; echo "-1 0"; return; }
+	_rb_zt_check "$tgt"
+	kill "$pid" 2>/dev/null
+	wait "$pid" 2>/dev/null
+	rm -f "$RB_ZT_PID"
+}
+
+# Прогон режима менеджера (v | v_flowseal | youtube). Пишет результаты в формате тестера ZM
+# («имя → удачи/всего», первой строкой контроль) и печатает путь к файлу.
+_rb_ztest() { # РЕЖИМ
+	local mode="$1" cand="$RB_RUN/zt.cand" urls="$RB_RUN/zt.urls" res="$RB_RUN/zt.res.$1" lines total cur=0 start next r ok tot name
+	[ -x "$RB_ZT_NFQWS" ] || return 1
+	_add_gp_domains
+	_refresh_exclude_file
+	echo "   Собираем стратегии" >&2
+	_test_build_candidates "$mode" "$cand"
+	[ -s "$cand" ] || return 1
+	echo "   Собираем адреса для проверки" >&2
+	if [ "$mode" = youtube ]; then _test_yt_urls > "$urls"; else _test_prepare_urls "$urls"; fi
+	total=$(grep -c '^#' "$cand")
+	echo "   Стратегий в подборе: $total" >&2
+	_rb_zt_rules_up
+	echo "   Проверяем, что открывается без Zapret" >&2
+	r="$(_rb_zt_check "$urls")"
+	echo "      открылось ${r% *} из ${r#* }" >&2
+	echo "Контрольный тест (Zapret выключен) → ${r% *}/${r#* }" > "$res"
+	lines=$(grep -n '^#' "$cand" | cut -d: -f1)
+	for start in $lines; do
+		_rb_stopped && break
+		cur=$((cur + 1))
+		next=$(printf '%s\n' "$lines" | awk -v s="$start" '$1 > s {print; exit}')
+		if [ -n "$next" ]; then sed -n "${start},$((next - 1))p" "$cand" > "$RB_RUN/zt.block"
+		else sed -n "${start},\$p" "$cand" > "$RB_RUN/zt.block"; fi
+		name=$(head -n1 "$RB_RUN/zt.block"); name="${name#\#}"
+		echo "   [$cur/$total] $name" >&2
+		r="$(_rb_zt_one "$RB_RUN/zt.block" "$urls")"
+		ok="${r% *}"; tot="${r#* }"
+		if [ "$ok" = -1 ]; then echo "      не запустилась" >&2; continue; fi
+		echo "      открылось $ok из $tot" >&2
+		echo "$name → $ok/$tot" >> "$res"
+	done
+	_rb_zt_down
+	# По числу удач, лучшие первыми. Разделитель «→» многобайтный — sort -t его не примет.
+	{ head -n1 "$res"; tail -n +2 "$res" | awk '{ n = $0; sub(/.* → /, "", n); split(n, a, "/"); print a[1] "\t" $0 }' |
+		sort -rn | cut -f2-; } > "$res.s" && mv "$res.s" "$res"
+	echo "$res"
+}
+
 _rb_result_num() { printf '%s\n' "$1" | sed -n 's/.* → \([0-9]*\)\/.*/\1/p'; }
 
-# Прогнать тестер. Печатает имя лучшей стратегии, если она лучше, чем без zapret.
+# Печатает «имя удачи» лучшей стратегии, если она открыла больше, чем без Zapret.
 _rb_zapret_pick() { # РЕЖИМ_ТЕСТА
-	local mode="$1" res best name ctrl bok
-	do_test_run "$mode" | _rb_test_progress >&2
-	res="$(_test_results_file "$mode")"
-	[ -s "$res" ] || return 1
-	best=$(grep -v '^Контрольный тест' "$res" | head -n1)
+	local res best ctrl bok
+	res="$(_rb_ztest "$1")" || return 1
+	best=$(tail -n +2 "$res" | head -n1)
 	[ -n "$best" ] || return 1
-	name="${best%% → *}"
 	bok=$(_rb_result_num "$best")
-	ctrl=$(_rb_result_num "$(grep '^Контрольный тест' "$res" | head -n1)")
+	ctrl=$(_rb_result_num "$(head -n1 "$res")")
 	[ -n "$bok" ] || return 1
 	[ -n "$ctrl" ] && [ "$bok" -le "$ctrl" ] && return 1
-	echo "$name $bok"
+	echo "${best%% → *} $bok"
 }
 
 _rb_youtube_pick() {
 	local res best name
-	do_test_run youtube | _rb_test_progress >&2
-	res="$(_test_results_file youtube)"
-	best=$(grep -v '^Контрольный тест' "$res" 2>/dev/null | head -n1)
+	res="$(_rb_ztest youtube)" || return 1
+	best=$(tail -n +2 "$res" | head -n1)
 	[ -n "$best" ] || return 1
 	name="${best%% → *}"
 	case "$name" in Yv[0-9]*) echo "$name" ;; *) return 1 ;; esac
@@ -5944,6 +6336,195 @@ _rb_result_write() { # ID СОСТОЯНИЕ
 	echo "$1|$2" >> "$RB_RESULTS"
 }
 
+
+# ── ИИ-сервисы: только DNS ──
+#
+# Геоблок не лечится ни стратегией zapret, ни туннелем: сервис смотрит, откуда пришли, и
+# открывает его только резолвер, выдающий адрес своего прокси. Поэтому проба здесь идёт
+# СИСТЕМНЫМ DNS — тем, что лечит, — а подбор zapret и WARP этот сервис не запускает.
+#
+# РЕЗОЛВЕР — ТОЛЬКО ДЛЯ ДОМЕНОВ СПИСКА, а не для всей сети. Список — тот, что публикует
+# dns.malw.link (файл hosts его репозитория: какие имена этот резолвер разблокирует); адреса к
+# ним отдаёт выбранный резолвер, а не файл, поэтому они не стареют вместе со списком. dnsmasq
+# получает свой файл `server=/домен/127.0.0.1#5055`, остальное разрешается как раньше.
+#
+# Резолвер крутится СВОИМ экземпляром https-dns-proxy (служба zm-geodns), а не секцией в
+# /etc/config/https-dns-proxy: та принадлежит человеку и странице DoH, и её dnsmasq_config_update
+# '*' увела бы в георезолвер вообще всё. Пакет, если его ставит кнопка, свою службу тут же
+# выключает — иначе он при установке сам забирает dnsmasq и порт 53 (проверено на 25.12.5).
+RB_GEO_PORT=5055
+RB_GEO_RESOLVER="$RB_DIR/geo.resolver"
+RB_GEO_DOMAINS="$RB_DIR/geo-domains.lst"
+RB_GEO_LIST_URLS="https://raw.githubusercontent.com/ImMALWARE/dns.malw.link/refs/heads/master/hosts https://cdn.jsdelivr.net/gh/ImMALWARE/dns.malw.link@master/hosts"
+RB_GEO_FALLBACK="chatgpt.com openai.com oaistatic.com oaiusercontent.com sora.com claude.ai anthropic.com claudeusercontent.com gemini.google.com aistudio.google.com generativelanguage.googleapis.com copilot.microsoft.com grok.com x.ai perplexity.ai"
+
+_rb_geo_how() {
+	if grep -qE '[[:space:]](chatgpt\.com|openai\.com)([[:space:]]|$)' /etc/hosts 2>/dev/null; then echo hosts
+	else echo doh; fi
+}
+
+# Проверить один резолвер: ответил ли он и жив ли прокси, адрес которого он выдал. Проба —
+# настоящий запрос к chatgpt.com через этот резолвер: curl спрашивает DoH и подключается к
+# выданному адресу. Печатает «время_мс id», если годится.
+_rb_geo_try() { # СТРОКА_doh.conf
+	local id url boot role host h port ip b res rc code t body
+	IFS='|' read -r id _t url boot role <<-EOF
+	$1
+	EOF
+	host=${url#https://}; host=${host%%/*}; h=${host%%:*}; port=443
+	case "$host" in *:*) port=${host##*:} ;; esac
+	# Имя самого резолвера разрешаем его bootstrap-серверами: DoH и нужен там, где системный
+	# DNS врёт.
+	ip=""
+	for b in $(echo "$boot" | tr ',' ' '); do
+		ip=$(nslookup "$h" "$b" 2>/dev/null | awk '/^Address/ && !/#/ && $2 !~ /:/ {print $2}' | tail -n1)
+		[ -n "$ip" ] && break
+	done
+	body="$RB_RUN/geo.$id"
+	res=$(curl -s --connect-timeout 5 --max-time 10 ${ip:+--resolve "$h:$port:$ip"} --doh-url "$url" \
+		-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o "$body" -w '%{http_code} %{time_total}' https://chatgpt.com/ 2>/dev/null)
+	rc=$?
+	code="${res%% *}"; t="${res##* }"
+	if [ "$rc" = 0 ] && [ "$code" != 000 ] && ! grep -qiE "$(_rb_svc_field geoblock 7 | sed 's/,/|/g')" "$body" 2>/dev/null; then
+		echo "$t $id" | awk '{printf "%d %s\n", $1 * 1000, $2}'
+	fi
+	rm -f "$body"
+}
+
+# Лучший резолвер пула — самый быстрый из тех, чей прокси отвечает. Все проверяются сразу.
+_rb_geo_pick() {
+	local line out="$RB_RUN/geo.pick"
+	: > "$out"
+	while IFS= read -r line; do
+		case "$line" in ''|\#*) continue ;; esac
+		[ "$(echo "$line" | cut -d'|' -f5)" = geo ] || continue
+		( _rb_geo_try "$line" >> "$out" ) &
+	done < "$RB_SHARE/doh.conf"
+	wait
+	[ -s "$out" ] || return 1
+	sort -n "$out" | awk 'NR == 1 {print $2}'
+}
+
+# Список доменов: скачать (напрямую, потом через туннель), взять имена и свернуть поддомены
+# под родителя — dnsmasq-у `server=/example.com/` хватает на все поддомены.
+_rb_geo_domains() {
+	local u f="$RB_RUN/geo.hosts" ok=0
+	for u in $RB_GEO_LIST_URLS; do _st_fetch "$u" "$f" && grep -q '^[0-9]' "$f" && { ok=1; break; }; done
+	if [ "$ok" = 1 ]; then
+		awk '/^[0-9]/ {print tolower($2)}' "$f" | sort -u | awk '
+			{ d[NR] = $0; have[$0] = 1 }
+			END { for (i = 1; i <= NR; i++) { n = split(d[i], p, "."); c = 0
+				for (j = 2; j < n; j++) { s = p[j]; for (k = j + 1; k <= n; k++) s = s "." p[k]; if (s in have) { c = 1; break } }
+				if (!c) print d[i] } }' > "$RB_GEO_DOMAINS.tmp" && mv "$RB_GEO_DOMAINS.tmp" "$RB_GEO_DOMAINS"
+	fi
+	rm -f "$f"
+	[ -s "$RB_GEO_DOMAINS" ] || { printf '%s\n' $RB_GEO_FALLBACK > "$RB_GEO_DOMAINS"; _rb_warn "Список доменов не скачался — беру короткий список ИИ-сервисов"; }
+	_rb_say "Доменов для DNS ИИ-сервисов: $(grep -c . "$RB_GEO_DOMAINS")"
+}
+
+_rb_geo_enable() {
+	local id line
+	if [ ! -x /usr/sbin/https-dns-proxy ]; then
+		local had_conf=0
+		[ -s /etc/config/https-dns-proxy ] && had_conf=1
+		_rb_say "Устанавливаем https-dns-proxy"
+		$UPDATE >/dev/null 2>&1
+		$INSTALL https-dns-proxy >/dev/null 2>&1 || { echo "ОШИБКА: https-dns-proxy не установился"; return 1; }
+		_rb_own "pkg https-dns-proxy"
+		# Своя служба пакета при установке сама забирает dnsmasq. Если настройки до установки не
+		# было, это умолчание пакета — выключаем, stop возвращает dnsmasq как было. Если была —
+		# её писал человек (или страница DoH), и dnsmasq уже на неё смотрит: выключить службу
+		# значило бы оставить весь DNS роутера на мёртвых портах. Так и случилось на живом
+		# роутере, пока этой проверки не было.
+		if [ "$had_conf" = 0 ]; then
+			/etc/init.d/https-dns-proxy stop >/dev/null 2>&1
+			/etc/init.d/https-dns-proxy disable >/dev/null 2>&1
+		fi
+		_rb_rpcd_ensure
+	fi
+	_rb_say "Подбираем DNS для ИИ-сервисов"
+	id="$(_rb_geo_pick)" || { echo "!! Ни один DNS не открыл ИИ-сервисы"; return 1; }
+	line="$(grep "^$id|" "$RB_SHARE/doh.conf" | head -n1)"
+	_rb_say "Лучший: $(echo "$line" | cut -d'|' -f2)"
+	_rb_geo_domains
+	{
+		echo "GEO_ID='$id'"
+		echo "GEO_TITLE='$(echo "$line" | cut -d'|' -f2)'"
+		echo "GEO_URL='$(echo "$line" | cut -d'|' -f3)'"
+		echo "GEO_BOOT='$(echo "$line" | cut -d'|' -f4)'"
+	} > "$RB_GEO_RESOLVER"
+	_rb_own "svc zm-geodns"
+	/etc/init.d/zm-geodns enable >/dev/null 2>&1
+	/etc/init.d/zm-geodns restart >/dev/null 2>&1
+	# Экземпляру нужно время разрешить имя самого резолвера (bootstrap): первые секунды он
+	# молчит, и проверка сразу после запуска отвечала «не открывается».
+	local i=0
+	while [ "$i" -lt 20 ]; do
+		nslookup -type=a chatgpt.com "127.0.0.1:$RB_GEO_PORT" 2>/dev/null | grep -q '^Address: [0-9]' && break
+		sleep 1; i=$((i + 1))
+	done
+}
+
+# Снять DNS для ИИ-сервисов целиком: служба, файл dnsmasq, сторож, пакет, если его ставили мы.
+_rb_geo_off() {
+	_rb_geo_disable
+	rm -f /etc/init.d/zm-geodns.disabled "$RB_GEO_DOMAINS"
+	sed -i '/redbtn_geo_watch/d' "$CRON_FILE" 2>/dev/null && /etc/init.d/cron restart >/dev/null 2>&1
+	sed -i '/^svc zm-geodns$/d' "$RB_OWNED" 2>/dev/null
+	if _rb_owns "pkg https-dns-proxy"; then
+		$DELETE https-dns-proxy >/dev/null 2>&1
+		sed -i '/^pkg https-dns-proxy$/d' "$RB_OWNED"
+	fi
+	sed -i '/^geoblock|/d' "$RB_RESULTS" 2>/dev/null
+}
+
+_rb_geo_disable() {
+	/etc/init.d/zm-geodns stop >/dev/null 2>&1
+	/etc/init.d/zm-geodns disable >/dev/null 2>&1
+	rm -f "$RB_GEO_RESOLVER"
+}
+
+_rb_geo_ok() {
+	local ok=0
+	RB_SYS_DNS=1
+	_rb_check_service geoblock as_is && ok=1
+	RB_SYS_DNS=""
+	[ "$ok" = 1 ]
+}
+
+_rb_geo_step() {
+	_rb_say "Проверяем ИИ-сервисы"
+	if _rb_geo_ok; then
+		_rb_result_write geoblock "$( [ -s "$RB_GEO_RESOLVER" ] && echo doh || _rb_geo_how)"
+		echo "[ OK ] $(_rb_svc_field geoblock 2) — открывается"
+		return 0
+	fi
+	if _rb_geo_enable && _rb_geo_ok; then
+		_rb_result_write geoblock doh
+		echo "[ OK ] $(_rb_svc_field geoblock 2) — через DoH"
+		grep -q redbtn_geo_watch "$CRON_FILE" 2>/dev/null || {
+			echo "*/30 * * * * /opt/zapret-manager-luci/backend.sh redbtn_geo_watch >/dev/null 2>&1" >> "$CRON_FILE"
+			/etc/init.d/cron restart >/dev/null 2>&1; }
+	else
+		_rb_result_write geoblock none
+		echo "[FAIL] $(_rb_svc_field geoblock 2) — не открывается"
+	fi
+}
+
+# Кнопка «Подобрать DNS заново» и сторож раз в 30 минут: прокси резолвера может умереть.
+do_redbtn_geo_doh() {
+	_rb_geo_enable || { _rb_result_write geoblock none; return 1; }
+	if _rb_geo_ok; then _rb_result_write geoblock doh; _rb_say "Готово, ИИ-сервисы открываются"
+	else _rb_result_write geoblock none; echo "!! ИИ-сервисы не открываются"; fi
+}
+
+redbtn_geo_watch() {
+	[ -s "$RB_GEO_RESOLVER" ] || return 0
+	_rb_running && return 0
+	_rb_geo_ok && return 0
+	logger -t zm-redbtn "ИИ-сервисы перестали открываться — подбираю DNS заново"
+	do_redbtn_geo_doh >/dev/null 2>&1
+}
 
 # ── основной проход ──
 
@@ -5987,8 +6568,9 @@ do_redbtn_run() {
 		cp "$CONF" "$zbak"
 		local tmode=v
 		[ "$mode" = full ] && tmode=v_flowseal
-		_rb_say "Подбираем стратегию Zapret — это займёт несколько минут"
-		# Остановленный тестер возвращает настройку сам; его неполный победитель не применяем.
+		_rb_say "Подбираем стратегию Zapret — сеть работает на прежней настройке до конца подбора"
+		# Подбор идёт в изоляции: клиенты до конца на прежней настройке. Неполный победитель
+		# остановленного подбора не применяется.
 		if pick="$(_rb_zapret_pick "$tmode")" && ! _rb_stopped; then
 			name="${pick% *}"
 			_rb_say "Лучшая стратегия: $name (${pick#* } целей)"
@@ -6046,8 +6628,9 @@ do_redbtn_run() {
 		fi
 	done
 
-	# WARP — для того, что не открыл zapret, и только если установлен steer.
-	failed="$(_rb_failed "$before")"
+	# WARP — для того, что не открыл zapret, и только если установлен steer. ИИ-сервисы сюда
+	# не идут: геоблок снимает DNS, а не туннель (см. «ИИ-сервисы: только DNS»).
+	failed="$(_rb_failed "$before" | grep -vx geoblock)"
 	if [ -n "$failed" ] && _st_ready; then
 		_rb_phase warp
 		_rb_say "Не открылось: $(_rb_svc_names "$failed") — пробуем через WARP"
@@ -6079,6 +6662,10 @@ do_redbtn_run() {
 		for id in $failed; do _rb_result_write "$id" none; done
 		_rb_warn "Не открылось: $(_rb_svc_names "$failed"). Их можно пустить через WARP — установите steer на странице «steer»"
 	fi
+	_rb_stopped && { _rb_say "Остановлено"; return 0; }
+
+	_rb_phase geo
+	_rb_geo_step
 	_rb_stopped && { _rb_say "Остановлено"; return 0; }
 
 	_rb_phase telegram
@@ -6174,8 +6761,10 @@ redbtn_status() {
 		svc="$svc$sep{\"id\":\"$id\",\"name\":\"$(esc "$name")\",\"state\":\"$st\",\"warp\":$w}"
 		sep=","
 	done
-	printf '{"running":%s,"phase":"%s","last":"%s","blocker":"%s","steer":%s,"steer_busy":%s,"video":"%s","configured":%s,"services":[%s]}\n' \
-		"$running" "$(esc "$phase")" "$last" "$blk" "$steer" "$(_job_alive steer && echo true || echo false)" "$(esc "$video")" \
+	local geo=""
+	[ -s "$RB_GEO_RESOLVER" ] && geo=$(sed -n "s/^GEO_TITLE='\(.*\)'$/\1/p" "$RB_GEO_RESOLVER")
+	printf '{"running":%s,"phase":"%s","last":"%s","blocker":"%s","steer":%s,"steer_busy":%s,"video":"%s","geo_dns":"%s","configured":%s,"services":[%s]}\n' \
+		"$running" "$(esc "$phase")" "$last" "$blk" "$steer" "$(_job_alive steer && echo true || echo false)" "$(esc "$video")" "$(esc "$geo")" \
 		"$([ -s "$RB_LAST" ] && echo true || echo false)" "$svc"
 }
 
@@ -6196,6 +6785,15 @@ redbtn_action() {
 			;;
 		video_list) redbtn_video_list ;;
 		video_set)  redbtn_video_set "$mode" ;;
+		geo_doh)
+			_rb_running && { echo '{"error":"дождитесь окончания подбора"}'; return 1; }
+			job_start redbtn do_redbtn_geo_doh
+			;;
+		geo_off)
+			_rb_running && { echo '{"error":"дождитесь окончания подбора"}'; return 1; }
+			_rb_geo_off
+			printf '{"ok":true}\n'
+			;;
 		*) echo '{"error":"неизвестное действие"}' ;;
 	esac
 }
@@ -6276,6 +6874,7 @@ case "$cmd" in
 	health)                               health ;;
 	redbtn_status)                        redbtn_status ;;
 	redbtn_action)                        redbtn_action "$1" "$2" ;;
+	redbtn_geo_watch)                     redbtn_geo_watch ;;
 	steer_status)                         steer_status ;;
 	steer_action)                         steer_action "$1" "$2" ;;
 	bytetube_action)                      bytetube_action "$1" ;;
@@ -7266,6 +7865,8 @@ var STATES = {
 	zapret: { text: 'через Zapret', cls: 'zm-ok' },
 	warp:   { text: 'через WARP', cls: 'zm-ok' },
 	tgws:   { text: 'через веб-сокет', cls: 'zm-ok' },
+	doh:    { text: 'через DoH', cls: 'zm-ok' },
+	hosts:  { text: 'через hosts', cls: 'zm-ok' },
 	none:   { text: 'не открывается', cls: 'zm-bad' }
 };
 
@@ -7276,6 +7877,7 @@ var STEPS = [
 	{ id: 'zapret', label: 'Zapret' },
 	{ id: 'warp', label: 'WARP' },
 	{ id: 'steer', label: 'Правила' },
+	{ id: 'geo', label: 'ИИ-сервисы' },
 	{ id: 'telegram', label: 'Telegram' }
 ];
 
@@ -7285,9 +7887,10 @@ var PHASE_TEXT = {
 	zapret: 'Подбираем стратегию Zapret',
 	warp: 'Поднимаем туннель WARP',
 	steer: 'Применяем правила',
+	geo: 'Подбираем DNS для ИИ-сервисов',
 	telegram: 'Проверяем Telegram',
 };
-var RUN_PHASES = [ 'zapret_install', 'check', 'zapret', 'warp', 'steer', 'telegram' ];
+var RUN_PHASES = [ 'zapret_install', 'check', 'zapret', 'warp', 'steer', 'geo', 'telegram' ];
 
 var BLOCKERS = {
 	zapret2: 'Установлен Zapret2 — удалите его на странице Zapret2.'
@@ -7652,6 +8255,28 @@ return view.extend({
 					stateBadge(s)
 				]);
 			})));
+			// ИИ-сервисы открывает DNS, а не туннель: какой выбран и что с ним можно сделать.
+			var geo = (data.services || []).filter(function(s) { return s.id === 'geoblock'; })[0];
+			if (data.geo_dns)
+				svcCard.appendChild(E('div', { 'class': 'zm-row' }, [
+					E('span', { 'class': 'zm-label' }, 'DNS для ИИ-сервисов'),
+					E('span', {}, data.geo_dns)
+				]));
+			if (!busy && (data.geo_dns || (geo && geo.state === 'none'))) {
+				var geoActs = [
+					E('button', { 'class': 'cbi-button' + (data.geo_dns ? '' : ' cbi-button-positive'), 'click': function() {
+						act('geo_doh', '', 'Подбираем DNS для ИИ-сервисов');
+					} }, 'Подобрать DNS заново')
+				];
+				if (data.geo_dns) geoActs.push(E('button', { 'class': 'cbi-button cbi-button-remove', 'click': function() {
+					zm.redbtnAction('geo_off', '').then(function(res) {
+						if (res.error) { zm.toast(res.error, 'error'); return; }
+						zm.toast('DNS для ИИ-сервисов выключен', 'info');
+						return zm.redbtnStatus().then(function(r) { data = r || data; renderServices(); });
+					});
+				} }, 'Выключить'));
+				svcCard.appendChild(E('div', { 'class': 'zm-actions' }, geoActs));
+			}
 		}
 
 		// Не всё открылось, а steer не стоит — подсказываем, куда идти.
@@ -7662,7 +8287,7 @@ return view.extend({
 		function renderSteerHint() {
 			steerCard.innerHTML = '';
 			steerCard.style.display = 'none';
-			var bad = (data.services || []).filter(function(s) { return s.state === 'none' && !s.warp && s.id !== 'telegram'; });
+			var bad = (data.services || []).filter(function(s) { return s.state === 'none' && !s.warp && s.id !== 'telegram' && s.id !== 'geoblock'; });
 			if (busy || data.steer || !bad.length) return;
 			steerCard.style.display = '';
 			steerCard.appendChild(E('div', { 'class': 'zm-card' }, [
@@ -8249,7 +8874,7 @@ mkdir -p /usr/share/zm-redbtn/lists
 cat > '/usr/share/zm-redbtn/services.conf' << 'ZM_INSTALLER_EOF'
 # Сервисы автообхода. Каталог и цели — из BigRedButton (gitlab.com/xyzmean/brb).
 #
-# ФОРМАТ: id|название|списки доменов|списки адресов|обязательные цели|дополнительные цели|признак отказа
+# ФОРМАТ: id|название|списки доменов|списки адресов|обязательные цели|дополнительные цели|признак отказа|наборы
 #
 #   списки    — файлы в /usr/share/zm-redbtn/lists, через запятую; по ним движок уводит сервис в
 #               туннель. Адресные списки только там, где сервис ходит по адресам без DNS
@@ -8258,16 +8883,19 @@ cat > '/usr/share/zm-redbtn/services.conf' << 'ZM_INSTALLER_EOF'
 #   обязательные — цели, которые ОБЯЗАНЫ открыться все: у YouTube это видеоузел, у Discord —
 #               шлюз и узел обновлений (без него приложение висит на проверке обновлений).
 #   дополнительные — из них должно открыться не меньше RB_BAR процентов.
+#   наборы    — наборы .srs каталога splify2-lists (издатель itdoginfo), через запятую; по ним
+#               сервис уводится в туннель. Не скачались — списки из пакета (поля 3 и 4).
+#               У ИИ-сервисов списков туннеля нет: геоблок снимает DNS (см. zm-geodns), а не WARP.
 #   признак отказа — фразы в ответе, при которых сервис считается закрытым, хотя ответил
 #               (геоблок отвечает кодом 200 со страницей «недоступно в вашей стране»).
-youtube|YouTube|svc_youtube.lst||www.youtube.com,youtubei.googleapis.com,manifest.googlevideo.com|youtu.be,i.ytimg.com,i9.ytimg.com,yt3.ggpht.com,yt4.ggpht.com,jnn-pa.googleapis.com,signaler-pa.youtube.com,yt3.googleusercontent.com,rr4---sn-4g5e6nze.googlevideo.com,rr4---sn-5go7yner.googlevideo.com,rr5---sn-n8v7knez.googlevideo.com,rr2---sn-q4fl6ndl.googlevideo.com,rr1---sn-q4fl6n6y.googlevideo.com,rr14---sn-n8v7kn7r.googlevideo.com,rr4---sn-jvhnu5g-c35d.googlevideo.com,rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com,rr12---sn-gvnuxaxjvh-bvwz.googlevideo.com,rr1---sn-ug5onuxaxjvh-n8v6.googlevideo.com|
-discord|Discord|svc_discord.lst|discord.lst|discord.com,gateway.discord.gg,updates.discord.com|cdn.discordapp.com,media.discordapp.net|
-instagram|Instagram|svc_meta.lst|meta.lst|www.instagram.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com|
-whatsapp|WhatsApp|svc_meta.lst|whatsapp.lst|web.whatsapp.com|static.whatsapp.net,mmg.whatsapp.net|
-x|X (Twitter)|svc_twitter.lst|twitter_x.lst|x.com|twitter.com,abs.twimg.com,video.twimg.com|
-github|GitHub|own_github.lst||github.com,raw.githubusercontent.com,objects.githubusercontent.com|codeload.github.com,api.github.com,ghcr.io|
-geoblock|ИИ-сервисы|geoblock.lst||chatgpt.com|claude.ai,api.openai.com,gemini.google.com|App unavailable,unsupported_country,not available in your country,not available in your region
-telegram|Telegram|svc_telegram.lst|telegram.lst|web.telegram.org|t.me,core.telegram.org,telegra.ph|
+youtube|YouTube|svc_youtube.lst||www.youtube.com,youtubei.googleapis.com,manifest.googlevideo.com|youtu.be,i.ytimg.com,i9.ytimg.com,yt3.ggpht.com,yt4.ggpht.com,jnn-pa.googleapis.com,signaler-pa.youtube.com,yt3.googleusercontent.com,rr4---sn-4g5e6nze.googlevideo.com,rr4---sn-5go7yner.googlevideo.com,rr5---sn-n8v7knez.googlevideo.com,rr2---sn-q4fl6ndl.googlevideo.com,rr1---sn-q4fl6n6y.googlevideo.com,rr14---sn-n8v7kn7r.googlevideo.com,rr4---sn-jvhnu5g-c35d.googlevideo.com,rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com,rr12---sn-gvnuxaxjvh-bvwz.googlevideo.com,rr1---sn-ug5onuxaxjvh-n8v6.googlevideo.com||youtube
+discord|Discord|svc_discord.lst|discord.lst|discord.com,gateway.discord.gg,updates.discord.com|cdn.discordapp.com,media.discordapp.net||discord
+instagram|Instagram|svc_meta.lst|meta.lst|www.instagram.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com||meta
+whatsapp|WhatsApp|svc_meta.lst|whatsapp.lst|web.whatsapp.com|static.whatsapp.net,mmg.whatsapp.net||meta
+x|X (Twitter)|svc_twitter.lst|twitter_x.lst|x.com|twitter.com,abs.twimg.com,video.twimg.com||twitter
+github|GitHub|own_github.lst||github.com,raw.githubusercontent.com,objects.githubusercontent.com|codeload.github.com,api.github.com,ghcr.io||
+geoblock|ИИ-сервисы|||chatgpt.com|claude.ai,api.openai.com,gemini.google.com|App unavailable,unsupported_country,not available in your country,not available in your region|
+telegram|Telegram|svc_telegram.lst|telegram.lst|web.telegram.org|t.me,core.telegram.org,telegra.ph||telegram
 ZM_INSTALLER_EOF
 cat > '/usr/share/zm-redbtn/lists/svc_youtube.lst' << 'ZM_INSTALLER_EOF'
 ggpht.com
@@ -9422,6 +10050,80 @@ cat > '/usr/share/zm-redbtn/lists/twitter_x.lst' << 'ZM_INSTALLER_EOF'
 208.91.196.0/23
 ZM_INSTALLER_EOF
 chmod 0644 /usr/share/zm-redbtn/services.conf /usr/share/zm-redbtn/lists/*.lst
+cat > '/etc/init.d/zm-geodns' << 'ZM_INSTALLER_EOF'
+#!/bin/sh /etc/rc.common
+# DNS для ИИ-сервисов красной кнопки Zapret Manager: свой экземпляр https-dns-proxy на
+# 127.0.0.1:5055 и файл dnsmasq, который отдаёт ему ТОЛЬКО домены из списка
+# /etc/zm-redbtn/geo-domains.lst. Остальной DNS роутера не меняется.
+START=99
+STOP=10
+USE_PROCD=1
+
+RES=/etc/zm-redbtn/geo.resolver
+DOM=/etc/zm-redbtn/geo-domains.lst
+PORT=5055
+
+confdir() {
+	local d
+	d=$(sed -n 's/^conf-dir=\([^,]*\).*/\1/p' /var/etc/dnsmasq.conf.* 2>/dev/null | head -n 1)
+	[ -n "$d" ] || d=/tmp/dnsmasq.d
+	echo "$d"
+}
+
+dnsmasq_on() {
+	local d f
+	d="$(confdir)"; f="$d/zm-geo.conf"
+	mkdir -p "$d"
+	# По двадцать доменов в строке: dnsmasq понимает server=/a/b/c/адрес.
+	awk -v p="$PORT" 'NF { l = l "/" $1; if (++n == 20) { print "server=" l "/127.0.0.1#" p; l = ""; n = 0 } }
+		END { if (n) print "server=" l "/127.0.0.1#" p }' "$DOM" > "$f.tmp"
+	if cmp -s "$f.tmp" "$f"; then rm -f "$f.tmp"; else mv "$f.tmp" "$f"; /etc/init.d/dnsmasq restart >/dev/null 2>&1; fi
+}
+
+dnsmasq_off() {
+	local f
+	f="$(confdir)/zm-geo.conf"
+	[ -f "$f" ] || return 0
+	rm -f "$f"
+	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+}
+
+start_service() {
+	[ -s "$RES" ] && [ -s "$DOM" ] && [ -x /usr/sbin/https-dns-proxy ] || return 0
+	. "$RES"
+	procd_open_instance
+	procd_set_param command /usr/sbin/https-dns-proxy -a 127.0.0.1 -p "$PORT" -4 \
+		-b "$GEO_BOOT" -r "$GEO_URL" -u nobody -g nogroup
+	procd_set_param respawn 3600 5 0
+	procd_close_instance
+	dnsmasq_on
+}
+
+stop_service() {
+	dnsmasq_off
+}
+ZM_INSTALLER_EOF
+chmod 0755 /etc/init.d/zm-geodns
+cat > '/usr/share/zm-redbtn/doh.conf' << 'ZM_INSTALLER_EOF'
+# Резолверы для ИИ-сервисов. Пул geo — из BigRedButton (gitlab.com/xyzmean/brb) плюс dns.yo1nk.app.
+# Формат: id|название|ссылка DoH|bootstrap-серверы|роль. Берётся самый быстрый geo, чей прокси отвечает.
+yo1nk|dns.yo1nk.app|https://dns.yo1nk.app/dns-query|1.1.1.1,77.88.8.8|geo
+malw|dns.malw.link (снимает геоблок)|https://dns.malw.link/dns-query|1.1.1.1,8.8.8.8,77.88.8.8|geo
+malw_cf|dns.malw.link через Cloudflare|https://5u35p8m9i7.cloudflare-gateway.com/dns-query|1.1.1.1,8.8.8.8,77.88.8.8|geo
+comss|Comss.one|https://dns.comss.one/dns-query|1.1.1.1,77.88.8.8|geo
+comss_ru|Comss RU|https://dns.comss.ru/dns-query|1.1.1.1,77.88.8.8|geo
+mafioznik|Mafioznik|https://dns.mafioznik.com/dns-query|1.1.1.1,77.88.8.8|geo
+mafioznik_xyz|Mafioznik XYZ|https://dns.mafioznik.xyz/dns-query|1.1.1.1,77.88.8.8|geo
+astracat|AstraCat|https://dns.astrakat.ru/dns-query|1.1.1.1,77.88.8.8|geo
+astracat_8443|AstraCat :8443|https://dns.astrakat.ru:8443/dns-query|1.1.1.1,77.88.8.8|geo
+geohide|GeoHide :444|https://dns.geohide.ru:444/dns-query|1.1.1.1,77.88.8.8|geo
+geohide_8443|GeoHide :8443|https://dns.geohide.ru:8443/dns-query|1.1.1.1,77.88.8.8|geo
+xbox|Xbox DNS|https://xbox-dns.ru/dns-query|1.1.1.1,77.88.8.8|geo
+cloudflare|Cloudflare|https://cloudflare-dns.com/dns-query|1.1.1.1,1.0.0.1|plain
+google|Google|https://dns.google/dns-query|8.8.8.8,8.8.4.4|plain
+yandex|Яндекс (запасной, работает изнутри страны)|https://common.dot.dns.yandex.net/dns-query|77.88.8.8,77.88.8.1|fallback
+ZM_INSTALLER_EOF
+chmod 0644 /usr/share/zm-redbtn/doh.conf
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
 chmod 0755 /www/luci-static/resources/view/zapret-manager
