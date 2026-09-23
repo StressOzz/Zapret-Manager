@@ -1,19 +1,21 @@
 #!/bin/sh
 # Zapret Manager by StressOzz for LuCI installer
-# Version: 1.34
+# Version: 1.38
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
 echo -e "\n${MAGENTA}Устанавливаем Zapret Manager для LuCI${NC}"
 
-# Пока идёт подбор красной кнопки, переустанавливать нельзя: ниже стирается каталог задач, а с
+# Пока идёт автообход, переустанавливать нельзя: ниже стирается каталог задач, а с
 # ним журнал идущего подбора, и страница показывает пустой журнал до самого конца. Тестер при
 # этом меняет стратегии zapret, и обрывать его посередине значит оставить роутер на случайной.
-if [ -f /tmp/zapret-manager-luci/redbtn.pid ] && kill -0 "$(cat /tmp/zapret-manager-luci/redbtn.pid 2>/dev/null)" 2>/dev/null; then
-	echo -e "${YELLOW}Идёт подбор красной кнопки — дождитесь его окончания и запустите установку снова${NC}"
-	exit 1
-fi
+for _zm_job in redbtn steer; do
+	if [ -f /tmp/zapret-manager-luci/$_zm_job.pid ] && kill -0 "$(cat /tmp/zapret-manager-luci/$_zm_job.pid 2>/dev/null)" 2>/dev/null; then
+		echo -e "${YELLOW}Идёт автообход или операция steer — дождитесь окончания и запустите установку снова${NC}"
+		exit 1
+	fi
+done
 
 rm -rf \
 	/usr/lib/zapret-manager* \
@@ -61,7 +63,7 @@ chmod 0755 /opt/zapret-manager-luci
 cat > '/opt/zapret-manager-luci/backend.sh' << 'ZM_INSTALLER_EOF'
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.34"
+ZM_VERSION="1.38"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -1329,7 +1331,9 @@ rm -rf /opt/zapret-manager-luci /usr/libexec/rpcd/zapret-manager \
 	/www/luci-static/resources/bytetube \
 	/www/luci-static/resources/view/bytetube \
 	/tmp/zapret-manager-luci /tmp/luci-indexcache* /tmp/luci-modulecache/* \
-	/www/zm /www/zm-webui.html /usr/share/zm-redbtn 2>/dev/null
+	/www/zm /www/zm-webui.html 2>/dev/null
+# Списки автообхода нужны steer, пока его правила на месте: без них движок не поднимется.
+[ -s /etc/zm-steer/owned ] || [ -s /etc/zm-redbtn/owned ] || rm -rf /usr/share/zm-redbtn
 uci -q delete uhttpd.zmweb && uci -q commit uhttpd
 /etc/init.d/rpcd restart >/dev/null 2>&1
 /etc/init.d/uhttpd restart >/dev/null 2>&1
@@ -2203,7 +2207,7 @@ test_action() {
 				*) echo '{"error":"неизвестный режим теста"}'; return 1 ;;
 			esac
 			if [ -f "$JOBS_DIR/redbtn.pid" ] && kill -0 "$(cat "$JOBS_DIR/redbtn.pid" 2>/dev/null)" 2>/dev/null; then
-				echo '{"error":"идёт подбор красной кнопки — дождитесь его окончания"}'
+				echo '{"error":"идёт автообход — дождитесь его окончания"}'
 				return 1
 			fi
 			job_start strategy_test do_test_run "$mode"
@@ -3085,13 +3089,18 @@ health() {
 	if [ "$doh" = "2" ]; then pidof https-dns-proxy >/dev/null 2>&1 && doh=1; fi
 	out=$(hosts_status 2>/dev/null)
 	case "$out" in *'"enabled":true'*|*'"geohide":"'[a-z]*) hs=1 ;; esac
-	if [ -s /etc/zm-redbtn/owned ]; then
+	if [ -s /etc/zm-redbtn/last ]; then
 		rb=1
 		grep -q '|none$' /etc/zm-redbtn/services 2>/dev/null && rb=2
-		if grep -qx 'steer-spec' /etc/zm-redbtn/owned; then /etc/init.d/steer running >/dev/null 2>&1 || rb=2; fi
 	fi
-	printf '{"zapret":%s,"zapret2":%s,"bytetube":%s,"tg":%s,"mixomo":%s,"doh":%s,"hosts":%s,"redbtn":%s}\n' \
-		"$zr" "$zr2" "$bt" "$tg" "$mx" "$doh" "$hs" "$rb"
+	# steer: 1 — работает с правилами, 2 — установлен, но выключен или туннель не поднят.
+	local sr=0
+	if grep -qx 'net zmwarp' /etc/zm-steer/owned 2>/dev/null; then
+		sr=2
+		if grep -qx 'steer-spec' /etc/zm-steer/owned && /etc/init.d/steer running >/dev/null 2>&1 && [ -d /sys/class/net/zmwarp ]; then sr=1; fi
+	fi
+	printf '{"zapret":%s,"zapret2":%s,"bytetube":%s,"tg":%s,"mixomo":%s,"doh":%s,"hosts":%s,"redbtn":%s,"steer":%s}\n' \
+		"$zr" "$zr2" "$bt" "$tg" "$mx" "$doh" "$hs" "$rb" "$sr"
 }
 
 bytetube_installed() {
@@ -4719,78 +4728,24 @@ doh_set() {
 }
 
 
-# ───────────────────────── Красная кнопка ─────────────────────────
-#
-# Автоподбор обхода по сервисам: роутер сам проверяет каждый сервис и берёт ему самый дешёвый
-# работающий способ. Идея и каталог сервисов — из BigRedButton (gitlab.com/xyzmean/brb), но
-# ступень обхода DPI здесь своя, менеджерская: стратегию подбирает тестер Zapret Manager
-# (do_test_run) и применяет её его же функциями (strategy_set_*). Своего перебора с отдельными
-# экземплярами nfqws, как было в brb, здесь нет — у zapret на роутере один хозяин, и это
-# менеджер.
-#
-# ЛЕСТНИЦА, по возрастанию цены:
-#   1. напрямую        — сервис открывается и без обхода;
-#   2. через Zapret    — открывается при общей стратегии zapret (её подбирает тестер ZM);
-#   3. через WARP      — туннель AmneziaWG к Cloudflare, трафик сервиса уводит движок steer;
-#   4. через веб-сокет — только Telegram: микропакет tgws (его же ставит страница TG WS Proxy).
-#
-# ЧЕГО КНОПКА НЕ ДЕЛАЕТ, и это исправления против brb:
-#   - не трогает DNS роутера (brb выкидывал чужие секции https-dns-proxy и ставил dnsmasq
-#     noresolv=1, а при удалении не возвращал ничего). DNS — страница «DNS over HTTPS»;
-#     если её перенаправление порта 53 спорит с резолвером движка, кнопка это показывает и
-#     чинит только по нажатию;
-#   - не пишет поверх чужой спеки steer (splify2 или настроенной руками);
-#   - не делает хуже: если подобранная стратегия открыла меньше сервисов, чем было, прежняя
-#     настройка zapret возвращается;
-#   - заводит туннелю зону firewall с NAT: без неё проба с самого роутера проходила, а
-#     устройства сети через туннель не ходили;
-#   - записывает всё, что поставила и поменяла (RB_OWNED), и снимает ровно это при удалении.
+# ───────────────────────── Общее для steer и автообхода ─────────────────────────
 
-RB_DIR="/etc/zm-redbtn"
+# Каталог сервисов и их списки доменов/адресов (ставится установщиком панели).
 RB_SHARE="/usr/share/zm-redbtn"
-RB_RUN="$JOBS_DIR/redbtn"
-RB_OWNED="$RB_DIR/owned"
-RB_RESULTS="$RB_DIR/services"
-RB_LAST="$RB_DIR/last"
-RB_STOP_FLAG="$RB_RUN/stop"
-RB_PHASE_FILE="$RB_RUN/phase"
-RB_WARP_CONF="$RB_DIR/warp.conf"
-RB_WARP_IF="zmwarp"
-RB_WARP_ZONE="zmwarp"
-RB_STEER_VER="1.5.7"
-RB_STEER_SPEC="/etc/steer/spec.json"
-RB_STEER_URLS="https://github.com/xyzmean/steer/releases/download/v@VER@ https://gitlab.com/xyzmean/steer/-/raw/dist https://raw.githubusercontent.com/xyzmean/steer/dist"
-RB_AWG_MIRROR="https://gitlab.com/xyzmean/brb/-/raw/main/deps/awg"
-# Полоса локальных портов для проверки «напрямую». Пакетам из неё ставится бит 0x40000000 —
-# тот самый, по которому общий zapret пропускает пакет мимо себя (DESYNC_MARK). Так проба
-# «без обхода» не требует останавливать zapret всей сети.
-RB_LANE_DIRECT="21000-21199"
-# Российские колонии Cloudflare: туннель через них геоблок не снимает, берутся только в запас.
-RB_RU_COLOS="DME SVX LED KJA REN OVB KZN AER VVO"
-# Свой DNS для проб. Системный резолвер может отдавать чужое: подмену провайдера или адреса
-# fakeip вышестоящего роутера со splify2 (с ними проба через туннель стучится в адрес, который
-# что-то значит только там). Первый ответивший из списка — на весь проход.
-RB_PROBE_DOHS="https://1.1.1.1/dns-query https://8.8.8.8/dns-query https://77.88.8.8/dns-query"
-RB_PROBE_DOH=""
-RB_SYS_DNS=""
-RB_PARALLEL=8
-RB_BAR=60
-
-mkdir -p "$RB_RUN" 2>/dev/null
 
 _rb_say() { echo "==> $*"; }
 _rb_warn() { echo "!! $*"; }
-_rb_phase() { printf '%s\n' "$1" > "$RB_PHASE_FILE"; }
-_rb_stopped() { [ -f "$RB_STOP_FLAG" ]; }
-_rb_own() { mkdir -p "$RB_DIR"; grep -qxF "$1" "$RB_OWNED" 2>/dev/null || echo "$1" >> "$RB_OWNED"; }
-_rb_owns() { grep -qxF "$1" "$RB_OWNED" 2>/dev/null; }
-_rb_running() { [ -f "$JOBS_DIR/redbtn.pid" ] && kill -0 "$(cat "$JOBS_DIR/redbtn.pid" 2>/dev/null)" 2>/dev/null; }
-_rb_test_running() { [ -f "$JOBS_DIR/strategy_test.pid" ] && kill -0 "$(cat "$JOBS_DIR/strategy_test.pid" 2>/dev/null)" 2>/dev/null; }
+_rb_svc_ids() { grep -v '^#' "$RB_SHARE/services.conf" 2>/dev/null | cut -d'|' -f1 | grep .; }
+_rb_svc_field() { grep "^$1|" "$RB_SHARE/services.conf" 2>/dev/null | head -n1 | cut -d'|' -f"$2"; }
+_rb_svc_names() { local id; for id in $1; do printf '%s, ' "$(_rb_svc_field "$id" 2)"; done | sed 's/, $//'; }
+# Сервис можно пустить через WARP, только если у него есть списки доменов или адресов.
+_rb_routable() { [ -n "$(_rb_svc_field "$1" 3)$(_rb_svc_field "$1" 4)" ]; }
+_rb_in() { grep -qxF "$1" "$2" 2>/dev/null; }
+_job_alive() { [ -f "$JOBS_DIR/$1.pid" ] && kill -0 "$(cat "$JOBS_DIR/$1.pid" 2>/dev/null)" 2>/dev/null; }
 
-# Наш объект в ubus должен пережить установку пакетов. luci-proto-amneziawg в post-install
-# зовёт `rpcd reload`, следом идёт перезапуск сети, и на живом роутере (mipsel, 25.12.5) rpcd
-# поднялся без объекта zapret-manager: страница получала «Object not found» и считала роутер
-# мёртвым до конца подбора. Повторная перезагрузка rpcd возвращает объект.
+# Наш объект в ubus должен пережить установку пакетов: luci-proto-amneziawg в post-install
+# зовёт `rpcd reload`, следом идёт перезапуск сети, и rpcd поднимался без объекта
+# zapret-manager — страница получала «Object not found» до конца операции.
 _rb_rpcd_ensure() {
 	local i=0
 	while [ "$i" -lt 3 ]; do
@@ -4802,31 +4757,988 @@ _rb_rpcd_ensure() {
 	ubus list zapret-manager >/dev/null 2>&1
 }
 
-_rb_svc_ids() { grep -v '^#' "$RB_SHARE/services.conf" 2>/dev/null | cut -d'|' -f1 | grep .; }
-_rb_svc_field() { grep "^$1|" "$RB_SHARE/services.conf" 2>/dev/null | head -n1 | cut -d'|' -f"$2"; }
 
-# ── что мешает кнопке ──
+
+# ───────────────────────── steer: выбранные сервисы через WARP ─────────────────────────
+#
+# Страница «steer» ставит и связывает всё сама: движок steer (github.com/xyzmean/steer),
+# AmneziaWG, ключи Cloudflare WARP, интерфейс zmwarp с зоной firewall (NAT) и правила, по
+# которым в туннель уходят ТОЛЬКО выбранные сервисы; остальной трафик идёт как шёл.
+#
+# Автообход этим пользуется, если steer установлен: сервис, который не открыл Zapret, но
+# открывает WARP, он сам добавляет в выбор. То, что человек из выбора убрал (ST_SKIP), он
+# обратно не добавляет.
+#
+# ЧЕГО steer ЗДЕСЬ НЕ ДЕЛАЕТ:
+#   - не трогает DNS роутера: спор с перехватом порта 53 страницей DoH показывается и
+#     чинится только по нажатию;
+#   - не пишет поверх чужой спеки steer (splify2 или настроенной руками);
+#   - не держит движок включённым без правил: пакет при установке включает его сразу, а он и
+#     с пустой спекой заворачивает DNS сети на себя (на 25.12.5 так отваливался DNS по IPv6);
+#   - записывает всё, что поставил и поменял (ST_OWNED), и снимает ровно это при удалении.
+
+ST_DIR="/etc/zm-steer"
+ST_OWNED="$ST_DIR/owned"
+ST_SEL="$ST_DIR/services"
+ST_SKIP="$ST_DIR/skip"
+ST_OFF="$ST_DIR/stopped"
+ST_WARP_CONF="$ST_DIR/warp.conf"
+ST_RUN="$JOBS_DIR/steer"
+ST_STOP_FLAG="$ST_RUN/stop"
+ST_PHASE_FILE="$ST_RUN/phase"
+ST_WARP_IF="zmwarp"
+ST_WARP_ZONE="zmwarp"
+ST_STEER_VER="1.5.7"
+ST_STEER_SPEC="/etc/steer/spec.json"
+ST_STEER_URLS="https://github.com/xyzmean/steer/releases/download/v@VER@ https://gitlab.com/xyzmean/steer/-/raw/dist https://raw.githubusercontent.com/xyzmean/steer/dist"
+ST_AWG_MIRRORS="${GH_MAIN}/Slava-Shchipunov/awg-openwrt/releases/download ${GH_MAIN}/2Grey/awg-openwrt/releases/download"
+ST_AWG_MIRROR_FLAT="https://gitlab.com/xyzmean/brb/-/raw/main/deps/awg"
+# Автоперезапуск: строка crontab помечается хвостом-комментарием. Команда самодостаточна —
+# переживает и удаление панели: туннель поднимается заново, steer перезапускается, если включён.
+ST_CRON_TAG="# zm-steer"
+ST_CRON_CMD="/etc/init.d/steer enabled && { ifup $ST_WARP_IF; sleep 15; /etc/init.d/steer restart; }"
+# Российские колонии Cloudflare: туннель через них геоблок не снимает, берутся только в запас.
+ST_RU_COLOS="DME SVX LED KJA REN OVB KZN AER VVO"
+# Что выбрать при первой установке, если ничего не выбрано: ИИ-сервисы закрывает геоблок,
+# и кроме туннеля им ничего не поможет.
+ST_DEFAULT_SEL="geoblock"
+
+_st_phase() { printf '%s\n' "$1" > "$ST_PHASE_FILE"; }
+_st_stopped() { [ -f "$ST_STOP_FLAG" ]; }
+_st_own() { mkdir -p "$ST_DIR"; grep -qxF "$1" "$ST_OWNED" 2>/dev/null || echo "$1" >> "$ST_OWNED"; }
+_st_owns() { grep -qxF "$1" "$ST_OWNED" 2>/dev/null; }
+_st_running() { _job_alive steer; }
+_st_installed() { _st_owns "net $ST_WARP_IF" && command -v steer >/dev/null 2>&1; }
+# Готов принимать сервисы: поставлен, не выключен человеком и ничто не мешает.
+_st_ready() { _st_installed && [ ! -f "$ST_OFF" ] && [ -z "$(_st_blocker)" ]; }
+_st_sel() { [ -s "$ST_SEL" ] || return 0; local id; for id in $(cat "$ST_SEL"); do _rb_routable "$id" && echo "$id"; done; }
+
+# Переезд со старых версий (красная кнопка 1.34, автообход 1.35–1.36), где туннель и steer
+# записывались в каталог автообхода. Раньше переезд шёл, только пока каталога steer ещё нет, —
+# и если он успевал появиться (выбор списков до установки), старые правила так и оставались
+# «чужими»: страница steer и автообход отказывались их трогать. Теперь смотрим на сами записи.
+_st_migrate() {
+	local old=/etc/zm-redbtn re='^(pkg (steer|kmod-amneziawg|amneziawg-tools|luci-proto-amneziawg)|net zmwarp|fw zmwarp|steer-spec)$' f id l
+	grep -qE "$re" "$old/owned" 2>/dev/null || return 0
+	mkdir -p "$ST_DIR"
+	grep -E "$re" "$old/owned" | while read -r l; do _rb_in "$l" "$ST_OWNED" || echo "$l" >> "$ST_OWNED"; done
+	sed -i -E "/$re/d" "$old/owned"
+	for f in warp.conf warp.colo spec.before; do [ -f "$old/$f" ] && [ ! -f "$ST_DIR/$f" ] && mv "$old/$f" "$ST_DIR/$f"; done
+	if [ ! -s "$ST_SEL" ]; then
+		{
+			grep '|warp$' "$old/services" 2>/dev/null | cut -d'|' -f1
+			cat "$old/warp.pick" 2>/dev/null
+		} | sort -u | while read -r id; do _rb_in "$id" "$old/warp.skip" || echo "$id"; done > "$ST_SEL"
+	fi
+	[ -s "$old/warp.skip" ] && [ ! -s "$ST_SKIP" ] && mv "$old/warp.skip" "$ST_SKIP"
+	rm -f "$old/warp.pick" "$old/warp.skip"
+	sed -i 's/# zm-autobypass$/# zm-steer/' "$CRON_FILE" 2>/dev/null
+	# Красная кнопка 1.34 из форка держала для ИИ-сервисов свой DNS (zm-geodns). Его сторож
+	# звал команду, которой здесь нет: умри прокси — и ИИ-сервисы перестали бы разрешаться
+	# вовсе. Теперь они идут через WARP, поэтому этот DNS выключаем.
+	if grep -qx 'svc zm-geodns' "$old/owned" 2>/dev/null || [ -x /etc/init.d/zm-geodns ]; then
+		/etc/init.d/zm-geodns stop >/dev/null 2>&1
+		/etc/init.d/zm-geodns disable >/dev/null 2>&1
+		rm -f /etc/init.d/zm-geodns "$old/geo.resolver"
+		sed -i '/redbtn_geo_watch/d' "$CRON_FILE" 2>/dev/null
+		sed -i '/^svc zm-geodns$/d' "$old/owned" 2>/dev/null
+	fi
+}
+_st_migrate
+mkdir -p "$ST_RUN" 2>/dev/null
+
+# ── что мешает ──
 #
 # splify2 держит ту же спеку steer и сам ведёт туннели и списки: два хозяина одной спеки
-# затирали бы друг друга. Zapret2 несовместим с тестером zapret.
-_rb_blocker() {
+# затирали бы друг друга.
+_st_blocker() {
 	if [ -x /etc/init.d/splify2 ] || ubus list splify2 >/dev/null 2>&1; then echo splify2; return; fi
-	if [ -f /etc/init.d/zapret2 ] && [ ! -f "$EXPERT_MODE_FILE" ]; then echo zapret2; return; fi
-	if _rb_spec_foreign; then echo steer; return; fi
+	if _st_spec_foreign; then echo steer; return; fi
 	echo ""
 }
 
 # Спека steer чужая: она есть, в ней есть каналы, и писали её не мы.
-_rb_spec_foreign() {
-	[ -s "$RB_STEER_SPEC" ] || return 1
-	_rb_owns "steer-spec" && return 1
-	grep -q '"channels"[[:space:]]*:[[:space:]]*\[[[:space:]]*{' "$RB_STEER_SPEC"
+_st_spec_foreign() {
+	[ -s "$ST_STEER_SPEC" ] || return 1
+	_st_owns "steer-spec" && return 1
+	# Выход zm_warp пишет только Zapret Manager (любая его версия): такая спека наша, даже если
+	# запись о ней потерялась при обновлении, — забираем её обратно, а не отказываемся работать.
+	if grep -q '"zm_warp"' "$ST_STEER_SPEC"; then _st_own "steer-spec"; return 1; fi
+	grep -q '"channels"[[:space:]]*:[[:space:]]*\[[[:space:]]*{' "$ST_STEER_SPEC"
 }
+
+
+# ── пакеты ──
+
+_rb_arch() { awk -F\' '/DISTRIB_ARCH/ {print $2}' /etc/openwrt_release; }
+_rb_release() { awk -F\' '/DISTRIB_RELEASE/ {print $2}' /etc/openwrt_release; }
+_rb_target() { awk -F\' '/DISTRIB_TARGET/ {print $2}' /etc/openwrt_release | tr '/' '_'; }
+
+# Скачать и проверить, что это пакет, а не HTML-страница ошибки с кодом 200.
+_rb_fetch_pkg() { # URL ФАЙЛ
+	rm -f "$2"
+	curl -fsSL --connect-timeout 8 --max-time 120 -o "$2" "$1" 2>/dev/null || { rm -f "$2"; return 1; }
+	[ -s "$2" ] || { rm -f "$2"; return 1; }
+	if head -c 512 "$2" | grep -qi '<html\|<!doctype'; then rm -f "$2"; return 1; fi
+	return 0
+}
+
+
+_st_steer_ver() { steer --version 2>/dev/null | head -n1 | awk '{print $2}'; }
+
+_st_install_steer() {
+	if command -v steer >/dev/null 2>&1; then
+		_rb_say "Движок steer уже установлен: $(_st_steer_ver)"
+		return 0
+	fi
+	local arch tmp base url ver
+	arch="$(_rb_arch)"
+	[ -n "$arch" ] || { echo "ОШИБКА: не удалось определить архитектуру роутера"; return 1; }
+	tmp="$ST_RUN/steer.$RAZ"
+	_rb_say "Устанавливаем движок steer $ST_STEER_VER"
+	$UPDATE >/dev/null 2>&1
+	for base in $ST_STEER_URLS; do
+		ver="$ST_STEER_VER"
+		url="$(echo "$base" | sed "s/@VER@/$ver/")/steer-${ver}-1_${arch}.${RAZ}"
+		if ! _rb_fetch_pkg "$url" "$tmp"; then
+			# На зеркале может лежать выпуск на шаг старше — берём тот, что там есть.
+			case "$base" in *@VER@*) continue ;; esac
+			ver=$(curl -fsSL --connect-timeout 8 --max-time 15 "$base/VERSION" 2>/dev/null | tr -d '[:space:]')
+			echo "$ver" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || continue
+			_rb_fetch_pkg "$base/steer-${ver}-1_${arch}.${RAZ}" "$tmp" || continue
+		fi
+		if $INSTALL "$tmp" >/dev/null 2>&1; then
+			rm -f "$tmp"
+			_st_own "pkg steer"
+			# Пакет включает движок сразу, а движок и с пустой спекой заворачивает DNS сети на
+			# свой резолвер. Включается он только вместе с правилами (_st_spec_apply).
+			/etc/init.d/steer stop >/dev/null 2>&1
+			/etc/init.d/steer disable >/dev/null 2>&1
+			_rb_rpcd_ensure
+			_rb_say "Движок steer $ver установлен"
+			return 0
+		fi
+	done
+	rm -f "$tmp"
+	echo "ОШИБКА: не удалось установить движок steer"
+	return 1
+}
+
+_st_awg_loaded() { grep -q '^amneziawg ' /proc/modules 2>/dev/null || [ -d /sys/module/amneziawg ]; }
+
+_st_install_awg() {
+	if _st_awg_loaded && command -v awg >/dev/null 2>&1; then return 0; fi
+	if ! _pkg_is_installed kmod-amneziawg || ! command -v awg >/dev/null 2>&1; then
+		_rb_say "Устанавливаем AmneziaWG"
+		local rel arch tgt p base ok=0 bases m
+		rel="$(_rb_release)"; arch="$(_rb_arch)"; tgt="$(_rb_target)"
+		bases=""
+		for m in $ST_AWG_MIRRORS; do bases="$bases $m/v$rel"; done
+		bases="$bases $ST_AWG_MIRROR_FLAT/$rel"
+		$UPDATE >/dev/null 2>&1
+		for base in $bases; do
+			ok=1
+			for p in kmod-amneziawg amneziawg-tools; do
+				_pkg_is_installed "$p" && continue
+				if _rb_fetch_pkg "$base/${p}_v${rel}_${arch}_${tgt}.${RAZ}" "$ST_RUN/$p.$RAZ" &&
+				   $INSTALL "$ST_RUN/$p.$RAZ" >/dev/null 2>&1; then
+					_st_own "pkg $p"
+				else
+					ok=0
+				fi
+				rm -f "$ST_RUN/$p.$RAZ"
+			done
+			[ "$ok" = 1 ] && break
+		done
+		# Обработчик для веб-интерфейса — чтобы туннель было видно в «Сеть → Интерфейсы».
+		# Без него всё работает, поэтому неудача здесь не ошибка.
+		if [ "$ok" = 1 ] && ! _pkg_is_installed luci-proto-amneziawg; then
+			_rb_fetch_pkg "$base/luci-proto-amneziawg_v${rel}_${arch}_${tgt}.${RAZ}" "$ST_RUN/lpa.$RAZ" &&
+				$INSTALL "$ST_RUN/lpa.$RAZ" >/dev/null 2>&1 && _st_own "pkg luci-proto-amneziawg"
+			rm -f "$ST_RUN/lpa.$RAZ"
+		fi
+		_rb_rpcd_ensure
+	fi
+	# Установщик пакета модуль в ядро не грузит, а /etc/init.d/kmod грузит его только при
+	# загрузке: без modprobe интерфейс не поднимается до перезагрузки роутера.
+	_st_awg_loaded || modprobe amneziawg >/dev/null 2>&1
+	if ! _st_awg_loaded || ! command -v awg >/dev/null 2>&1; then
+		echo "ОШИБКА: не удалось установить AmneziaWG — для вашей версии OpenWrt может не быть готового пакета"
+		return 1
+	fi
+	# netifd узнаёт о протоколе amneziawg только при своём запуске.
+	if ! ubus call network get_proto_handlers 2>/dev/null | grep -q '"amneziawg"'; then
+		_rb_say "Перезапускаем сеть, чтобы она узнала протокол AmneziaWG (страница может ненадолго пропасть)"
+		/etc/init.d/network restart >/dev/null 2>&1
+		sleep 8
+		_rb_rpcd_ensure
+	fi
+	return 0
+}
+
+# ── WARP ──
+
+_st_warp_field() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$ST_WARP_CONF" | head -n1; }
+
+# Ключи WARP — напрямую у Cloudflare, как это делает wgcf: свой ключ генерирует awg, Cloudflare
+# в ответ называет свой ключ и адрес. Разбор — jsonfilter, он есть в каждой OpenWrt, jq не
+# нужен. Не вышло — запасные генераторы страницы Mixomo (сторонние сайты).
+ST_WARP_API="https://api.cloudflareclient.com/v0a2158/reg https://api.cloudflareclient.com/v0a1922/reg"
+
+_st_warp_conf_write() { # ПРИВАТНЫЙ ПИР v4 v6
+	mkdir -p "$ST_DIR"
+	printf '%s\n' \
+		"[Interface]" "PrivateKey = $1" "Address = ${3}${4:+, $4}" "MTU = 1280" \
+		"S1 = $MIXOMO_AWG_S1" "S2 = $MIXOMO_AWG_S2" "Jc = $MIXOMO_AWG_JC" "Jmin = $MIXOMO_AWG_JMIN" "Jmax = $MIXOMO_AWG_JMAX" \
+		"H1 = $MIXOMO_AWG_H1" "H2 = $MIXOMO_AWG_H2" "H3 = $MIXOMO_AWG_H3" "H4 = $MIXOMO_AWG_H4" "I1 = $MIXOMO_AWG_I1" "" \
+		"[Peer]" "PublicKey = $2" "AllowedIPs = 0.0.0.0/0" "Endpoint = engage.cloudflareclient.com:4500" "PersistentKeepalive = 25" \
+		> "$ST_WARP_CONF"
+	chmod 600 "$ST_WARP_CONF"
+}
+
+_st_warp_register() {
+	[ -s "$ST_WARP_CONF" ] && [ -n "$(_st_warp_field PrivateKey)" ] && return 0
+	mkdir -p "$ST_DIR" "$ST_RUN"
+	local priv pub api reg="$ST_RUN/reg.json" peer v4 v6 tos
+	if command -v awg >/dev/null 2>&1 && command -v jsonfilter >/dev/null 2>&1; then
+		priv="$(awg genkey 2>/dev/null)"
+		pub="$(printf '%s' "$priv" | awg pubkey 2>/dev/null)"
+		tos="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+		for api in $ST_WARP_API; do
+			[ -n "$pub" ] || break
+			rm -f "$reg"
+			curl -fsS --connect-timeout 8 --max-time 25 -X POST \
+				-H 'User-Agent: okhttp/3.12.1' -H 'CF-Client-Version: a-6.10-2158' -H 'Content-Type: application/json' \
+				-d "{\"install_id\":\"\",\"tos\":\"$tos\",\"key\":\"$pub\",\"fcm_token\":\"\",\"type\":\"ios\",\"locale\":\"en_US\"}" \
+				-o "$reg" "$api" 2>/dev/null || continue
+			peer="$(jsonfilter -i "$reg" -e '@.config.peers[0].public_key' 2>/dev/null)"
+			v4="$(jsonfilter -i "$reg" -e '@.config.interface.addresses.v4' 2>/dev/null)"
+			v6="$(jsonfilter -i "$reg" -e '@.config.interface.addresses.v6' 2>/dev/null)"
+			if [ -n "$peer" ] && [ -n "$v4" ]; then
+				_st_warp_conf_write "$priv" "$peer" "$v4" "$v6"
+				rm -f "$reg"
+				_rb_say "Ключи WARP получены у Cloudflare"
+				return 0
+			fi
+		done
+		rm -f "$reg"
+		_rb_warn "Cloudflare не выдал ключи напрямую — пробуем запасные генераторы"
+	fi
+	# Тот же генератор, что у страницы Mixomo, но в свой файл: чужой /root/WARP.conf не трогаем.
+	( MIXOMO_WARP_CONF="$ST_WARP_CONF"; $UPDATE >/dev/null 2>&1; do_mixomo_warp_register manual ) || return 1
+	chmod 600 "$ST_WARP_CONF"
+	[ -n "$(_st_warp_field PrivateKey)" ] && [ -n "$(_st_warp_field PublicKey)" ]
+}
+
+# Кандидаты в точку входа: адреса Cloudflare, ответившие быстрее всех по HTTP. Это только
+# отсев — годность точки решает настоящее рукопожатие туннеля и данные через него.
+_st_warp_candidates() {
+	local prefixes="188.114.96. 188.114.97. 188.114.98. 188.114.99. 162.159.192. 162.159.193. 162.159.195. 8.34.146. 8.39.214. 8.39.204. 8.6.112. 8.35.211. 8.39.125. 8.47.69."
+	local pings="$ST_RUN/pings" ip count=0
+	rm -f "$pings"
+	for ip in $(awk -v prefixes="$prefixes" 'BEGIN { srand(); n = split(prefixes, arr, " "); for (i = 0; i < 40; i++) { print arr[int(rand() * n) + 1] int(rand() * 256) } }'); do
+		(
+			t=$(curl -s --connect-timeout 2 -o /dev/null -w '%{time_total}' -H "Host: trace.cloudflare.com" "http://$ip/cdn-cgi/trace" 2>/dev/null) || exit 0
+			[ -n "$t" ] && echo "$t $ip" | awk '{printf "%d %s\n", $1 * 1000, $2}' >> "$pings"
+		) &
+		count=$((count + 1))
+		[ $((count % 20)) -eq 0 ] && wait
+	done
+	wait
+	[ -s "$pings" ] && sort -n "$pings" | head -n 5 | awk '{print $2}'
+	echo "engage.cloudflareclient.com"
+}
+
+_st_warp_iface_write() { # ХОСТ ПОРТ
+	local priv addr peer
+	priv="$(_st_warp_field PrivateKey)"
+	addr="$(_st_warp_field Address | tr ',' '\n' | sed 's/[[:space:]]//g' | grep -v ':' | head -n1)"
+	peer="$(_st_warp_field PublicKey)"
+	case "$addr" in */*) ;; *) addr="$addr/32" ;; esac
+	uci -q delete "network.$ST_WARP_IF"
+	uci -q delete "network.${ST_WARP_IF}_peer"
+	uci set "network.$ST_WARP_IF=interface"
+	uci set "network.$ST_WARP_IF.proto=amneziawg"
+	uci set "network.$ST_WARP_IF.private_key=$priv"
+	uci add_list "network.$ST_WARP_IF.addresses=$addr"
+	uci set "network.$ST_WARP_IF.mtu=1280"
+	uci set "network.$ST_WARP_IF.awg_jc=$MIXOMO_AWG_JC"
+	uci set "network.$ST_WARP_IF.awg_jmin=$MIXOMO_AWG_JMIN"
+	uci set "network.$ST_WARP_IF.awg_jmax=$MIXOMO_AWG_JMAX"
+	uci set "network.$ST_WARP_IF.awg_s1=$MIXOMO_AWG_S1"
+	uci set "network.$ST_WARP_IF.awg_s2=$MIXOMO_AWG_S2"
+	uci set "network.$ST_WARP_IF.awg_h1=$MIXOMO_AWG_H1"
+	uci set "network.$ST_WARP_IF.awg_h2=$MIXOMO_AWG_H2"
+	uci set "network.$ST_WARP_IF.awg_h3=$MIXOMO_AWG_H3"
+	uci set "network.$ST_WARP_IF.awg_h4=$MIXOMO_AWG_H4"
+	uci set "network.$ST_WARP_IF.awg_i1=$MIXOMO_AWG_I1"
+	uci set "network.${ST_WARP_IF}_peer=amneziawg_$ST_WARP_IF"
+	uci set "network.${ST_WARP_IF}_peer.description=WARP"
+	uci set "network.${ST_WARP_IF}_peer.public_key=$peer"
+	uci add_list "network.${ST_WARP_IF}_peer.allowed_ips=0.0.0.0/0"
+	# Маршрутов в главную таблицу не ставим: трафик в туннель уводит движок, остальное
+	# идёт как шло.
+	uci set "network.${ST_WARP_IF}_peer.route_allowed_ips=0"
+	uci set "network.${ST_WARP_IF}_peer.persistent_keepalive=25"
+	uci set "network.${ST_WARP_IF}_peer.endpoint_host=$1"
+	uci set "network.${ST_WARP_IF}_peer.endpoint_port=$2"
+	uci commit network
+	_st_own "net $ST_WARP_IF"
+}
+
+# Зона firewall туннеля: NAT и выравнивание MSS. Без NAT устройства сети уходят в туннель
+# со своими адресами из LAN, и ответы не возвращаются.
+_st_warp_zone() {
+	if [ "$(uci -q get "firewall.$ST_WARP_ZONE")" != "zone" ]; then
+		uci set "firewall.$ST_WARP_ZONE=zone"
+		uci set "firewall.$ST_WARP_ZONE.name=$ST_WARP_ZONE"
+		uci add_list "firewall.$ST_WARP_ZONE.network=$ST_WARP_IF"
+		uci set "firewall.$ST_WARP_ZONE.input=REJECT"
+		uci set "firewall.$ST_WARP_ZONE.output=ACCEPT"
+		uci set "firewall.$ST_WARP_ZONE.forward=REJECT"
+		uci set "firewall.$ST_WARP_ZONE.masq=1"
+		uci set "firewall.$ST_WARP_ZONE.mtu_fix=1"
+		uci set "firewall.${ST_WARP_ZONE}_fwd=forwarding"
+		uci set "firewall.${ST_WARP_ZONE}_fwd.src=lan"
+		uci set "firewall.${ST_WARP_ZONE}_fwd.dest=$ST_WARP_ZONE"
+		uci commit firewall
+		_st_own "fw $ST_WARP_ZONE"
+		/etc/init.d/firewall reload >/dev/null 2>&1
+	fi
+}
+
+_st_warp_hs_epoch() { awg show "$ST_WARP_IF" latest-handshakes 2>/dev/null | awk '{print $2}' | head -n1; }
+
+_st_warp_handshake() { # ждать рукопожатия до 10 с
+	local i=0 hs
+	while [ "$i" -lt 10 ]; do
+		hs=$(_st_warp_hs_epoch)
+		[ -n "$hs" ] && [ "$hs" != 0 ] && return 0
+		ping -c1 -W1 -I "$ST_WARP_IF" 1.1.1.1 >/dev/null 2>&1
+		i=$((i + 1))
+	done
+	return 1
+}
+
+# Колония Cloudflare ИЗНУТРИ туннеля. Ответ означает, что данные через туннель идут, а не
+# только прошло рукопожатие.
+_st_warp_colo() {
+	curl -s --interface "$ST_WARP_IF" --connect-timeout 5 --max-time 8 https://1.1.1.1/cdn-cgi/trace 2>/dev/null |
+		sed -n 's/^colo=//p' | head -n1
+}
+
+_st_warp_is_ru() { case " $ST_RU_COLOS " in *" $1 "*) return 0 ;; esac; return 1; }
+
+_st_warp_try() { # ХОСТ ПОРТ -> печатает колонию
+	local colo
+	uci set "network.${ST_WARP_IF}_peer.endpoint_host=$1"
+	uci set "network.${ST_WARP_IF}_peer.endpoint_port=$2"
+	uci commit network
+	# ifup сам перечитывает настройку сети (ubus call network reload) и перезапускает интерфейс.
+	ifup "$ST_WARP_IF" >/dev/null 2>&1
+	sleep 3
+	_st_warp_handshake || return 1
+	colo="$(_st_warp_colo)"
+	[ -n "$colo" ] || return 1
+	echo "$colo"
+}
+
+_st_warp_up() { # [repick] — не пробовать прежнюю точку входа, подобрать заново
+	local repick="$1" host port colo spare="" cand
+	_st_install_awg || return 1
+	_rb_say "Получаем ключи WARP"
+	_st_warp_register || { echo "ОШИБКА: не удалось получить ключи WARP"; return 1; }
+	[ "$(uci -q get "network.$ST_WARP_IF.proto")" = amneziawg ] || _st_warp_iface_write engage.cloudflareclient.com 4500
+	_st_warp_zone
+	if [ "$repick" != repick ]; then
+		# Прежняя точка работает — не перебираем заново.
+		ifup "$ST_WARP_IF" >/dev/null 2>&1
+		sleep 3
+		if _st_warp_handshake && colo="$(_st_warp_colo)" && [ -n "$colo" ] && ! _st_warp_is_ru "$colo"; then
+			_rb_say "Туннель WARP работает, колония $colo"
+			echo "$colo" > "$ST_DIR/warp.colo"
+			return 0
+		fi
+	fi
+	_rb_say "Подбираем точку входа WARP"
+	cand="$(_st_warp_candidates)"
+	_rb_say "Кандидатов: $(echo "$cand" | grep -c .)"
+	# Порты 4500 и 2408 выколоты из игрового фильтра zapret — туннель не попадёт под обработку.
+	for port in 4500 2408; do
+		for host in $cand; do
+			_st_stopped && return 1
+			echo "   Пробуем $host:$port"
+			colo="$(_st_warp_try "$host" "$port")" || { echo "      не отвечает"; continue; }
+			echo "      работает, колония $colo"
+			if _st_warp_is_ru "$colo"; then
+				[ -n "$spare" ] || spare="$host $port $colo"
+				continue
+			fi
+			_rb_say "Туннель WARP работает: $host:$port, колония $colo"
+			echo "$colo" > "$ST_DIR/warp.colo"
+			return 0
+		done
+	done
+	if [ -n "$spare" ]; then
+		set -- $spare
+		_st_warp_try "$1" "$2" >/dev/null
+		_rb_warn "Туннель WARP работает только через российскую колонию $3: ИИ-сервисы через него не откроются"
+		echo "$3" > "$ST_DIR/warp.colo"
+		return 0
+	fi
+	ifdown "$ST_WARP_IF" >/dev/null 2>&1
+	rm -f "$ST_DIR/warp.colo"
+	echo "ОШИБКА: туннель WARP не поднялся ни через одну точку входа"
+	return 1
+}
+
+
+# ── спека steer ──
+
+_st_json_list() { # файлы через пробел -> "a","b"
+	local f out=""
+	for f in $1; do [ -s "$RB_SHARE/lists/$f" ] && out="$out${out:+,}\"$RB_SHARE/lists/$f\""; done
+	printf '%s' "$out"
+}
+
+_st_spec_build() { # ID... -> JSON в stdout
+	local id name dom pre match chans="" sep=""
+	for id in "$@"; do
+		name="$(_rb_svc_field "$id" 2)"
+		dom="$(_st_json_list "$(_rb_svc_field "$id" 3 | tr ',' ' ')")"
+		pre="$(_st_json_list "$(_rb_svc_field "$id" 4 | tr ',' ' ')")"
+		match=""
+		[ -n "$dom" ] && match="\"domains_files\":[$dom]"
+		[ -n "$pre" ] && match="$match${match:+,}\"prefixes_files\":[$pre]"
+		[ -n "$match" ] || continue
+		chans="$chans$sep{\"name\":\"$name\",\"out\":\"zm_warp\",\"match\":{$match}}"
+		sep=","
+	done
+	[ -n "$chans" ] || return 1
+	printf '{"schema":1,"lan_devices":["br-lan"],"outputs":{"zm_warp":{"kind":"interface","devices":["%s"],"on_fail":"direct"}},"channels":[%s]}\n' \
+		"$ST_WARP_IF" "$chans"
+}
+
+_st_spec_apply() { # ID...
+	local tmp="$ST_RUN/spec.json" out
+	_st_spec_build "$@" > "$tmp" || return 1
+	if ! out=$(steer apply --spec "$tmp" --dry-run 2>&1 >/dev/null); then
+		echo "ОШИБКА: движок steer отверг настройку"
+		printf '%s\n' "$out" | tail -n 5
+		return 1
+	fi
+	mkdir -p /etc/steer
+	if [ -s "$ST_STEER_SPEC" ] && ! _st_owns "steer-spec" && [ ! -f "$ST_DIR/spec.before" ]; then
+		cp "$ST_STEER_SPEC" "$ST_DIR/spec.before"
+	fi
+	if [ -s "$ST_STEER_SPEC" ] && cmp -s "$tmp" "$ST_STEER_SPEC" && /etc/init.d/steer running >/dev/null 2>&1; then
+		_rb_say "Правила steer не изменились"
+		return 0
+	fi
+	cp "$tmp" "$ST_STEER_SPEC.tmp" && mv "$ST_STEER_SPEC.tmp" "$ST_STEER_SPEC"
+	_st_own "steer-spec"
+	/etc/init.d/steer enable >/dev/null 2>&1
+	/etc/init.d/steer restart >/dev/null 2>&1
+	_rb_say "Правила steer применены"
+}
+
+_st_spec_clear() {
+	_st_owns "steer-spec" || return 0
+	/etc/init.d/steer stop >/dev/null 2>&1
+	/etc/init.d/steer disable >/dev/null 2>&1
+	if [ -s "$ST_DIR/spec.before" ]; then mv "$ST_DIR/spec.before" "$ST_STEER_SPEC"; else rm -f "$ST_STEER_SPEC"; fi
+	sed -i '/^steer-spec$/d' "$ST_OWNED"
+}
+
+# Перезапустить steer, если он в работе (включён нами).
+_st_kick() {
+	_st_owns "steer-spec" || return 0
+	/etc/init.d/steer enabled 2>/dev/null || return 0
+	/etc/init.d/steer restart >/dev/null 2>&1
+	_rb_say "steer перезапущен"
+}
+
+
+# ── DNS: спор за порт 53 ──
+#
+# https-dns-proxy с force_dns=1 (так его всегда пишет страница DoH) заворачивает DNS сети на
+# dnsmasq; движок заворачивает те же запросы на свой резолвер, и только там домены
+# превращаются в правила. Побеждает тот, кто зарегистрировался раньше, а проигравший молчит.
+_st_dns_conflict() {
+	[ -f /etc/config/https-dns-proxy ] || return 1
+	pidof https-dns-proxy >/dev/null 2>&1 || return 1
+	_st_owns "steer-spec" || return 1
+	# Ключа нет — у прокси умолчание единица.
+	[ "$(uci -q get https-dns-proxy.config.force_dns)" != "0" ]
+}
+
+# Перехват порта 53 DoH включён — независимо от того, стоят ли уже наши правила.
+_st_doh_force_on() {
+	[ -f /etc/config/https-dns-proxy ] || return 1
+	pidof https-dns-proxy >/dev/null 2>&1 || return 1
+	[ "$(uci -q get https-dns-proxy.config.force_dns)" != "0" ]
+}
+
+_st_doh_unforce() {
+	# Секция main 'config' — её так пишет и пакет, и страница DoH. Прежняя правка через sed
+	# ничего не делала, когда ключа force_dns в файле не было (умолчание — единица).
+	uci -q get https-dns-proxy.config >/dev/null 2>&1 || uci set https-dns-proxy.config=main
+	uci set https-dns-proxy.config.force_dns='0'
+	uci commit https-dns-proxy
+	/etc/init.d/https-dns-proxy restart >/dev/null 2>&1
+}
+
+do_steer_dns_fix() {
+	_st_doh_unforce
+	/etc/init.d/steer restart >/dev/null 2>&1
+}
+
+
+
+# Автоперезапуск по расписанию — так же, как у Mihomo.
+_st_cron_get() {
+	local line hour
+	line=$(grep -F "$ST_CRON_TAG" "$CRON_FILE" 2>/dev/null | head -n1)
+	[ -n "$line" ] || return 0
+	hour=$(echo "$line" | awk '{print $2}')
+	case "$hour" in
+		*/*) echo "every:${hour#*/}" ;;
+		*) echo "daily:$hour" ;;
+	esac
+}
+
+_st_cron_set() { # off | every:N | daily:H
+	local mode="${1%%:*}" value="${1#*:}" spec
+	case "$mode" in
+		off) spec="" ;;
+		every)
+			case "$value" in
+				2|4|6|8|12) spec="0 */$value * * *" ;;
+				*) echo '{"error":"допустимо каждые 2, 4, 6, 8 или 12 часов"}'; return 1 ;;
+			esac ;;
+		daily)
+			case "$value" in ''|*[!0-9]*) echo '{"error":"введите час от 0 до 23"}'; return 1 ;; esac
+			[ "$value" -ge 0 ] && [ "$value" -le 23 ] || { echo '{"error":"допустимый диапазон 0-23"}'; return 1; }
+			spec="0 $value * * *" ;;
+		*) echo '{"error":"неизвестный режим"}'; return 1 ;;
+	esac
+	mkdir -p "$(dirname "$CRON_FILE")"
+	touch "$CRON_FILE"
+	sed -i "\\|$ST_CRON_TAG|d" "$CRON_FILE"
+	[ -n "$spec" ] && echo "$spec $ST_CRON_CMD $ST_CRON_TAG" >> "$CRON_FILE"
+	/etc/init.d/cron enable >/dev/null 2>&1
+	/etc/init.d/cron restart >/dev/null 2>&1
+	printf '{"ok":true}\n'
+}
+
+
+
+# ── правила по выбору ──
+
+# Выключить движок и туннель, не удаляя ничего.
+_st_down() {
+	/etc/init.d/steer stop >/dev/null 2>&1
+	/etc/init.d/steer disable >/dev/null 2>&1
+	_st_owns "net $ST_WARP_IF" && ifdown "$ST_WARP_IF" >/dev/null 2>&1
+}
+
+# Применить выбор: туннель и правила, или, если ничего не выбрано, всё выключить.
+_st_apply() { # [tunnel_ready] — туннель только что проверен, второй раз не поднимаем
+	local sel
+	sel="$(_st_sel | tr '\n' ' ')"
+	if [ -z "$(echo $sel)" ]; then
+		_st_spec_clear
+		_st_down
+		_rb_say "Ничего не выбрано — туннель и steer выключены"
+		return 0
+	fi
+	[ "$1" = tunnel_ready ] || _st_warp_up || return 1
+	# Домены уходят в туннель, только если DNS устройств отвечает резолвер steer. Перехват
+	# порта 53 страницей DoH его перебивает — выключаем перехват сами: шифрованный DNS при
+	# этом работает как работал, dnsmasq по-прежнему спрашивает его.
+	if _st_doh_force_on; then
+		_st_doh_unforce
+		_rb_warn "DNS over HTTPS перехватывал DNS сети — перехват выключен, шифрованный DNS работает как прежде"
+	fi
+	_rb_say "Через WARP: $(_rb_svc_names "$sel")"
+	_st_spec_apply $sel
+}
+
+# Самопроверка: что говорит сам движок (steer diag) и идёт ли трафик через WARP на деле.
+# Печатает в журнал; код 1 — есть поломка.
+_st_selfcheck() {
+	local f="$ST_RUN/diag.json" n i v what why bad=0 trace
+	_rb_say "Проверяем, что всё работает"
+	if [ "$(_st_sel)" ]; then
+		trace="$(curl -s --interface "$ST_WARP_IF" --connect-timeout 5 --max-time 10 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)"
+		case "$trace" in
+			*warp=on*|*warp=plus*) echo "[ OK ] Туннель WARP: трафик идёт через Cloudflare ($(echo "$trace" | sed -n 's/^colo=//p'))" ;;
+			*) echo "[FAIL] Туннель WARP: трафик через него не идёт"; bad=1 ;;
+		esac
+		/etc/init.d/steer running >/dev/null 2>&1 && echo "[ OK ] Служба steer запущена" || { echo "[FAIL] Служба steer не запущена"; bad=1; }
+	fi
+	command -v steer >/dev/null 2>&1 || return $bad
+	[ -s "$ST_STEER_SPEC" ] || return $bad
+	steer diag --spec "$ST_STEER_SPEC" > "$f" 2>/dev/null
+	n=$(jsonfilter -i "$f" -e '@.checks[*].id' 2>/dev/null | wc -l)
+	i=0
+	while [ "$i" -lt "$n" ]; do
+		v=$(jsonfilter -i "$f" -e "@.checks[$i].verdict" 2>/dev/null)
+		what=$(jsonfilter -i "$f" -e "@.checks[$i].what" 2>/dev/null)
+		why=$(jsonfilter -i "$f" -e "@.checks[$i].why" 2>/dev/null)
+		case "$v" in
+			ok)   echo "[ OK ] $what" ;;
+			warn) echo "!! $what${why:+ — $why}" ;;
+			fail) echo "[FAIL] $what${why:+ — $why}"; bad=1 ;;
+		esac
+		i=$((i + 1))
+	done
+	if [ "$bad" = 0 ]; then _rb_say "Проверка пройдена"; else _rb_warn "Проверка нашла поломку — подробности выше"; fi
+	return $bad
+}
+
+# Добавить сервис в выбор (зовёт автообход). Код 1 — человек его убирал, не добавляем.
+_st_sel_add() {
+	_rb_in "$1" "$ST_SKIP" && return 1
+	mkdir -p "$ST_DIR"
+	_rb_in "$1" "$ST_SEL" || echo "$1" >> "$ST_SEL"
+}
+
+# ── задачи страницы ──
+
+do_steer_install() {
+	local blk id
+	_st_phase install
+	rm -f "$ST_STOP_FLAG"
+	blk="$(_st_blocker)"
+	case "$blk" in
+		splify2) echo "ОШИБКА: установлен splify2 — туннели и списки настраиваются в нём"; return 1 ;;
+		steer)   echo "ОШИБКА: у движка steer уже есть чужие правила — не перезаписываем их"; return 1 ;;
+	esac
+	_ensure_deps
+	mkdir -p "$ST_DIR"
+	_st_phase pkgs
+	_st_install_steer || return 1
+	# conntrack нужен движку, чтобы при включённой выгрузке потоков (flow offloading) уже
+	# открытые соединения тоже переходили в туннель. Не встал — не беда, это не ошибка.
+	if ! command -v conntrack >/dev/null 2>&1; then
+		$INSTALL conntrack >/dev/null 2>&1 && _st_own "pkg conntrack"
+	fi
+	_st_phase awg
+	_st_install_awg || return 1
+	_st_phase keys
+	_st_warp_register || { echo "ОШИБКА: не удалось получить ключи WARP — Cloudflare и запасные генераторы не ответили"; return 1; }
+	# Ничего не выбрано — берём ИИ-сервисы и то, что автообход не смог открыть.
+	if [ -z "$(_st_sel)" ]; then
+		for id in $ST_DEFAULT_SEL $(grep '|none$' /etc/zm-redbtn/services 2>/dev/null | cut -d'|' -f1); do
+			_rb_routable "$id" && _st_sel_add "$id"
+		done
+	fi
+	rm -f "$ST_OFF"
+	_st_phase tunnel
+	_st_warp_up || return 1
+	_st_phase rules
+	_st_apply tunnel_ready || return 1
+	_st_phase check
+	sleep 2
+	_st_selfcheck
+	_rb_say "Готово, steer установлен и работает"
+}
+
+do_steer_apply() {
+	_st_phase rules
+	rm -f "$ST_STOP_FLAG"
+	_st_installed || { echo "ОШИБКА: steer ещё не установлен"; return 1; }
+	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: спеку steer сейчас ведёт не Zapret Manager"; return 1; }
+	rm -f "$ST_OFF"
+	_st_apply || return 1
+	_st_phase check
+	sleep 2
+	_st_selfcheck
+	_rb_say "Готово"
+}
+
+do_steer_stop() {
+	_st_phase rules
+	_st_installed || { echo "ОШИБКА: steer ещё не установлен"; return 1; }
+	touch "$ST_OFF"
+	_st_down
+	_rb_say "Готово, steer и туннель выключены — всё идёт напрямую"
+}
+
+_st_need_warp() {
+	_st_owns "net $ST_WARP_IF" && [ -s "$ST_WARP_CONF" ] && return 0
+	echo "ОШИБКА: туннеля WARP ещё нет — сначала установите steer"
+	return 1
+}
+
+do_steer_warp_restart() {
+	_st_phase warp
+	_st_need_warp || return 1
+	rm -f "$ST_STOP_FLAG"
+	_rb_say "Перезапускаем туннель WARP"
+	_st_install_awg || return 1
+	ifup "$ST_WARP_IF" >/dev/null 2>&1
+	sleep 3
+	local colo=""
+	if _st_warp_handshake && colo="$(_st_warp_colo)" && [ -n "$colo" ]; then
+		echo "$colo" > "$ST_DIR/warp.colo"
+		_rb_say "Туннель WARP работает, колония $colo"
+	else
+		_rb_warn "Точка входа не отвечает — подбираем новую"
+		_st_warp_up repick || return 1
+	fi
+	_st_kick
+	_rb_say "Готово"
+}
+
+do_steer_warp_endpoint() {
+	_st_phase warp
+	_st_need_warp || return 1
+	rm -f "$ST_STOP_FLAG"
+	_st_warp_up repick || return 1
+	_st_kick
+	_rb_say "Готово, точка входа подобрана"
+}
+
+do_steer_warp_recreate() {
+	_st_phase warp
+	_st_need_warp || return 1
+	rm -f "$ST_STOP_FLAG"
+	local host port
+	host="$(uci -q get "network.${ST_WARP_IF}_peer.endpoint_host")"
+	port="$(uci -q get "network.${ST_WARP_IF}_peer.endpoint_port")"
+	_rb_say "Пересоздаём WARP с новыми ключами"
+	mv "$ST_WARP_CONF" "$ST_WARP_CONF.old"
+	if ! _st_warp_register; then
+		mv "$ST_WARP_CONF.old" "$ST_WARP_CONF"
+		echo "ОШИБКА: не удалось получить новые ключи — оставляем прежние"
+		return 1
+	fi
+	rm -f "$ST_WARP_CONF.old"
+	_st_warp_iface_write "${host:-engage.cloudflareclient.com}" "${port:-4500}"
+	_st_warp_up || return 1
+	_st_kick
+	_rb_say "Готово, WARP пересоздан"
+}
+
+do_steer_remove() {
+	_st_phase remove
+	_rb_say "Удаляем steer и туннель WARP"
+	_st_spec_clear
+	/etc/init.d/steer stop >/dev/null 2>&1
+	if _st_owns "net $ST_WARP_IF"; then
+		ifdown "$ST_WARP_IF" >/dev/null 2>&1
+		uci -q delete "network.$ST_WARP_IF"
+		uci -q delete "network.${ST_WARP_IF}_peer"
+		uci commit network
+		/etc/init.d/network reload >/dev/null 2>&1
+	fi
+	if _st_owns "fw $ST_WARP_ZONE"; then
+		uci -q delete "firewall.$ST_WARP_ZONE"
+		uci -q delete "firewall.${ST_WARP_ZONE}_fwd"
+		uci commit firewall
+		/etc/init.d/firewall reload >/dev/null 2>&1
+	fi
+	if grep -qF "$ST_CRON_TAG" "$CRON_FILE" 2>/dev/null; then
+		sed -i "\\|$ST_CRON_TAG|d" "$CRON_FILE"
+		/etc/init.d/cron restart >/dev/null 2>&1
+	fi
+	if _st_owns "pkg steer"; then
+		_rb_say "Удаляем движок steer"
+		$DELETE steer >/dev/null 2>&1
+	fi
+	_st_owns "pkg conntrack" && $DELETE conntrack >/dev/null 2>&1
+	# AmneziaWG — только если других туннелей на нём нет.
+	if ! uci show network 2>/dev/null | grep -q "\.proto='amneziawg'"; then
+		local p
+		for p in luci-proto-amneziawg amneziawg-tools kmod-amneziawg; do
+			_st_owns "pkg $p" && $DELETE "$p" >/dev/null 2>&1
+		done
+	fi
+	# Результаты автообхода «через WARP» больше не правда.
+	sed -i 's/|warp$/|none/' /etc/zm-redbtn/services 2>/dev/null
+	_rb_rpcd_ensure
+	rm -rf "$ST_DIR" "$ST_RUN"
+	_rb_say "Готово, steer удалён"
+}
+
+steer_status() {
+	local running=false phase="" blk colo="" warp_up=false installed=false ver="" run=false chans=0 dns=false
+	local host="" port="" hs="" age="" rx=0 tx=0 off=false svc="" sep="" id sel=" " skip w k r
+	_st_running && running=true
+	[ -f "$ST_PHASE_FILE" ] && phase=$(cat "$ST_PHASE_FILE")
+	blk="$(_st_blocker)"
+	_st_installed && installed=true
+	[ -f "$ST_OFF" ] && off=true
+	[ -f "$ST_DIR/warp.colo" ] && colo=$(cat "$ST_DIR/warp.colo")
+	[ -d "/sys/class/net/$ST_WARP_IF" ] && warp_up=true
+	if _st_owns "net $ST_WARP_IF"; then
+		host="$(uci -q get "network.${ST_WARP_IF}_peer.endpoint_host")"
+		port="$(uci -q get "network.${ST_WARP_IF}_peer.endpoint_port")"
+	fi
+	if [ "$warp_up" = true ] && command -v awg >/dev/null 2>&1; then
+		hs=$(_st_warp_hs_epoch)
+		[ -n "$hs" ] && [ "$hs" != 0 ] && age=$(( $(date +%s) - hs ))
+		set -- $(awg show "$ST_WARP_IF" transfer 2>/dev/null | head -n1)
+		rx="${2:-0}"; tx="${3:-0}"
+	fi
+	if command -v steer >/dev/null 2>&1; then
+		ver="$(_st_steer_ver)"
+		/etc/init.d/steer running >/dev/null 2>&1 && run=true
+		_st_owns "steer-spec" && chans=$(grep -o '"out"' "$ST_STEER_SPEC" 2>/dev/null | wc -l)
+	fi
+	_st_dns_conflict && dns=true
+	sel=" $(_st_sel | tr '\n' ' ') "
+	for id in $(_rb_svc_ids); do
+		_rb_routable "$id" || continue
+		w=false; k=false
+		case "$sel" in *" $id "*) w=true ;; esac
+		_rb_in "$id" "$ST_SKIP" && k=true
+		r="$(grep "^$id|" /etc/zm-redbtn/services 2>/dev/null | head -n1 | cut -d'|' -f2)"
+		svc="$svc$sep{\"id\":\"$id\",\"name\":\"$(esc "$(_rb_svc_field "$id" 2)")\",\"on\":$w,\"skip\":$k,\"auto\":\"$r\"}"
+		sep=","
+	done
+	printf '{"running":%s,"phase":"%s","blocker":"%s","installed":%s,"stopped":%s,"version":"%s","steer_running":%s,"channels":%s,"warp_up":%s,"warp_colo":"%s","warp_host":"%s","warp_port":"%s","warp_hs_age":"%s","warp_rx":%s,"warp_tx":%s,"autorestart":"%s","dns_conflict":%s,"redbtn_running":%s,"services":[%s]}\n' \
+		"$running" "$(esc "$phase")" "$blk" "$installed" "$off" "$(esc "$ver")" "$run" "${chans:-0}" "$warp_up" "$(esc "$colo")" \
+		"$(esc "$host")" "$(esc "$port")" "$age" "${rx:-0}" "${tx:-0}" "$(_st_cron_get)" "$dns" \
+		"$(_job_alive redbtn && echo true || echo false)" "$svc"
+}
+
+# Выбор сервисов с страницы: итоговый набор через запятую.
+_st_sel_set() {
+	local want id
+	want=" $(echo "$1" | tr ',' ' ') "
+	for id in $want; do
+		[ -n "$(_rb_svc_field "$id" 1)" ] && _rb_routable "$id" || { echo '{"error":"неизвестный сервис"}'; return 1; }
+	done
+	mkdir -p "$ST_DIR"
+	touch "$ST_SKIP"
+	# Снятое человеком запоминаем, чтобы автообход не вернул; отмеченное снова — забываем.
+	for id in $(_st_sel); do case "$want" in *" $id "*) ;; *) _rb_in "$id" "$ST_SKIP" || echo "$id" >> "$ST_SKIP" ;; esac; done
+	for id in $want; do sed -i "/^$id\$/d" "$ST_SKIP"; done
+	printf '%s\n' $want | grep . > "$ST_SEL"
+	[ -s "$ST_SKIP" ] || rm -f "$ST_SKIP"
+	return 0
+}
+
+steer_action() {
+	local action="$1" mode="$2"
+	case "$action" in
+		install|apply|start|stop|remove|warp_restart|warp_endpoint|warp_recreate|lists)
+			_st_running && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
+			_job_alive redbtn && { echo '{"error":"идёт автообход — дождитесь его окончания"}'; return 1; }
+			case "$action" in
+				install)       job_start steer do_steer_install ;;
+				apply|start)   job_start steer do_steer_apply ;;
+				stop)          job_start steer do_steer_stop ;;
+				remove)        job_start steer do_steer_remove ;;
+				warp_restart)  job_start steer do_steer_warp_restart ;;
+				warp_endpoint) job_start steer do_steer_warp_endpoint ;;
+				warp_recreate) job_start steer do_steer_warp_recreate ;;
+				lists)
+					_st_sel_set "$mode" || return 1
+					if _st_installed && [ ! -f "$ST_OFF" ]; then job_start steer do_steer_apply
+					else printf '{"ok":true,"saved":true}\n'; fi ;;
+			esac
+			;;
+		halt)
+			_st_running || { echo '{"error":"ничего не выполняется"}'; return 1; }
+			touch "$ST_STOP_FLAG"
+			printf '{"ok":true}\n'
+			;;
+		restart)
+			_st_running && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
+			_st_owns "steer-spec" || { echo '{"error":"правил для steer нет — выберите сервисы"}'; return 1; }
+			/etc/init.d/steer enable >/dev/null 2>&1
+			/etc/init.d/steer restart >/dev/null 2>&1
+			sleep 1
+			/etc/init.d/steer running >/dev/null 2>&1 || { echo '{"error":"steer не запустился — загляните в системный журнал"}'; return 1; }
+			printf '{"ok":true}\n'
+			;;
+		autorestart) _st_cron_set "$mode" ;;
+		diag)
+			local trace warp="none" colo=""
+			if _st_installed && [ -n "$(_st_sel)" ] && [ ! -f "$ST_OFF" ]; then
+				trace="$(curl -s --interface "$ST_WARP_IF" --connect-timeout 4 --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)"
+				case "$trace" in *warp=on*|*warp=plus*) warp=on ;; *) warp=off ;; esac
+				colo="$(echo "$trace" | sed -n 's/^colo=//p')"
+			fi
+			local d=""
+			if command -v steer >/dev/null 2>&1 && [ -s "$ST_STEER_SPEC" ] && _st_owns "steer-spec"; then
+				d="$(steer diag --spec "$ST_STEER_SPEC" 2>/dev/null | tr '\n' ' ')"
+				case "$d" in '{'*'}'*) ;; *) d="" ;; esac
+			fi
+			printf '{"warp":"%s","colo":"%s","diag":%s}\n' "$warp" "$(esc "$colo")" "${d:-null}"
+			;;
+		dns_fix)
+			do_steer_dns_fix
+			printf '{"ok":true}\n'
+			;;
+		*) echo '{"error":"неизвестное действие"}' ;;
+	esac
+}
+
+
+
+# ───────────────────────── Автообход ─────────────────────────
+#
+# Автоподбор обхода по сервисам (внутри по-прежнему redbtn: пути и имя задачи не менялись,
+# чтобы обновление панели не теряло состояние). Роутер сам проверяет каждый сервис и берёт ему
+# самый дешёвый работающий способ. Идея и каталог сервисов — из BigRedButton
+# (gitlab.com/xyzmean/brb); стратегию подбирает тестер Zapret Manager (do_test_run) и
+# применяет её его же функциями.
+#
+# ЛЕСТНИЦА, по возрастанию цены:
+#   1. напрямую        — сервис открывается и без обхода;
+#   2. через Zapret    — открывается при общей стратегии zapret (её подбирает тестер ZM);
+#   3. через WARP      — ТОЛЬКО если установлен steer (своя страница): сервис, который WARP
+#                        открывает, добавляется в его выбор. Сам автообход steer не ставит;
+#   4. через веб-сокет — только Telegram: микропакет tgws (его же ставит страница TG WS Proxy).
+#
+# Не делает хуже: если подобранная стратегия открыла меньше сервисов, чем было, прежняя
+# настройка zapret возвращается.
+
+RB_DIR="/etc/zm-redbtn"
+RB_RUN="$JOBS_DIR/redbtn"
+RB_OWNED="$RB_DIR/owned"
+RB_RESULTS="$RB_DIR/services"
+RB_LAST="$RB_DIR/last"
+RB_STOP_FLAG="$RB_RUN/stop"
+RB_PHASE_FILE="$RB_RUN/phase"
+# Видео на время подбора. Настройка — вне RB_DIR, в каталоге панели.
+RB_VIDEO_FILE="/opt/zapret-manager-luci/autobypass_video"
+RB_VIDEO_LIST_URLS="${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/AutoBypass/videos.txt https://cdn.jsdelivr.net/gh/StressOzz/Zapret-Manager@main/files/AutoBypass/videos.txt"
+# Свой DNS для проб: системный резолвер может отдавать подмену провайдера. Первый ответивший
+# из списка — на весь проход; ни один не ответил (или curl собран без DoH) — берём системный.
+RB_PROBE_DOHS="https://1.1.1.1/dns-query https://8.8.8.8/dns-query https://77.88.8.8/dns-query"
+RB_PROBE_DOH=""
+# Полоса локальных портов для проверки «напрямую». Пакетам из неё ставится бит 0x40000000 —
+# тот самый, по которому общий zapret пропускает пакет мимо себя (DESYNC_MARK). Так проба
+# «без обхода» не требует останавливать zapret всей сети.
+RB_LANE_DIRECT="21000-21199"
+RB_PARALLEL=8
+RB_BAR=60
+
+mkdir -p "$RB_RUN" 2>/dev/null
+
+_rb_phase() { printf '%s\n' "$1" > "$RB_PHASE_FILE"; }
+_rb_stopped() { [ -f "$RB_STOP_FLAG" ]; }
+_rb_own() { mkdir -p "$RB_DIR"; grep -qxF "$1" "$RB_OWNED" 2>/dev/null || echo "$1" >> "$RB_OWNED"; }
+_rb_owns() { grep -qxF "$1" "$RB_OWNED" 2>/dev/null; }
+_rb_running() { _job_alive redbtn; }
+_rb_test_running() { _job_alive strategy_test; }
+
+# Zapret2 несовместим с тестером zapret.
+_rb_blocker() {
+	if [ -f /etc/init.d/zapret2 ] && [ ! -f "$EXPERT_MODE_FILE" ]; then echo zapret2; return; fi
+	echo ""
+}
+
 
 # ── пробы ──
 #
 # Успех — curl вернул 0, сервер ответил кодом (не 000 и не 451) и в теле нет признака отказа.
-# Без проверки кода brb считал «открылось» и заглушку провайдера, и 403.
 _rb_probe_nft_up() {
 	nft delete table inet zm_rb_probe >/dev/null 2>&1
 	nft -f - >/dev/null 2>&1 <<-RBNFT
@@ -4844,7 +5756,7 @@ _rb_probe_nft_down() { nft delete table inet zm_rb_probe >/dev/null 2>&1; }
 _rb_doh_pick() {
 	local u
 	for u in $RB_PROBE_DOHS; do
-		curl -s -o /dev/null --max-time 6 --doh-url "$u" https://www.google.com/ 2>/dev/null && { echo "$u"; return 0; }
+		curl -s -o /dev/null --connect-timeout 4 --max-time 6 --doh-url "$u" https://www.google.com/ 2>/dev/null && { echo "$u"; return 0; }
 	done
 	return 1
 }
@@ -4852,10 +5764,10 @@ _rb_doh_pick() {
 _rb_check_one() { # ХОСТ РЕЖИМ(as_is|direct|warp) ОТКАЗ ФАЙЛ_УСПЕХОВ
 	local host="$1" mode="$2" deny="$3" okf="$4" body res code size rc extra=""
 	body="$RB_RUN/body.$$.$host"
-	[ -n "$RB_PROBE_DOH" ] && [ -z "$RB_SYS_DNS" ] && extra="--doh-url $RB_PROBE_DOH"
+	[ -n "$RB_PROBE_DOH" ] && extra="--doh-url $RB_PROBE_DOH"
 	case "$mode" in
 		direct) extra="$extra --local-port $RB_LANE_DIRECT" ;;
-		warp)   extra="$extra --interface $RB_WARP_IF" ;;
+		warp)   extra="$extra --interface $ST_WARP_IF" ;;
 	esac
 	res=$(curl -sL $extra --connect-timeout 4 --max-time 8 --speed-time 4 --speed-limit 1 --range 0-65535 \
 		-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o "$body" -w '%{http_code} %{size_download}' "https://$host/" 2>/dev/null)
@@ -4913,7 +5825,7 @@ _rb_check_service() { # ID РЕЖИМ -> код 0, если сервис раб�
 _rb_check_all() { # РЕЖИМ [ПОДПИСЬ]
 	local id
 	for id in $(_rb_svc_ids); do
-		case "$id" in telegram|geoblock) continue ;; esac
+		[ "$id" = telegram ] && continue
 		_rb_stopped && return 0
 		if _rb_check_service "$id" "$1"; then
 			echo "$id ok"
@@ -4943,453 +5855,12 @@ _rb_test_progress() {
 _rb_count_ok() { printf '%s\n' "$1" | grep -c ' ok$'; }
 _rb_failed() { printf '%s\n' "$1" | awk '$2=="fail"{print $1}'; }
 
-
-# ── пакеты ──
-
-_rb_arch() { awk -F\' '/DISTRIB_ARCH/ {print $2}' /etc/openwrt_release; }
-_rb_release() { awk -F\' '/DISTRIB_RELEASE/ {print $2}' /etc/openwrt_release; }
-_rb_target() { awk -F\' '/DISTRIB_TARGET/ {print $2}' /etc/openwrt_release | tr '/' '_'; }
-
-# Скачать и проверить, что это пакет, а не HTML-страница ошибки с кодом 200.
-_rb_fetch_pkg() { # URL ФАЙЛ
-	rm -f "$2"
-	curl -fsSL --connect-timeout 8 --max-time 120 -o "$2" "$1" 2>/dev/null || { rm -f "$2"; return 1; }
-	[ -s "$2" ] || { rm -f "$2"; return 1; }
-	if head -c 512 "$2" | grep -qi '<html\|<!doctype'; then rm -f "$2"; return 1; fi
-	return 0
-}
-
-_rb_steer_ver() { steer --version 2>/dev/null | head -n1 | awk '{print $2}'; }
-
-_rb_install_steer() {
-	if command -v steer >/dev/null 2>&1; then
-		_rb_say "Движок steer уже установлен: $(_rb_steer_ver)"
-		return 0
-	fi
-	local arch file tmp base url ver
-	arch="$(_rb_arch)"
-	[ -n "$arch" ] || { echo "ОШИБКА: не удалось определить архитектуру роутера"; return 1; }
-	tmp="$RB_RUN/steer.$RAZ"
-	_rb_say "Устанавливаем движок steer $RB_STEER_VER"
-	$UPDATE >/dev/null 2>&1
-	for base in $RB_STEER_URLS; do
-		ver="$RB_STEER_VER"
-		url="$(echo "$base" | sed "s/@VER@/$ver/")/steer-${ver}-1_${arch}.${RAZ}"
-		if ! _rb_fetch_pkg "$url" "$tmp"; then
-			# На зеркале может лежать выпуск на шаг старше — берём тот, что там есть.
-			case "$base" in *@VER@*) continue ;; esac
-			ver=$(curl -fsSL --connect-timeout 8 --max-time 15 "$base/VERSION" 2>/dev/null | tr -d '[:space:]')
-			echo "$ver" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || continue
-			_rb_fetch_pkg "$base/steer-${ver}-1_${arch}.${RAZ}" "$tmp" || continue
-		fi
-		if $INSTALL "$tmp" >/dev/null 2>&1; then
-			rm -f "$tmp"
-			_rb_own "pkg steer"
-			# Пакет включает движок сразу, а движок и с пустой спекой заворачивает DNS сети на
-			# свой резолвер. На живом роутере так оборвался DNS клиентов по IPv6: запросы к
-			# роутеру по v6 уходили в тайм-аут. Включается он только вместе с правилами.
-			/etc/init.d/steer stop >/dev/null 2>&1
-			/etc/init.d/steer disable >/dev/null 2>&1
-			_rb_rpcd_ensure
-			_rb_say "Движок steer $ver установлен"
-			return 0
-		fi
-	done
-	rm -f "$tmp"
-	echo "ОШИБКА: не удалось установить движок steer"
-	return 1
-}
-
-_rb_awg_loaded() { grep -q '^amneziawg ' /proc/modules 2>/dev/null || [ -d /sys/module/amneziawg ]; }
-
-_rb_install_awg() {
-	if _rb_awg_loaded && command -v awg >/dev/null 2>&1; then return 0; fi
-	if ! _pkg_is_installed kmod-amneziawg || ! command -v awg >/dev/null 2>&1; then
-		_rb_say "Устанавливаем AmneziaWG"
-		local rel arch tgt p base ok
-		rel="$(_rb_release)"; arch="$(_rb_arch)"; tgt="$(_rb_target)"
-		$UPDATE >/dev/null 2>&1
-		for base in "${GH_MAIN}/2Grey/awg-openwrt/releases/download/v$rel" "$RB_AWG_MIRROR/$rel"; do
-			ok=1
-			for p in kmod-amneziawg amneziawg-tools; do
-				_pkg_is_installed "$p" && continue
-				if _rb_fetch_pkg "$base/${p}_v${rel}_${arch}_${tgt}.${RAZ}" "$RB_RUN/$p.$RAZ" &&
-				   $INSTALL "$RB_RUN/$p.$RAZ" >/dev/null 2>&1; then
-					_rb_own "pkg $p"
-				else
-					ok=0
-				fi
-				rm -f "$RB_RUN/$p.$RAZ"
-			done
-			[ "$ok" = 1 ] && break
-		done
-		# Обработчик для веб-интерфейса — чтобы туннель было видно в «Сеть → Интерфейсы».
-		# Без него всё работает, поэтому неудача здесь не ошибка.
-		if [ "$ok" = 1 ] && ! _pkg_is_installed luci-proto-amneziawg; then
-			_rb_fetch_pkg "$base/luci-proto-amneziawg_v${rel}_${arch}_${tgt}.${RAZ}" "$RB_RUN/lpa.$RAZ" &&
-				$INSTALL "$RB_RUN/lpa.$RAZ" >/dev/null 2>&1 && _rb_own "pkg luci-proto-amneziawg"
-			rm -f "$RB_RUN/lpa.$RAZ"
-		fi
-	fi
-	# Установщик пакета модуль в ядро не грузит, а /etc/init.d/kmod грузит его только при
-	# загрузке: без modprobe интерфейс не поднимается до перезагрузки роутера.
-	_rb_awg_loaded || modprobe amneziawg >/dev/null 2>&1
-	if ! _rb_awg_loaded || ! command -v awg >/dev/null 2>&1; then
-		echo "ОШИБКА: не удалось установить AmneziaWG"
-		return 1
-	fi
-	# netifd узнаёт о протоколе amneziawg только при своём запуске.
-	if ! ubus call network get_proto_handlers 2>/dev/null | grep -q '"amneziawg"'; then
-		_rb_say "Перезапускаем сеть, чтобы она узнала протокол AmneziaWG"
-		/etc/init.d/network restart >/dev/null 2>&1
-		sleep 8
-	fi
-	_rb_rpcd_ensure
-	return 0
-}
-
-# ── WARP ──
-
-_rb_warp_field() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$RB_WARP_CONF" | head -n1; }
-
-_rb_warp_register() {
-	[ -s "$RB_WARP_CONF" ] && return 0
-	mkdir -p "$RB_DIR"
-	# Тот же генератор, что у страницы Mixomo, но в свой файл: чужой /root/WARP.conf не трогаем.
-	( MIXOMO_WARP_CONF="$RB_WARP_CONF"; do_mixomo_warp_register manual ) || return 1
-	chmod 600 "$RB_WARP_CONF"
-	[ -n "$(_rb_warp_field PrivateKey)" ] && [ -n "$(_rb_warp_field PublicKey)" ]
-}
-
-# Кандидаты в точку входа: адреса Cloudflare, ответившие быстрее всех по HTTP. Это только
-# отсев — годность точки решает настоящее рукопожатие туннеля и данные через него.
-_rb_warp_candidates() {
-	local prefixes="188.114.96. 188.114.97. 188.114.98. 188.114.99. 162.159.192. 162.159.193. 162.159.195. 8.34.146. 8.39.214. 8.39.204. 8.6.112. 8.35.211. 8.39.125. 8.47.69."
-	local pings="$RB_RUN/pings" ip count=0
-	rm -f "$pings"
-	for ip in $(awk -v prefixes="$prefixes" 'BEGIN { srand(); n = split(prefixes, arr, " "); for (i = 0; i < 40; i++) { print arr[int(rand() * n) + 1] int(rand() * 256) } }'); do
-		(
-			t=$(curl -s --connect-timeout 2 -o /dev/null -w '%{time_total}' -H "Host: trace.cloudflare.com" "http://$ip/cdn-cgi/trace" 2>/dev/null) || exit 0
-			[ -n "$t" ] && echo "$t $ip" | awk '{printf "%d %s\n", $1 * 1000, $2}' >> "$pings"
-		) &
-		count=$((count + 1))
-		[ $((count % 20)) -eq 0 ] && wait
-	done
-	wait
-	[ -s "$pings" ] && sort -n "$pings" | head -n 5 | awk '{print $2}'
-	echo "engage.cloudflareclient.com"
-}
-
-_rb_warp_iface_write() { # ХОСТ ПОРТ
-	local priv addr peer
-	priv="$(_rb_warp_field PrivateKey)"
-	addr="$(_rb_warp_field Address | tr ',' '\n' | sed 's/[[:space:]]//g' | grep -v ':' | head -n1)"
-	peer="$(_rb_warp_field PublicKey)"
-	case "$addr" in */*) ;; *) addr="$addr/32" ;; esac
-	uci -q delete "network.$RB_WARP_IF"
-	uci -q delete "network.${RB_WARP_IF}_peer"
-	uci set "network.$RB_WARP_IF=interface"
-	uci set "network.$RB_WARP_IF.proto=amneziawg"
-	uci set "network.$RB_WARP_IF.private_key=$priv"
-	uci add_list "network.$RB_WARP_IF.addresses=$addr"
-	uci set "network.$RB_WARP_IF.mtu=1280"
-	uci set "network.$RB_WARP_IF.awg_jc=$MIXOMO_AWG_JC"
-	uci set "network.$RB_WARP_IF.awg_jmin=$MIXOMO_AWG_JMIN"
-	uci set "network.$RB_WARP_IF.awg_jmax=$MIXOMO_AWG_JMAX"
-	uci set "network.$RB_WARP_IF.awg_s1=$MIXOMO_AWG_S1"
-	uci set "network.$RB_WARP_IF.awg_s2=$MIXOMO_AWG_S2"
-	uci set "network.$RB_WARP_IF.awg_h1=$MIXOMO_AWG_H1"
-	uci set "network.$RB_WARP_IF.awg_h2=$MIXOMO_AWG_H2"
-	uci set "network.$RB_WARP_IF.awg_h3=$MIXOMO_AWG_H3"
-	uci set "network.$RB_WARP_IF.awg_h4=$MIXOMO_AWG_H4"
-	uci set "network.$RB_WARP_IF.awg_i1=$MIXOMO_AWG_I1"
-	uci set "network.${RB_WARP_IF}_peer=amneziawg_$RB_WARP_IF"
-	uci set "network.${RB_WARP_IF}_peer.description=WARP"
-	uci set "network.${RB_WARP_IF}_peer.public_key=$peer"
-	uci add_list "network.${RB_WARP_IF}_peer.allowed_ips=0.0.0.0/0"
-	# Маршрутов в главную таблицу не ставим: трафик в туннель уводит движок, остальное
-	# идёт как шло.
-	uci set "network.${RB_WARP_IF}_peer.route_allowed_ips=0"
-	uci set "network.${RB_WARP_IF}_peer.persistent_keepalive=25"
-	uci set "network.${RB_WARP_IF}_peer.endpoint_host=$1"
-	uci set "network.${RB_WARP_IF}_peer.endpoint_port=$2"
-	uci commit network
-	_rb_own "net $RB_WARP_IF"
-}
-
-# Зона firewall туннеля: NAT и выравнивание MSS. Без NAT устройства сети уходят в туннель
-# со своими адресами из LAN, и ответы не возвращаются.
-_rb_warp_zone() {
-	if [ "$(uci -q get "firewall.$RB_WARP_ZONE")" != "zone" ]; then
-		uci set "firewall.$RB_WARP_ZONE=zone"
-		uci set "firewall.$RB_WARP_ZONE.name=$RB_WARP_ZONE"
-		uci add_list "firewall.$RB_WARP_ZONE.network=$RB_WARP_IF"
-		uci set "firewall.$RB_WARP_ZONE.input=REJECT"
-		uci set "firewall.$RB_WARP_ZONE.output=ACCEPT"
-		uci set "firewall.$RB_WARP_ZONE.forward=REJECT"
-		uci set "firewall.$RB_WARP_ZONE.masq=1"
-		uci set "firewall.$RB_WARP_ZONE.mtu_fix=1"
-		uci set "firewall.${RB_WARP_ZONE}_fwd=forwarding"
-		uci set "firewall.${RB_WARP_ZONE}_fwd.src=lan"
-		uci set "firewall.${RB_WARP_ZONE}_fwd.dest=$RB_WARP_ZONE"
-		uci commit firewall
-		_rb_own "fw $RB_WARP_ZONE"
-		/etc/init.d/firewall reload >/dev/null 2>&1
-	fi
-}
-
-_rb_warp_handshake() { # ждать рукопожатия до 10 с
-	local i=0 hs
-	while [ "$i" -lt 10 ]; do
-		hs=$(awg show "$RB_WARP_IF" latest-handshakes 2>/dev/null | awk '{print $2}' | head -n1)
-		[ -n "$hs" ] && [ "$hs" != 0 ] && return 0
-		ping -c1 -W1 -I "$RB_WARP_IF" 1.1.1.1 >/dev/null 2>&1
-		i=$((i + 1))
-	done
-	return 1
-}
-
-# Колония Cloudflare ИЗНУТРИ туннеля. Ответ означает, что данные через туннель идут, а не
-# только прошло рукопожатие.
-_rb_warp_colo() {
-	# По https: http-вариант этого адреса теперь отвечает переадресацией без тела.
-	curl -s --interface "$RB_WARP_IF" --connect-timeout 5 --max-time 8 https://1.1.1.1/cdn-cgi/trace 2>/dev/null |
-		sed -n 's/^colo=//p' | head -n1
-}
-
-_rb_warp_is_ru() { case " $RB_RU_COLOS " in *" $1 "*) return 0 ;; esac; return 1; }
-
-_rb_warp_try() { # ХОСТ ПОРТ -> печатает колонию
-	local colo
-	uci set "network.${RB_WARP_IF}_peer.endpoint_host=$1"
-	uci set "network.${RB_WARP_IF}_peer.endpoint_port=$2"
-	uci commit network
-	ifdown "$RB_WARP_IF" >/dev/null 2>&1
-	sleep 1
-	ifup "$RB_WARP_IF" >/dev/null 2>&1
-	sleep 3
-	_rb_warp_handshake || return 1
-	colo="$(_rb_warp_colo)"
-	[ -n "$colo" ] || return 1
-	echo "$colo"
-}
-
-_rb_warp_up() {
-	_rb_install_awg || return 1
-	_rb_say "Получаем ключи WARP"
-	_rb_warp_register || { echo "ОШИБКА: не удалось получить ключи WARP"; return 1; }
-	local host port colo spare="" cand
-	[ "$(uci -q get "network.$RB_WARP_IF.proto")" = amneziawg ] || _rb_warp_iface_write engage.cloudflareclient.com 4500
-	_rb_warp_zone
-	# Прежняя точка работает — не перебираем заново.
-	host="$(uci -q get "network.${RB_WARP_IF}_peer.endpoint_host")"
-	port="$(uci -q get "network.${RB_WARP_IF}_peer.endpoint_port")"
-	ifup "$RB_WARP_IF" >/dev/null 2>&1
-	sleep 3
-	if _rb_warp_handshake && colo="$(_rb_warp_colo)" && [ -n "$colo" ] && ! _rb_warp_is_ru "$colo"; then
-		_rb_say "Туннель WARP работает, колония $colo"
-		echo "$colo" > "$RB_DIR/warp.colo"
-		return 0
-	fi
-	_rb_say "Подбираем точку входа WARP"
-	cand="$(_rb_warp_candidates)"
-	_rb_say "Кандидатов: $(echo "$cand" | grep -c .)"
-	# Порты 4500 и 2408 выколоты из игрового фильтра zapret — туннель не попадёт под обработку.
-	for port in 4500 2408; do
-		for host in $cand; do
-			_rb_stopped && return 1
-			echo "   Пробуем $host:$port"
-			colo="$(_rb_warp_try "$host" "$port")" || { echo "      не отвечает"; continue; }
-			echo "      работает, колония $colo"
-			if _rb_warp_is_ru "$colo"; then
-				[ -n "$spare" ] || spare="$host $port $colo"
-				continue
-			fi
-			_rb_say "Туннель WARP работает: $host:$port, колония $colo"
-			echo "$colo" > "$RB_DIR/warp.colo"
-			return 0
-		done
-	done
-	if [ -n "$spare" ]; then
-		set -- $spare
-		_rb_warp_try "$1" "$2" >/dev/null
-		_rb_warn "Туннель WARP работает только через российскую колонию $3: ИИ-сервисы через него не откроются"
-		echo "$3" > "$RB_DIR/warp.colo"
-		return 0
-	fi
-	ifdown "$RB_WARP_IF" >/dev/null 2>&1
-	rm -f "$RB_DIR/warp.colo"
-	echo "ОШИБКА: туннель WARP не поднялся ни через одну точку входа"
-	return 1
-}
-
-# ── списки для туннеля ──
-#
-# Списки сервисов берутся наборами .srs из каталога splify2-lists (github.com/xyzmean/splify2-lists):
-# его lists.json называет для каждого набора ссылку на релиз издателя С ЗАФИКСИРОВАННЫМ тегом,
-# так что два роутера с одним каталогом уводят в туннель одно и то же. Набор раскладывает сам
-# движок (`steer srs-read`) на домены, подсети и сужение по протоколу и портам.
-#
-# Качается сначала напрямую, потом ЧЕРЕЗ ТУННЕЛЬ: списки нужны ровно тем сервисам, которые
-# уходят в WARP, значит туннель к этому моменту уже поднят, а GitHub у аудитории кнопки часто
-# закрыт. Не скачалось вовсе — берётся список из пакета: хуже свежего, но лучше никакого.
-RB_LISTS_MANIFEST="https://github.com/xyzmean/splify2-lists/releases/latest/download/lists.json"
-RB_SRS_FALLBACK="https://github.com/itdoginfo/allow-domains/releases/latest/download"
-
-_rb_fetch() { # URL ФАЙЛ — напрямую, потом через туннель
-	curl -fsSL --connect-timeout 6 --max-time 60 -o "$2" "$1" 2>/dev/null && [ -s "$2" ] && return 0
-	[ -d "/sys/class/net/$RB_WARP_IF" ] &&
-		curl -fsSL --interface "$RB_WARP_IF" --connect-timeout 6 --max-time 60 -o "$2" "$1" 2>/dev/null && [ -s "$2" ]
-}
-
-_rb_srs_url() { # НАБОР -> ссылка из каталога или «последний релиз» издателя
-	local m="$RB_RUN/lists.json" u=""
-	[ -s "$m" ] || _rb_fetch "$RB_LISTS_MANIFEST" "$m" || rm -f "$m"
-	[ -s "$m" ] && u=$(grep -o '"url"[[:space:]]*:[[:space:]]*"[^"]*/allow-domains/releases/download/[^"]*/'"$1"'\.srs"' "$m" |
-		head -n1 | sed 's/.*"\(https[^"]*\)"$/\1/')
-	echo "${u:-$RB_SRS_FALLBACK/$1.srs}"
-}
-
-# Набор -> $RB_DIR/lists/НАБОР.dom / .pfx / .meta. Код 0 — разложен.
-_rb_srs_get() { # НАБОР
-	local d="$RB_DIR/lists" f
-	mkdir -p "$d"
-	[ -f "$RB_RUN/srs.$1.done" ] && return 0
-	f="$RB_RUN/$1.srs"
-	_rb_fetch "$(_rb_srs_url "$1")" "$f" || return 1
-	steer srs-read "$f" --out "$d/$1.dom.tmp" --prefixes-out "$d/$1.pfx.tmp" --meta-out "$d/$1.meta.tmp" >/dev/null 2>&1 || {
-		rm -f "$f" "$d/$1".*.tmp; return 1; }
-	for x in dom pfx meta; do touch "$d/$1.$x.tmp"; mv "$d/$1.$x.tmp" "$d/$1.$x"; done
-	rm -f "$f"
-	touch "$RB_RUN/srs.$1.done"
-}
-
-# Каналы сервиса в спеке: печатает JSON-объекты через запятую (без внешних скобок).
-_rb_svc_channels() { # ID
-	local id="$1" name sets set dom="" pfx="" narrow="" f proto ports ch="" sep=""
-	name="$(_rb_svc_field "$id" 2)"
-	sets="$(_rb_svc_field "$id" 8 | tr ',' ' ')"
-	for set in $sets; do
-		# Один набор на несколько сервисов (Instagram и WhatsApp — оба meta) — в спеку один раз.
-		# Пометка файлом: функцию зовут в подоболочке, переменная оттуда не возвращается.
-		[ -f "$RB_RUN/used.$set" ] && continue
-		if _rb_srs_get "$set"; then
-			touch "$RB_RUN/used.$set"
-			f="$RB_DIR/lists/$set"
-			[ -s "$f.dom" ] && dom="$dom${dom:+,}\"$f.dom\""
-			if [ -s "$f.pfx" ]; then
-				if [ -s "$f.meta" ]; then narrow="$narrow $set"; else pfx="$pfx${pfx:+,}\"$f.pfx\""; fi
-			fi
-		else
-			_rb_warn "Список $set не скачался — беру список из пакета" >&2
-			sets=""
-			break
-		fi
-	done
-	# Ни одного набора или набор не скачался — списки из пакета.
-	if [ -z "$sets" ]; then
-		dom="$(_rb_json_list "$(_rb_svc_field "$id" 3 | tr ',' ' ')")"
-		pfx="$(_rb_json_list "$(_rb_svc_field "$id" 4 | tr ',' ' ')")"
-		narrow=""
-	fi
-	[ -n "$dom" ] && { ch="$ch$sep{\"name\":\"$name\",\"out\":\"zm_warp\",\"match\":{\"domains_files\":[$dom]}}"; sep=","; }
-	[ -n "$pfx" ] && { ch="$ch$sep{\"name\":\"$name (адреса)\",\"out\":\"zm_warp\",\"match\":{\"prefixes_files\":[$pfx]}}"; sep=","; }
-	# Подсети с сужением — отдельным каналом с протоколом и портами (схема 2): без сужения
-	# в туннель ушёл бы весь TCP к подсетям Cloudflare, а не только голос Discord.
-	for set in $narrow; do
-		f="$RB_DIR/lists/$set"
-		proto=$(sed -n 's/^proto=//p' "$f.meta" | head -n1)
-		ports=$(sed -n 's/^ports=//p' "$f.meta" | head -n1 | sed 's/,/","/g')
-		ch="$ch$sep{\"name\":\"$name (голос)\",\"out\":\"zm_warp\",\"match\":{\"prefixes_files\":[\"$f.pfx\"]${proto:+,\"proto\":\"$proto\"}${ports:+,\"ports\":[\"$ports\"]}}}"
-		sep=","
-	done
-	printf '%s' "$ch"
-}
-
-# ── спека steer ──
-
-_rb_json_list() { # файлы через пробел -> "a","b"
-	local f out=""
-	for f in $1; do [ -s "$RB_SHARE/lists/$f" ] && out="$out${out:+,}\"$RB_SHARE/lists/$f\""; done
-	printf '%s' "$out"
-}
-
-_rb_spec_build() { # ID... -> JSON в stdout
-	local id c chans="" schema=1
-	rm -f "$RB_RUN"/used.*
-	for id in "$@"; do
-		c="$(_rb_svc_channels "$id")"
-		[ -n "$c" ] && chans="$chans${chans:+,}$c"
-	done
-	[ -n "$chans" ] || return 1
-	case "$chans" in *'"ports"'*|*'"proto"'*) schema=2 ;; esac
-	printf '{"schema":%s,"lan_devices":["br-lan"],"outputs":{"zm_warp":{"kind":"interface","devices":["%s"],"on_fail":"direct"}},"channels":[%s]}\n' \
-		"$schema" "$RB_WARP_IF" "$chans"
-}
-
-_rb_spec_apply() { # ID...
-	local tmp="$RB_RUN/spec.json" out
-	_rb_spec_build "$@" > "$tmp" || return 1
-	if ! out=$(steer apply --spec "$tmp" --dry-run 2>&1 >/dev/null); then
-		echo "ОШИБКА: движок отверг настройку"
-		printf '%s\n' "$out" | tail -n 5
-		return 1
-	fi
-	mkdir -p /etc/steer
-	if [ -s "$RB_STEER_SPEC" ] && ! _rb_owns "steer-spec" && [ ! -f "$RB_DIR/spec.before" ]; then
-		cp "$RB_STEER_SPEC" "$RB_DIR/spec.before"
-	fi
-	if [ -s "$RB_STEER_SPEC" ] && cmp -s "$tmp" "$RB_STEER_SPEC" && /etc/init.d/steer running >/dev/null 2>&1; then
-		_rb_say "Правила движка не изменились"
-		return 0
-	fi
-	cp "$tmp" "$RB_STEER_SPEC.tmp" && mv "$RB_STEER_SPEC.tmp" "$RB_STEER_SPEC"
-	_rb_own "steer-spec"
-	/etc/init.d/steer enable >/dev/null 2>&1
-	/etc/init.d/steer restart >/dev/null 2>&1
-	_rb_say "Правила движка применены"
-}
-
-_rb_spec_clear() {
-	_rb_owns "steer-spec" || return 0
-	/etc/init.d/steer stop >/dev/null 2>&1
-	/etc/init.d/steer disable >/dev/null 2>&1
-	if [ -s "$RB_DIR/spec.before" ]; then mv "$RB_DIR/spec.before" "$RB_STEER_SPEC"; else rm -f "$RB_STEER_SPEC"; fi
-	sed -i '/^steer-spec$/d' "$RB_OWNED"
-}
-
-# ── DNS: спор за порт 53 ──
-#
-# https-dns-proxy с force_dns=1 (так его всегда пишет страница DoH) заворачивает DNS сети на
-# dnsmasq; движок заворачивает те же запросы на свой резолвер, и только там домены
-# превращаются в правила. Побеждает тот, кто зарегистрировался раньше, а проигравший молчит.
-_rb_dns_conflict() {
-	[ -f /etc/config/https-dns-proxy ] || return 1
-	# Служба самого пакета, а не любой процесс https-dns-proxy: свой экземпляр для ИИ-сервисов
-	# кнопка держит отдельно (zm-geodns), и порт 53 он не трогает.
-	/etc/init.d/https-dns-proxy running >/dev/null 2>&1 || return 1
-	_rb_owns "steer-spec" || return 1
-	# Ключа нет — у прокси умолчание единица.
-	local fd
-	fd=$(sed -n "s/^[[:space:]]*option force_dns '\([^']*\)'.*/\1/p" /etc/config/https-dns-proxy | head -n1)
-	[ "$fd" != "0" ]
-}
-
-do_redbtn_dns_fix() {
-	sed -i "s/^\([[:space:]]*option force_dns\) .*/\1 '0'/" /etc/config/https-dns-proxy
-	/etc/init.d/https-dns-proxy restart >/dev/null 2>&1
-	/etc/init.d/steer restart >/dev/null 2>&1
-}
-
 # ── Telegram ──
 #
 # Сайт открывается ещё не значит, что работает приложение: оно ходит к дата-центрам по MTProto,
 # и режут именно его. Поэтому каждому дата-центру шлётся настоящий первый запрос протокола —
 # req_pq_multi в транспорте abridged, — и ждётся ответ. Молчание хотя бы одного — ставим tgws:
 # он сам решает по каждому дата-центру, вести его напрямую или через веб-сокет.
-#
-# Код ответа curl по адресу ДЦ здесь ничего не говорит: ДЦ принимает TCP и ждёт MTProto, а не
-# TLS, так что тайм-аут у открытого и у закрытого одинаковый.
 RB_TG_DCS="149.154.175.50 149.154.167.51 149.154.175.100 149.154.167.91 91.108.56.130"
 
 _rb_mtproto_req() { # байты req_pq_multi в виде \ooo для printf
@@ -5423,6 +5894,7 @@ _rb_tg_ok() {
 	_rb_check_service telegram as_is || return 1
 	_rb_tg_dc_ok
 }
+
 
 # ── zapret: подбор тестером менеджера ──
 
@@ -5472,196 +5944,20 @@ _rb_result_write() { # ID СОСТОЯНИЕ
 	echo "$1|$2" >> "$RB_RESULTS"
 }
 
-# ── ИИ-сервисы: только DNS ──
-#
-# Геоблок не лечится ни стратегией zapret, ни туннелем: сервис смотрит, откуда пришли, и
-# открывает его только резолвер, выдающий адрес своего прокси. Поэтому проба здесь идёт
-# СИСТЕМНЫМ DNS — тем, что лечит, — а подбор zapret и WARP этот сервис не запускает.
-#
-# РЕЗОЛВЕР — ТОЛЬКО ДЛЯ ДОМЕНОВ СПИСКА, а не для всей сети. Список — тот, что публикует
-# dns.malw.link (файл hosts его репозитория: какие имена этот резолвер разблокирует); адреса к
-# ним отдаёт выбранный резолвер, а не файл, поэтому они не стареют вместе со списком. dnsmasq
-# получает свой файл `server=/домен/127.0.0.1#5055`, остальное разрешается как раньше.
-#
-# Резолвер крутится СВОИМ экземпляром https-dns-proxy (служба zm-geodns), а не секцией в
-# /etc/config/https-dns-proxy: та принадлежит человеку и странице DoH, и её dnsmasq_config_update
-# '*' увела бы в георезолвер вообще всё. Пакет, если его ставит кнопка, свою службу тут же
-# выключает — иначе он при установке сам забирает dnsmasq и порт 53 (проверено на 25.12.5).
-RB_GEO_PORT=5055
-RB_GEO_RESOLVER="$RB_DIR/geo.resolver"
-RB_GEO_DOMAINS="$RB_DIR/geo-domains.lst"
-RB_GEO_LIST_URLS="https://raw.githubusercontent.com/ImMALWARE/dns.malw.link/refs/heads/master/hosts https://cdn.jsdelivr.net/gh/ImMALWARE/dns.malw.link@master/hosts"
-RB_GEO_FALLBACK="chatgpt.com openai.com oaistatic.com oaiusercontent.com sora.com claude.ai anthropic.com claudeusercontent.com gemini.google.com aistudio.google.com generativelanguage.googleapis.com copilot.microsoft.com grok.com x.ai perplexity.ai"
-
-_rb_geo_how() {
-	if grep -qE '[[:space:]](chatgpt\.com|openai\.com)([[:space:]]|$)' /etc/hosts 2>/dev/null; then echo hosts
-	else echo doh; fi
-}
-
-# Проверить один резолвер: ответил ли он и жив ли прокси, адрес которого он выдал. Проба —
-# настоящий запрос к chatgpt.com через этот резолвер: curl спрашивает DoH и подключается к
-# выданному адресу. Печатает «время_мс id», если годится.
-_rb_geo_try() { # СТРОКА_doh.conf
-	local id url boot role host h port ip b res rc code t body
-	IFS='|' read -r id _t url boot role <<-EOF
-	$1
-	EOF
-	host=${url#https://}; host=${host%%/*}; h=${host%%:*}; port=443
-	case "$host" in *:*) port=${host##*:} ;; esac
-	# Имя самого резолвера разрешаем его bootstrap-серверами: DoH и нужен там, где системный
-	# DNS врёт.
-	ip=""
-	for b in $(echo "$boot" | tr ',' ' '); do
-		ip=$(nslookup "$h" "$b" 2>/dev/null | awk '/^Address/ && !/#/ && $2 !~ /:/ {print $2}' | tail -n1)
-		[ -n "$ip" ] && break
-	done
-	body="$RB_RUN/geo.$id"
-	res=$(curl -s --connect-timeout 5 --max-time 10 ${ip:+--resolve "$h:$port:$ip"} --doh-url "$url" \
-		-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o "$body" -w '%{http_code} %{time_total}' https://chatgpt.com/ 2>/dev/null)
-	rc=$?
-	code="${res%% *}"; t="${res##* }"
-	if [ "$rc" = 0 ] && [ "$code" != 000 ] && ! grep -qiE "$(_rb_svc_field geoblock 7 | sed 's/,/|/g')" "$body" 2>/dev/null; then
-		echo "$t $id" | awk '{printf "%d %s\n", $1 * 1000, $2}'
-	fi
-	rm -f "$body"
-}
-
-# Лучший резолвер пула — самый быстрый из тех, чей прокси отвечает. Все проверяются сразу.
-_rb_geo_pick() {
-	local line out="$RB_RUN/geo.pick"
-	: > "$out"
-	while IFS= read -r line; do
-		case "$line" in ''|\#*) continue ;; esac
-		[ "$(echo "$line" | cut -d'|' -f5)" = geo ] || continue
-		( _rb_geo_try "$line" >> "$out" ) &
-	done < "$RB_SHARE/doh.conf"
-	wait
-	[ -s "$out" ] || return 1
-	sort -n "$out" | awk 'NR == 1 {print $2}'
-}
-
-# Список доменов: скачать (напрямую, потом через туннель), взять имена и свернуть поддомены
-# под родителя — dnsmasq-у `server=/example.com/` хватает на все поддомены.
-_rb_geo_domains() {
-	local u f="$RB_RUN/geo.hosts" ok=0
-	for u in $RB_GEO_LIST_URLS; do _rb_fetch "$u" "$f" && grep -q '^[0-9]' "$f" && { ok=1; break; }; done
-	if [ "$ok" = 1 ]; then
-		awk '/^[0-9]/ {print tolower($2)}' "$f" | sort -u | awk '
-			{ d[NR] = $0; have[$0] = 1 }
-			END { for (i = 1; i <= NR; i++) { n = split(d[i], p, "."); c = 0
-				for (j = 2; j < n; j++) { s = p[j]; for (k = j + 1; k <= n; k++) s = s "." p[k]; if (s in have) { c = 1; break } }
-				if (!c) print d[i] } }' > "$RB_GEO_DOMAINS.tmp" && mv "$RB_GEO_DOMAINS.tmp" "$RB_GEO_DOMAINS"
-	fi
-	rm -f "$f"
-	[ -s "$RB_GEO_DOMAINS" ] || { printf '%s\n' $RB_GEO_FALLBACK > "$RB_GEO_DOMAINS"; _rb_warn "Список доменов не скачался — беру короткий список ИИ-сервисов"; }
-	_rb_say "Доменов для DNS ИИ-сервисов: $(grep -c . "$RB_GEO_DOMAINS")"
-}
-
-_rb_geo_enable() {
-	local id line
-	if [ ! -x /usr/sbin/https-dns-proxy ]; then
-		local had_conf=0
-		[ -s /etc/config/https-dns-proxy ] && had_conf=1
-		_rb_say "Устанавливаем https-dns-proxy"
-		$UPDATE >/dev/null 2>&1
-		$INSTALL https-dns-proxy >/dev/null 2>&1 || { echo "ОШИБКА: https-dns-proxy не установился"; return 1; }
-		_rb_own "pkg https-dns-proxy"
-		# Своя служба пакета при установке сама забирает dnsmasq. Если настройки до установки не
-		# было, это умолчание пакета — выключаем, stop возвращает dnsmasq как было. Если была —
-		# её писал человек (или страница DoH), и dnsmasq уже на неё смотрит: выключить службу
-		# значило бы оставить весь DNS роутера на мёртвых портах. Так и случилось на живом
-		# роутере, пока этой проверки не было.
-		if [ "$had_conf" = 0 ]; then
-			/etc/init.d/https-dns-proxy stop >/dev/null 2>&1
-			/etc/init.d/https-dns-proxy disable >/dev/null 2>&1
-		fi
-		_rb_rpcd_ensure
-	fi
-	_rb_say "Подбираем DNS для ИИ-сервисов"
-	id="$(_rb_geo_pick)" || { echo "!! Ни один DNS не открыл ИИ-сервисы"; return 1; }
-	line="$(grep "^$id|" "$RB_SHARE/doh.conf" | head -n1)"
-	_rb_say "Лучший: $(echo "$line" | cut -d'|' -f2)"
-	_rb_geo_domains
-	{
-		echo "GEO_ID='$id'"
-		echo "GEO_TITLE='$(echo "$line" | cut -d'|' -f2)'"
-		echo "GEO_URL='$(echo "$line" | cut -d'|' -f3)'"
-		echo "GEO_BOOT='$(echo "$line" | cut -d'|' -f4)'"
-	} > "$RB_GEO_RESOLVER"
-	_rb_own "svc zm-geodns"
-	/etc/init.d/zm-geodns enable >/dev/null 2>&1
-	/etc/init.d/zm-geodns restart >/dev/null 2>&1
-	# Экземпляру нужно время разрешить имя самого резолвера (bootstrap): первые секунды он
-	# молчит, и проверка сразу после запуска отвечала «не открывается».
-	local i=0
-	while [ "$i" -lt 20 ]; do
-		nslookup -type=a chatgpt.com "127.0.0.1:$RB_GEO_PORT" 2>/dev/null | grep -q '^Address: [0-9]' && break
-		sleep 1; i=$((i + 1))
-	done
-}
-
-_rb_geo_disable() {
-	/etc/init.d/zm-geodns stop >/dev/null 2>&1
-	/etc/init.d/zm-geodns disable >/dev/null 2>&1
-	rm -f "$RB_GEO_RESOLVER"
-}
-
-_rb_geo_ok() {
-	local ok=0
-	RB_SYS_DNS=1
-	_rb_check_service geoblock as_is && ok=1
-	RB_SYS_DNS=""
-	[ "$ok" = 1 ]
-}
-
-_rb_geo_step() {
-	_rb_say "Проверяем ИИ-сервисы"
-	if _rb_geo_ok; then
-		_rb_result_write geoblock "$( [ -s "$RB_GEO_RESOLVER" ] && echo doh || _rb_geo_how)"
-		echo "[ OK ] $(_rb_svc_field geoblock 2) — открывается"
-		return 0
-	fi
-	if _rb_geo_enable && _rb_geo_ok; then
-		_rb_result_write geoblock doh
-		echo "[ OK ] $(_rb_svc_field geoblock 2) — через DoH"
-		grep -q redbtn_geo_watch "$CRON_FILE" 2>/dev/null || {
-			echo "*/30 * * * * /opt/zapret-manager-luci/backend.sh redbtn_geo_watch >/dev/null 2>&1" >> "$CRON_FILE"
-			/etc/init.d/cron restart >/dev/null 2>&1; }
-	else
-		_rb_result_write geoblock none
-		echo "[FAIL] $(_rb_svc_field geoblock 2) — не открывается"
-	fi
-}
-
-# Кнопка «Подобрать DNS заново» и сторож раз в 30 минут: прокси резолвера может умереть.
-do_redbtn_geo_doh() {
-	_rb_geo_enable || { _rb_result_write geoblock none; return 1; }
-	if _rb_geo_ok; then _rb_result_write geoblock doh; _rb_say "Готово, ИИ-сервисы открываются"
-	else _rb_result_write geoblock none; echo "!! ИИ-сервисы не открываются"; fi
-}
-
-redbtn_geo_watch() {
-	[ -s "$RB_GEO_RESOLVER" ] || return 0
-	_rb_running && return 0
-	_rb_geo_ok && return 0
-	logger -t zm-redbtn "ИИ-сервисы перестали открываться — подбираю DNS заново"
-	do_redbtn_geo_doh >/dev/null 2>&1
-}
 
 # ── основной проход ──
 
 do_redbtn_run() {
-	local mode="${1:-quick}" blk before after failed id zbak="$RB_RUN/zapret.before" pick name warp_ids="" warp_need=""
+	local mode="${1:-quick}" blk before after failed zfailed id zbak="$RB_RUN/zapret.before" pick name warp_ids=""
 	rm -f "$RB_STOP_FLAG"
 	mkdir -p "$RB_DIR" "$RB_RUN"
 	_ensure_deps
 	blk="$(_rb_blocker)"
 	case "$blk" in
-		splify2) echo "ОШИБКА: установлен splify2 — туннели и списки настраиваются в нём"; return 1 ;;
 		zapret2) echo "ОШИБКА: установлен Zapret2 — сначала удалите его"; return 1 ;;
-		steer)   echo "ОШИБКА: у движка steer уже есть чужие правила — кнопка их не перезаписывает"; return 1 ;;
 	esac
 	_rb_test_running && { echo "ОШИБКА: идёт тест стратегий — дождитесь его окончания"; return 1; }
+	_job_alive steer && { echo "ОШИБКА: на странице steer идёт операция — дождитесь её окончания"; return 1; }
 	: > "$RB_RESULTS"
 
 	_rb_phase zapret_install
@@ -5674,7 +5970,7 @@ do_redbtn_run() {
 
 	trap '_rb_probe_nft_down' EXIT INT TERM
 	_rb_probe_nft_up
-	RB_PROBE_DOH="$(_rb_doh_pick)" || _rb_warn "Ни один DNS для проверок не ответил — проверяем системным"
+	RB_PROBE_DOH="$(_rb_doh_pick)" || _rb_warn "Шифрованный DNS для проверок не ответил — проверяем через DNS роутера"
 
 	_rb_phase check
 	_rb_say "Проверяем сервисы при текущей настройке"
@@ -5682,8 +5978,11 @@ do_redbtn_run() {
 	_rb_stopped && { _rb_say "Остановлено"; return 0; }
 
 	# Подбор стратегии — только если что-то не открывается: рабочую настройку не трогаем.
+	# ИИ-сервисы не в счёт: их закрывает геоблок, а его стратегия Zapret не снимает — ради них
+	# одних гонять тестер десять минут бессмысленно, им сразу WARP.
 	failed="$(_rb_failed "$before")"
-	if [ -n "$failed" ]; then
+	zfailed="$(printf '%s\n' "$failed" | grep -vx 'geoblock')"
+	if [ -n "$zfailed" ]; then
 		_rb_phase zapret
 		cp "$CONF" "$zbak"
 		local tmode=v
@@ -5708,16 +6007,16 @@ do_redbtn_run() {
 					_rb_say "Стратегия $name применена"
 				fi
 			fi
-		else
+		elif ! _rb_stopped; then
 			_rb_warn "Ни одна стратегия не открыла больше, чем без Zapret — настройку не меняем"
 		fi
 		_rb_stopped && { _rb_say "Остановлено"; return 0; }
 
 		# YouTube отдельно: у менеджера для него свой набор стратегий (Yv).
-		if ! _rb_stopped && printf '%s\n' "$before" | grep -qx 'youtube fail'; then
+		if printf '%s\n' "$before" | grep -qx 'youtube fail'; then
 			_rb_say "Подбираем стратегию для YouTube"
 			cp "$CONF" "$zbak"
-			if name="$(_rb_youtube_pick)"; then
+			if name="$(_rb_youtube_pick)" && ! _rb_stopped; then
 				case "$(strategy_set_youtube "$name")" in
 					*'"ok":true'*)
 						if _rb_check_service youtube as_is; then
@@ -5747,15 +6046,21 @@ do_redbtn_run() {
 		fi
 	done
 
-	# WARP — для того, что не открыл zapret.
+	# WARP — для того, что не открыл zapret, и только если установлен steer.
 	failed="$(_rb_failed "$before")"
-	if [ -n "$failed" ]; then
+	if [ -n "$failed" ] && _st_ready; then
 		_rb_phase warp
-		_rb_say "Не открылось: $(for id in $failed; do printf '%s, ' "$(_rb_svc_field "$id" 2)"; done | sed 's/, $//')"
-		if _rb_install_steer && _rb_warp_up; then
+		_rb_say "Не открылось: $(_rb_svc_names "$failed") — пробуем через WARP"
+		if _st_warp_up; then
 			for id in $failed; do
-				if _rb_check_service "$id" warp; then
+				if ! _rb_routable "$id"; then
+					_rb_result_write "$id" none
+				elif _rb_in "$id" "$ST_SKIP"; then
+					echo "[ -- ] $(_rb_svc_field "$id" 2) — через WARP не пускаем: вы убрали его на странице steer"
+					_rb_result_write "$id" none
+				elif _rb_check_service "$id" warp; then
 					echo "[ OK ] $(_rb_svc_field "$id" 2) — через WARP"
+					_st_sel_add "$id"
 					warp_ids="$warp_ids $id"
 					_rb_result_write "$id" warp
 				else
@@ -5763,32 +6068,26 @@ do_redbtn_run() {
 					_rb_result_write "$id" none
 				fi
 			done
+			if [ -n "$warp_ids" ]; then
+				_rb_phase steer
+				_st_apply || _rb_warn "steer не принял правила — загляните на страницу steer"
+			fi
 		else
 			for id in $failed; do _rb_result_write "$id" none; done
 		fi
+	elif [ -n "$failed" ]; then
+		for id in $failed; do _rb_result_write "$id" none; done
+		_rb_warn "Не открылось: $(_rb_svc_names "$failed"). Их можно пустить через WARP — установите steer на странице «steer»"
 	fi
 	_rb_stopped && { _rb_say "Остановлено"; return 0; }
 
-	_rb_phase steer
-	if [ -n "$warp_ids" ]; then
-		_rb_say "Скачиваем списки сервисов"
-		_rb_spec_apply $warp_ids || return 1
-	else
-		_rb_spec_clear
-		# Правил нет — движку, поставленному кнопкой, работать незачем (см. _rb_install_steer).
-		if _rb_owns "pkg steer"; then
-			/etc/init.d/steer stop >/dev/null 2>&1
-			/etc/init.d/steer disable >/dev/null 2>&1
-		fi
-		if _rb_owns "net $RB_WARP_IF"; then ifdown "$RB_WARP_IF" >/dev/null 2>&1; fi
-	fi
-
-	_rb_phase geo
-	_rb_geo_step
-
 	_rb_phase telegram
 	_rb_say "Проверяем Telegram"
-	if [ -x /etc/init.d/tgws ] && [ -n "$(tgws status 2>/dev/null)" ]; then
+	if _st_ready && _rb_in telegram "$ST_SEL"; then
+		# Telegram отмечен на странице steer — он уже идёт через WARP, веб-сокет не нужен.
+		_rb_result_write telegram warp
+		echo "[ OK ] Telegram — через WARP (выбран на странице steer)"
+	elif [ -x /etc/init.d/tgws ] && [ -n "$(tgws status 2>/dev/null)" ]; then
 		_rb_result_write telegram tgws
 		echo "[ OK ] Telegram — через веб-сокет"
 	elif _rb_tg_ok; then
@@ -5796,8 +6095,8 @@ do_redbtn_run() {
 		echo "[ OK ] Telegram — открывается"
 	else
 		if do_tgws_install; then
-			_rb_rpcd_ensure
 			_rb_own "pkg tgws"
+			_rb_rpcd_ensure
 			_rb_result_write telegram tgws
 			echo "[ OK ] Telegram — через веб-сокет"
 		else
@@ -5808,70 +6107,76 @@ do_redbtn_run() {
 
 	_rb_phase done
 	date +%s > "$RB_LAST"
-	if _rb_dns_conflict; then
-		_rb_warn "DNS over HTTPS перехватывает DNS сети — правила по доменам не действуют, исправьте на странице кнопки"
+	if [ -n "$warp_ids" ] && _st_dns_conflict; then
+		_rb_warn "DNS over HTTPS перехватывает DNS сети — сервисы через WARP работать не будут, нажмите «Исправить» на странице steer"
 	fi
 	_rb_say "Готово, обход подобран"
 }
 
-do_redbtn_remove() {
-	_rb_phase remove
-	_rb_say "Снимаем настройки красной кнопки"
-	_rb_spec_clear
-	if _rb_owns "net $RB_WARP_IF"; then
-		ifdown "$RB_WARP_IF" >/dev/null 2>&1
-		uci -q delete "network.$RB_WARP_IF"
-		uci -q delete "network.${RB_WARP_IF}_peer"
-		uci commit network
-		/etc/init.d/network reload >/dev/null 2>&1
-	fi
-	if _rb_owns "fw $RB_WARP_ZONE"; then
-		uci -q delete "firewall.$RB_WARP_ZONE"
-		uci -q delete "firewall.${RB_WARP_ZONE}_fwd"
-		uci commit firewall
-		/etc/init.d/firewall reload >/dev/null 2>&1
-	fi
-	if _rb_owns "svc zm-geodns"; then _rb_geo_disable; fi
-	sed -i '/redbtn_geo_watch/d' "$CRON_FILE" 2>/dev/null && /etc/init.d/cron restart >/dev/null 2>&1
-	if _rb_owns "pkg https-dns-proxy"; then $DELETE https-dns-proxy >/dev/null 2>&1; fi
-	_rb_owns "pkg tgws" && do_tgws_remove
-	if _rb_owns "pkg steer"; then
-		_rb_say "Удаляем движок steer"
-		$DELETE steer >/dev/null 2>&1
-	fi
-	# AmneziaWG — только если других туннелей на нём нет.
-	if ! uci show network 2>/dev/null | grep -q "\.proto='amneziawg'"; then
-		local p
-		for p in luci-proto-amneziawg amneziawg-tools kmod-amneziawg; do
-			_rb_owns "pkg $p" && $DELETE "$p" >/dev/null 2>&1
+
+# ── видео на время подбора ──
+#
+# Каталог — файл videos.txt в репозитории Zapret Manager (files/AutoBypass), строки
+# «файл.mp4|Название|постер.jpg». Сами ролики браузер берёт с jsDelivr или GitHub; роутер только
+# хранит выбор, чтобы он был одинаковым в LuCI и в Web UI на любом устройстве.
+redbtn_video_list() {
+	local cache="$JOBS_DIR/autobypass_videos.txt" u tmp="$JOBS_DIR/autobypass_videos.tmp" out="" sep="" file name poster
+	if [ ! -s "$cache" ] || [ -n "$(find "$cache" -mmin +60 2>/dev/null)" ]; then
+		for u in $RB_VIDEO_LIST_URLS; do
+			if curl -fsSL --connect-timeout 5 --max-time 10 -o "$tmp" "$u" 2>/dev/null && grep -q '\.mp4|' "$tmp"; then
+				mv "$tmp" "$cache"; break
+			fi
 		done
+		rm -f "$tmp"
 	fi
-	_rb_probe_nft_down
-	rm -rf "$RB_DIR" "$RB_RUN"
-	_rb_say "Готово, настройки красной кнопки сняты"
+	[ -s "$cache" ] || printf '%s\n' 'wait.mp4|Стандартное|poster.jpg' > "$cache"
+	while IFS='|' read -r file name poster; do
+		case "$file" in ''|\#*) continue ;; esac
+		echo "$file" | grep -qE '^[A-Za-z0-9._-]+\.mp4$' || continue
+		echo "$poster" | grep -qE '^[A-Za-z0-9._-]+\.(jpg|jpeg|png|webp)$' || poster=""
+		out="$out$sep{\"file\":\"$file\",\"name\":\"$(esc "${name:-$file}")\",\"poster\":\"$poster\"}"
+		sep=","
+	done < "$cache"
+	printf '{"items":[%s]}\n' "$out"
 }
 
+redbtn_video_set() {
+	local v="$1"
+	case "$v" in
+		''|default) rm -f "$RB_VIDEO_FILE"; printf '{"ok":true}\n'; return 0 ;;
+		off) ;;
+		cat:*) echo "${v#cat:}" | grep -qE '^[A-Za-z0-9._-]+\.mp4$' || { echo '{"error":"неверное имя файла"}'; return 1; } ;;
+		url:https://*|url:http://*)
+			case "$v" in *[[:space:]\"\'\\\<\>]*) echo '{"error":"ссылка содержит недопустимые символы"}'; return 1 ;; esac ;;
+		*) echo '{"error":"ссылка должна начинаться с http:// или https://"}'; return 1 ;;
+	esac
+	mkdir -p "$(dirname "$RB_VIDEO_FILE")"
+	printf '%s\n' "$v" > "$RB_VIDEO_FILE"
+	printf '{"ok":true}\n'
+}
+
+
+
 redbtn_status() {
-	local running=false phase="" last="" blk colo="" warp_up=false steer_ver="" dns=false svc="" sep="" id st name
+	local running=false phase="" last="" blk video="" svc="" sep="" id st name w steer=false sel=" "
 	_rb_running && running=true
 	[ -f "$RB_PHASE_FILE" ] && phase=$(cat "$RB_PHASE_FILE")
 	[ -f "$RB_LAST" ] && last=$(cat "$RB_LAST")
 	blk="$(_rb_blocker)"
-	[ -f "$RB_DIR/warp.colo" ] && colo=$(cat "$RB_DIR/warp.colo")
-	[ -d "/sys/class/net/$RB_WARP_IF" ] && warp_up=true
-	command -v steer >/dev/null 2>&1 && steer_ver="$(_rb_steer_ver)"
-	_rb_dns_conflict && dns=true
-	local geo=""
-	[ -s "$RB_GEO_RESOLVER" ] && geo=$(sed -n "s/^GEO_TITLE='\(.*\)'$/\1/p" "$RB_GEO_RESOLVER")
+	[ -s "$RB_VIDEO_FILE" ] && video=$(head -n1 "$RB_VIDEO_FILE")
+	if _st_ready; then steer=true; sel=" $(_st_sel | tr '\n' ' ') "; fi
 	for id in $(_rb_svc_ids); do
 		name="$(_rb_svc_field "$id" 2)"
 		st="$(grep "^$id|" "$RB_RESULTS" 2>/dev/null | head -n1 | cut -d'|' -f2)"
-		svc="$svc$sep{\"id\":\"$id\",\"name\":\"$(esc "$name")\",\"state\":\"$st\"}"
+		# Выбор на странице steer важнее результата подбора: отмеченный сервис идёт через WARP.
+		w=false
+		case "$sel" in *" $id "*) w=true ;; esac
+		svc="$svc$sep{\"id\":\"$id\",\"name\":\"$(esc "$name")\",\"state\":\"$st\",\"warp\":$w}"
 		sep=","
 	done
-	printf '{"running":%s,"phase":"%s","last":"%s","blocker":"%s","warp_up":%s,"warp_colo":"%s","steer":"%s","dns_conflict":%s,"geo_dns":"%s","configured":%s,"services":[%s]}\n' \
-		"$running" "$(esc "$phase")" "$last" "$blk" "$warp_up" "$(esc "$colo")" "$(esc "$steer_ver")" "$dns" "$(esc "$geo")" \
-		"$([ -s "$RB_OWNED" ] && echo true || echo false)" "$svc"
+	printf '{"running":%s,"phase":"%s","last":"%s","blocker":"%s","steer":%s,"steer_busy":%s,"video":"%s","configured":%s,"services":[%s]}\n' \
+		"$running" "$(esc "$phase")" "$last" "$blk" "$steer" "$(_job_alive steer && echo true || echo false)" "$(esc "$video")" \
+		"$([ -s "$RB_LAST" ] && echo true || echo false)" "$svc"
 }
 
 redbtn_action() {
@@ -5880,26 +6185,17 @@ redbtn_action() {
 		start)
 			case "$mode" in quick|full) ;; *) mode=quick ;; esac
 			_rb_test_running && { echo '{"error":"идёт тест стратегий — дождитесь его окончания"}'; return 1; }
+			_job_alive steer && { echo '{"error":"на странице steer идёт операция — дождитесь её окончания"}'; return 1; }
 			job_start redbtn do_redbtn_run "$mode"
 			;;
 		stop)
 			_rb_running || { echo '{"error":"подбор не запущен"}'; return 1; }
 			mkdir -p "$RB_RUN" "$TEST_DIR"
-			touch "$RB_STOP_FLAG" "$TEST_STOP_FLAG"
+			touch "$RB_STOP_FLAG" "$TEST_STOP_FLAG" "$ST_STOP_FLAG"
 			printf '{"ok":true}\n'
 			;;
-		remove)
-			_rb_running && { echo '{"error":"дождитесь окончания подбора"}'; return 1; }
-			job_start redbtn do_redbtn_remove
-			;;
-		dns_fix)
-			do_redbtn_dns_fix
-			printf '{"ok":true}\n'
-			;;
-		geo_doh)
-			_rb_running && { echo '{"error":"дождитесь окончания подбора"}'; return 1; }
-			job_start redbtn do_redbtn_geo_doh
-			;;
+		video_list) redbtn_video_list ;;
+		video_set)  redbtn_video_set "$mode" ;;
 		*) echo '{"error":"неизвестное действие"}' ;;
 	esac
 }
@@ -5980,7 +6276,8 @@ case "$cmd" in
 	health)                               health ;;
 	redbtn_status)                        redbtn_status ;;
 	redbtn_action)                        redbtn_action "$1" "$2" ;;
-	redbtn_geo_watch)                     redbtn_geo_watch ;;
+	steer_status)                         steer_status ;;
+	steer_action)                         steer_action "$1" "$2" ;;
 	bytetube_action)                      bytetube_action "$1" ;;
 	*) echo '{"error":"неизвестная команда"}'; exit 1 ;;
 esac
@@ -6071,6 +6368,8 @@ list_methods() {
 	json_add_object "health";                 json_close_object
 	json_add_object "redbtn_status";          json_close_object
 	json_add_object "redbtn_action";          json_add_string "action" "string"; json_add_string "mode" "string"; json_close_object
+	json_add_object "steer_status";           json_close_object
+	json_add_object "steer_action";           json_add_string "action" "string"; json_add_string "mode" "string"; json_close_object
 	json_add_object "bytetube_action";        json_add_string "action" "string"; json_close_object
 	json_dump
 }
@@ -6155,6 +6454,8 @@ call_method() {
 		health)                  "$BACKEND" health ;;
 		redbtn_status)           "$BACKEND" redbtn_status ;;
 		redbtn_action)           json_get_var action action; json_get_var mode mode; "$BACKEND" redbtn_action "$action" "$mode" ;;
+		steer_status)            "$BACKEND" steer_status ;;
+		steer_action)            json_get_var action action; json_get_var mode mode; "$BACKEND" steer_action "$action" "$mode" ;;
 		bytetube_action)         json_get_var action action; "$BACKEND" bytetube_action "$action" ;;
 		*) echo '{"error":"unknown method"}'; return 1 ;;
 	esac
@@ -6183,7 +6484,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"system_status", "mirror_status", "exclusions_status", "exclusions_file_get", "nfqws_opt_get", "tg_status", "tgws_status",
 					"test_status", "test_results", "zm_update_status", "mixomo_status", "mixomo_config_get",
 					"mixomo_warp_status",
-					"zapret_latest_version", "bytetube_installed", "health", "redbtn_status"
+					"zapret_latest_version", "bytetube_installed", "health", "redbtn_status", "steer_status"
 				],
 				"system": [ "info" ]
 			},
@@ -6208,7 +6509,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"mixomo_action", "mixomo_config_set", "mixomo_subscription_set",
 					"mixomo_magitrickle_list_set", "mixomo_autorestart_set", "mixomo_ui_action",
 					"mixomo_warp_action", "mixomo_warp_integrate_action", "mixomo_warp_config_set",
-					"bytetube_action", "redbtn_action"
+					"bytetube_action", "redbtn_action", "steer_action"
 				]
 			},
 			"uci": [ "bytetube" ]
@@ -6236,9 +6537,14 @@ cat > '/usr/share/luci/menu.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF
 		"action": { "type": "view", "path": "zapret-manager/dashboard" }
 	},
 	"admin/services/zapret-manager/redbtn": {
-		"title": "Красная кнопка",
+		"title": "Автообход",
 		"order": 15,
 		"action": { "type": "view", "path": "zapret-manager/redbtn" }
+	},
+	"admin/services/zapret-manager/steer": {
+		"title": "steer",
+		"order": 16,
+		"action": { "type": "view", "path": "zapret-manager/steer" }
 	},
 	"admin/services/zapret-manager/strategy": {
 		"title": "Zapret",
@@ -6295,6 +6601,8 @@ cat > '/www/luci-static/resources/zapret-manager/common.js' << 'ZM_INSTALLER_EOF
 var callStatus = rpc.declare({ object: 'zapret-manager', method: 'status', expect: {} });
 var callRedbtnStatus = rpc.declare({ object: 'zapret-manager', method: 'redbtn_status', expect: {} });
 var callRedbtnAction = rpc.declare({ object: 'zapret-manager', method: 'redbtn_action', params: ['action', 'mode'], expect: {} });
+var callSteerStatus = rpc.declare({ object: 'zapret-manager', method: 'steer_status', expect: {} });
+var callSteerAction = rpc.declare({ object: 'zapret-manager', method: 'steer_action', params: ['action', 'mode'], expect: {} });
 var callSystemInfo = rpc.declare({ object: 'zapret-manager', method: 'system_info', expect: {} });
 var callJobStatus = rpc.declare({ object: 'zapret-manager', method: 'job_status', params: ['job'], expect: {} });
 var callLogTail = rpc.declare({ object: 'zapret-manager', method: 'log_tail', params: ['job'], expect: {} });
@@ -6632,6 +6940,8 @@ return baseclass.extend({
 	health: callHealth,
 	redbtnStatus: callRedbtnStatus,
 	redbtnAction: callRedbtnAction,
+	steerStatus: callSteerStatus,
+	steerAction: callSteerAction,
 	boardInfo: callBoardInfo,
 	parseSize: parseSize,
 	fmtSize: fmtSize,
@@ -6707,6 +7017,12 @@ return view.extend({
 			if (zrSt !== 0 && d.zapret_version) items.push(row('Версия Zapret', E('span', {}, d.zapret_version)));
 			if (zrSt !== 0 && d.strategy) items.push(row('Стратегия', E('span', {}, d.strategy)));
 			items.push(row('Zapret2', zm.stateBadge(zr2St)));
+			var rbSt = st(h, 'redbtn', 0);
+			items.push(row('Автообход', rbSt === 1 ? zm.badge(true, 'настроен', '')
+				: E('span', { 'class': 'zm-badge ' + (rbSt === 2 ? 'zm-warn' : 'zm-off') }, [ E('span', { 'class': 'zm-dot' }), rbSt === 2 ? 'требует внимания' : 'не запускался' ])));
+			var stSt = st(h, 'steer', 0);
+			items.push(row('steer (WARP)', stSt === 1 ? zm.badge(true, 'работает', '') : stSt === 2
+				? E('span', { 'class': 'zm-badge zm-warn' }, [ E('span', { 'class': 'zm-dot' }), 'выключен' ]) : zm.badge(false, '', 'не установлен')));
 			items.push(row('ByeTube', zm.stateBadge(st(h, 'bytetube', 0))));
 			items.push(row('TG WS Proxy', zm.stateBadge(st(h, 'tg', 0))));
 			items.push(row('Mixomo', zm.stateBadge(st(h, 'mixomo', 0))));
@@ -6942,42 +7258,72 @@ cat > '/www/luci-static/resources/view/zapret-manager/redbtn.js' << 'ZM_INSTALLE
 'require view';
 'require zapret-manager.common as zm';
 
+// Автообход: роутер сам проверяет сервисы и подбирает каждому рабочий способ.
+// Внутреннее имя страницы и методов — redbtn (так было задумано первой версией).
+
 var STATES = {
 	direct: { text: 'напрямую', cls: 'zm-ok' },
 	zapret: { text: 'через Zapret', cls: 'zm-ok' },
 	warp:   { text: 'через WARP', cls: 'zm-ok' },
 	tgws:   { text: 'через веб-сокет', cls: 'zm-ok' },
-	doh:    { text: 'через DoH', cls: 'zm-ok' },
-	hosts:  { text: 'через hosts', cls: 'zm-ok' },
 	none:   { text: 'не открывается', cls: 'zm-bad' }
 };
 
-var PHASES = {
-	zapret_install: 'Устанавливаем Zapret',
+// Шаги подбора в том порядке, в каком их проходит роутер.
+var STEPS = [
+	{ id: 'zapret_install', label: 'Подготовка' },
+	{ id: 'check', label: 'Проверка' },
+	{ id: 'zapret', label: 'Zapret' },
+	{ id: 'warp', label: 'WARP' },
+	{ id: 'steer', label: 'Правила' },
+	{ id: 'telegram', label: 'Telegram' }
+];
+
+var PHASE_TEXT = {
+	zapret_install: 'Готовим Zapret',
 	check: 'Проверяем сервисы',
 	zapret: 'Подбираем стратегию Zapret',
 	warp: 'Поднимаем туннель WARP',
 	steer: 'Применяем правила',
-	geo: 'Проверяем ИИ-сервисы',
 	telegram: 'Проверяем Telegram',
-	remove: 'Снимаем настройки'
 };
+var RUN_PHASES = [ 'zapret_install', 'check', 'zapret', 'warp', 'steer', 'telegram' ];
 
 var BLOCKERS = {
-	splify2: 'Установлен splify2 — туннели и списки настраиваются в нём.',
-	zapret2: 'Установлен Zapret2 — удалите его на странице Zapret2.',
-	steer: 'Обход на роутере уже настроен вручную — кнопка его не перезаписывает.'
+	zapret2: 'Установлен Zapret2 — удалите его на странице Zapret2.'
 };
 
-// Ролик на время подбора. Лежит в репозитории форка; jsDelivr первым, потому что он отдаёт
-// правильный тип файла и чаще открывается там, где raw.githubusercontent закрыт.
-var WAIT_VIDEO = [
-	'https://cdn.jsdelivr.net/gh/xyzmean/Zapret-Manager-Exp@main/files/RedButton/wait.mp4',
-	'https://raw.githubusercontent.com/xyzmean/Zapret-Manager-Exp/main/files/RedButton/wait.mp4'
+var MODES = [
+	{ id: 'quick', label: 'Быстрый подбор', hint: 'Стратегии v — обычно 5–15 минут.' },
+	{ id: 'full', label: 'Полный подбор', hint: 'Стратегии v и Flowseal — дольше, до получаса, зато вариантов больше.' }
 ];
-var WAIT_POSTER = 'https://cdn.jsdelivr.net/gh/xyzmean/Zapret-Manager-Exp@main/files/RedButton/poster.jpg';
 
-function stateBadge(st) {
+var TABS = [
+	{ id: 'main', label: 'Автообход' },
+	{ id: 'video', label: 'Видео' }
+];
+
+// Видео берутся с сервера Zapret Manager: jsDelivr первым — он чаще открывается там, где
+// raw.githubusercontent закрыт, и отдаёт правильный тип файла.
+var VIDEO_BASES = [
+	'https://cdn.jsdelivr.net/gh/StressOzz/Zapret-Manager@main/files/AutoBypass/',
+	'https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/AutoBypass/'
+];
+// Запас для стандартного ролика: он же лежит в репозитории автора кнопки. Плеер берёт первый
+// источник, который открылся, так что пока на нашем сервере файла нет, играет этот.
+var VIDEO_SPARE = [
+	'https://cdn.jsdelivr.net/gh/xyzmean/Zapret-Manager-Exp@main/files/RedButton/',
+	'https://raw.githubusercontent.com/xyzmean/Zapret-Manager-Exp/main/files/RedButton/'
+];
+var VIDEO_DEFAULT = { file: 'wait.mp4', name: 'Стандартное', poster: 'poster.jpg' };
+
+var ICON_BOLT = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></svg>';
+
+function stateBadge(svc) {
+	var st = svc.state;
+	// Ручной выбор списков важнее подобранного: отмеченный сервис идёт через WARP, снятый — нет.
+	if (svc.warp) st = 'warp';
+	else if (st === 'warp') return E('span', { 'class': 'zm-badge zm-off' }, [ E('span', { 'class': 'zm-dot' }), 'WARP выключен' ]);
 	var s = STATES[st];
 	return E('span', { 'class': 'zm-badge ' + (s ? s.cls : 'zm-off') }, [
 		E('span', { 'class': 'zm-dot' }),
@@ -6985,61 +7331,135 @@ function stateBadge(st) {
 	]);
 }
 
+function plainBadge(cls, text) {
+	return E('span', { 'class': 'zm-badge ' + cls }, [ E('span', { 'class': 'zm-dot' }), text ]);
+}
+
 function fmtTime(ts) {
 	if (!ts) return 'ещё не было';
 	var d = new Date(parseInt(ts, 10) * 1000);
-	return d.toLocaleString();
+	return isNaN(d) ? '—' : d.toLocaleString('ru-RU', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
 }
 
 return view.extend({
 	load: function() {
 		zm.injectCss();
-		return zm.redbtnStatus();
+		return zm.redbtnStatus().catch(function() { return {}; });
 	},
 
 	render: function(data) {
-		var wrap = E('div', { 'class': 'zm-wrap' });
-		var logEl = E('pre', { 'class': 'zm-log' });
+		data = data || {};
+		var wrap = E('div', { 'class': 'zm-wrap zm-ab' });
 		var busy = false;
 		var mode = 'quick';
+		var activeTab = 'main';
+		var lastAction = '';
+		var maxStep = -1;
+		var videos = null;           // каталог с сервера, грузится при первом открытии вкладки «Видео»
+		var customOpen = false;
 
-		var mainCard = E('div', { 'class': 'zm-card zm-redbtn-card' });
+		// ── вкладки ──
+		var tabBar = E('div', { 'class': 'zm-actions', 'style': 'margin-bottom:14px' });
+		var panels = {};
+		TABS.forEach(function(t) { panels[t.id] = E('div', { 'class': 'zm-ab-panel', 'style': t.id === activeTab ? '' : 'display:none' }); });
+
+		function renderTabBar() {
+			tabBar.innerHTML = '';
+			TABS.forEach(function(t) {
+				tabBar.appendChild(E('button', {
+					'class': 'cbi-button' + (t.id === activeTab ? ' cbi-button-positive' : ''),
+					'click': function() { switchTab(t.id); }
+				}, t.label));
+			});
+		}
+
+		function switchTab(id) {
+			activeTab = id;
+			TABS.forEach(function(t) { panels[t.id].style.display = t.id === activeTab ? '' : 'none'; });
+			renderTabBar();
+			placeRunCards();
+			if (id === 'video') loadVideos();
+		}
+
+		// ── карточки ──
+		var heroCard = E('div', { 'class': 'zm-card zm-ab-hero' });
+		var steerCard = E('div', {});
 		var svcCard = E('div', { 'class': 'zm-card' });
-		var warpCard = E('div', { 'class': 'zm-card' });
-		var dnsCard = E('div', {});
-		// Плеер и журнал — отдельными блоками под главным: плеер крупный, журнал сразу под ним.
-		var videoCard = E('div', { 'class': 'zm-card zm-redbtn-player', 'style': 'display:none' });
-		var logCard = E('div', { 'class': 'zm-card zm-redbtn-logcard' }, [ logEl ]);
-		var videoEl = null, videoBox = null, soundBtn = null;
+		var videoSetCard = E('div', { 'class': 'zm-card' });
 
-		// Выбор «без звука» запоминается в браузере: кто выключил звук один раз, не хочет его
-		// снова на следующем подборе.
+		// Видео и журнал — общие: переезжают под первую карточку открытой вкладки.
+		var logEl = E('pre', { 'class': 'zm-log' });
+		var logCard = E('div', { 'class': 'zm-card zm-ab-logcard', 'style': 'display:none' }, [
+			E('h3', {}, 'Журнал'), logEl
+		]);
+		var playerCard = E('div', { 'class': 'zm-card zm-ab-player', 'style': 'display:none' });
+		var videoEl = null, soundBtn = null, previewing = false;
+
+		function placeRunCards() {
+			var p = panels[activeTab], first = p.firstChild;
+			var anchor = first ? first.nextSibling : null;
+			p.insertBefore(playerCard, anchor);
+			p.insertBefore(logCard, playerCard.nextSibling);
+		}
+
+		// ── видео ──
+
+		function videoPref() { return data.video || ''; }
+
+		function catalogItem(file) {
+			var list = videos || [ VIDEO_DEFAULT ];
+			for (var i = 0; i < list.length; i++) if (list[i].file === file) return list[i];
+			return file === VIDEO_DEFAULT.file ? VIDEO_DEFAULT : { file: file, name: file, poster: '' };
+		}
+
+		function videoSource(pref) {
+			if (pref === 'off') return null;
+			if (pref.indexOf('url:') === 0) return { srcs: [ pref.slice(4) ], poster: '' };
+			var it = catalogItem(pref.indexOf('cat:') === 0 ? pref.slice(4) : VIDEO_DEFAULT.file);
+			var bases = it.file === VIDEO_DEFAULT.file ? VIDEO_BASES.concat(VIDEO_SPARE) : VIDEO_BASES;
+			return {
+				srcs: bases.map(function(b) { return b + it.file; }),
+				// Постер — только из каталога, который реально пришёл с сервера: иначе вместо
+				// заставки была бы битая картинка.
+				poster: (videos && it.poster) ? VIDEO_BASES[0] + it.poster : ''
+			};
+		}
+
+		// Выбор «без звука» запоминается в браузере: кто выключил звук один раз, не хочет его снова.
 		function soundPref() { try { return localStorage.getItem('zm-redbtn-mute') !== '1'; } catch (e) { return true; } }
 		function soundSave(on) { try { localStorage.setItem('zm-redbtn-mute', on ? '0' : '1'); } catch (e) {} }
 		function soundLabel() { if (soundBtn && videoEl) soundBtn.textContent = videoEl.muted ? 'Включить звук' : 'Выключить звук'; }
 
-		// Видео создаётся заново на каждый подбор и удаляется после: пока подбора нет, оно не
-		// должно ни качаться, ни играть. Со звуком — если браузер разрешит (подбор начат
-		// нажатием), иначе без звука, и включить его можно в самом плеере.
-		function videoShow(withSound) {
-			if (videoEl) return videoEl;
+		// Плеер создаётся на каждый показ и удаляется после: пока видео не нужно, оно не качается.
+		function videoShow(withSound, preview, prefOverride) {
+			var src = videoSource(prefOverride != null ? prefOverride : videoPref());
+			if (!src) return;
+			if (videoEl) videoHide();
+			previewing = !!preview;
 			videoEl = E('video', {
-				'class': 'zm-redbtn-video', 'controls': '', 'loop': '', 'playsinline': '',
-				'preload': 'auto', 'poster': WAIT_POSTER
-			}, WAIT_VIDEO.map(function(u) { return E('source', { 'src': u, 'type': 'video/mp4' }); }));
+				'class': 'zm-ab-video', 'controls': '', 'loop': '', 'playsinline': '', 'preload': 'auto',
+				'poster': src.poster || null
+			}, src.srcs.map(function(u) { return E('source', { 'src': u, 'type': 'video/mp4' }); }));
 			videoEl.muted = !(withSound && soundPref());
 			videoEl.addEventListener('volumechange', function() { soundSave(!videoEl.muted); soundLabel(); });
-			soundBtn = E('button', {
-				'class': 'cbi-button',
-				'click': function() { if (videoEl) videoEl.muted = !videoEl.muted; }
-			}, '');
-			videoBox = E('div', {}, [
-				E('h3', {}, 'А пока подбираем…'),
-				videoEl, E('div', { 'class': 'zm-actions' }, [ soundBtn ])
-			]);
-			videoCard.innerHTML = '';
-			videoCard.appendChild(videoBox);
-			videoCard.style.display = '';
+			// Не открылся ни один источник — прячем плеер и говорим об этом одной строкой.
+			var sources = videoEl.querySelectorAll('source');
+			if (sources.length) sources[sources.length - 1].addEventListener('error', function() {
+				playerCard.innerHTML = '';
+				playerCard.appendChild(E('h3', {}, previewing ? 'Просмотр' : 'Пока ждём'));
+				playerCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Видео не загрузилось — сервер недоступен или ссылка неверная. Подбор это не мешает.'));
+				videoEl = soundBtn = null;
+			});
+			soundBtn = E('button', { 'class': 'cbi-button', 'click': function() { if (videoEl) videoEl.muted = !videoEl.muted; } }, '');
+			playerCard.innerHTML = '';
+			playerCard.appendChild(E('h3', {}, previewing ? 'Просмотр' : 'Пока ждём'));
+			playerCard.appendChild(videoEl);
+			playerCard.appendChild(E('div', { 'class': 'zm-actions' }, [
+				soundBtn,
+				E('button', { 'class': 'cbi-button', 'click': function() { videoHide(); } }, previewing ? 'Закрыть' : 'Скрыть видео')
+			]));
+			playerCard.style.display = '';
+			placeRunCards();
 			soundLabel();
 			setTimeout(function() {
 				if (!videoEl) return;
@@ -7050,19 +7470,22 @@ return view.extend({
 					videoEl.play().catch(function() {});
 				});
 			}, 0);
-			return videoEl;
 		}
 
 		function videoHide() {
-			if (!videoEl) return;
-			videoEl.pause();
-			videoEl.removeAttribute('src');
-			while (videoEl.firstChild) videoEl.removeChild(videoEl.firstChild);
-			videoEl.load();
-			videoCard.innerHTML = '';
-			videoCard.style.display = 'none';
-			videoEl = videoBox = soundBtn = null;
+			if (videoEl) {
+				videoEl.pause();
+				while (videoEl.firstChild) videoEl.removeChild(videoEl.firstChild);
+				videoEl.removeAttribute('src');
+				videoEl.load();
+			}
+			playerCard.innerHTML = '';
+			playerCard.style.display = 'none';
+			videoEl = soundBtn = null;
+			previewing = false;
 		}
+
+		// ── ход операции ──
 
 		function refresh() {
 			return zm.redbtnStatus().then(function(res) {
@@ -7071,229 +7494,762 @@ return view.extend({
 			});
 		}
 
-		function follow(withVideo, withSound) {
-			var ticks = 0;
-			busy = true;
-			if (withVideo) videoShow(withSound);
-			renderMain();
-			zm.pollJob('redbtn', logEl, function(ok) {
-				busy = false;
-				// Опрос сдаётся, когда роутер на время перестаёт отвечать (перезапуск сети при
-				// установке туннеля). Подбор при этом идёт дальше — ждём роутер и следим снова.
-				zm.redbtnStatus().then(function(res) {
-					if (res && res.running) { busy = true; follow(withVideo && !!videoEl, false); return; }
-					videoHide();
-					zm.toast(ok ? 'Готово' : 'Операция завершилась с ошибкой', ok ? 'info' : 'error');
-					refresh();
-				}).catch(function() {
-					zm.toast('Роутер не отвечает — ждём', 'warning');
-					setTimeout(function() { busy = false; waitRouter(); }, 5000);
-				});
-			}, function() {
-				if (++ticks % 5) return;
-				zm.redbtnStatus().then(function(res) {
-					if (!res) return;
-					data.phase = res.phase;
-					renderPhase();
-					data.services = res.services;
-					renderServices();
-				});
-			});
+		function finish(ok, res) {
+			busy = false;
+			if (!previewing) videoHide();
+			if (res) data = res;
+			var msg;
+			if (!ok) msg = 'Операция завершилась с ошибкой — подробности в журнале';
+			else if (lastAction === 'start') msg = data.phase === 'done' ? 'Готово, обход подобран' : 'Подбор остановлен';
+			else msg = 'Готово';
+			zm.toast(msg, ok ? 'info' : 'error');
+			lastAction = '';
+			renderAll();
 		}
 
 		function waitRouter() {
 			zm.redbtnStatus().then(function(res) {
 				data = res || {};
-				if (data.running) { follow(!!videoEl, false); return; }
-				videoHide();
-				renderAll();
+				if (data.running) { follow(!!videoEl); return; }
+				finish(true, res);
 			}).catch(function() { setTimeout(waitRouter, 5000); });
 		}
 
-		function start() {
-			if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-			zm.redbtnAction('start', mode).then(function(res) {
-				if (res.error) { zm.toast(res.error, 'error'); return; }
-				zm.toast('Подбор начат', 'warning');
-				data.running = true;
-				follow(true, true);
+		function follow(withVideo) {
+			var ticks = 0;
+			busy = true;
+			logCard.style.display = '';
+			if (withVideo && !videoEl && videoPref() !== 'off') videoShow(false);
+			renderAll();
+			placeRunCards();
+			zm.pollJob('redbtn', logEl, function(ok) {
+				// Опрос сдаётся, когда роутер на время замолкает (перезапуск сети при установке
+				// туннеля). Подбор при этом идёт дальше — ждём роутер и следим снова.
+				zm.redbtnStatus().then(function(res) {
+					if (res && res.running) { data = res; follow(withVideo && !!videoEl); return; }
+					finish(ok, res);
+				}).catch(function() {
+					zm.toast('Роутер не отвечает — ждём', 'warning');
+					setTimeout(waitRouter, 5000);
+				});
+			}, function() {
+				if (++ticks % 4) return;
+				zm.redbtnStatus().then(function(res) {
+					if (!res) return;
+					data = res;
+					renderHero();
+					renderServices();
+				}).catch(function() {});
 			});
 		}
+
+		function act(action, arg, toastText, withVideo) {
+			if (busy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
+			zm.redbtnAction(action, arg || '').then(function(res) {
+				if (res.error) { zm.toast(res.error, 'error'); return; }
+				if (toastText) zm.toast(toastText, 'warning');
+				lastAction = action;
+				data.running = true;
+				if (action === 'start') { maxStep = -1; data.phase = 'zapret_install'; }
+				if (withVideo && videoPref() !== 'off') videoShow(true);
+				follow(false);
+			}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
+		}
+
+		function start() { act('start', mode, 'Подбор запущен — страницу можно закрыть, он продолжится', true); }
 
 		function stop() {
 			zm.redbtnAction('stop', '').then(function(res) {
 				if (res.error) { zm.toast(res.error, 'error'); return; }
-				zm.toast('Останавливаем подбор', 'warning');
+				zm.toast('Останавливаем — роутер закончит текущий шаг', 'warning');
 			});
 		}
 
-		function remove() {
-			if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-			if (!confirm('Снять туннель WARP и правила красной кнопки? Стратегия Zapret останется.')) return;
-			zm.redbtnAction('remove', '').then(function(res) {
-				if (res.error) { zm.toast(res.error, 'error'); return; }
-				follow(false);
-			});
+		// ── главная карточка ──
+
+		function stepIndex(phase) {
+			for (var i = 0; i < STEPS.length; i++) if (STEPS[i].id === phase) return i;
+			return -1;
 		}
 
-		var phaseEl = E('div', { 'class': 'zm-hint' });
-		function renderPhase() {
-			phaseEl.textContent = busy ? (PHASES[data.phase] || 'Работаем') + '…' : '';
+		function renderSteps() {
+			var cur = stepIndex(data.phase);
+			if (cur > maxStep) maxStep = cur;
+			return E('div', { 'class': 'zm-ab-steps' }, STEPS.map(function(s, i) {
+				var cls = i < maxStep ? ' zm-ab-done' : (i === maxStep ? ' zm-ab-now' : '');
+				return E('div', { 'class': 'zm-ab-step' + cls }, [
+					E('span', { 'class': 'zm-ab-step-dot' }, i < maxStep ? '✓' : String(i + 1)),
+					E('span', { 'class': 'zm-ab-step-label' }, s.label)
+				]);
+			}));
 		}
 
-		function renderMain() {
-			mainCard.innerHTML = '';
-			mainCard.appendChild(E('h3', {}, 'Красная кнопка'));
-			mainCard.appendChild(E('p', { 'class': 'zm-hint' },
-				'Роутер проверит сервисы и подберёт каждому способ: напрямую, через Zapret, через WARP, а Telegram — через веб-сокет. Подбор занимает от пяти минут до получаса.'));
+		function summary() {
+			var list = (data.services || []).filter(function(s) { return s.state; });
+			if (!list.length) return null;
+			var ok = list.filter(function(s) { return s.warp || (s.state !== 'none' && s.state !== 'warp'); }).length;
+			return E('div', { 'class': 'zm-ab-sum' + (ok === list.length ? ' zm-ab-sum-ok' : '') }, [
+				E('b', {}, ok + ' из ' + list.length), ' сервисов открываются'
+			]);
+		}
+
+		function renderHero() {
+			heroCard.innerHTML = '';
+			var status;
+			if (busy || data.running) status = plainBadge('zm-warn', PHASE_TEXT[data.phase] || 'Работаем');
+			else if (data.configured) status = plainBadge('zm-ok', 'настроен');
+			else status = plainBadge('zm-off', 'ещё не запускался');
+
+			heroCard.appendChild(E('div', { 'class': 'zm-ab-head' }, [
+				E('div', { 'class': 'zm-ab-icon' }, [ E(ICON_BOLT) ]),
+				E('div', { 'class': 'zm-ab-title' }, [
+					E('h3', {}, 'Автообход'),
+					E('p', { 'class': 'zm-hint' }, 'Одна кнопка — и роутер сам подберёт каждому сервису рабочий способ: напрямую или через Zapret, а если установлен steer — и через WARP.')
+				]),
+				status
+			]));
 
 			if (data.blocker) {
-				mainCard.appendChild(E('div', { 'class': 'zm-row' }, [
-					E('span', { 'class': 'zm-badge zm-warn' }, [ E('span', { 'class': 'zm-dot' }), BLOCKERS[data.blocker] || data.blocker ])
+				heroCard.appendChild(E('div', { 'class': 'zm-ab-note zm-ab-note-warn' }, BLOCKERS[data.blocker] || data.blocker));
+				return;
+			}
+			if (!busy && data.steer_busy) heroCard.appendChild(E('div', { 'class': 'zm-ab-note zm-ab-note-warn' }, 'На странице steer идёт операция — запуск станет доступен, когда она закончится.'));
+
+			if (busy) {
+				if (RUN_PHASES.indexOf(data.phase) >= 0 || lastAction === 'start') heroCard.appendChild(renderSteps());
+				heroCard.appendChild(E('div', { 'class': 'zm-actions' }, [
+					E('button', { 'class': 'cbi-button cbi-button-remove', 'click': stop }, 'Остановить')
 				]));
+				heroCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Можно закрыть страницу — подбор продолжится на роутере.'));
 				return;
 			}
 
-			if (!busy) {
-				var grid = E('div', { 'class': 'zm-grid' });
-				[
-					{ id: 'quick', label: 'Быстрый подбор' },
-					{ id: 'full', label: 'Полный подбор (дольше, больше стратегий)' }
-				].forEach(function(m) {
-					grid.appendChild(E('div', {
-						'class': 'zm-tile' + (mode === m.id ? ' zm-active' : ''),
-						'click': function() { mode = m.id; renderMain(); }
-					}, m.label));
-				});
-				mainCard.appendChild(grid);
-			}
+			var sel = MODES.filter(function(m) { return m.id === mode; })[0];
+			heroCard.appendChild(E('div', { 'class': 'zm-grid' }, MODES.map(function(m) {
+				return E('div', {
+					'class': 'zm-tile' + (mode === m.id ? ' zm-active' : ''),
+					'click': function() { mode = m.id; renderHero(); }
+				}, m.label);
+			})));
+			heroCard.appendChild(E('p', { 'class': 'zm-hint' }, sel.hint + ' Стратегия Zapret меняется, только если так откроется больше сервисов.'));
 
-			var actions = busy ? [
-				E('button', { 'class': 'cbi-button cbi-button-remove', 'click': stop }, 'Остановить подбор')
-			] : [
-				E('button', { 'class': 'cbi-button zm-redbtn', 'click': start }, 'Подобрать обход')
-			];
-			if (!busy && data.configured)
-				actions.push(E('button', { 'class': 'cbi-button cbi-button-remove', 'click': remove }, 'Снять настройки'));
-			mainCard.appendChild(E('div', { 'class': 'zm-actions' }, actions));
-			renderPhase();
-			mainCard.appendChild(phaseEl);
-			mainCard.appendChild(E('div', { 'class': 'zm-row' }, [
-				E('span', { 'class': 'zm-label' }, 'Последний подбор'),
-				E('span', {}, fmtTime(data.last))
-			]));
+			var actions = [ E('button', { 'class': 'cbi-button cbi-button-positive zm-ab-go', 'click': start }, [ E(ICON_BOLT), data.configured ? 'Подобрать заново' : 'Запустить автообход' ]) ];
+			heroCard.appendChild(E('div', { 'class': 'zm-actions' }, actions));
 
+			var foot = [ E('span', {}, 'Последний подбор: ' + fmtTime(data.last)) ];
+			var s = summary();
+			if (s) foot.unshift(s);
+			heroCard.appendChild(E('div', { 'class': 'zm-ab-foot' }, foot));
 		}
 
 		function renderServices() {
 			svcCard.innerHTML = '';
 			svcCard.appendChild(E('h3', {}, 'Сервисы'));
-			(data.services || []).forEach(function(s) {
-				svcCard.appendChild(E('div', { 'class': 'zm-row' }, [
-					E('span', { 'class': 'zm-label' }, s.name),
-					stateBadge(s.state)
-				]));
+			svcCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Как сейчас открывается каждый сервис.'));
+			svcCard.appendChild(E('div', { 'class': 'zm-ab-svc' }, (data.services || []).map(function(s) {
+				return E('div', { 'class': 'zm-ab-svc-item' + (s.state === 'none' ? ' zm-ab-svc-bad' : '') }, [
+					E('span', { 'class': 'zm-ab-svc-name' }, s.name),
+					stateBadge(s)
+				]);
+			})));
+		}
+
+		// Не всё открылось, а steer не стоит — подсказываем, куда идти.
+		function steerHref() {
+			return document.querySelector('.zmw-body') ? '#/steer' : L.url('admin/services/zapret-manager/steer');
+		}
+
+		function renderSteerHint() {
+			steerCard.innerHTML = '';
+			steerCard.style.display = 'none';
+			var bad = (data.services || []).filter(function(s) { return s.state === 'none' && !s.warp && s.id !== 'telegram'; });
+			if (busy || data.steer || !bad.length) return;
+			steerCard.style.display = '';
+			steerCard.appendChild(E('div', { 'class': 'zm-card' }, [
+				E('h3', {}, 'Не всё открылось'),
+				E('p', { 'class': 'zm-hint' }, bad.map(function(s) { return s.name; }).join(', ') + ' — не помог и Zapret. Их можно пустить через бесплатный туннель WARP: установите steer, и они сразу пойдут через него.'),
+				E('div', { 'class': 'zm-actions' }, [
+					E('a', { 'class': 'cbi-button cbi-button-positive', 'style': 'text-decoration:none', 'href': steerHref() }, 'Открыть steer')
+				])
+			]));
+		}
+
+		// ── вкладка «Видео» ──
+
+		function loadVideos() {
+			if (videos) return;
+			videos = [ VIDEO_DEFAULT ];
+			zm.redbtnAction('video_list', '').then(function(res) {
+				if (res && res.items && res.items.length) videos = res.items;
+				renderVideoSet();
+			}).catch(function() {});
+		}
+
+		function saveVideo(v, text) {
+			zm.redbtnAction('video_set', v).then(function(res) {
+				if (res.error) { zm.toast(res.error, 'error'); return; }
+				data.video = (v === 'default') ? '' : v;
+				customOpen = false;
+				zm.toast(text || 'Видео выбрано', 'info');
+				renderVideoSet();
 			});
-			if (data.geo_dns)
-				svcCard.appendChild(E('div', { 'class': 'zm-row' }, [
-					E('span', { 'class': 'zm-label' }, 'DNS для ИИ-сервисов'),
-					E('span', {}, data.geo_dns)
+		}
+
+		function renderVideoSet() {
+			videoSetCard.innerHTML = '';
+			videoSetCard.appendChild(E('h3', {}, 'Видео во время подбора'));
+			videoSetCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Пока роутер подбирает обход, можно посмотреть видео. Выберите из списка с сервера Zapret Manager или вставьте свою ссылку.'));
+			var pref = videoPref();
+			var curFile = pref === '' ? VIDEO_DEFAULT.file : (pref.indexOf('cat:') === 0 ? pref.slice(4) : '');
+			var isUrl = pref.indexOf('url:') === 0;
+
+			var tiles = (videos || [ VIDEO_DEFAULT ]).map(function(v) {
+				return E('div', {
+					'class': 'zm-tile' + (!customOpen && curFile === v.file ? ' zm-active' : ''),
+					'click': function() { saveVideo(v.file === VIDEO_DEFAULT.file ? 'default' : 'cat:' + v.file, 'Выбрано: ' + v.name); }
+				}, v.name);
+			});
+			tiles.push(E('div', {
+				'class': 'zm-tile' + (customOpen || isUrl ? ' zm-active' : ''),
+				'click': function() { customOpen = true; renderVideoSet(); }
+			}, 'Своя ссылка'));
+			tiles.push(E('div', {
+				'class': 'zm-tile' + (!customOpen && pref === 'off' ? ' zm-active' : ''),
+				'click': function() { saveVideo('off', 'Видео выключено'); }
+			}, 'Без видео'));
+			videoSetCard.appendChild(E('div', { 'class': 'zm-grid' }, tiles));
+
+			if (customOpen || isUrl) {
+				var input = E('input', {
+					'type': 'text', 'class': 'cbi-input-text', 'placeholder': 'https://…/video.mp4',
+					'value': isUrl ? pref.slice(4) : ''
+				});
+				videoSetCard.appendChild(E('div', { 'class': 'zm-actions' }, [
+					input,
+					E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() {
+						var u = (input.value || '').trim();
+						if (!/^https?:\/\/\S+$/.test(u)) { zm.toast('Ссылка должна начинаться с http:// или https://', 'error'); return; }
+						saveVideo('url:' + u, 'Своё видео сохранено');
+					} }, 'Сохранить')
 				]));
-		}
+				videoSetCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Прямая ссылка на файл MP4 (H.264 + AAC). Ссылки на страницы YouTube не подойдут.'));
+			}
 
-		function renderWarp() {
-			warpCard.innerHTML = '';
-			var used = (data.services || []).some(function(s) { return s.state === 'warp'; });
-			if (!used && !data.warp_up) { warpCard.style.display = 'none'; return; }
-			warpCard.style.display = '';
-			warpCard.appendChild(E('h3', {}, 'Туннель WARP'));
-			warpCard.appendChild(E('div', { 'class': 'zm-row' }, [
-				E('span', { 'class': 'zm-label' }, 'Состояние'),
-				zm.badge(data.warp_up === true, 'работает', 'не поднят')
-			]));
-			if (data.warp_colo)
-				warpCard.appendChild(E('div', { 'class': 'zm-row' }, [
-					E('span', { 'class': 'zm-label' }, 'Точка Cloudflare'),
-					E('span', {}, data.warp_colo)
-				]));
-		}
-
-		function geoCard() {
-			var geo = (data.services || []).filter(function(s) { return s.id === 'geoblock'; })[0];
-			if (!geo || geo.state !== 'none') return null;
-			return E('div', { 'class': 'zm-card' }, [
-				E('h3', {}, 'ИИ-сервисы'),
-				E('p', { 'class': 'zm-hint' }, 'ChatGPT, Claude и Gemini не открылись ни через один DNS из списка.'),
-				E('div', { 'class': 'zm-actions' }, [
-					E('button', {
-						'class': 'cbi-button cbi-button-positive',
-						'click': function() {
-							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-							zm.redbtnAction('geo_doh', '').then(function(res) {
-								if (res.error) { zm.toast(res.error, 'error'); return; }
-								follow(false);
-							});
-						}
-					}, 'Подобрать DNS заново')
-				])
-			]);
-		}
-
-		function renderDns() {
-			dnsCard.innerHTML = '';
-			var g = busy ? null : geoCard();
-			if (g) dnsCard.appendChild(g);
-			if (!data.dns_conflict) return;
-			dnsCard.appendChild(E('div', { 'class': 'zm-card' }, [
-				E('h3', {}, 'DNS'),
-				E('p', { 'class': 'zm-hint' },
-					'DNS over HTTPS забирает запросы сети себе: сервисы, уведённые в WARP, на устройствах пойдут мимо туннеля.'),
-				E('div', { 'class': 'zm-actions' }, [
-					E('button', {
-						'class': 'cbi-button cbi-button-positive',
-						'click': function() {
-							zm.redbtnAction('dns_fix', '').then(function(res) {
-								if (res.error) { zm.toast(res.error, 'error'); return; }
-								zm.toast('DNS исправлен', 'info');
-								refresh();
-							});
-						}
-					}, 'Исправить')
-				])
+			if (pref !== 'off') videoSetCard.appendChild(E('div', { 'class': 'zm-actions' }, [
+				E('button', { 'class': 'cbi-button', 'click': function() {
+					if (busy && videoEl && !previewing) { zm.toast('Видео уже играет на вкладке «Автообход»', 'warning'); return; }
+					videoShow(true, true);
+				} }, 'Посмотреть')
 			]));
 		}
+
+		// ── сборка ──
 
 		function renderAll() {
-			renderMain();
-			renderDns();
+			renderTabBar();
+			renderHero();
+			renderSteerHint();
 			renderServices();
-			renderWarp();
+			renderVideoSet();
 		}
 
-		renderAll();
-		wrap.appendChild(mainCard);
-		wrap.appendChild(videoCard);
-		wrap.appendChild(logCard);
-		wrap.appendChild(dnsCard);
-		wrap.appendChild(svcCard);
-		wrap.appendChild(warpCard);
+		panels.main.appendChild(heroCard);
+		panels.main.appendChild(steerCard);
+		panels.main.appendChild(svcCard);
+		panels.video.appendChild(videoSetCard);
 
-		if (data.running) follow(data.phase !== 'remove', false);
+		renderAll();
+		placeRunCards();
+		wrap.appendChild(tabBar);
+		TABS.forEach(function(t) { wrap.appendChild(panels[t.id]); });
+
+		if (data.running) {
+			lastAction = 'start';
+			follow(true);
+		}
 		return wrap;
 	}
 });
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/redbtn.js'
 
+cat > '/www/luci-static/resources/view/zapret-manager/steer.js' << 'ZM_INSTALLER_EOF'
+'use strict';
+'require view';
+'require zapret-manager.common as zm';
+
+// steer: выбранные сервисы идут через бесплатный туннель Cloudflare WARP, остальное — как обычно.
+// Страница ставит и связывает всё сама: движок steer, AmneziaWG, ключи WARP, туннель и правила.
+
+var STEPS = [
+	{ id: 'pkgs', label: 'steer' },
+	{ id: 'awg', label: 'AmneziaWG' },
+	{ id: 'keys', label: 'Ключи WARP' },
+	{ id: 'tunnel', label: 'Туннель' },
+	{ id: 'rules', label: 'Правила' },
+	{ id: 'check', label: 'Проверка' }
+];
+
+var PHASE_TEXT = {
+	install: 'Устанавливаем', pkgs: 'Ставим steer', awg: 'Ставим AmneziaWG', keys: 'Получаем ключи WARP',
+	tunnel: 'Поднимаем туннель', warp: 'Настраиваем туннель', rules: 'Применяем правила',
+	check: 'Проверяем', remove: 'Удаляем'
+};
+
+var BLOCKERS = {
+	splify2: 'Установлен splify2 — туннели и списки настраиваются в нём.',
+	steer: 'Движок steer уже настроен вручную — Zapret Manager его не перезаписывает.'
+};
+
+// Значок сервиса: буква на фирменном цвете.
+var SVC_LOOK = {
+	youtube: [ 'YT', '#ff0033' ], discord: [ 'D', '#5865f2' ], instagram: [ 'IG', '#e1306c' ],
+	whatsapp: [ 'W', '#25d366' ], x: [ 'X', '#14171a' ], github: [ 'GH', '#24292f' ],
+	geoblock: [ 'AI', '#10a37f' ], telegram: [ 'T', '#229ed9' ]
+};
+var SVC_SUB = {
+	youtube: 'сайт, видео, приложение', discord: 'сайт, голос, обновления', instagram: 'лента, сторис, звонки',
+	whatsapp: 'сообщения и звонки', x: 'лента и видео', github: 'сайт и загрузки',
+	geoblock: 'ChatGPT, Claude, Gemini', telegram: 'приложение и сайт'
+};
+var AUTO_TEXT = { direct: 'открывается и так', zapret: 'открывается через Zapret', none: 'автообход: не открылся', warp: 'автообход: нужен WARP' };
+
+var ICON_ROUTE = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="18.5" r="2.2"/><circle cx="18" cy="5.5" r="2.2"/><path d="M8.2 18.5h7.3a3.3 3.3 0 0 0 0-6.6h-7a3.3 3.3 0 0 1 0-6.6h7.3"/></svg>';
+
+function plainBadge(cls, text) {
+	return E('span', { 'class': 'zm-badge ' + cls }, [ E('span', { 'class': 'zm-dot' }), text ]);
+}
+
+function row(label, node) {
+	return E('div', { 'class': 'zm-row' }, [ E('span', { 'class': 'zm-label' }, label), node ]);
+}
+
+function fmtAge(sec) {
+	sec = parseInt(sec, 10);
+	if (isNaN(sec)) return 'не было';
+	if (sec < 60) return 'только что';
+	if (sec < 3600) return Math.floor(sec / 60) + ' мин назад';
+	return Math.floor(sec / 3600) + ' ч назад';
+}
+
+function hh(h) { return (h < 10 ? '0' : '') + h + ':00'; }
+
+return view.extend({
+	load: function() {
+		zm.injectCss();
+		return zm.steerStatus().catch(function() { return {}; });
+	},
+
+	render: function(data) {
+		data = data || {};
+		var wrap = E('div', { 'class': 'zm-wrap zm-ab' });
+		var busy = false, lastAction = '', pick = null, autoBusy = false, maxStep = -1, diagRes = null, diagBusy = false;
+
+		var heroCard = E('div', { 'class': 'zm-card zm-ab-hero' });
+		var logEl = E('pre', { 'class': 'zm-log' });
+		var logCard = E('div', { 'class': 'zm-card zm-ab-logcard', 'style': 'display:none' }, [ E('h3', {}, 'Журнал'), logEl ]);
+		var dnsCard = E('div', {});
+		var listCard = E('div', { 'class': 'zm-card' });
+		var checkCard = E('div', { 'class': 'zm-card' });
+		var warpCard = E('div', { 'class': 'zm-card' });
+		var autoCard = E('div', { 'class': 'zm-card' });
+
+		// ── ход операции ──
+
+		function refresh() {
+			return zm.steerStatus().then(function(res) { data = res || {}; renderAll(); });
+		}
+
+		function finish(ok, res) {
+			busy = false;
+			if (res) data = res;
+			var msg = 'Готово';
+			if (!ok) msg = 'Не получилось — подробности в журнале';
+			else if (lastAction === 'install') msg = 'steer установлен и работает';
+			else if (lastAction === 'remove') msg = 'steer удалён';
+			else if (lastAction === 'stop') msg = 'steer выключен — всё идёт напрямую';
+			else if (lastAction === 'lists' || lastAction === 'start') msg = 'Готово, выбор применён';
+			zm.toast(msg, ok ? 'info' : 'error');
+			lastAction = '';
+			diagRes = null;
+			renderAll();
+			if (ok && data.installed) runDiag(true);
+		}
+
+		function waitRouter() {
+			zm.steerStatus().then(function(res) {
+				data = res || {};
+				if (data.running) { follow(); return; }
+				finish(true, res);
+			}).catch(function() { setTimeout(waitRouter, 5000); });
+		}
+
+		function follow() {
+			var ticks = 0;
+			busy = true;
+			logCard.style.display = '';
+			renderAll();
+			zm.pollJob('steer', logEl, function(ok) {
+				// Установка AmneziaWG перезапускает сеть, и роутер на время замолкает — ждём его.
+				zm.steerStatus().then(function(res) {
+					if (res && res.running) { data = res; follow(); return; }
+					finish(ok, res);
+				}).catch(function() {
+					zm.toast('Роутер не отвечает — ждём', 'warning');
+					setTimeout(waitRouter, 5000);
+				});
+			}, function() {
+				if (++ticks % 3) return;
+				zm.steerStatus().then(function(res) { if (res) { data = res; renderHero(); } }).catch(function() {});
+			});
+		}
+
+		function act(action, arg, toastText) {
+			if (busy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
+			zm.steerAction(action, arg || '').then(function(res) {
+				if (res.error) { zm.toast(res.error, 'error'); return; }
+				if (res.saved) { zm.toast('Выбор сохранён — применится при установке', 'info'); pick = null; refresh(); return; }
+				if (toastText) zm.toast(toastText, 'warning');
+				lastAction = action;
+				maxStep = -1;
+				data.running = true;
+				data.phase = action === 'install' ? 'pkgs' : action === 'remove' ? 'remove' : /^warp_/.test(action) ? 'warp' : 'rules';
+				follow();
+			}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
+		}
+
+		// ── главная карточка ──
+
+		function stepIndex(p) {
+			for (var i = 0; i < STEPS.length; i++) if (STEPS[i].id === p) return i;
+			return -1;
+		}
+
+		function renderSteps() {
+			var cur = stepIndex(data.phase);
+			if (cur > maxStep) maxStep = cur;
+			return E('div', { 'class': 'zm-ab-steps' }, STEPS.map(function(s, i) {
+				var cls = i < maxStep ? ' zm-ab-done' : (i === maxStep ? ' zm-ab-now' : '');
+				return E('div', { 'class': 'zm-ab-step' + cls }, [
+					E('span', { 'class': 'zm-ab-step-dot' }, i < maxStep ? '✓' : String(i + 1)),
+					E('span', { 'class': 'zm-ab-step-label' }, s.label)
+				]);
+			}));
+		}
+
+		function stat(label, value, cls) {
+			return E('div', { 'class': 'zm-st-stat' }, [
+				E('span', { 'class': 'zm-st-stat-label' }, label),
+				E('span', { 'class': 'zm-st-stat-value ' + (cls || '') }, value)
+			]);
+		}
+
+		function tunnelState() {
+			var age = parseInt(data.warp_hs_age, 10), n = parseInt(data.channels, 10) || 0;
+			if (!data.warp_up) return (data.stopped || !n) ? [ 'выключен', 'zm-st-off' ] : [ 'не поднят', 'zm-st-bad' ];
+			if (!isNaN(age) && age < 300) return [ 'работает' + (data.warp_colo ? ' · ' + data.warp_colo : ''), 'zm-st-ok' ];
+			return [ 'нет связи', 'zm-st-warn' ];
+		}
+
+		function renderHero() {
+			heroCard.innerHTML = '';
+			var n = parseInt(data.channels, 10) || 0, status;
+			if (busy || data.running) status = plainBadge('zm-warn', PHASE_TEXT[data.phase] || 'Работаем');
+			else if (!data.installed) status = plainBadge('zm-off', 'не установлен');
+			else if (data.stopped) status = plainBadge('zm-off', 'выключен');
+			else if (!n) status = plainBadge('zm-off', 'сервисы не выбраны');
+			else if (data.steer_running && data.warp_up) status = plainBadge('zm-ok', 'работает');
+			else status = plainBadge('zm-bad', 'не работает');
+
+			heroCard.appendChild(E('div', { 'class': 'zm-ab-head' }, [
+				E('div', { 'class': 'zm-ab-icon' }, [ E(ICON_ROUTE) ]),
+				E('div', { 'class': 'zm-ab-title' }, [
+					E('h3', {}, 'steer'),
+					E('p', { 'class': 'zm-hint' }, 'Выбранные сервисы идут через бесплатный туннель Cloudflare WARP. Остальной интернет — как обычно.')
+				]),
+				status
+			]));
+
+			if (data.blocker) {
+				heroCard.appendChild(E('div', { 'class': 'zm-ab-note zm-ab-note-warn' }, BLOCKERS[data.blocker] || data.blocker));
+				return;
+			}
+
+			if (busy) {
+				if (lastAction === 'install') heroCard.appendChild(renderSteps());
+				heroCard.appendChild(E('div', { 'class': 'zm-actions' }, [
+					E('button', { 'class': 'cbi-button cbi-button-remove', 'click': function() {
+						zm.steerAction('halt', '').then(function(res) {
+							if (res.error) zm.toast(res.error, 'error'); else zm.toast('Останавливаем — роутер закончит текущий шаг', 'warning');
+						});
+					} }, 'Остановить')
+				]));
+				heroCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Можно закрыть страницу — всё доделается на роутере.'));
+				return;
+			}
+			if (data.redbtn_running) heroCard.appendChild(E('div', { 'class': 'zm-ab-note zm-ab-note-warn' }, 'Идёт автообход — кнопки заработают, когда он закончит.'));
+
+			if (!data.installed) {
+				heroCard.appendChild(E('div', { 'class': 'zm-st-promo' }, [
+					E('div', {}, [ E('b', {}, '1 кнопка'), E('span', {}, 'всё ставится и настраивается само') ]),
+					E('div', {}, [ E('b', {}, '2–4 минуты'), E('span', {}, 'steer, AmneziaWG, ключи WARP, туннель') ]),
+					E('div', {}, [ E('b', {}, 'Только выбранное'), E('span', {}, 'остальной трафик не трогается') ])
+				]));
+				heroCard.appendChild(E('div', { 'class': 'zm-actions' }, [
+					E('button', { 'class': 'cbi-button cbi-button-positive zm-ab-go', 'click': function() {
+						act('install', '', 'Устанавливаем steer — это займёт пару минут');
+					} }, [ E(ICON_ROUTE), 'Установить и включить' ])
+				]));
+				heroCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сразу через WARP пойдут сервисы, отмеченные ниже. Выбор можно поменять в любой момент.'));
+				return;
+			}
+
+			var ts = tunnelState();
+			heroCard.appendChild(E('div', { 'class': 'zm-st-stats' }, [
+				stat('Туннель WARP', ts[0], ts[1]),
+				stat('steer', data.stopped ? 'выключен' : data.steer_running ? 'запущен' : (n ? 'остановлен' : 'ждёт выбора'),
+					data.stopped || !n ? 'zm-st-off' : data.steer_running ? 'zm-st-ok' : 'zm-st-bad'),
+				stat('Через WARP', n ? n + ' ' + (n === 1 ? 'сервис' : n < 5 ? 'сервиса' : 'сервисов') : 'ничего', n ? 'zm-st-ok' : 'zm-st-off')
+			]));
+
+			var actions = [];
+			if (data.stopped) actions.push(E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() { act('start', '', 'Включаем steer'); } }, 'Включить'));
+			else {
+				actions.push(E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() { act('apply', '', 'Перезапускаем туннель и правила'); } }, 'Перезапустить'));
+				actions.push(E('button', { 'class': 'cbi-button', 'click': function() { act('stop', '', 'Выключаем steer'); } }, 'Выключить'));
+			}
+			actions.push(E('button', { 'class': 'cbi-button cbi-button-remove', 'click': function() {
+				if (!confirm('Удалить steer?\n\nБудут удалены steer, туннель WARP и всё, что для них ставилось. Сервисы, которые шли через WARP, пойдут напрямую.')) return;
+				act('remove', '', 'Удаляем steer');
+			} }, 'Удалить'));
+			heroCard.appendChild(E('div', { 'class': 'zm-actions' }, actions));
+			heroCard.appendChild(E('div', { 'class': 'zm-ab-foot' }, [
+				E('span', {}, 'Версия steer: ' + (data.version || '—')),
+				E('span', {}, 'Выключить — всё пойдёт напрямую, настройки сохранятся.')
+			]));
+		}
+
+		// ── какие сервисы пускать через WARP ──
+
+		function currentPick() {
+			var m = {};
+			(data.services || []).forEach(function(s) { if (s.on) m[s.id] = true; });
+			return m;
+		}
+
+		function renderLists() {
+			listCard.innerHTML = '';
+			listCard.appendChild(E('h3', {}, 'Что пускать через WARP'));
+			listCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Включите нужные сервисы и нажмите «Применить». Автообход включает их сам, если Zapret не помог.'));
+			var cur = currentPick(), sel = pick || cur, changed = false;
+			var list = data.services || [];
+			list.forEach(function(s) { if (!!sel[s.id] !== !!cur[s.id]) changed = true; });
+			listCard.appendChild(E('div', { 'class': 'zm-svc-grid' }, list.map(function(s) {
+				var look = SVC_LOOK[s.id] || [ (s.name || '?').charAt(0), '#6e7681' ];
+				var on = !!sel[s.id];
+				return E('div', {
+					'class': 'zm-svc' + (on ? ' zm-svc-on' : ''),
+					'role': 'switch', 'aria-checked': on ? 'true' : 'false', 'tabindex': '0',
+					'click': function() {
+						if (busy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
+						pick = {};
+						for (var k in sel) if (sel[k]) pick[k] = true;
+						if (pick[s.id]) delete pick[s.id]; else pick[s.id] = true;
+						renderLists();
+					}
+				}, [
+					E('span', { 'class': 'zm-svc-ico', 'style': 'background:' + look[1] }, look[0]),
+					E('span', { 'class': 'zm-svc-text' }, [
+						E('span', { 'class': 'zm-svc-name' }, s.name),
+						E('span', { 'class': 'zm-svc-sub' }, AUTO_TEXT[s.auto] || SVC_SUB[s.id] || '')
+					]),
+					E('span', { 'class': 'zm-switch' + (on ? ' zm-switch-on' : '') }, [ E('span', {}) ])
+				]);
+			})));
+			if (changed) {
+				listCard.appendChild(E('div', { 'class': 'zm-actions zm-st-apply' }, [
+					E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() {
+						var ids = list.filter(function(s) { return sel[s.id]; }).map(function(s) { return s.id; });
+						pick = null;
+						act('lists', ids.join(','), 'Применяем выбор');
+					} }, 'Применить'),
+					E('button', { 'class': 'cbi-button', 'click': function() { pick = null; renderLists(); } }, 'Отмена'),
+					E('span', { 'class': 'zm-hint' }, 'Есть несохранённые изменения')
+				]));
+			}
+		}
+
+		// ── проверка ──
+
+		function runDiag(quiet) {
+			if (diagBusy) return;
+			diagBusy = true;
+			renderCheck();
+			zm.steerAction('diag', '').then(function(res) {
+				diagBusy = false;
+				diagRes = res || {};
+				renderCheck();
+				if (!quiet) zm.toast('Проверка закончена', 'info');
+			}).catch(function() { diagBusy = false; renderCheck(); });
+		}
+
+		function renderCheck() {
+			checkCard.innerHTML = '';
+			checkCard.style.display = data.installed ? '' : 'none';
+			if (!data.installed) return;
+			checkCard.appendChild(E('h3', {}, 'Проверка'));
+			checkCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Роутер проверит туннель и спросит сам steer, всё ли на месте.'));
+			if (diagRes) {
+				var items = [];
+				if (diagRes.warp === 'on') items.push([ 'ok', 'Трафик идёт через WARP' + (diagRes.colo ? ' (сервер ' + diagRes.colo + ')' : ''), '' ]);
+				else if (diagRes.warp === 'off') items.push([ 'fail', 'Трафик через WARP не идёт', 'Нажмите «Перезапустить туннель» или «Сменить точку входа» ниже' ]);
+				var d = diagRes.diag;
+				if (d && d.checks) d.checks.forEach(function(c) {
+					if (c.verdict === 'ok' || c.verdict === 'warn' || c.verdict === 'fail') items.push([ c.verdict, c.what, c.why ]);
+				});
+				var bad = items.filter(function(i) { return i[0] === 'fail'; }).length, warn = items.filter(function(i) { return i[0] === 'warn'; }).length;
+				checkCard.appendChild(E('div', { 'class': 'zm-ab-note ' + (bad ? 'zm-st-note-bad' : warn ? 'zm-ab-note-warn' : 'zm-st-note-ok') },
+					bad ? 'Есть поломка — посмотрите красные пункты' : warn ? 'Работает, но есть замечания' : 'Всё в порядке'));
+				checkCard.appendChild(E('div', { 'class': 'zm-st-checks' }, items.map(function(i) {
+					return E('div', { 'class': 'zm-st-check zm-st-check-' + i[0] }, [
+						E('span', { 'class': 'zm-st-check-dot' }, i[0] === 'ok' ? '✓' : i[0] === 'warn' ? '!' : '✕'),
+						E('span', {}, [ E('span', { 'class': 'zm-st-check-what' }, i[1]), i[2] ? E('span', { 'class': 'zm-st-check-why' }, i[2]) : '' ])
+					]);
+				})));
+			}
+			checkCard.appendChild(E('div', { 'class': 'zm-actions' }, [
+				E('button', { 'class': 'cbi-button', 'disabled': diagBusy || busy ? '' : null, 'click': function() { runDiag(false); } },
+					diagBusy ? 'Проверяем…' : 'Проверить')
+			]));
+		}
+
+		// ── туннель WARP ──
+
+		function renderWarp() {
+			warpCard.innerHTML = '';
+			warpCard.style.display = data.installed ? '' : 'none';
+			if (!data.installed) return;
+			warpCard.appendChild(E('h3', {}, 'Туннель WARP'));
+			var ts = tunnelState();
+			var st = plainBadge(ts[1] === 'zm-st-ok' ? 'zm-ok' : ts[1] === 'zm-st-warn' ? 'zm-warn' : ts[1] === 'zm-st-bad' ? 'zm-bad' : 'zm-off', ts[0].split(' · ')[0]);
+			warpCard.appendChild(E('div', { 'class': 'bt-cols' }, [
+				E('div', { 'class': 'bt-col' }, [
+					row('Состояние', st),
+					row('Точка входа', E('span', {}, data.warp_host ? data.warp_host + ':' + data.warp_port : '—')),
+					row('Сервер Cloudflare', E('span', {}, data.warp_colo || '—'))
+				]),
+				E('div', { 'class': 'bt-col' }, [
+					row('Последняя связь', E('span', {}, data.warp_up ? fmtAge(data.warp_hs_age) : '—')),
+					row('Получено', E('span', {}, zm.fmtSize(+data.warp_rx || 0))),
+					row('Отправлено', E('span', {}, zm.fmtSize(+data.warp_tx || 0)))
+				])
+			]));
+			warpCard.appendChild(E('div', { 'class': 'zm-actions' }, [
+				E('button', { 'class': 'cbi-button', 'click': function() { act('warp_restart', '', 'Перезапускаем туннель'); } }, 'Перезапустить туннель'),
+				E('button', { 'class': 'cbi-button', 'click': function() { act('warp_endpoint', '', 'Ищем быструю точку входа'); } }, 'Сменить точку входа'),
+				E('button', { 'class': 'cbi-button', 'click': function() {
+					if (!confirm('Пересоздать WARP?\n\nБудут получены новые ключи, туннель переподключится. Помогает, если Cloudflare перестал пускать старые ключи.')) return;
+					act('warp_recreate', '', 'Пересоздаём WARP');
+				} }, 'Новые ключи')
+			]));
+			warpCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Не работает — «Перезапустить туннель». Медленно — «Сменить точку входа». Совсем не помогает — «Новые ключи».'));
+		}
+
+		// ── автоперезапуск ──
+
+		function renderAuto() {
+			autoCard.innerHTML = '';
+			autoCard.style.display = data.installed ? '' : 'none';
+			if (!data.installed) return;
+			autoCard.appendChild(E('h3', {}, 'Автоперезапуск'));
+			autoCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Туннель и steer перезапускаются по расписанию — помогает, если обход со временем «подвисает».'));
+			var cur = data.autorestart || '';
+			var am = cur === '' ? 'off' : (cur.indexOf('every:') === 0 ? 'every' + cur.split(':')[1] : 'daily');
+			var curHour = am === 'daily' ? parseInt(cur.split(':')[1], 10) : 4;
+			if (isNaN(curHour) || curHour < 0 || curHour > 23) curHour = 4;
+			var opts = [];
+			for (var h = 0; h < 24; h++) opts.push(E('option', { 'value': String(h), 'selected': h === curHour ? 'selected' : null }, hh(h)));
+			var hourSel = E('select', { 'class': 'cbi-input-select zm-hour-select' }, opts);
+			var dailyRow = E('div', { 'class': 'zm-actions', 'style': am === 'daily' ? '' : 'display:none' }, [
+				E('span', { 'class': 'zm-label' }, 'Время перезапуска'),
+				hourSel,
+				E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() { doAuto('daily:' + hourSel.value); } },
+					am === 'daily' ? 'Сохранить время' : 'Включить')
+			]);
+			function tile(id, label, onclick) {
+				return E('div', { 'class': 'zm-tile' + (am === id ? ' zm-active' : ''), 'click': onclick }, label);
+			}
+			autoCard.appendChild(E('div', { 'class': 'zm-grid' }, [
+				tile('off', 'Выключен', function() { if (am !== 'off') doAuto('off'); }),
+				tile('every2', 'Каждые 2 часа', function() { if (am !== 'every2') doAuto('every:2'); }),
+				tile('every6', 'Каждые 6 часов', function() { if (am !== 'every6') doAuto('every:6'); }),
+				tile('every12', 'Каждые 12 часов', function() { if (am !== 'every12') doAuto('every:12'); }),
+				tile('daily', am === 'daily' ? 'Ежедневно в ' + hh(curHour) : 'Ежедневно в заданное время', function() {
+					dailyRow.style.display = '';
+					hourSel.focus();
+				})
+			]));
+			autoCard.appendChild(dailyRow);
+		}
+
+		function doAuto(value) {
+			if (autoBusy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
+			autoBusy = true;
+			zm.steerAction('autorestart', value).then(function(res) {
+				autoBusy = false;
+				if (res.error) { zm.toast(res.error, 'error'); return; }
+				zm.toast(value === 'off' ? 'Автоперезапуск выключен' : 'Автоперезапуск настроен', 'info');
+				refresh();
+			}).catch(function() { autoBusy = false; });
+		}
+
+		// ── спор за DNS ──
+
+		function renderDns() {
+			dnsCard.innerHTML = '';
+			dnsCard.style.display = 'none';
+			if (!data.dns_conflict || busy) return;
+			dnsCard.style.display = '';
+			dnsCard.appendChild(E('div', { 'class': 'zm-card' }, [
+				E('h3', {}, 'Нужно исправить DNS'),
+				E('p', { 'class': 'zm-hint' }, 'DNS over HTTPS снова перехватывает запросы устройств, и сервисы через WARP не откроются. Шифрованный DNS после исправления продолжит работать.'),
+				E('div', { 'class': 'zm-actions' }, [
+					E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() {
+						zm.steerAction('dns_fix', '').then(function(res) {
+							if (res.error) { zm.toast(res.error, 'error'); return; }
+							zm.toast('DNS исправлен', 'info');
+							refresh();
+						});
+					} }, 'Исправить')
+				])
+			]));
+		}
+
+		function renderAll() {
+			renderHero();
+			renderDns();
+			renderLists();
+			renderCheck();
+			renderWarp();
+			renderAuto();
+		}
+
+		renderAll();
+		wrap.appendChild(E('div', { 'class': 'zm-ab-panel' }, [ heroCard, logCard, dnsCard, listCard, checkCard, warpCard, autoCard ]));
+
+		if (data.running) { lastAction = data.phase === 'remove' ? 'remove' : [ 'pkgs', 'awg', 'keys', 'tunnel' ].indexOf(data.phase) >= 0 ? 'install' : 'apply'; follow(); }
+		else if (data.installed && !data.stopped && (parseInt(data.channels, 10) || 0) > 0) runDiag(true);
+		return wrap;
+	}
+});
+ZM_INSTALLER_EOF
+chmod 0644 '/www/luci-static/resources/view/zapret-manager/steer.js'
+
 mkdir -p /usr/share/zm-redbtn/lists
 cat > '/usr/share/zm-redbtn/services.conf' << 'ZM_INSTALLER_EOF'
-# Сервисы красной кнопки. Каталог и цели — из BigRedButton (gitlab.com/xyzmean/brb).
+# Сервисы автообхода. Каталог и цели — из BigRedButton (gitlab.com/xyzmean/brb).
 #
-# ФОРМАТ: id|название|списки доменов|списки адресов|обязательные цели|дополнительные цели|признак отказа|наборы
-#
-#   наборы    — имена наборов .srs каталога splify2-lists (издатель itdoginfo), через запятую;
-#               по ним сервис уводится в туннель. Не скачались — берутся списки из пакета
-#               (второе и третье поля). ИИ-сервисы и Telegram в туннель не уходят вовсе.
+# ФОРМАТ: id|название|списки доменов|списки адресов|обязательные цели|дополнительные цели|признак отказа
 #
 #   списки    — файлы в /usr/share/zm-redbtn/lists, через запятую; по ним движок уводит сервис в
 #               туннель. Адресные списки только там, где сервис ходит по адресам без DNS
@@ -7304,14 +8260,14 @@ cat > '/usr/share/zm-redbtn/services.conf' << 'ZM_INSTALLER_EOF'
 #   дополнительные — из них должно открыться не меньше RB_BAR процентов.
 #   признак отказа — фразы в ответе, при которых сервис считается закрытым, хотя ответил
 #               (геоблок отвечает кодом 200 со страницей «недоступно в вашей стране»).
-youtube|YouTube|svc_youtube.lst||www.youtube.com,youtubei.googleapis.com,manifest.googlevideo.com|youtu.be,i.ytimg.com,i9.ytimg.com,yt3.ggpht.com,yt4.ggpht.com,jnn-pa.googleapis.com,signaler-pa.youtube.com,yt3.googleusercontent.com,rr4---sn-4g5e6nze.googlevideo.com,rr4---sn-5go7yner.googlevideo.com,rr5---sn-n8v7knez.googlevideo.com,rr2---sn-q4fl6ndl.googlevideo.com,rr1---sn-q4fl6n6y.googlevideo.com,rr14---sn-n8v7kn7r.googlevideo.com,rr4---sn-jvhnu5g-c35d.googlevideo.com,rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com,rr12---sn-gvnuxaxjvh-bvwz.googlevideo.com,rr1---sn-ug5onuxaxjvh-n8v6.googlevideo.com||youtube
-discord|Discord|svc_discord.lst|discord.lst|discord.com,gateway.discord.gg,updates.discord.com|cdn.discordapp.com,media.discordapp.net||discord
-instagram|Instagram|svc_meta.lst|meta.lst|www.instagram.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com||meta
-whatsapp|WhatsApp|svc_meta.lst|whatsapp.lst|web.whatsapp.com|static.whatsapp.net,mmg.whatsapp.net||meta
-x|X (Twitter)|svc_twitter.lst|twitter_x.lst|x.com|twitter.com,abs.twimg.com,video.twimg.com||twitter
-github|GitHub|own_github.lst||github.com,raw.githubusercontent.com,objects.githubusercontent.com|codeload.github.com,api.github.com,ghcr.io||
-geoblock|ИИ-сервисы|||chatgpt.com|claude.ai,api.openai.com,gemini.google.com|App unavailable,unsupported_country,not available in your country,not available in your region|
-telegram|Telegram|||web.telegram.org|t.me,core.telegram.org,telegra.ph||
+youtube|YouTube|svc_youtube.lst||www.youtube.com,youtubei.googleapis.com,manifest.googlevideo.com|youtu.be,i.ytimg.com,i9.ytimg.com,yt3.ggpht.com,yt4.ggpht.com,jnn-pa.googleapis.com,signaler-pa.youtube.com,yt3.googleusercontent.com,rr4---sn-4g5e6nze.googlevideo.com,rr4---sn-5go7yner.googlevideo.com,rr5---sn-n8v7knez.googlevideo.com,rr2---sn-q4fl6ndl.googlevideo.com,rr1---sn-q4fl6n6y.googlevideo.com,rr14---sn-n8v7kn7r.googlevideo.com,rr4---sn-jvhnu5g-c35d.googlevideo.com,rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com,rr12---sn-gvnuxaxjvh-bvwz.googlevideo.com,rr1---sn-ug5onuxaxjvh-n8v6.googlevideo.com|
+discord|Discord|svc_discord.lst|discord.lst|discord.com,gateway.discord.gg,updates.discord.com|cdn.discordapp.com,media.discordapp.net|
+instagram|Instagram|svc_meta.lst|meta.lst|www.instagram.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com|
+whatsapp|WhatsApp|svc_meta.lst|whatsapp.lst|web.whatsapp.com|static.whatsapp.net,mmg.whatsapp.net|
+x|X (Twitter)|svc_twitter.lst|twitter_x.lst|x.com|twitter.com,abs.twimg.com,video.twimg.com|
+github|GitHub|own_github.lst||github.com,raw.githubusercontent.com,objects.githubusercontent.com|codeload.github.com,api.github.com,ghcr.io|
+geoblock|ИИ-сервисы|geoblock.lst||chatgpt.com|claude.ai,api.openai.com,gemini.google.com|App unavailable,unsupported_country,not available in your country,not available in your region
+telegram|Telegram|svc_telegram.lst|telegram.lst|web.telegram.org|t.me,core.telegram.org,telegra.ph|
 ZM_INSTALLER_EOF
 cat > '/usr/share/zm-redbtn/lists/svc_youtube.lst' << 'ZM_INSTALLER_EOF'
 ggpht.com
@@ -7332,6 +8288,37 @@ yt3.googleusercontent.com
 ytimg.com
 ytimg.l.google.com
 yting.com
+ZM_INSTALLER_EOF
+cat > '/usr/share/zm-redbtn/lists/svc_telegram.lst' << 'ZM_INSTALLER_EOF'
+t.me
+telegram.me
+telegram.org
+telegram.dog
+telegra.ph
+telesco.pe
+tdesktop.com
+telegram-cdn.org
+cdn-telegram.org
+graph.org
+tg.dev
+fragment.com
+comments.app
+contest.com
+tx.me
+telegram.space
+ZM_INSTALLER_EOF
+cat > '/usr/share/zm-redbtn/lists/telegram.lst' << 'ZM_INSTALLER_EOF'
+# Сети Telegram (core.telegram.org/resources/cidr.txt), только IPv4: туннель WARP здесь без IPv6.
+91.105.192.0/23
+91.108.4.0/22
+91.108.8.0/22
+91.108.12.0/22
+91.108.16.0/22
+91.108.20.0/22
+91.108.56.0/22
+95.161.64.0/20
+149.154.160.0/20
+185.76.151.0/24
 ZM_INSTALLER_EOF
 cat > '/usr/share/zm-redbtn/lists/svc_discord.lst' << 'ZM_INSTALLER_EOF'
 dis.gd
@@ -7421,11 +8408,476 @@ uploads.github.com
 user-images.githubusercontent.com
 www.github.com
 ZM_INSTALLER_EOF
+cat > '/usr/share/zm-redbtn/lists/geoblock.lst' << 'ZM_INSTALLER_EOF'
+4pda.to
+4pda.ws
+a-vrv.akamaized.net
+abercrombie.com
+adidas.com
+adobe.com
+adobe.io
+adobe.net
+affinity.studio
+ai-chat.bsg.brave.com
+ai.com
+aircanada.com
+akc.org
+all3dp.com
+alphacoders.com
+alza.hu
+amazfitwatchfaces.com
+amplitude.com
+analog.com
+andrevi.ch
+ansys.com
+anthropic.com
+anthropic.qualtrics.com
+api.jetbrains.ai
+api.themoviedb.org
+arc.net
+arduino.cc
+assets.heroku.com
+atlassian.com
+att.com
+augmentcode.com
+autodesk.com
+backend-v2.crixet.com
+bell-sw.com
+bestbuy.com
+bitdefender.com
+bitnami.com
+blinkshot.io
+bosch.com
+boschaftermarket.com
+boschautoparts.com
+brawlstarsgame.com
+broadcom.com
+broncosportforum.com
+btod.com
+buanzo.org
+buf.build
+builds.parsec.app
+buymeacoffee.com
+canva.com
+canva.dev
+capacitorjs.com
+carrefouruae.com
+cats.com
+cdn.web-platform.io
+cdromance.org
+cdw.com
+chainreactioncycles.com
+chaos.com
+chat.com
+chat.openai.com.cdn.cloudflare.net
+chatgpt.com
+cisco.com
+cisecurity.org
+citrix.com
+clamav.net
+clashofclans.com
+clashroyaleapp.com
+claude.ai
+claude.com
+clevelandclinic.org
+clickup.com
+clip.opus.pro
+code.gist.build
+codeium.com
+coingate.com
+community.sophos.com
+connect.ngrok-agent.com
+contabo.com
+copilot.microsoft.com
+corsair.com
+cpu-monkey.com
+credly.com
+crunchyroll.com
+cursor-cdn.com
+cursor.sh
+cursorapi.com
+cvedetails.com
+daemon-tools.cc
+dashboard.algolia.com
+dashboard.gitguardian.com
+data-cdn.mbamupdates.com
+data.cline.bot
+deepl.com
+deezer.com
+dell.com
+dellcdn.com
+designer.microsoft.com
+developer.nvidia.com
+devexpress.com
+diabrowser.com
+digitalcontent.sky
+disctech.com
+disneyplus.com
+docs.liquibase.com
+document360.com
+document360.io
+download3.omnissa.com
+downloads.intercomcdn.com
+ducati.com
+dyson.com
+easydmarc.com
+editorx.com
+elevenlabs.io
+eneba.com
+etsy.com
+exchanger.bits.media
+expandrive.com
+extremetech.com
+f1.com
+fast.com
+filebin.net
+files.manus.cdn
+fivetran.com
+flir.com
+flir.eu
+flourish.studio
+fluke.com
+flukenetworks.com
+flyertalk.com
+footballapi.pulselive.com
+force-user-content.com
+force.com
+formula1.com
+forum.netgate.com
+framer.app
+framer.com
+framercanvas.com
+framercdn.com
+framerstatic.com
+framerusercontent.com
+freeimages.com
+fxnetworks.com
+g2a.com
+gamestop.com
+gaming.amazon.com
+geforcenow.com
+genspark.ai
+geolocation.onetrust.com
+getoutline.com
+gfn.am
+ghostrc.game.idtech.services
+global.fncstatic.com
+glpals.com
+gofund.me
+gofundme.com
+gonift.com
+gpsonextra.net
+gpu-monkey.com
+gql.twitch.tv
+grafana.com
+graylog.org
+grizzlysms.com
+grok.com
+grok.x.com
+groq.com
+groupon.com
+guilded.gg
+habr.com
+hashicorp.com
+haydaygame.com
+hbomax.com
+hc-ping.com
+hchk.io
+healthline.com
+herokucdn.com
+hollisterco.com
+home-connect.com
+home.by.me
+hostinger.com
+hotels.com
+housebrand.com
+htmhell.dev
+httptoolkit.com
+hume.ai
+hybrid-analysis.com
+ibm.com
+iedb.org
+iherb.com
+ikea.com
+image.tmdb.org
+imgur.com
+indeed.com
+install.launcher.omniverse.nvidia.com
+intel.com
+intel.de
+intel.nl
+intelix.sophos.com
+intercom.io
+intuit.com
+intuitibits.com
+itninja.com
+jamf.com
+jetbrains.com
+jetbrains.space
+jetbrains.team
+joesandbox.com
+kaleido.ai
+keysight.com
+kinogo.la
+klarna.com
+kmail-lists.com
+lambdalabs.com
+langdock.com
+last.fm
+ldoceonline.com
+legalshield.com
+lgeapi.com
+lgthinq.com
+lidarr.audio
+lifehacker.com
+lightning.ai
+lookerstudio.google.com
+lyst.com
+mailerlite.com
+mailinator.com
+manus.im
+manybooks.net
+marvelsnap.com
+mattermost.com
+max.com
+medicalnewstoday.com
+meetup.com
+metopera.org
+middlewareinventory.com
+mintmobile.com
+miracleptr.wordpress.com
+mixcloud.com
+mongodb.com
+monoprice.com
+mouser.com
+mouser.fi
+mssg.me
+multisim.com
+myheritage.com
+myjetbrains.com
+myparallels.com
+myqrcode.com
+nba.com
+neo4j.com
+netacad.com
+netapp.com
+netflix.ca
+netflix.com
+netflix.net
+netflixinvestor.com
+netflixtechblog.com
+netlify.com
+new.abb.com
+newark.com
+news.google.com
+newsroom.porsche.com
+nfl.com
+nflxext.com
+nflximg.com
+nflximg.net
+nflxsearch.net
+nflxso.net
+nflxvideo.net
+ngrok.com
+ni.com
+nike.com
+nitropdf.com
+nordaccount.com
+nordcdn.com
+nordvpn.com
+notion-emojis.s3-us-west-2.amazonaws.com
+notion-static.com
+notion.com
+notion.new
+notion.site
+notion.so
+ntp.msn.com
+nxp.com
+oaistatic.com
+oaiusercontent.com
+ocstore.com
+octopus.do
+omnissa.com
+onfastspring.com
+onshape.com
+openai.com
+openh264.org
+openrouter.ai
+oracle.com
+oraclecloud.com
+paddle.com
+paddlestatus.com
+pandasecurity.com
+parallels.cn
+parallels.com
+parallels.net
+parallelsaccess.com
+paritydeals.com
+patreon.com
+patreonusercontent.com
+paywithmoon.com
+pcgamesn.com
+pcmag.com
+penguin.com
+penguinrandomhouse.com
+pexels.com
+philiascans.org
+pingdom.com
+pkgs.tailscale.com
+platform.activestate.com
+plugshare.com
+posthog.com
+premierleague.com
+primark.com
+primevideo.com
+proactivebackend-pa.googleapis.com
+production-openaicom-storage.azureedge.net
+profitwell.com
+prowlarr.com
+public.parsec.app
+qobuz.com
+qodana.cloud
+qoder.com
+qt.io
+qualcomm.com
+quicknode.com
+qwant.com
+reactflow.dev
+recraft.ai
+redis.io
+redislabs.com
+remna.st
+remove.bg
+research.net
+reve.art
+salesforce-experience.com
+salesforce-hub.com
+salesforce-scrt.com
+salesforce-setup.com
+salesforce-sites.com
+salesforce.com
+salesforceiq.com
+salesforceliveagent.com
+schneider-electric.com
+sdxcentral.com
+se.com
+seconddinnertech.com
+semrush.com
+sentry.dev
+sentry.io
+sephora.com
+servarr.com
+sfdcopens.com
+sharefile.com
+sharefile.io
+shinyhardware.co.uk
+shop.gameloft.com
+sigsauer.com
+singlekey-id.com
+site.com
+siteground.com
+sketchup.com
+sky.com
+skycdp.com
+smartbear.co
+smartbear.com
+smartdeploy.com
+snapgametech.com
+snapgene.com
+snort.org
+snyk.io
+solarwinds.com
+sonara.ai
+sora.com
+spacelift.io
+spiceworks.com
+spitfireaudio.com
+spotify.com
+squadbustersgame.com
+squareup.com
+strava.com
+streamable.com
+suggestqueries.google.com
+supercell.com
+support.anydesk.com
+support.xerox.com
+surveymonkey.com
+swagger.io
+swapd.co
+synoforum.com
+syslog-ng.com
+tableau.com
+talosintelligence.com
+teamviewer.com
+techbargains.com
+telemetr.io
+tempmail.plus
+terraform.io
+theaudiodb.com
+themoviedb.org
+ti.com
+tidal.com
+timberland.de
+tmdb-image-prod.b-cdn.net
+tmdb.com
+tmdb.org
+toolbox.app
+torrenteditor.com
+trae.ai
+trailblazer.me
+trailhead.com
+transferwise.com
+tria.ge
+truthsocial.com
+tsmc.com
+tutanota.com
+typing.com
+uaudio.com
+uizard.io
+unscreen.com
+upwork.com
+usher.ttvnw.net
+v.vrv.co
+vagrantcloud.com
+veeam.com
+verificationacademy.com
+vmware.com
+vod-fy.crunchyrollcdn.com
+volkswagen-classic-parts.com
+vyos.io
+w.atwiki.jp
+walmart.com
+watchguard.com
+watermarkremover.io
+wbagora.com
+wbgames.com
+wdfiles.com
+weather.com
+webnames.ca
+weebly.com
+wetransfer.com
+widgetapp.stream
+wikidot.com
+windsurf.com
+wise.com
+wpengine.com
+wunderground.com
+www3.corsair.com
+x-minus.pro
+x.ai
+xiaomi.eu
+xrite.com
+xsts.auth.xboxlive.com
+xtracloud.net
+yeggi.com
+youtrack.cloud
+zapier.com
+zedge.net
+zerossl.com
+ZM_INSTALLER_EOF
 cat > '/usr/share/zm-redbtn/lists/discord.lst' << 'ZM_INSTALLER_EOF'
-104.16.0.0/12
 138.128.137.32/28
 138.128.140.240/28
-162.159.128.0/19
 172.65.202.16/28
 34.0.129.176/28
 34.0.130.176/28
@@ -7969,82 +9421,7 @@ cat > '/usr/share/zm-redbtn/lists/twitter_x.lst' << 'ZM_INSTALLER_EOF'
 202.160.128.0/22
 208.91.196.0/23
 ZM_INSTALLER_EOF
-rm -f /usr/share/zm-redbtn/lists/geoblock.lst
 chmod 0644 /usr/share/zm-redbtn/services.conf /usr/share/zm-redbtn/lists/*.lst
-cat > '/etc/init.d/zm-geodns' << 'ZM_INSTALLER_EOF'
-#!/bin/sh /etc/rc.common
-# DNS для ИИ-сервисов красной кнопки Zapret Manager: свой экземпляр https-dns-proxy на
-# 127.0.0.1:5055 и файл dnsmasq, который отдаёт ему ТОЛЬКО домены из списка
-# /etc/zm-redbtn/geo-domains.lst. Остальной DNS роутера не меняется.
-START=99
-STOP=10
-USE_PROCD=1
-
-RES=/etc/zm-redbtn/geo.resolver
-DOM=/etc/zm-redbtn/geo-domains.lst
-PORT=5055
-
-confdir() {
-	local d
-	d=$(sed -n 's/^conf-dir=\([^,]*\).*/\1/p' /var/etc/dnsmasq.conf.* 2>/dev/null | head -n 1)
-	[ -n "$d" ] || d=/tmp/dnsmasq.d
-	echo "$d"
-}
-
-dnsmasq_on() {
-	local d f
-	d="$(confdir)"; f="$d/zm-geo.conf"
-	mkdir -p "$d"
-	# По двадцать доменов в строке: dnsmasq понимает server=/a/b/c/адрес.
-	awk -v p="$PORT" 'NF { l = l "/" $1; if (++n == 20) { print "server=" l "/127.0.0.1#" p; l = ""; n = 0 } }
-		END { if (n) print "server=" l "/127.0.0.1#" p }' "$DOM" > "$f.tmp"
-	if cmp -s "$f.tmp" "$f"; then rm -f "$f.tmp"; else mv "$f.tmp" "$f"; /etc/init.d/dnsmasq restart >/dev/null 2>&1; fi
-}
-
-dnsmasq_off() {
-	local f
-	f="$(confdir)/zm-geo.conf"
-	[ -f "$f" ] || return 0
-	rm -f "$f"
-	/etc/init.d/dnsmasq restart >/dev/null 2>&1
-}
-
-start_service() {
-	[ -s "$RES" ] && [ -s "$DOM" ] && [ -x /usr/sbin/https-dns-proxy ] || return 0
-	. "$RES"
-	procd_open_instance
-	procd_set_param command /usr/sbin/https-dns-proxy -a 127.0.0.1 -p "$PORT" -4 \
-		-b "$GEO_BOOT" -r "$GEO_URL" -u nobody -g nogroup
-	procd_set_param respawn 3600 5 0
-	procd_close_instance
-	dnsmasq_on
-}
-
-stop_service() {
-	dnsmasq_off
-}
-ZM_INSTALLER_EOF
-chmod 0755 /etc/init.d/zm-geodns
-cat > '/usr/share/zm-redbtn/doh.conf' << 'ZM_INSTALLER_EOF'
-# Резолверы для ИИ-сервисов. Пул geo — из BigRedButton (gitlab.com/xyzmean/brb) плюс dns.yo1nk.app.
-# Формат: id|название|ссылка DoH|bootstrap-серверы|роль. Берётся самый быстрый geo, чей прокси отвечает.
-yo1nk|dns.yo1nk.app|https://dns.yo1nk.app/dns-query|1.1.1.1,77.88.8.8|geo
-malw|dns.malw.link (снимает геоблок)|https://dns.malw.link/dns-query|1.1.1.1,8.8.8.8,77.88.8.8|geo
-malw_cf|dns.malw.link через Cloudflare|https://5u35p8m9i7.cloudflare-gateway.com/dns-query|1.1.1.1,8.8.8.8,77.88.8.8|geo
-comss|Comss.one|https://dns.comss.one/dns-query|1.1.1.1,77.88.8.8|geo
-comss_ru|Comss RU|https://dns.comss.ru/dns-query|1.1.1.1,77.88.8.8|geo
-mafioznik|Mafioznik|https://dns.mafioznik.com/dns-query|1.1.1.1,77.88.8.8|geo
-mafioznik_xyz|Mafioznik XYZ|https://dns.mafioznik.xyz/dns-query|1.1.1.1,77.88.8.8|geo
-astracat|AstraCat|https://dns.astrakat.ru/dns-query|1.1.1.1,77.88.8.8|geo
-astracat_8443|AstraCat :8443|https://dns.astrakat.ru:8443/dns-query|1.1.1.1,77.88.8.8|geo
-geohide|GeoHide :444|https://dns.geohide.ru:444/dns-query|1.1.1.1,77.88.8.8|geo
-geohide_8443|GeoHide :8443|https://dns.geohide.ru:8443/dns-query|1.1.1.1,77.88.8.8|geo
-xbox|Xbox DNS|https://xbox-dns.ru/dns-query|1.1.1.1,77.88.8.8|geo
-cloudflare|Cloudflare|https://cloudflare-dns.com/dns-query|1.1.1.1,1.0.0.1|plain
-google|Google|https://dns.google/dns-query|8.8.8.8,8.8.4.4|plain
-yandex|Яндекс (запасной, работает изнутри страны)|https://common.dot.dns.yandex.net/dns-query|77.88.8.8,77.88.8.1|fallback
-ZM_INSTALLER_EOF
-chmod 0644 /usr/share/zm-redbtn/doh.conf
 
 mkdir -p /www/luci-static/resources/view/zapret-manager
 chmod 0755 /www/luci-static/resources/view/zapret-manager
@@ -10087,15 +11464,99 @@ html.zm-theme-dark .zm-config-editor { border-color: rgba(255,255,255,.14); }
 }
 
 .cbi-page-actions { display: none !important; }
-.zm-redbtn, .zm-redbtn:focus {
-	background: #d32f2f !important; border-color: #b71c1c !important; color: #fff !important;
-	font-size: 1.1em; font-weight: 600; padding: .7em 2.2em; border-radius: 999px;
+.zm-ab-panel { display: flex; flex-direction: column; gap: 16px; }
+.zm-ab-head { display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+.zm-ab-head > .zm-badge { margin-left: auto; }
+.zm-ab-title { flex: 1 1 260px; min-width: 0; }
+.zm-ab-title h3 { margin: 2px 0 2px 0; font-size: 17px; }
+.zm-ab-title .zm-hint { margin-top: 0; }
+.zm-ab-icon {
+	width: 44px; height: 44px; border-radius: 13px; flex-shrink: 0;
+	display: grid; place-items: center; color: #fff;
+	background: linear-gradient(135deg, #5fd8ff 0%, #1aa3ff 50%, #0a7cff 100%);
+	box-shadow: 0 8px 18px -8px rgba(10,124,255,.8);
 }
-.zm-redbtn:hover { background: #b71c1c !important; }
-.zm-redbtn-player video { display: block; width: 100%; max-height: 82vh; aspect-ratio: 16 / 9; object-fit: contain; border-radius: 12px; background: #000; }
-.zm-redbtn-player .zm-actions { margin-top: 10px; }
-.zm-redbtn-logcard .zm-log:not(.zm-show) { display: none; }
-.zm-redbtn-logcard:not(:has(.zm-log.zm-show)) { display: none; }
+.zm-ab-hero .zm-grid { margin-top: 16px; }
+.zm-ab-go { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; }
+.zm-ab-go svg { width: 17px; height: 17px; }
+.zm-ab-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: 12.5px; opacity: .8; border-top: 1px dashed rgba(0,0,0,.12); padding-top: 12px; margin-top: 4px; }
+html.zm-theme-dark .zm-ab-foot { border-top-color: rgba(255,255,255,.12); }
+.zm-ab-sum b { font-size: 15px; }
+.zm-ab-sum-ok b { color: #1a7f37; }
+.zm-ab-note { margin-top: 14px; border-radius: 10px; padding: 11px 14px; font-size: 13px; font-weight: 600; }
+.zm-ab-note-warn { background: rgba(191,135,0,.12); color: #9a6700; border: 1px solid rgba(191,135,0,.3); }
+
+.zm-ab-steps { display: flex; gap: 6px; margin: 18px 0 4px; counter-reset: s; overflow-x: auto; padding-bottom: 2px; }
+.zm-ab-step { flex: 1 1 0; min-width: 78px; display: flex; flex-direction: column; align-items: center; gap: 6px; position: relative; font-size: 12px; opacity: .55; }
+.zm-ab-step::before { content: ""; position: absolute; top: 14px; left: calc(-50% + 18px); right: calc(50% + 18px); height: 2px; background: rgba(110,118,129,.3); border-radius: 2px; }
+.zm-ab-step:first-child::before { display: none; }
+.zm-ab-step-dot { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; font-weight: 700; font-size: 12.5px; background: rgba(110,118,129,.14); color: inherit; }
+.zm-ab-step-label { white-space: nowrap; font-weight: 600; }
+.zm-ab-step.zm-ab-done { opacity: 1; }
+.zm-ab-step.zm-ab-done .zm-ab-step-dot { background: #1a7f37; color: #fff; }
+.zm-ab-step.zm-ab-done::before, .zm-ab-step.zm-ab-now::before { background: #1a7f37; }
+.zm-ab-step.zm-ab-now { opacity: 1; }
+.zm-ab-step.zm-ab-now .zm-ab-step-dot { background: #1aa3ff; color: #fff; animation: zm-ab-pulse 1.6s ease-in-out infinite; }
+@keyframes zm-ab-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(26,163,255,.55); } 50% { box-shadow: 0 0 0 7px rgba(26,163,255,0); } }
+
+.zm-ab-svc { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 9px; margin-top: 10px; }
+.zm-ab-svc-item .zm-badge { flex-shrink: 0; }
+.zm-ab-svc-item {
+	display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0;
+	border: 1px solid rgba(0,0,0,.08); border-radius: 10px; padding: 10px 12px;
+	background: var(--background-color-low, #fafafa);
+}
+html.zm-theme-dark .zm-ab-svc-item { background: #22272e; border-color: rgba(255,255,255,.1); }
+.zm-ab-svc-item.zm-ab-svc-bad { border-color: rgba(207,34,46,.3); }
+.zm-ab-svc-name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* steer */
+.zm-st-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.zm-st-stat { display: flex; flex-direction: column; gap: 4px; min-width: 0; padding: 11px 14px; border-radius: 11px; border: 1px solid rgba(0,0,0,.08); background: var(--background-color-low, #fafafa); }
+html.zm-theme-dark .zm-st-stat { background: #22272e; border-color: rgba(255,255,255,.1); }
+.zm-st-stat-label { font-size: 11.5px; opacity: .65; text-transform: uppercase; letter-spacing: .04em; }
+.zm-st-stat-value { font-size: 14px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zm-st-ok { color: #1a7f37; } .zm-st-warn { color: #9a6700; } .zm-st-bad { color: #cf222e; } .zm-st-off { opacity: .6; }
+.zm-st-promo { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
+.zm-st-promo > div { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; border-radius: 11px; background: rgba(26,163,255,.07); border: 1px solid rgba(26,163,255,.2); }
+.zm-st-promo b { font-size: 14px; } .zm-st-promo span { font-size: 12px; opacity: .7; }
+.zm-svc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; margin-top: 12px; }
+.zm-svc { display: flex; align-items: center; gap: 11px; min-width: 0; padding: 10px 12px; border-radius: 12px; cursor: pointer; user-select: none;
+	border: 1px solid rgba(0,0,0,.1); background: var(--background-color-low, #fafafa); transition: border-color .15s, background .15s, transform .1s; }
+html.zm-theme-dark .zm-svc { background: #22272e; border-color: rgba(255,255,255,.1); }
+.zm-svc:hover { transform: translateY(-1px); border-color: #1aa3ff; }
+.zm-svc.zm-svc-on { border-color: rgba(26,163,255,.6); background: rgba(26,163,255,.08); }
+.zm-svc-ico { width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 12.5px; letter-spacing: -.02em; }
+.zm-svc-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.zm-svc-name { font-weight: 700; font-size: 13.5px; }
+.zm-svc-sub { font-size: 11.5px; opacity: .6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zm-switch { width: 38px; height: 22px; border-radius: 999px; background: rgba(110,118,129,.35); position: relative; flex-shrink: 0; transition: background .15s; }
+.zm-switch > span { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: left .15s; }
+.zm-switch.zm-switch-on { background: #1aa3ff; } .zm-switch.zm-switch-on > span { left: 19px; }
+.zm-st-apply .zm-hint { margin: 0; }
+.zm-st-note-ok { background: rgba(26,127,55,.1); color: #1a7f37; border: 1px solid rgba(26,127,55,.25); }
+.zm-st-note-bad { background: rgba(207,34,46,.08); color: #cf222e; border: 1px solid rgba(207,34,46,.25); }
+.zm-st-checks { display: flex; flex-direction: column; gap: 7px; margin-top: 12px; }
+.zm-st-check { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; }
+.zm-st-check > span:last-child { display: flex; flex-direction: column; min-width: 0; }
+.zm-st-check-dot { width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; font-size: 11px; font-weight: 800; color: #fff; }
+.zm-st-check-ok .zm-st-check-dot { background: #1a7f37; } .zm-st-check-warn .zm-st-check-dot { background: #bf8700; } .zm-st-check-fail .zm-st-check-dot { background: #cf222e; }
+.zm-st-check-why { font-size: 12px; opacity: .65; }
+@media (max-width: 600px) {
+	.zm-st-stats, .zm-st-promo { grid-template-columns: 1fr; }
+	.zm-svc-grid { grid-template-columns: 1fr; }
+}
+.zm-ab-player video { display: block; width: 100%; max-height: 72vh; aspect-ratio: 16 / 9; object-fit: contain; border-radius: 12px; background: #000; }
+.zm-ab-player .zm-actions { margin-bottom: 0; }
+.zm-ab-logcard .zm-log { margin-top: 0; }
+@media (max-width: 600px) {
+	.zm-ab-title { flex-basis: calc(100% - 58px); }
+	.zm-ab-head > .zm-badge { margin-left: 58px; }
+	.zm-ab-step { min-width: 40px; }
+	.zm-ab-step:not(.zm-ab-now) .zm-ab-step-label { visibility: hidden; }
+	.zm-ab-step-label { font-size: 11.5px; }
+	.zm-ab-svc { grid-template-columns: 1fr; }
+}
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/style.css'
 
@@ -11931,6 +13392,10 @@ chmod 0644 '/www/luci-static/resources/view/zapret-manager/bytetube.js'
 
 rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null || true
 /etc/init.d/rpcd reload >/dev/null 2>&1 || /etc/init.d/rpcd restart >/dev/null 2>&1
+# Списки сервисов могли обновиться вместе с панелью — steer перечитывает их без обрыва DNS.
+if grep -qx 'steer-spec' /etc/zm-steer/owned 2>/dev/null && /etc/init.d/steer enabled 2>/dev/null; then
+	/etc/init.d/steer reload >/dev/null 2>&1
+fi
 
 if command -v apk >/dev/null 2>&1; then PM="apk"; INSTALL="apk add"
 else PM="opkg"; INSTALL="opkg install"; fi
@@ -12418,7 +13883,9 @@ var ICONS = {
 	lock: '<rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
 	arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
 	alert: '<path d="M12 3.5l9.5 16.5h-19L12 3.5z"/><path d="M12 10v4.5M12 17.3v.2"/>',
-	rocket: '<path d="M14.5 4.2c2.6-1.1 5-1.2 5.3-.9.3.3.2 2.7-.9 5.3-1 2.4-3.1 4.9-6.2 6.9l-3.2-3.2c2-3.1 4.5-5.2 6.9-6.2z"/><circle cx="15.2" cy="8.8" r="1.6"/><path d="M9.5 12.3l-3.6-.4 2.4-3.2 3.3-.2M11.7 14.5l.4 3.6 3.2-2.4.2-3.3"/><path d="M6.8 16.2c-1.3.4-2.1 2.2-2.3 3.3 1.1-.2 2.9-1 3.3-2.3"/>',
+	route: '<circle cx="6" cy="18.5" r="2.2"/><circle cx="18" cy="5.5" r="2.2"/><path d="M8.2 18.5h7.3a3.3 3.3 0 0 0 0-6.6h-7a3.3 3.3 0 0 1 0-6.6h7.3"/>',
+	wand: '<path d="M4 20l10.5-10.5"/><path d="M13 8.5l2.5 2.5"/><path d="M16.5 3v3M15 4.5h3M19.5 8.5v2.5M18.2 9.8h2.6M9 3.5v2M8 4.5h2"/>',
+	rocket: '<path d="M12 2.5c2.9 2.1 4.3 5.3 4.3 9.2V16H7.7v-4.3c0-3.9 1.4-7.1 4.3-9.2z"/><circle cx="12" cy="9.3" r="1.7"/><path d="M7.7 12.2L5 14.6V18l2.7-2M16.3 12.2l2.7 2.4V18l-2.7-2"/><path d="M10.2 18.5 12 21.5l1.8-3"/>',
 	telegram: '<path d="M21 4.5L2.8 11.4c-.8.3-.8 1.4 0 1.7l4.4 1.5 1.7 5.3c.2.7 1.1.9 1.6.4l2.5-2.4 4.6 3.4c.6.4 1.4.1 1.6-.6L22.3 5.8c.2-.9-.6-1.6-1.3-1.3z"/><path d="M7.3 14.6l10-6.6-7.4 8"/>'
 };
 
@@ -12501,7 +13968,8 @@ function toggleTheme() {
 
 var ROUTES = [
 	{ id: 'dashboard', title: 'Дашборд', sub: 'Состояние всех компонентов', icon: 'dashboard', group: 'Обзор' },
-	{ id: 'redbtn', title: 'Красная кнопка', sub: 'Автоподбор обхода по сервисам', icon: 'rocket', group: 'Обход блокировок', dot: 'redbtn' },
+	{ id: 'redbtn', title: 'Автообход', sub: 'Роутер сам подберёт обход для каждого сервиса', icon: 'wand', group: 'Обход блокировок', dot: 'redbtn' },
+	{ id: 'steer', title: 'steer', sub: 'Выбранные сервисы через туннель WARP', icon: 'route', group: 'Обход блокировок', dot: 'steer' },
 	{ id: 'strategy', title: 'Zapret', sub: 'Стратегии, тесты, YouTube, игры, Discord и исключения', icon: 'shield', group: 'Обход блокировок', dot: 'zapret' },
 	{ id: 'zapret2', title: 'Zapret2', sub: 'Установка и управление Zapret2', icon: 'bolt', group: 'Обход блокировок', dot: 'zapret2' },
 	{ id: 'bytetube', title: 'ByeTube', sub: 'YouTube через ByeDPI', icon: 'play', group: 'Обход блокировок', dot: 'bytetube' },
@@ -13622,6 +15090,49 @@ html[data-theme="dark"] #zmw-view .zm-tile.zm-active::before { color: #a594ff; }
 #zmw-view .zm-tg-link-card { background: var(--ok-bg); border: 1px solid rgba(16,185,129,.28); border-radius: 16px; }
 #zmw-view .zm-tg-link-box { background: var(--console); color: #86efac; border-radius: 12px; font-family: var(--mono); font-size: 13.5px; }
 #zmw-view .zm-tg-qr-box img { border-radius: 14px; box-shadow: var(--shadow); }
+
+/* Автообход */
+#zmw-view .zm-ab-panel { gap: 18px; }
+#zmw-view .zm-ab-panel > .zm-card { margin: 0 !important; }
+#zmw-view .zm-ab-hero { background: var(--surface); position: relative; overflow: hidden; }
+#zmw-view .zm-ab-hero::after {
+	content: ""; position: absolute; right: -80px; top: -80px; width: 240px; height: 240px; border-radius: 50%;
+	background: radial-gradient(circle, rgba(26,163,255,.16), transparent 70%); pointer-events: none;
+}
+#zmw-view .zm-ab-hero h3::before, #zmw-view .zm-ab-title h3::before { display: none; }
+#zmw-view .zm-ab-foot { border-top-color: var(--border); color: var(--muted); opacity: 1; }
+#zmw-view .zm-ab-sum b { color: var(--text); }
+#zmw-view .zm-ab-sum-ok b { color: var(--ok); }
+#zmw-view .zm-ab-note-warn { background: var(--warn-bg); color: var(--warn); border-color: rgba(245,158,11,.35); }
+#zmw-view .zm-ab-step { color: var(--muted); opacity: 1; }
+#zmw-view .zm-ab-step::before { background: var(--border-2); }
+#zmw-view .zm-ab-step-dot { background: var(--surface-2); border: 1px solid var(--border); }
+#zmw-view .zm-ab-step.zm-ab-done { color: var(--text-2); }
+#zmw-view .zm-ab-step.zm-ab-done .zm-ab-step-dot { background: var(--ok-dot); border-color: transparent; color: #fff; }
+#zmw-view .zm-ab-step.zm-ab-done::before, #zmw-view .zm-ab-step.zm-ab-now::before { background: var(--grad); }
+#zmw-view .zm-ab-step.zm-ab-now { color: var(--text); }
+#zmw-view .zm-ab-step.zm-ab-now .zm-ab-step-dot { background: var(--grad); border-color: transparent; color: #fff; }
+#zmw-view .zm-ab-svc-item, html.zm-theme-dark #zmw-view .zm-ab-svc-item { background: var(--surface-2); border-color: var(--border); border-radius: 13px; }
+#zmw-view .zm-ab-svc-item.zm-ab-svc-bad { border-color: rgba(239,68,68,.35); }
+#zmw-view .zm-ab-svc-name { color: var(--text); }
+#zmw-view .zm-ab-player video { border-radius: 14px; box-shadow: var(--shadow); }
+#zmw-view .zm-ab-logcard .zm-log { margin-top: 0; }
+
+#zmw-view .zm-st-stat, html.zm-theme-dark #zmw-view .zm-st-stat { background: var(--surface-2); border-color: var(--border); border-radius: 14px; }
+#zmw-view .zm-st-stat-label { color: var(--muted); opacity: 1; }
+#zmw-view .zm-st-stat-value { color: var(--text); }
+#zmw-view .zm-st-ok { color: var(--ok); } #zmw-view .zm-st-warn { color: var(--warn); } #zmw-view .zm-st-bad { color: var(--bad); } #zmw-view .zm-st-off { color: var(--muted); opacity: 1; }
+#zmw-view .zm-st-promo > div { background: var(--grad-soft); border-color: rgba(124,92,255,.25); border-radius: 14px; }
+#zmw-view .zm-st-promo b { color: var(--text); } #zmw-view .zm-st-promo span { color: var(--muted); opacity: 1; }
+#zmw-view .zm-svc, html.zm-theme-dark #zmw-view .zm-svc { background: var(--surface-2); border-color: var(--border); border-radius: 14px; }
+#zmw-view .zm-svc:hover { border-color: rgba(124,92,255,.55); box-shadow: 0 10px 20px -14px rgba(99,102,241,.7); }
+#zmw-view .zm-svc.zm-svc-on, html.zm-theme-dark #zmw-view .zm-svc.zm-svc-on { background: var(--grad-soft); border-color: rgba(124,92,255,.6); }
+#zmw-view .zm-svc-name { color: var(--text); } #zmw-view .zm-svc-sub { color: var(--muted); opacity: 1; }
+#zmw-view .zm-switch { background: var(--border-2); }
+#zmw-view .zm-switch.zm-switch-on { background: var(--grad); }
+#zmw-view .zm-st-note-ok { background: var(--ok-bg); color: var(--ok); border-color: rgba(16,185,129,.3); }
+#zmw-view .zm-st-note-bad { background: var(--bad-bg); color: var(--bad); border-color: rgba(239,68,68,.3); }
+#zmw-view .zm-st-check { color: var(--text); } #zmw-view .zm-st-check-why { color: var(--muted); opacity: 1; }
 
 /* авторы */
 #zmw-view .zm-credits-grid { gap: 12px; }
