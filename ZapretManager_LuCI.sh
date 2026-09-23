@@ -4870,25 +4870,40 @@ _rb_check_service() { # ID РЕЖИМ -> код 0, если сервис раб�
 }
 
 # Проверить все сервисы (кроме Telegram), печатает «id ok|fail» по строке.
-_rb_check_all() { # РЕЖИМ
+# С ПОДПИСЬЮ — ещё и печатает каждый сервис в журнал сразу, как он проверен: проверка всех идёт
+# около минуты, и журнал, молчащий минуту, выглядит зависшим.
+_rb_check_all() { # РЕЖИМ [ПОДПИСЬ]
 	local id
 	for id in $(_rb_svc_ids); do
 		[ "$id" = telegram ] && continue
-		if _rb_check_service "$id" "$1"; then echo "$id ok"; else echo "$id fail"; fi
+		if _rb_check_service "$id" "$1"; then
+			echo "$id ok"
+			[ -n "${2:-}" ] && echo "[ OK ] $(_rb_svc_field "$id" 2) — $2" >&2
+		else
+			echo "$id fail"
+			[ -n "${2:-}" ] && echo "[FAIL] $(_rb_svc_field "$id" 2)" >&2
+		fi
+	done
+}
+
+# Ход тестера менеджера — в журнал по строке: какую стратегию меряем и сколько она открыла.
+_rb_test_progress() {
+	local line
+	while IFS= read -r line; do
+		case "$line" in
+			'==> ['*) echo "   ${line#==> }" ;;
+			'==> Результат: '*) echo "      открылось ${line#==> Результат: }" | sed 's#/# из #' ;;
+			'==> Контрольный тест'*) echo "   Проверяем, что открывается без Zapret" ;;
+			'==> Собираем стратегии'*) echo "   Собираем стратегии" ;;
+			'==> Собираем список доменов'*) echo "   Собираем адреса для проверки" ;;
+			'==> Найдено стратегий: '*) echo "   Стратегий в подборе: ${line#==> Найдено стратегий: }" ;;
+		esac
 	done
 }
 
 _rb_count_ok() { printf '%s\n' "$1" | grep -c ' ok$'; }
 _rb_failed() { printf '%s\n' "$1" | awk '$2=="fail"{print $1}'; }
 
-_rb_print_checks() { # ТАБЛИЦА ПОДПИСЬ_OK
-	local id st
-	printf '%s\n' "$1" | while read -r id st; do
-		[ -n "$id" ] || continue
-		if [ "$st" = ok ]; then echo "[ OK ] $(_rb_svc_field "$id" 2) — $2"
-		else echo "[FAIL] $(_rb_svc_field "$id" 2)"; fi
-	done
-}
 
 # ── пакеты ──
 
@@ -5132,11 +5147,14 @@ _rb_warp_up() {
 	fi
 	_rb_say "Подбираем точку входа WARP"
 	cand="$(_rb_warp_candidates)"
+	_rb_say "Кандидатов: $(echo "$cand" | grep -c .)"
 	# Порты 4500 и 2408 выколоты из игрового фильтра zapret — туннель не попадёт под обработку.
 	for port in 4500 2408; do
 		for host in $cand; do
 			_rb_stopped && return 1
-			colo="$(_rb_warp_try "$host" "$port")" || continue
+			echo "   Пробуем $host:$port"
+			colo="$(_rb_warp_try "$host" "$port")" || { echo "      не отвечает"; continue; }
+			echo "      работает, колония $colo"
 			if _rb_warp_is_ru "$colo"; then
 				[ -n "$spare" ] || spare="$host $port $colo"
 				continue
@@ -5298,7 +5316,7 @@ _rb_result_num() { printf '%s\n' "$1" | sed -n 's/.* → \([0-9]*\)\/.*/\1/p'; }
 # Прогнать тестер. Печатает имя лучшей стратегии, если она лучше, чем без zapret.
 _rb_zapret_pick() { # РЕЖИМ_ТЕСТА
 	local mode="$1" res best name ctrl bok
-	do_test_run "$mode" | grep '^==> \[' | sed 's/^==> /   /' >&2
+	do_test_run "$mode" | _rb_test_progress >&2
 	res="$(_test_results_file "$mode")"
 	[ -s "$res" ] || return 1
 	best=$(grep -v '^Контрольный тест' "$res" | head -n1)
@@ -5313,7 +5331,7 @@ _rb_zapret_pick() { # РЕЖИМ_ТЕСТА
 
 _rb_youtube_pick() {
 	local res best name
-	do_test_run youtube >/dev/null 2>&1
+	do_test_run youtube | _rb_test_progress >&2
 	res="$(_test_results_file youtube)"
 	best=$(grep -v '^Контрольный тест' "$res" 2>/dev/null | head -n1)
 	[ -n "$best" ] || return 1
@@ -5357,8 +5375,7 @@ do_redbtn_run() {
 
 	_rb_phase check
 	_rb_say "Проверяем сервисы при текущей настройке"
-	before="$(_rb_check_all as_is)"
-	_rb_print_checks "$before" "открывается"
+	before="$(_rb_check_all as_is открывается)"
 	_rb_stopped && { _rb_say "Остановлено"; return 0; }
 
 	# Подбор стратегии — только если что-то не открывается: рабочую настройку не трогаем.
@@ -5373,7 +5390,8 @@ do_redbtn_run() {
 			name="${pick% *}"
 			_rb_say "Лучшая стратегия: $name (${pick#* } целей)"
 			if _rb_zapret_apply "$name"; then
-				after="$(_rb_check_all as_is)"
+				_rb_say "Проверяем сервисы с новой стратегией"
+				after="$(_rb_check_all as_is открывается)"
 				# Одна проба шумит: сервис, ответивший медленно, выглядит закрытым. Прежде чем
 				# откатывать, перемериваем ещё раз.
 				[ "$(_rb_count_ok "$after")" -lt "$(_rb_count_ok "$before")" ] && after="$(_rb_check_all as_is)"
@@ -5414,6 +5432,7 @@ do_redbtn_run() {
 	# Что открылось — напрямую или благодаря zapret.
 	_rb_phase check
 	local direct
+	_rb_say "Проверяем, что открывается без обхода"
 	direct="$(_rb_check_all direct)"
 	for id in $(printf '%s\n' "$before" | awk '$2=="ok"{print $1}'); do
 		# «Через Zapret» — только если и повторная проба без обхода не прошла.
@@ -5482,6 +5501,7 @@ do_redbtn_run() {
 }
 
 do_redbtn_remove() {
+	_rb_phase remove
 	_rb_say "Снимаем настройки красной кнопки"
 	_rb_spec_clear
 	if _rb_owns "net $RB_WARP_IF"; then
@@ -6612,7 +6632,8 @@ var PHASES = {
 	zapret: 'Подбираем стратегию Zapret',
 	warp: 'Поднимаем туннель WARP',
 	steer: 'Применяем правила',
-	telegram: 'Проверяем Telegram'
+	telegram: 'Проверяем Telegram',
+	remove: 'Снимаем настройки'
 };
 
 var BLOCKERS = {
@@ -6620,6 +6641,14 @@ var BLOCKERS = {
 	zapret2: 'Установлен Zapret2 — удалите его на странице Zapret2.',
 	steer: 'Обход на роутере уже настроен вручную — кнопка его не перезаписывает.'
 };
+
+// Ролик на время подбора. Лежит в репозитории форка; jsDelivr первым, потому что он отдаёт
+// правильный тип файла и чаще открывается там, где raw.githubusercontent закрыт.
+var WAIT_VIDEO = [
+	'https://cdn.jsdelivr.net/gh/xyzmean/Zapret-Manager@main/files/RedButton/wait.mp4',
+	'https://raw.githubusercontent.com/xyzmean/Zapret-Manager/main/files/RedButton/wait.mp4'
+];
+var WAIT_POSTER = 'https://cdn.jsdelivr.net/gh/xyzmean/Zapret-Manager@main/files/RedButton/poster.jpg';
 
 function stateBadge(st) {
 	var s = STATES[st];
@@ -6651,6 +6680,54 @@ return view.extend({
 		var svcCard = E('div', { 'class': 'zm-card' });
 		var warpCard = E('div', { 'class': 'zm-card' });
 		var dnsCard = E('div', {});
+		var videoEl = null, videoBox = null, soundBtn = null;
+
+		// Выбор «без звука» запоминается в браузере: кто выключил звук один раз, не хочет его
+		// снова на следующем подборе.
+		function soundPref() { try { return localStorage.getItem('zm-redbtn-mute') !== '1'; } catch (e) { return true; } }
+		function soundSave(on) { try { localStorage.setItem('zm-redbtn-mute', on ? '0' : '1'); } catch (e) {} }
+		function soundLabel() { if (soundBtn && videoEl) soundBtn.textContent = videoEl.muted ? 'Включить звук' : 'Выключить звук'; }
+
+		// Видео создаётся заново на каждый подбор и удаляется после: пока подбора нет, оно не
+		// должно ни качаться, ни играть. Со звуком — если браузер разрешит (подбор начат
+		// нажатием), иначе без звука, и включить его можно в самом плеере.
+		function videoShow(withSound) {
+			if (videoEl) return videoEl;
+			videoEl = E('video', {
+				'class': 'zm-redbtn-video', 'controls': '', 'loop': '', 'playsinline': '',
+				'preload': 'auto', 'poster': WAIT_POSTER
+			}, WAIT_VIDEO.map(function(u) { return E('source', { 'src': u, 'type': 'video/mp4' }); }));
+			videoEl.muted = !(withSound && soundPref());
+			videoEl.addEventListener('volumechange', function() { soundSave(!videoEl.muted); soundLabel(); });
+			soundBtn = E('button', {
+				'class': 'cbi-button',
+				'click': function() { if (videoEl) videoEl.muted = !videoEl.muted; }
+			}, '');
+			videoBox = E('div', { 'class': 'zm-redbtn-player' }, [
+				videoEl, E('div', { 'class': 'zm-actions' }, [ soundBtn ])
+			]);
+			soundLabel();
+			setTimeout(function() {
+				if (!videoEl) return;
+				var p = videoEl.play();
+				if (p && p.catch) p.catch(function() {
+					if (!videoEl) return;
+					videoEl.muted = true;
+					videoEl.play().catch(function() {});
+				});
+			}, 0);
+			return videoEl;
+		}
+
+		function videoHide() {
+			if (!videoEl) return;
+			videoEl.pause();
+			videoEl.removeAttribute('src');
+			while (videoEl.firstChild) videoEl.removeChild(videoEl.firstChild);
+			videoEl.load();
+			if (videoBox && videoBox.parentNode) videoBox.parentNode.removeChild(videoBox);
+			videoEl = videoBox = soundBtn = null;
+		}
 
 		function refresh() {
 			return zm.redbtnStatus().then(function(res) {
@@ -6659,12 +6736,14 @@ return view.extend({
 			});
 		}
 
-		function follow() {
+		function follow(withVideo, withSound) {
 			var ticks = 0;
 			busy = true;
+			if (withVideo) videoShow(withSound);
 			renderMain();
 			zm.pollJob('redbtn', logEl, function(ok) {
 				busy = false;
+				videoHide();
 				zm.toast(ok ? 'Готово' : 'Операция завершилась с ошибкой', ok ? 'info' : 'error');
 				refresh();
 			}, function() {
@@ -6685,7 +6764,7 @@ return view.extend({
 				if (res.error) { zm.toast(res.error, 'error'); return; }
 				zm.toast('Подбор начат', 'warning');
 				data.running = true;
-				follow();
+				follow(true, true);
 			});
 		}
 
@@ -6701,7 +6780,7 @@ return view.extend({
 			if (!confirm('Снять туннель WARP и правила красной кнопки? Стратегия Zapret останется.')) return;
 			zm.redbtnAction('remove', '').then(function(res) {
 				if (res.error) { zm.toast(res.error, 'error'); return; }
-				follow();
+				follow(false);
 			});
 		}
 
@@ -6752,6 +6831,7 @@ return view.extend({
 				E('span', { 'class': 'zm-label' }, 'Последний подбор'),
 				E('span', {}, fmtTime(data.last))
 			]));
+			if (busy && videoBox) mainCard.appendChild(videoBox);
 			mainCard.appendChild(logEl);
 		}
 
@@ -6818,7 +6898,7 @@ return view.extend({
 		wrap.appendChild(svcCard);
 		wrap.appendChild(warpCard);
 
-		if (data.running) follow();
+		if (data.running) follow(data.phase !== 'remove', false);
 		return wrap;
 	}
 });
@@ -10020,6 +10100,9 @@ html.zm-theme-dark .zm-config-editor { border-color: rgba(255,255,255,.14); }
 	font-size: 1.1em; font-weight: 600; padding: .7em 2.2em; border-radius: 999px;
 }
 .zm-redbtn:hover { background: #b71c1c !important; }
+.zm-redbtn-player { margin: 12px 0 0; }
+.zm-redbtn-player video { display: block; width: 100%; max-width: 560px; max-height: 360px; border-radius: 10px; background: #000; }
+.zm-redbtn-player .zm-actions { margin-top: 8px; }
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/style.css'
 
