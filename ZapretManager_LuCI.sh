@@ -1358,6 +1358,8 @@ system_uninstall_panel() {
 	local script="/tmp/zm_uninstall_panel.sh"
 	cat > "$script" << 'ZM_UNINSTALL_EOF'
 sleep 1
+# Уборка автообхода — пока backend.sh на месте (см. redbtn_panel_gone).
+/opt/zapret-manager-luci/backend.sh redbtn_panel_gone >/dev/null 2>&1
 rm -rf /opt/zapret-manager-luci /usr/libexec/rpcd/zapret-manager \
 	/usr/share/luci/menu.d/luci-app-zapret-manager.json \
 	/usr/share/rpcd/acl.d/luci-app-zapret-manager.json \
@@ -6467,11 +6469,14 @@ _rb_zt_check() { # ФАЙЛ_ЦЕЛЕЙ
 	while IFS= read -r e; do
 		[ -n "$e" ] || continue
 		_rb_stopped && break
+		# Открытой цель считается так же, как в _rb_check_one: ответ с кодом, кроме 451 и 000.
+		# Без -f curl завершается успехом на любом коде, и заглушка провайдера «недоступно по
+		# закону» засчитывалась стратегии как открытый сайт — у контроля без zapret тоже.
 		(
-			curl -sL --local-port "$RB_ZT_LO-$RB_ZT_HI" ${RB_PROBE_DOH:+--doh-url "$RB_PROBE_DOH"} \
+			c=$(curl -sL --local-port "$RB_ZT_LO-$RB_ZT_HI" ${RB_PROBE_DOH:+--doh-url "$RB_PROBE_DOH"} \
 				--connect-timeout 4 --max-time 6 --speed-time 3 --speed-limit 1 --range 0-65535 \
-				-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o /dev/null "${e#*|}" >/dev/null 2>&1 &&
-				echo "${e%%|*}" >> "$okf"
+				-A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) curl/8.0" -o /dev/null -w '%{http_code}' "${e#*|}" 2>/dev/null) &&
+				[ -n "$c" ] && [ "$c" != 000 ] && [ "$c" != 451 ] && echo "${e%%|*}" >> "$okf"
 		) &
 		pids="$pids $!"
 		run=$((run + 1))
@@ -6575,6 +6580,27 @@ _rb_zt_one() { # ФАЙЛ_БЛОКА ФАЙЛ_ЦЕЛЕЙ [ПРОВЕРКА]
 	rm -f "$RB_ZT_PID"
 }
 
+# Цели «имя|адрес» без схемы — к https://. Внешний набор (TEST_DOMAINS_JSON, suite.v2.json
+# hyperion-cs) даёт голые имена хостов, и curl ходил к ним по HTTP на 80-й: мерился не TLS, на
+# котором и стоит блокировка по SNI, а открытый HTTP, который провайдер режет иначе или не режет
+# вовсе. Чинится здесь, у нас: _test_prepare_urls общая с тестером менеджера.
+_rb_urls_https() { # ФАЙЛ
+	awk 'BEGIN { FS = OFS = "|" } NF >= 2 && $2 !~ /^[A-Za-z][A-Za-z0-9+.-]*:\/\// { $2 = "https://" $2 "/" } { print }' "$1" > "$1.tmp" &&
+		mv "$1.tmp" "$1"
+}
+
+# Файл исключений zapret — общий с работающим zapret всей сети, и подбор только читает его:
+# стратегии кандидатов ссылаются на него через --hostlist-exclude. _refresh_exclude_file
+# (менеджера) качает версию из репозитория поверх, и при недоступном GitHub файл оставался
+# пустым — вместе с исключениями, которые человек дописал сам. Поэтому качаем, только когда
+# файла нет или он пуст, а если и тогда не скачалось — пустой файл: без него nfqws не стартует.
+_rb_exclude_ensure() {
+	local f=/opt/zapret/ipset/zapret-hosts-user-exclude.txt
+	[ -s "$f" ] && return 0
+	_refresh_exclude_file
+	[ -f "$f" ] || : > "$f"
+}
+
 # Прогон режима менеджера (v | v_flowseal | youtube). Пишет результаты в формате тестера ZM
 # («имя → удачи/всего», первой строкой контроль) и печатает путь к файлу. С файлом целей
 # сервисов («svc:хост|ссылка») у строки есть хвост « · сервисы N»: сколько адресов
@@ -6587,13 +6613,14 @@ _rb_ztest() { # РЕЖИМ [ЦЕЛИ_СЕРВИСОВ]
 	_rb_zt_down
 	_kill_match "qnum=$RB_ZT_QUEUE"
 	_add_gp_domains
-	_refresh_exclude_file
+	_rb_exclude_ensure
 	chmod -R a+rX /opt/zapret/ipset /opt/zapret/files 2>/dev/null
 	echo "   Собираем стратегии" >&2
 	_test_build_candidates "$mode" "$cand"
 	[ -s "$cand" ] || return 1
 	echo "   Собираем адреса для проверки" >&2
 	if [ "$mode" = youtube ]; then _test_yt_urls > "$urls"; else _test_prepare_urls "$urls"; fi
+	_rb_urls_https "$urls"
 	[ -n "$svcf" ] && [ -s "$svcf" ] && cat "$svcf" >> "$urls"
 	total=$(grep -c '^#' "$cand")
 	echo "   Стратегий в подборе: $total" >&2
@@ -6794,6 +6821,19 @@ RB_GEO_PORT=5359
 RB_GEO_RESOLVER="$RB_DIR/geo.resolver"
 RB_GEO_DOMAINS="$RB_DIR/geo-domains.lst"
 RB_GEO_LIST_URLS="https://raw.githubusercontent.com/ImMALWARE/dns.malw.link/refs/heads/master/hosts https://cdn.jsdelivr.net/gh/ImMALWARE/dns.malw.link@master/hosts"
+# СТОРОЖ — своя задача redbtn_geo со своим журналом, а не redbtn. Под именем redbtn он затирал
+# журнал последнего автообхода, которым человек разбирает, что подбор сделал, и страница
+# показывала «идёт автообход», которого человек не запускал. Автообход и кнопка «Подобрать DNS
+# заново» ждут сторожа (_rb_geo_watch_wait), а не убивают: посреди подбора он перезапускает
+# dnsmasq, и оборванный на полпути перезапуск оставил бы сеть без DNS. Сам сторож поверх
+# автообхода не стартует.
+RB_GEO_JOB=redbtn_geo
+# Последний неудачный подбор DNS — в /tmp: после перезагрузки одна лишняя попытка дешевле
+# записи во флеш каждые два часа.
+RB_GEO_FAIL="$RB_RUN/geo.fail"
+# Резолвера нет, потому что последний подбор не нашёл годного: пробовать снова не каждые 30
+# минут, а раз в два часа — дюжина проб и скачивание списка доменов на каждом тике cron.
+RB_GEO_RETRY=7200
 RB_GEO_FALLBACK="chatgpt.com openai.com oaistatic.com oaiusercontent.com sora.com claude.ai anthropic.com claudeusercontent.com gemini.google.com aistudio.google.com generativelanguage.googleapis.com copilot.microsoft.com grok.com x.ai perplexity.ai"
 
 _rb_geo_how() {
@@ -6829,16 +6869,22 @@ _rb_geo_try() { # СТРОКА_doh.conf
 	rm -f "$body"
 }
 
-# Лучший резолвер пула — самый быстрый из тех, чей прокси отвечает. Все проверяются сразу.
+# Лучший резолвер пула — самый быстрый из тех, чей прокси отвечает. Проверяются параллельно, но
+# не больше RB_PARALLEL разом: каждая проба — curl на те же три-четыре мегабайта, а пул уже
+# двенадцать резолверов, и на роутере со 128 МБ дюжина разом — тот же OOM, что у проб сервисов.
+# Ждём только свои пробы, как в _rb_zt_check.
 _rb_geo_pick() {
-	local line out="$RB_RUN/geo.pick"
+	local line out="$RB_RUN/geo.pick" run=0 pids=""
 	: > "$out"
 	while IFS= read -r line; do
 		case "$line" in ''|\#*) continue ;; esac
 		[ "$(echo "$line" | cut -d'|' -f5)" = geo ] || continue
 		( _rb_geo_try "$line" >> "$out" ) &
+		pids="$pids $!"
+		run=$((run + 1))
+		if [ "$run" -ge "$RB_PARALLEL" ]; then wait $pids 2>/dev/null; pids=""; run=0; fi
 	done < "$RB_SHARE/doh.conf"
-	wait
+	[ -n "$pids" ] && wait $pids 2>/dev/null
 	[ -s "$out" ] || return 1
 	sort -n "$out" | awk 'NR == 1 {print $2}'
 }
@@ -6910,8 +6956,8 @@ _rb_geo_enable() {
 # Снять DNS для ИИ-сервисов целиком: служба, файл dnsmasq, сторож, пакет, если его ставили мы.
 _rb_geo_off() {
 	_rb_geo_disable
-	rm -f /etc/init.d/zm-geodns.disabled "$RB_GEO_DOMAINS"
-	sed -i '/redbtn_geo_watch/d' "$CRON_FILE" 2>/dev/null && /etc/init.d/cron restart >/dev/null 2>&1
+	rm -f /etc/init.d/zm-geodns.disabled "$RB_GEO_DOMAINS" "$RB_GEO_FAIL"
+	_rb_geo_watch_off
 	sed -i '/^svc zm-geodns$/d' "$RB_OWNED" 2>/dev/null
 	# Пакет удаляем, только если им не пользуется страница DoH: её служба включена — значит,
 	# человек настроил DoH поверх того, что поставили мы, и пакет теперь его.
@@ -6946,30 +6992,50 @@ _rb_geo_step() {
 	if _rb_geo_enable && _rb_geo_ok; then
 		_rb_result_write geoblock doh
 		echo "[ OK ] $(_rb_svc_field geoblock 2) — через DoH"
+		rm -f "$RB_GEO_FAIL"
 		_rb_geo_watch_on
 	else
 		[ -s "$RB_GEO_RESOLVER" ] && _rb_geo_disable
+		date +%s > "$RB_GEO_FAIL"
 		_rb_result_write geoblock none
 		echo "[FAIL] $(_rb_svc_field geoblock 2) — не открывается"
 	fi
 }
 
-# Кнопка «Подобрать DNS заново» и сторож раз в 30 минут: прокси резолвера может умереть.
-do_redbtn_geo_doh() {
-	_rb_phase geo
-	rm -f "$RB_STOP_FLAG"
-	_rb_geo_enable || { _rb_result_write geoblock none; _rb_phase done; return 1; }
+# Подобрать DNS заново — общее у кнопки «Подобрать DNS заново» и сторожа.
+_rb_geo_redo() {
+	# Не нашлось ни одного годного — прежний резолвер снимается, если и он уже не открывает ИИ-
+	# сервисы (так сторож и зовёт подбор): с умершим прокси домены списка не разрешались бы вовсе.
+	# Рабочий остаётся — кнопку могли нажать и при живом. Дальше сторож пробует раз в RB_GEO_RETRY.
+	if ! _rb_geo_enable; then
+		[ -s "$RB_GEO_RESOLVER" ] && ! _rb_geo_ok && _rb_geo_disable
+		date +%s > "$RB_GEO_FAIL"
+		_rb_result_write geoblock none
+		return 1
+	fi
 	if _rb_geo_ok; then
 		_rb_result_write geoblock doh
+		rm -f "$RB_GEO_FAIL"
 		_rb_geo_watch_on
 		_rb_say "Готово, ИИ-сервисы открываются"
 	else
 		# Резолвер, не открывший ИИ-сервисы, выключаем: иначе через него шли бы все домены
 		# списка, а открывалось раньше что-то из них и без него.
 		_rb_geo_disable
+		date +%s > "$RB_GEO_FAIL"
 		_rb_result_write geoblock none
 		echo "!! ИИ-сервисы не открываются"
+		return 1
 	fi
+}
+
+# Кнопка «Подобрать DNS заново» — задачей автообхода: человек нажал её на странице и смотрит
+# её журнал там же. Сторож идёт своей задачей, см. redbtn_geo_watch.
+do_redbtn_geo_doh() {
+	_rb_phase geo
+	rm -f "$RB_STOP_FLAG"
+	_rb_geo_watch_wait
+	_rb_geo_redo
 	_rb_phase done
 }
 
@@ -6979,13 +7045,69 @@ _rb_geo_watch_on() {
 	/etc/init.d/cron restart >/dev/null 2>&1
 }
 
+_rb_geo_watch_off() {
+	grep -q redbtn_geo_watch "$CRON_FILE" 2>/dev/null || return 0
+	sed -i '/redbtn_geo_watch/d' "$CRON_FILE" 2>/dev/null && /etc/init.d/cron restart >/dev/null 2>&1
+}
+
+_rb_geo_watch_wait() { # дождаться сторожа, если он сейчас подбирает (до пяти минут)
+	local w=0
+	_job_alive "$RB_GEO_JOB" || return 0
+	_rb_say "Ждём, пока закончится подбор DNS для ИИ-сервисов"
+	while [ "$w" -lt 300 ] && _job_alive "$RB_GEO_JOB"; do sleep 1; w=$((w + 1)); done
+}
+
+# DNS для ИИ-сервисов выключил человек, а не наша неудача. Кнопка «Выключить» убирает и
+# строку cron (_rb_geo_off), так что сюда доходят другие пути: пакет https-dns-proxy удалён,
+# или резолвер на месте, а службу zm-geodns выключили в «Автозапуске» (сами мы её выключаем
+# только вместе с удалением резолвера, см. _rb_geo_disable).
+_rb_geo_user_off() {
+	[ -x /usr/sbin/https-dns-proxy ] || return 0
+	[ -s "$RB_GEO_RESOLVER" ] && ! /etc/init.d/zm-geodns enabled 2>/dev/null && return 0
+	return 1
+}
+
+# Раз в 30 минут из cron. Строка cron появляется, когда DNS для ИИ-сервисов однажды подобрался,
+# и остаётся, пока его не выключили: и когда прокси резолвера умер, и когда подбор заново не
+# нашёл годного и резолвер снят. Во втором случае прежний сторож молчал до конца — ему нечего
+# было проверять, — теперь пробует снова раз в RB_GEO_RETRY.
 redbtn_geo_watch() {
-	[ -s "$RB_GEO_RESOLVER" ] || return 0
+	if _rb_geo_user_off; then
+		logger -t zm-redbtn "DNS для ИИ-сервисов выключен — сторож снимается"
+		_rb_geo_watch_off
+		return 0
+	fi
 	_rb_running && return 0
-	_rb_geo_ok && return 0
-	logger -t zm-redbtn "ИИ-сервисы перестали открываться — подбираю DNS заново"
-	# Задачей, как с кнопки: страница видит, что идёт подбор, и второй не запустит.
-	job_start redbtn do_redbtn_geo_doh >/dev/null 2>&1
+	_job_alive "$RB_GEO_JOB" && return 0
+	_rb_geo_ok && { rm -f "$RB_GEO_FAIL"; return 0; }
+	if [ ! -s "$RB_GEO_RESOLVER" ] && [ -s "$RB_GEO_FAIL" ] &&
+		[ $(( $(date +%s) - $(cat "$RB_GEO_FAIL") )) -lt "$RB_GEO_RETRY" ] 2>/dev/null; then
+		return 0
+	fi
+	logger -t zm-redbtn "ИИ-сервисы не открываются — подбираю DNS заново"
+	job_start "$RB_GEO_JOB" _rb_geo_redo >/dev/null 2>&1
+}
+
+# Удаление панели (system_uninstall_panel зовёт до того, как сотрёт backend.sh). Steer, его
+# туннели и мост Telegram переживают удаление — их службы и строка cron самодостаточны (см.
+# ST_CRON_CMD), и список туннелей моста /etc/stgws/warp.lst остаётся верным, пока живут они.
+# DNS для ИИ-сервисов — нет: без сторожа умерший прокси резолвера так и остался бы в dnsmasq, и
+# домены списка перестали бы разрешаться вовсе, а строка cron каждые 30 минут звала бы
+# несуществующий backend.sh. Поэтому он снимается целиком, со службой.
+redbtn_panel_gone() {
+	local f r=0
+	_rb_geo_watch_wait
+	_rb_geo_off
+	rm -f /etc/init.d/zm-geodns /etc/rc.d/*zm-geodns
+	# Файл dnsmasq снимает stop службы; этот проход — на случай, если служба не отработала.
+	for f in /tmp/dnsmasq.d/zm-geo.conf /tmp/dnsmasq.cfg*.d/zm-geo.conf; do
+		[ -f "$f" ] && { rm -f "$f"; r=1; }
+	done
+	[ "$r" = 1 ] && /etc/init.d/dnsmasq restart >/dev/null 2>&1
+	# «pkg tgws» писали прежние версии, и никто его не читал; оставшись, он держал бы непустым
+	# owned, по которому удаление панели оставляет /usr/share/zm-redbtn.
+	sed -i '/^pkg tgws$/d' "$RB_OWNED" 2>/dev/null
+	[ -s "$RB_OWNED" ] || rm -f "$RB_OWNED"
 }
 
 # ── основной проход ──
@@ -7005,6 +7127,11 @@ do_redbtn_run() {
 	esac
 	_rb_test_running && { echo "ОШИБКА: идёт тест стратегий — дождитесь его окончания"; return 1; }
 	_job_alive steer && { echo "ОШИБКА: на странице Steer идёт операция — дождитесь её окончания"; return 1; }
+	# Сторож DNS для ИИ-сервисов мог начать подбор за минуту до кнопки: два подбора разом
+	# писали бы один geo.resolver и дважды перезапускали dnsmasq. Фаза — сразу первая: по
+	# оставшейся от кнопки «geo» страница приняла бы ожидание за «Подобрать DNS заново».
+	_rb_phase zapret_install
+	_rb_geo_watch_wait
 	: > "$RB_RESULTS"
 	# Нажатая кнопка — согласие на всё, что подбор умеет. Выключенное руками (Steer целиком или
 	# сервис, снятый на его странице) снова участвует: иначе подбор честно находил бы, что
@@ -7125,13 +7252,10 @@ do_redbtn_run() {
 		warp_done=1
 		if _st_warp_up; then
 			for id in $failed; do
+				# Снятых на странице Steer (ST_SKIP) здесь не бывает: подбор забывает их в начале
+				# прохода, а сменить выбор, пока он идёт, страница не даёт.
 				if ! _rb_routable "$id"; then
 					_rb_result_write "$id" none
-				elif _rb_in "$id" "$ST_SKIP"; then
-					echo "[ -- ] $(_rb_svc_field "$id" 2) — через WARP не пускаем: вы убрали его на странице Steer"
-					# Не «none»: это выбор человека, а не отказ, и точка раздела в меню не должна
-					# краснеть из-за него.
-					_rb_result_write "$id" off
 				elif _rb_check_service "$id" warp; then
 					echo "[ OK ] $(_rb_svc_field "$id" 2) — через WARP"
 					_st_sel_add "$id"
@@ -7183,7 +7307,6 @@ do_redbtn_run() {
 		echo "[ OK ] Telegram — открывается"
 	else
 		if do_tgws_install; then
-			_rb_own "pkg tgws"
 			_rb_rpcd_ensure
 			_rb_result_write telegram tgws
 			echo "[ OK ] Telegram — через веб-сокет"
@@ -7304,6 +7427,9 @@ redbtn_action() {
 			;;
 		geo_off)
 			_rb_running && { echo '{"error":"дождитесь окончания подбора"}'; return 1; }
+			# Сторож посреди подбора включил бы то, что сейчас выключают, а ждать его здесь
+			# нельзя — это синхронный вызов страницы.
+			_job_alive "$RB_GEO_JOB" && { echo '{"error":"идёт подбор DNS для ИИ-сервисов — повторите через минуту"}'; return 1; }
 			_rb_geo_off
 			printf '{"ok":true}\n'
 			;;
@@ -7388,6 +7514,7 @@ case "$cmd" in
 	redbtn_status)                        redbtn_status ;;
 	redbtn_action)                        redbtn_action "$1" "$2" ;;
 	redbtn_geo_watch)                     redbtn_geo_watch ;;
+	redbtn_panel_gone)                    redbtn_panel_gone ;;
 	steer_status)                         steer_status ;;
 	steer_action)                         steer_action "$1" "$2" ;;
 	bytetube_action)                      bytetube_action "$1" ;;
@@ -8380,8 +8507,7 @@ var STATES = {
 	tgws:   { text: 'через веб-сокет', cls: 'zm-ok' },
 	doh:    { text: 'через DoH', cls: 'zm-ok' },
 	hosts:  { text: 'через hosts', cls: 'zm-ok' },
-	none:   { text: 'не открывается', cls: 'zm-bad' },
-	off:    { text: 'выключен в Steer', cls: 'zm-off' }
+	none:   { text: 'не открывается', cls: 'zm-bad' }
 };
 
 // Шаги подбора в том порядке, в каком их проходит роутер.
@@ -9599,473 +9725,9 @@ uploads.github.com
 user-images.githubusercontent.com
 www.github.com
 ZM_INSTALLER_EOF
-cat > '/usr/share/zm-redbtn/lists/geoblock.lst' << 'ZM_INSTALLER_EOF'
-4pda.to
-4pda.ws
-a-vrv.akamaized.net
-abercrombie.com
-adidas.com
-adobe.com
-adobe.io
-adobe.net
-affinity.studio
-ai-chat.bsg.brave.com
-ai.com
-aircanada.com
-akc.org
-all3dp.com
-alphacoders.com
-alza.hu
-amazfitwatchfaces.com
-amplitude.com
-analog.com
-andrevi.ch
-ansys.com
-anthropic.com
-anthropic.qualtrics.com
-api.jetbrains.ai
-api.themoviedb.org
-arc.net
-arduino.cc
-assets.heroku.com
-atlassian.com
-att.com
-augmentcode.com
-autodesk.com
-backend-v2.crixet.com
-bell-sw.com
-bestbuy.com
-bitdefender.com
-bitnami.com
-blinkshot.io
-bosch.com
-boschaftermarket.com
-boschautoparts.com
-brawlstarsgame.com
-broadcom.com
-broncosportforum.com
-btod.com
-buanzo.org
-buf.build
-builds.parsec.app
-buymeacoffee.com
-canva.com
-canva.dev
-capacitorjs.com
-carrefouruae.com
-cats.com
-cdn.web-platform.io
-cdromance.org
-cdw.com
-chainreactioncycles.com
-chaos.com
-chat.com
-chat.openai.com.cdn.cloudflare.net
-chatgpt.com
-cisco.com
-cisecurity.org
-citrix.com
-clamav.net
-clashofclans.com
-clashroyaleapp.com
-claude.ai
-claude.com
-clevelandclinic.org
-clickup.com
-clip.opus.pro
-code.gist.build
-codeium.com
-coingate.com
-community.sophos.com
-connect.ngrok-agent.com
-contabo.com
-copilot.microsoft.com
-corsair.com
-cpu-monkey.com
-credly.com
-crunchyroll.com
-cursor-cdn.com
-cursor.sh
-cursorapi.com
-cvedetails.com
-daemon-tools.cc
-dashboard.algolia.com
-dashboard.gitguardian.com
-data-cdn.mbamupdates.com
-data.cline.bot
-deepl.com
-deezer.com
-dell.com
-dellcdn.com
-designer.microsoft.com
-developer.nvidia.com
-devexpress.com
-diabrowser.com
-digitalcontent.sky
-disctech.com
-disneyplus.com
-docs.liquibase.com
-document360.com
-document360.io
-download3.omnissa.com
-downloads.intercomcdn.com
-ducati.com
-dyson.com
-easydmarc.com
-editorx.com
-elevenlabs.io
-eneba.com
-etsy.com
-exchanger.bits.media
-expandrive.com
-extremetech.com
-f1.com
-fast.com
-filebin.net
-files.manus.cdn
-fivetran.com
-flir.com
-flir.eu
-flourish.studio
-fluke.com
-flukenetworks.com
-flyertalk.com
-footballapi.pulselive.com
-force-user-content.com
-force.com
-formula1.com
-forum.netgate.com
-framer.app
-framer.com
-framercanvas.com
-framercdn.com
-framerstatic.com
-framerusercontent.com
-freeimages.com
-fxnetworks.com
-g2a.com
-gamestop.com
-gaming.amazon.com
-geforcenow.com
-genspark.ai
-geolocation.onetrust.com
-getoutline.com
-gfn.am
-ghostrc.game.idtech.services
-global.fncstatic.com
-glpals.com
-gofund.me
-gofundme.com
-gonift.com
-gpsonextra.net
-gpu-monkey.com
-gql.twitch.tv
-grafana.com
-graylog.org
-grizzlysms.com
-grok.com
-grok.x.com
-groq.com
-groupon.com
-guilded.gg
-habr.com
-hashicorp.com
-haydaygame.com
-hbomax.com
-hc-ping.com
-hchk.io
-healthline.com
-herokucdn.com
-hollisterco.com
-home-connect.com
-home.by.me
-hostinger.com
-hotels.com
-housebrand.com
-htmhell.dev
-httptoolkit.com
-hume.ai
-hybrid-analysis.com
-ibm.com
-iedb.org
-iherb.com
-ikea.com
-image.tmdb.org
-imgur.com
-indeed.com
-install.launcher.omniverse.nvidia.com
-intel.com
-intel.de
-intel.nl
-intelix.sophos.com
-intercom.io
-intuit.com
-intuitibits.com
-itninja.com
-jamf.com
-jetbrains.com
-jetbrains.space
-jetbrains.team
-joesandbox.com
-kaleido.ai
-keysight.com
-kinogo.la
-klarna.com
-kmail-lists.com
-lambdalabs.com
-langdock.com
-last.fm
-ldoceonline.com
-legalshield.com
-lgeapi.com
-lgthinq.com
-lidarr.audio
-lifehacker.com
-lightning.ai
-lookerstudio.google.com
-lyst.com
-mailerlite.com
-mailinator.com
-manus.im
-manybooks.net
-marvelsnap.com
-mattermost.com
-max.com
-medicalnewstoday.com
-meetup.com
-metopera.org
-middlewareinventory.com
-mintmobile.com
-miracleptr.wordpress.com
-mixcloud.com
-mongodb.com
-monoprice.com
-mouser.com
-mouser.fi
-mssg.me
-multisim.com
-myheritage.com
-myjetbrains.com
-myparallels.com
-myqrcode.com
-nba.com
-neo4j.com
-netacad.com
-netapp.com
-netflix.ca
-netflix.com
-netflix.net
-netflixinvestor.com
-netflixtechblog.com
-netlify.com
-new.abb.com
-newark.com
-news.google.com
-newsroom.porsche.com
-nfl.com
-nflxext.com
-nflximg.com
-nflximg.net
-nflxsearch.net
-nflxso.net
-nflxvideo.net
-ngrok.com
-ni.com
-nike.com
-nitropdf.com
-nordaccount.com
-nordcdn.com
-nordvpn.com
-notion-emojis.s3-us-west-2.amazonaws.com
-notion-static.com
-notion.com
-notion.new
-notion.site
-notion.so
-ntp.msn.com
-nxp.com
-oaistatic.com
-oaiusercontent.com
-ocstore.com
-octopus.do
-omnissa.com
-onfastspring.com
-onshape.com
-openai.com
-openh264.org
-openrouter.ai
-oracle.com
-oraclecloud.com
-paddle.com
-paddlestatus.com
-pandasecurity.com
-parallels.cn
-parallels.com
-parallels.net
-parallelsaccess.com
-paritydeals.com
-patreon.com
-patreonusercontent.com
-paywithmoon.com
-pcgamesn.com
-pcmag.com
-penguin.com
-penguinrandomhouse.com
-pexels.com
-philiascans.org
-pingdom.com
-pkgs.tailscale.com
-platform.activestate.com
-plugshare.com
-posthog.com
-premierleague.com
-primark.com
-primevideo.com
-proactivebackend-pa.googleapis.com
-production-openaicom-storage.azureedge.net
-profitwell.com
-prowlarr.com
-public.parsec.app
-qobuz.com
-qodana.cloud
-qoder.com
-qt.io
-qualcomm.com
-quicknode.com
-qwant.com
-reactflow.dev
-recraft.ai
-redis.io
-redislabs.com
-remna.st
-remove.bg
-research.net
-reve.art
-salesforce-experience.com
-salesforce-hub.com
-salesforce-scrt.com
-salesforce-setup.com
-salesforce-sites.com
-salesforce.com
-salesforceiq.com
-salesforceliveagent.com
-schneider-electric.com
-sdxcentral.com
-se.com
-seconddinnertech.com
-semrush.com
-sentry.dev
-sentry.io
-sephora.com
-servarr.com
-sfdcopens.com
-sharefile.com
-sharefile.io
-shinyhardware.co.uk
-shop.gameloft.com
-sigsauer.com
-singlekey-id.com
-site.com
-siteground.com
-sketchup.com
-sky.com
-skycdp.com
-smartbear.co
-smartbear.com
-smartdeploy.com
-snapgametech.com
-snapgene.com
-snort.org
-snyk.io
-solarwinds.com
-sonara.ai
-sora.com
-spacelift.io
-spiceworks.com
-spitfireaudio.com
-spotify.com
-squadbustersgame.com
-squareup.com
-strava.com
-streamable.com
-suggestqueries.google.com
-supercell.com
-support.anydesk.com
-support.xerox.com
-surveymonkey.com
-swagger.io
-swapd.co
-synoforum.com
-syslog-ng.com
-tableau.com
-talosintelligence.com
-teamviewer.com
-techbargains.com
-telemetr.io
-tempmail.plus
-terraform.io
-theaudiodb.com
-themoviedb.org
-ti.com
-tidal.com
-timberland.de
-tmdb-image-prod.b-cdn.net
-tmdb.com
-tmdb.org
-toolbox.app
-torrenteditor.com
-trae.ai
-trailblazer.me
-trailhead.com
-transferwise.com
-tria.ge
-truthsocial.com
-tsmc.com
-tutanota.com
-typing.com
-uaudio.com
-uizard.io
-unscreen.com
-upwork.com
-usher.ttvnw.net
-v.vrv.co
-vagrantcloud.com
-veeam.com
-verificationacademy.com
-vmware.com
-vod-fy.crunchyrollcdn.com
-volkswagen-classic-parts.com
-vyos.io
-w.atwiki.jp
-walmart.com
-watchguard.com
-watermarkremover.io
-wbagora.com
-wbgames.com
-wdfiles.com
-weather.com
-webnames.ca
-weebly.com
-wetransfer.com
-widgetapp.stream
-wikidot.com
-windsurf.com
-wise.com
-wpengine.com
-wunderground.com
-www3.corsair.com
-x-minus.pro
-x.ai
-xiaomi.eu
-xrite.com
-xsts.auth.xboxlive.com
-xtracloud.net
-yeggi.com
-youtrack.cloud
-zapier.com
-zedge.net
-zerossl.com
-ZM_INSTALLER_EOF
+# Списка geoblock.lst больше нет: у ИИ-сервисов нет списков туннеля (поля 3 и 4 в services.conf
+# пусты), геоблок снимает DNS (zm-geodns), и файл, который ставили прежние версии, никто не читал.
+rm -f '/usr/share/zm-redbtn/lists/geoblock.lst'
 cat > '/usr/share/zm-redbtn/lists/discord.lst' << 'ZM_INSTALLER_EOF'
 138.128.137.32/28
 138.128.140.240/28
