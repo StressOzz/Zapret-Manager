@@ -1605,7 +1605,7 @@ nfqws_opt_set() {
 
 
 TG_MTPROTO_VER="0.10"
-TGWS_VERSION="0.3.0"
+TGWS_VERSION="0.3.1"
 TGWS_BASE_URL="https://gitlab.com/xyzmean/brb/-/raw/main/dist"
 TGWS_VERSION_URL="https://gitlab.com/xyzmean/brb/-/raw/main/VERSION"
 TG_GO_VER="1.4.1"
@@ -4833,7 +4833,7 @@ ST_STOP_FLAG="$ST_RUN/stop"
 ST_PHASE_FILE="$ST_RUN/phase"
 ST_WARP_IF="zmwarp"
 ST_WARP_ZONE="zmwarp"
-ST_STEER_VER="1.5.7"
+ST_STEER_VER="1.5.8"
 ST_STEER_SPEC="/etc/steer/spec.json"
 ST_STEER_URLS="https://github.com/xyzmean/steer/releases/download/v@VER@ https://gitlab.com/xyzmean/steer/-/raw/dist https://raw.githubusercontent.com/xyzmean/steer/dist"
 ST_AWG_MIRRORS="${GH_MAIN}/Slava-Shchipunov/awg-openwrt/releases/download ${GH_MAIN}/2Grey/awg-openwrt/releases/download"
@@ -4930,12 +4930,29 @@ _rb_fetch_pkg() { # URL ФАЙЛ
 
 _st_steer_ver() { steer --version 2>/dev/null | head -n1 | awk '{print $2}'; }
 
+# 0, если версия A старше B (числа через точку). В busybox нет sort -V.
+_st_ver_lt() { # A B
+	awk -v a="$1" -v b="$2" 'BEGIN { n = split(a, x, "."); m = split(b, y, "."); k = n > m ? n : m
+		for (i = 1; i <= k; i++) { if (x[i] + 0 < y[i] + 0) exit 0; if (x[i] + 0 > y[i] + 0) exit 1 }
+		exit 1 }'
+}
+
 _st_install_steer() {
 	if command -v steer >/dev/null 2>&1; then
-		_rb_say "Движок Steer уже установлен: $(_st_steer_ver)"
-		return 0
+		# Движок, который поставили мы, обновляется до нашей версии: иначе у всех, кому Steer
+		# поставился раньше, новый выпуск не приезжал бы никогда. Чужой (splify2 и т.п.) — не
+		# трогаем: версией движка управляет тот, кто его поставил.
+		if _st_owns "pkg steer" && _st_ver_lt "$(_st_steer_ver)" "$ST_STEER_VER"; then
+			_rb_say "Движок Steer $(_st_steer_ver) — обновляем до $ST_STEER_VER"
+		else
+			_rb_say "Движок Steer уже установлен: $(_st_steer_ver)"
+			return 0
+		fi
 	fi
-	local arch tmp base url ver
+	local arch tmp base url ver was_on=""
+	# Обновление не должно гасить работающий Steer: после установки пакета движок ниже
+	# выключается (это нужно новой установке), а при обновлении прежнее состояние возвращается.
+	command -v steer >/dev/null 2>&1 && /etc/init.d/steer enabled 2>/dev/null && was_on=1
 	arch="$(_rb_arch)"
 	[ -n "$arch" ] || { echo "ОШИБКА: не удалось определить архитектуру роутера"; return 1; }
 	tmp="$ST_RUN/steer.$RAZ"
@@ -4956,8 +4973,13 @@ _st_install_steer() {
 			_st_own "pkg steer"
 			# Пакет включает движок сразу, а движок и с пустой спекой заворачивает DNS сети на
 			# свой резолвер. Включается он только вместе с правилами (_st_spec_apply).
-			/etc/init.d/steer stop >/dev/null 2>&1
-			/etc/init.d/steer disable >/dev/null 2>&1
+			if [ -n "$was_on" ]; then
+				/etc/init.d/steer enable >/dev/null 2>&1
+				/etc/init.d/steer restart >/dev/null 2>&1
+			else
+				/etc/init.d/steer stop >/dev/null 2>&1
+				/etc/init.d/steer disable >/dev/null 2>&1
+			fi
 			_rb_rpcd_ensure
 			_rb_say "Движок Steer $ver установлен"
 			return 0
@@ -7137,6 +7159,8 @@ do_redbtn_run() {
 	# сервис, снятый на его странице) снова участвует: иначе подбор честно находил бы, что
 	# сервис открывается через WARP, и не включал бы его.
 	if _st_installed; then
+		# Движок, поставленный нами, — до нашей версии (см. _st_install_steer).
+		_st_owns "pkg steer" && _st_ver_lt "$(_st_steer_ver)" "$ST_STEER_VER" && _st_install_steer
 		[ -f "$ST_OFF" ] && { rm -f "$ST_OFF"; _rb_say "Steer был выключен — включаем"; }
 		[ -s "$ST_SKIP" ] && { rm -f "$ST_SKIP"; _rb_say "Сервисы, снятые на странице Steer, снова участвуют в подборе"; }
 	fi
