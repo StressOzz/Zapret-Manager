@@ -1048,7 +1048,7 @@ print_results_colored() { awk -v G="$(printf "$GREEN")" -v Y="$(printf "$YELLOW"
 function parse(l,  r, a) { if (index(l, "→") == 0) return 0; r = l; sub(/^.*→[[:space:]]*/, "", r); if (split(r, a, "/") < 2) return 0; pok = a[1] + 0; ptot = a[2] + 0; return 1 }
 { if (!parse($0)) next; if ($0 ~ /^Контрольный тест/) { if (!hc) { hc = 1; ctrl = pok; cl = $0 } next } n++; txt[n] = $0; ok[n] = pok; tot[n] = ptot }
 END { for (i = 2; i <= n; i++) { t = txt[i]; o = ok[i]; s = tot[i]; j = i - 1; while (j >= 1 && ok[j] < o) { txt[j+1] = txt[j]; ok[j+1] = ok[j]; tot[j+1] = tot[j]; j-- } txt[j+1] = t; ok[j+1] = o; tot[j+1] = s }
-if (hc) printf "%s%s%s\n", C, cl, N; for (i = 1; i <= n; i++) { if (tot[i] > 0 && ok[i] == tot[i]) c = G; else if (ok[i] > ctrl) c = Y; else c = R; printf "%s%s%s\n", c, txt[i], N } }' "$1"; }
+for (i = 1; i <= n; i++) { if (hc && ok[i] <= ctrl) { printf "%s%s%s\n", C, cl, N; hc = 0 } if (tot[i] > 0 && ok[i] == tot[i]) c = G; else if (ok[i] > ctrl) c = Y; else c = R; printf "%s%s%s\n", c, txt[i], N } if (hc) printf "%s%s%s\n", C, cl, N }' "$1"; }
 show_domain_results(){ clear; echo -e "${MAGENTA}Результат тестирования по домену${NC}\n"; FILE="$RES_DOMAIN"; [ ! -s "$FILE" ] && { echo -e "${RED}Результат не найден!${NC}\n"; PAUSE; return; }
 DOM_CTRL_OK=0; while IFS= read -r line; do if echo "$line" | grep -q "^Контрольный тест"; then LEFT=$(echo "$line" | cut -d'→' -f1); RIGHT=$(echo "$line" | cut -d'→' -f2); RIGHT_CLEAN=$(echo "$RIGHT" | tr -cd '0-9/')
 OK=$(echo "$RIGHT_CLEAN" | cut -d'/' -f1); TOTAL=$(echo "$RIGHT_CLEAN" | cut -d'/' -f2); [ -z "$OK" ] && OK=0; [ -z "$TOTAL" ] && TOTAL=0; DOM_CTRL_OK=$OK; if [ "$OK" -eq "$TOTAL" ] && [ "$TOTAL" -ne 0 ]; then COLOR="$GREEN"
