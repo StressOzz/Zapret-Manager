@@ -122,7 +122,7 @@
 ```
 sh <(wget -qO - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/ZapretManager_LuCI.sh)
 ```
-или - запустите основной скрипт → Системное меню → Установить **Zapret Manager для LuCI**
+или - запустите основной скрипт → Установить **Zapret Manager для WEB + LuCI**
 
 После установки, скрипт будет доступен в браузере по ссылке **http://192.168.1.1:7788/** (192.168.1.1 это IP вашего роутера)
 
