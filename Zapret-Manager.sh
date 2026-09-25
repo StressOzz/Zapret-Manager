@@ -2,7 +2,7 @@
 # =========================================
 # Zapret Manager by StressOzz
 # =========================================
-ZAPRET_MANAGER_VERSION="9.87"; STR_VERSION_AUTOINSTALL="v7"
+ZAPRET_MANAGER_VERSION="9.90"; STR_VERSION_AUTOINSTALL="v7"
 GREEN="\033[1;32m"; RED="\033[1;31m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
 GH_RAW_HOST="https://raw.githubusercontent.com"; GH_MAIN_HOST="https://github.com"
@@ -58,6 +58,11 @@ FINAL_STR="$TMP_SF/StrFINAL.txt"; NEW_STR="$TMP_SF/StrNEW.txt"; OLD_STR="$TMP_SF
 ARCH_FULL="$(cat /etc/openwrt_release | grep DISTRIB_ARCH | cut -d"'" -f2)"; MODEL="$(cat /tmp/sysinfo/model 2>/dev/null)"
 RES1="/opt/zapret/tmp/results_flowseal.txt"; RES2="/opt/zapret/tmp/results_versions.txt"; RES3="/opt/zapret/tmp/results_all.txt"
 LUCI_EDITION="/usr/libexec/rpcd/zapret-manager"
+ZM_LUCI_URL="${GH_RAW}/StressOzz/Zapret-Manager/main/ZapretManager_LuCI.sh"; ZM_LUCI_CACHE="/tmp/zm_luci_latest"; ZM_YV_OFF="/opt/zapret-manager-luci/yv_off"; ZM_DV_OFF="/opt/zapret-manager-luci/dv_off"
+zm_luci_inst_ver() { sed -n 's/^ZM_VERSION="\([^"]*\)".*/\1/p' /opt/zapret-manager-luci/backend.sh 2>/dev/null | head -n1; }
+zm_luci_last_ver() { if [ ! -e "$ZM_LUCI_CACHE" ] || [ -n "$(find "$ZM_LUCI_CACHE" -mmin +30 2>/dev/null)" ]; then { curl -fsSL --connect-timeout 3 --max-time 6 -r 0-400 "$ZM_LUCI_URL" 2>/dev/null || wget -q -T 6 -O - "$ZM_LUCI_URL" 2>/dev/null; } | sed -n 's/^# Version:[[:space:]]*//p' | head -n1 | tr -d '\r ' > "$ZM_LUCI_CACHE"; fi; cat "$ZM_LUCI_CACHE" 2>/dev/null; }
+zm_ver_gt() { awk -v a="$1" -v b="$2" 'BEGIN { n = split(a, x, "."); m = split(b, y, "."); k = (n > m ? n : m); for (i = 1; i <= k; i++) { if (x[i] + 0 > y[i] + 0) exit 0; if (x[i] + 0 < y[i] + 0) exit 1 } exit 1 }'; }
+zm_luci_state() { ZML_INST=""; ZML_LAST=""; ZML_ACT="install"; [ -e "$LUCI_EDITION" ] || return 0; ZML_INST=$(zm_luci_inst_ver); ZML_LAST=$(zm_luci_last_ver); if [ -n "$ZML_LAST" ] && zm_ver_gt "$ZML_LAST" "${ZML_INST:-0}"; then ZML_ACT="update"; else ZML_ACT="remove"; fi; }
 RES_CUSTOM="/opt/zapret/tmp/results_custom.txt"; CUSTOM_STR_FILE="/root/custom_test.txt"; CUSTOM_RESULTS="$RES_CUSTOM"; CUSTOM_BACK="$TMP_SF/zapret_custom_backup.conf"
 RES_DOMAIN="/opt/zapret/tmp/results_domain.txt"; RES_YOUTUBE="/opt/zapret/tmp/results_youtube.txt"; Fin_IP_Dis="104\.25\.158\.178 finland[0-9]\{5\}\.discord\.media"; PARALLEL=8
 EXCLUDE_FILE="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"; fileDoH="/etc/config/https-dns-proxy"; EXPERT_MODE_FILE="/etc/zapret_manager_expert_mode"
@@ -263,7 +268,6 @@ get_ver "https://github.com/spatiumstas/tg-ws-proxy-go/releases/latest" "$TMP_VE
 get_ver "https://github.com/DPITrickster/ByeDPI-OpenWrt/releases/latest" "$TMP_VER_BYEDPI" "ByeDPI" &
 get_ver "https://github.com/yandexru45/netshift/releases/latest" "$TMP_VER_POD" "NetShift" &
 get_ver "https://github.com/remittor/zapret-openwrt/releases/latest" "$TMP_VER" "Zapret" &
-get_ver "https://github.com/xyzmean/splify/releases/latest" "$TMP_VER_SPL" "splify" &
 get_ver "https://github.com/d0mhate/-tg-ws-proxy-Manager-go/releases/latest" "$TMP_VER_TG_GO" "TG-WS Proxy SOCKS5" &
 get_ver "https://github.com/valnesfjord/tg-ws-proxy-rs/releases/latest" "$TMP_VER_TG_RS" "TG-WS Proxy Rust" &
 get_zapret2_ver &
@@ -275,7 +279,6 @@ wait
 [ -s "$TMP_VER" ] && ZAPRET_VERSION="$(cat "$TMP_VER")"
 [ -s "$TMP_VER_POD" ] && PODKOP_LATEST_VER="$(cat "$TMP_VER_POD")"
 [ -s "$TMP_VER_TG_MT" ] && TG_MTProto="$(cat "$TMP_VER_TG_MT")"
-[ -s "$TMP_VER_SPL" ] && SPL_VER="$(cat "$TMP_VER_SPL")"
 [ -s "$TMP_VER_TG_GO" ] && TG_GO_VERSION="$(cat "$TMP_VER_TG_GO")"
 [ -s "$TMP_VER_TG_RS" ] && TG_RS_VERSION="$(cat "$TMP_VER_TG_RS")"
 [ -s "$TMP_VER_TGWS" ] && TGWS_VERSION="$(tr -d '[:space:]' < "$TMP_VER_TGWS")"
@@ -398,17 +401,10 @@ else run_auto_best_background; fi; elif [ -n "$OPT_RESULTS" ] && [ "$choiceAB" =
 clear; cat "$AUTO_LOG"; echo; PAUSE; elif [ "$choiceAB" = "$OPT_TZ" ]; then TIME_MENU; elif [ "$choiceAB" = "$OPT_MODE" ]; then set_auto_best_mode; elif [ -n "$OPT_CLEAR" ] && [ "$choiceAB" = "$OPT_CLEAR" ]; then
 echo -e "\n${GREEN}Результаты теста и лог удалены!${NC}\n"; rm -rf "$AUTO_RESULTS" "$AUTO_BACK" "$AUTO_LOG" "$AUTO_LOCK"; PAUSE; else return; fi; done; }
 # ==========================================
-# splify
+# WARP / splify (удаление)
 # ==========================================
 # ──────────────────────────── 1. environment checks ────────────────────────
 ZAVISIM() { local NEED=""; command -v jq >/dev/null 2>&1 || NEED="$NEED jq"; command -v wg >/dev/null 2>&1 || NEED="$NEED wireguard-tools"; [ -z "$NEED" ] && return 0; echo -e "\n${MAGENTA}Ставим зависимости для генерации${NC}"; update_packages || return 1; echo -e "${CYAN}Ставим зависимости${NC}"; $INSTALL $NEED >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка при установке!${NC}\n"; PAUSE; return 1; }; }
-# ──────────────────────────── 2. install splify packages ───────────────────
-install_splify() { SPL_SPL="${GH_MAIN}/xyzmean/splify/releases/download/v$SPL_VER/splify-$SPL_VER-1_$SPL_SUF.$RAZ"; SPL_LUCI="${GH_MAIN}/xyzmean/splify/releases/download/v$SPL_VER/luci-app-splify-$SPL_VER-1_$SPL_SUF.$RAZ"
-SPL_RUS="${GH_MAIN}/xyzmean/splify/releases/download/v$SPL_VER/luci-i18n-splify-ru-$SPL_VER-1_$SPL_SUF.$RAZ"; echo -e "${CYAN}Скачиваем ${NC}splify"; wget -q -U "Mozilla/5.0" -O "$TMP_SF/splify.$RAZ" "$SPL_SPL" || { echo -e "\n${RED}Не удалось скачать:\n${NC}$SPL_SPL\n"; PAUSE; return 1; }
-wget -q -U "Mozilla/5.0" -O "$TMP_SF/luci-app-splify.$RAZ" "$SPL_LUCI" || { echo -e "\n${RED}Не удалось скачать:\n${NC}$SPL_LUCI\n"; PAUSE; return 1; }; wget -q -U "Mozilla/5.0" -O "$TMP_SF/luci-i18n-splify-ru.$RAZ" "$SPL_RUS" || { echo -e "\n${RED}Не удалось скачать:\n${NC}$SPL_RUS\n"; PAUSE; return 1; }
-update_packages || return 1; echo -e "${CYAN}Устанавливаем ${NC}splify"; $INSTALL "$TMP_SF/splify.$RAZ" >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось установить:\n${NC}$SPL_SPL\n"; PAUSE; return 1; }
-$INSTALL "$TMP_SF/luci-app-splify.$RAZ" >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось установить:\n${NC}$SPL_LUCI\n"; PAUSE; return 1; }; $INSTALL "$TMP_SF/luci-i18n-splify-ru.$RAZ" >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось установить:\n${NC}$SPL_RUS\n"; PAUSE; return 1; }
-rm -f /tmp/luci-indexcache* /tmp/luci-modulecache* 2>/dev/null; /etc/init.d/rpcd reload 2>/dev/null || /etc/init.d/rpcd restart 2>/dev/null; sleep 5; }
 # ──────────────────────────── 4. register Cloudflare WARP ───────────────────
 colo_name() { case "$1" in AMS) echo "Amsterdam" ;; ARN) echo "Stockholm" ;; ATH) echo "Athens" ;; BUD) echo "Budapest" ;; FRA) echo "Frankfurt" ;; HEL) echo "Helsinki" ;; IST) echo "Istanbul" ;; KBP) echo "Kiev" ;; KIV) echo "Chisinau" ;; PRG) echo "Prague" ;; RIX) echo "Riga" ;; SOF) echo "Sofia" ;; TLL) echo "Tallinn" ;; VIE) echo "Vienna" ;; VNO) echo "Vilnius" ;; WAW) echo "Warsaw" ;; ZRH) echo "Zurich" ;; *) echo "$1" ;; esac; }
 find_best_endpoint() { echo -e "\n${CYAN}Подбираем лучший ${NC}endpoint"; echo -en "${YELLOW}Подождите...${NC}"; _prefixes="188.114.96. 188.114.97. 188.114.98. 188.114.99. 162.159.192. 162.159.193. 162.159.195. 8.34.146. 8.39.214. 8.39.204. 8.6.112. 8.35.211. 8.39.125. 8.47.69."
@@ -430,61 +426,58 @@ if ! curl -fsSL --max-time 60 "$II" -o "$REG" >/dev/null 2>&1; then echo -e "${R
 PRIV="$(jq -r '.result.key' "$REG")"; WARP_PEER="$(jq -r '.result.config.peers[0].public_key' "$REG")"; WARP_V4="$(jq -r '.result.config.interface.addresses.v4' "$REG")"; WARP_V6="$(jq -r '.result.config.interface.addresses.v6 // empty' "$REG")"; fi; if [ -z "$WARP_PEER" ]
 then WARP_PEER="$(jq -r '.config.peers[0].public_key' "$REG")"; WARP_V4="$(jq -r '.config.interface.addresses.v4' "$REG")"; WARP_V6="$(jq -r '.config.interface.addresses.v6 // empty' "$REG")"; fi
 [ -n "$WARP_PEER" ] && [ "$WARP_PEER" != "null" ] || { echo -e "${RED}Нет peer public_key${NC}"; PAUSE; return 1; }; [ -n "$WARP_V4" ] && [ "$WARP_V4" != "null" ] || { echo -e "${RED}Нет IPv4${NC}"; PAUSE; return 1; }; echo -e "WARP ${GREEN}сгенерирован!${NC}"; }
-restart_splify() { echo -e "\n${MAGENTA}Перезапускаем splify${NC}"; echo -en "${YELLOW}Подождите...${NC}"; /usr/local/sbin/splify-disable >/dev/null 2>&1; /etc/init.d/splify enable >/dev/null 2>&1; /etc/init.d/splify-agent enable >/dev/null 2>&1
-uci -q set splify.global.telemetry="0" && uci commit splify; /etc/init.d/splify restart >/dev/null 2>&1; sleep 3; /etc/init.d/splify-agent restart >/dev/null 2>&1; sleep 3; /usr/local/sbin/splify-apply >/dev/null 2>&1
-sleep 10; echo -e "\n\nsplify ${GREEN}перезапущен!${NC}"; echo -e "\n${YELLOW}Инициализация splify может занять несколько минут!${NC}"; }
 WARP_TO_ROOT() { printf '%s\n' "[Interface]" "PrivateKey = $PRIV" "Address = $WARP_V4${WARP_V6:+, $WARP_V6}" "DNS = 9.9.9.9" "MTU = 1280" "S1 = $AWG_S1" "S2 = $AWG_S2" "Jc = $AWG_JC" "Jmin = $AWG_JMIN" "Jmax = $AWG_JMAX" "H1 = $AWG_H1" "H2 = $AWG_H2" "H3 = $AWG_H3" "H4 = $AWG_H4" "I1 = $AWG_I1" "" "[Peer]" "PublicKey = $WARP_PEER" "AllowedIPs = 0.0.0.0/0, ::/0" "Endpoint = $WARP_EP" "PersistentKeepalive = 25" > /root/WARP.conf; echo -e "${YELLOW}Файл ${NC}WARP${YELLOW} сохранён в ${NC}/root/WARP.conf"; }
-# ──────────────────────────── 5. create warp0 interface ─────────────────────
-create_warp_iface() { echo -e "\n${MAGENTA}Создаём интерфейс $WARP_IFACE${NC}"; if [ -n "$(uci -q get "network.$WARP_IFACE")" ]; then echo -e "${CYAN}Перенастраиваем интерфейс ${NC}$WARP_IFACE"; ifdown "$WARP_IFACE" >/dev/null 2>&1; fi
-uci -q set "network.$WARP_IFACE=interface"; uci set "network.$WARP_IFACE.proto=amneziawg"; uci set "network.$WARP_IFACE.private_key=$PRIV"; uci -q delete "network.$WARP_IFACE.addresses"; uci add_list "network.$WARP_IFACE.addresses=$WARP_V4"
-[ -n "$WARP_V6" ] && uci add_list "network.$WARP_IFACE.addresses=$WARP_V6"; uci -q delete "network.$WARP_IFACE.dns"; uci add_list "network.$WARP_IFACE.dns=9.9.9.9"; uci set "network.$WARP_IFACE.mtu=1280"
-uci set "network.$WARP_IFACE.route_allowed_ips=0"; uci set "network.$WARP_IFACE.awg_jc=$AWG_JC"; uci set "network.$WARP_IFACE.awg_jmin=$AWG_JMIN"; uci set "network.$WARP_IFACE.awg_jmax=$AWG_JMAX"; uci set "network.$WARP_IFACE.awg_h1=$AWG_H1"
-uci set "network.$WARP_IFACE.awg_h2=$AWG_H2"; uci set "network.$WARP_IFACE.awg_h3=$AWG_H3"; uci set "network.$WARP_IFACE.awg_h4=$AWG_H4"; uci set "network.$WARP_IFACE.awg_s1=$AWG_S1"; uci set "network.$WARP_IFACE.awg_s2=$AWG_S2"
-uci set "network.$WARP_IFACE.awg_i1=$AWG_I1"; _pt="amneziawg_$WARP_IFACE"; while [ -n "$(uci -q get "network.@${_pt}[0]")" ]; do uci -q delete "network.@${_pt}[0]"; done; uci add network "$_pt" >/dev/null; uci set "network.@${_pt}[-1].public_key=$WARP_PEER"
-uci -q delete "network.@${_pt}[-1].allowed_ips"; uci add_list "network.@${_pt}[-1].allowed_ips=0.0.0.0/0"; uci add_list "network.@${_pt}[-1].allowed_ips=::/0"; uci set "network.@${_pt}[-1].endpoint_host=${WARP_EP%:*}"
-uci set "network.@${_pt}[-1].endpoint_port=${WARP_EP##*:}"; uci set "network.@${_pt}[-1].persistent_keepalive=25"; echo -e "${CYAN}Перезапускаем сеть${NC}"; uci commit network >/dev/null 2>&1; /etc/init.d/rpcd restart >/dev/null 2>&1
-/etc/init.d/uhttpd restart >/dev/null 2>&1; rm -rf /tmp/luci-* >/dev/null 2>&1; ip link del "$WARP_IFACE" >/dev/null 2>&1; killall netifd >/dev/null 2>&1; sleep 3; ifup "$WARP_IFACE" >/dev/null 2>&1; sleep 3; }
-# ──────────────────────────── 6. register endpoint in splify ────────────────
-register_in_splify() { _ei=0; while [ -n "$(uci -q get "splify.@endpoint[$_ei]" 2>/dev/null)" ]; do _ei_if="$(uci -q get "splify.@endpoint[$_ei].iface" 2>/dev/null)"; if [ -n "$_ei_if" ] && [ -z "$(uci -q get "network.$_ei_if" 2>/dev/null)" ]
-then uci -q delete "splify.@endpoint[$_ei]"; else _ei=$((_ei + 1)); fi; done; uci commit splify; grep -q "option iface '$WARP_IFACE'" /etc/config/splify 2>/dev/null || printf "\nconfig endpoint\n\toption iface '$WARP_IFACE'\n\toption priority '1'\n\toption type 'wg'\n" >> /etc/config/splify; }
-# ──────────────────────────── 7. firewall zone ──────────────────────────────
-setup_firewall() { echo -e "\n${MAGENTA}Создаём зону firewall${NC}"; if /usr/local/sbin/splify-firewall check "$WARP_IFACE" >/dev/null 2>&1
-then echo -e "${CYAN}Зона${NC} firewall ${CYAN}для ${NC}$WARP_IFACE уже настроена${NC}"; else echo -e "${CYAN}Настраиваем зону ${NC}firewall${CYAN} для ${NC}$WARP_IFACE${NC}"; echo -en "${YELLOW}Подождите...${NC}"; /usr/local/sbin/splify-firewall fix "$WARP_IFACE" >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось создать зону ${NC}firewall${RED}!${NC}\n"; PAUSE; return 1; }; echo; fi; }
-# ──────────────────────────── main ──────────────────────────────────────────
 SPL_V_VER() { if [ "$PKG_IS_APK" -eq 1 ]; then SPL_INST_VER=$(awk '$0=="P:splify"{f=1} f&&/^V:/{v=substr($0,3);sub(/-r[0-9]+$/,"",v);print v;exit}' /lib/apk/db/installed); else SPL_INST_VER=$(opkg list-installed splify 2>/dev/null | awk '{sub(/(-r[0-9]+|-[0-9]+)$/, "", $3); print $3}'); fi; }
-SPL_MENU() { while true; do SPL_V_VER; UPD_SPL="0"; mkdir -p "$TMP_SPL"; clear; echo -e "${MAGENTA}Меню splify${NC}\n"; if [ -z "$SPL_INST_VER" ]; then SPL_STATUS="${RED}не установлен${NC}"; elif [ "$SPL_VER" = "$SPL_INST_VER" ]; then SPL_STATUS="${GREEN}$SPL_INST_VER${NC}"
-else SPL_STATUS="${RED}$SPL_INST_VER (доступно обновление)${NC}"; UPD_SPL="1"; fi; echo -e "${YELLOW}splify:    $SPL_STATUS" 
-if [ -f /etc/init.d/steer ]; then echo -e "${YELLOW}splify2:${NC}   ${GREEN}установлен${NC}"; fi
-if pkg_is_installed amneziawg-tools && pkg_is_installed luci-proto-amneziawg && pkg_is_installed kmod-amneziawg
-then echo -e "${YELLOW}AmneziaWG: ${GREEN}установлен${NC}"; else echo -e "${YELLOW}AmneziaWG: ${RED}не установлен${NC}"; fi; if uci -q get network.warp0 >/dev/null 2>&1; then echo -e "${YELLOW}Интерфейс: ${GREEN}установлен${NC}"
-else echo -e "${YELLOW}Интерфейс: ${RED}не установлен${NC}"; fi; if uci show firewall | grep -q "network='.*warp0"; then echo -e "${YELLOW}Firewall:  ${GREEN}настроен${NC}"; else echo -e "${YELLOW}Firewall:  ${RED}не настроен${NC}"; fi
-if [ "$UPD_SPL" = "0" ]; then echo -e "\n${CYAN}1) ${GREEN}Установить ${NC}splify"; else echo -e "\n${CYAN}1) ${GREEN}Обновить ${NC}splify"; fi
-echo -e "${CYAN}2) ${GREEN}Удалить ${NC}splify"
-echo -e "${CYAN}3) ${GREEN}Установить ${NC}splify2"
-echo -e "${CYAN}4) ${GREEN}Удалить ${NC}splify2"
-echo -e "${CYAN}5) ${GREEN}Сгенерировать и применить ${NC}WARP ${GREEN}для${NC} splify"
-echo -e "${CYAN}6) ${GREEN}Перезапустить ${NC}splify"
-echo -ne "${CYAN}Enter) ${GREEN}Вернуться в предыдущее меню${NC}\n\n${YELLOW}Выберите пункт:${NC} "; read choiceSP; case "$choiceSP" in 
-1) if [ -f /etc/init.d/steer ]; then echo -e "\n${RED}установлен${NC} splify2\n"; PAUSE; continue; fi
-if [ "$UPD_SPL" = "0" ]; then clear; echo -e "${MAGENTA}Устанавливаем ${NC}splify"
-install_splify || continue; install_AWG || continue; echo; register_warp || continue; echo -e "${CYAN}Используем ${NC}endpoint${CYAN}:${NC} $WARP_EP"; create_warp_iface || continue; WARP_TO_ROOT; register_in_splify; setup_firewall || continue; restart_splify; echo -e "splify ${GREEN}установлен!${NC}\n"
-else echo -e "\n${MAGENTA}Обновляем ${NC}splify"; install_splify || continue; register_in_splify; restart_splify; echo -e "splify ${GREEN}обновлён!${NC}\n"; fi; PAUSE ;; 2) DELETE_SPL ;; 
-3) if [ -f /etc/init.d/splify ]; then echo -e "\n${RED}установлен${NC} splify"\n; PAUSE; continue; fi
-clear; echo -e "${MAGENTA}Запускаем официальный установщик splify2${NC}\n"
-echo -e "${YELLOW}При выборе движка выбирайте ${NC}1\n"
-sh -c "$(wget -qO- https://gitlab.com/xyzmean/splify2/-/raw/main/install.sh)"; echo; PAUSE ;;
-4) echo -e "\n${MAGENTA}Удаляем splify2${NC}"
-/etc/init.d/steer stop >/dev/null 2>&1
-/etc/init.d/steer disable >/dev/null 2>&1
-$DELETE steer-extended >/dev/null 2>&1
-$DELETE steer >/dev/null 2>&1
-$DELETE luci-app-splify2 >/dev/null 2>&1
-rm -rf /etc/config/steer* /etc/config/splify2* /etc/init.d/steer /tmp/*steer* /tmp/*splify2* /etc/steer* /etc/splify2* 2>/dev/null
-echo -e "splify2 ${GREEN}удалён!${NC}\n"; PAUSE;;
-5) if [ -z "$SPL_INST_VER" ]; then echo -e "\nsplify ${RED}не установлен!${NC}\n"
-else register_warp || continue; choose_endpoint || continue; create_warp_iface || continue; WARP_TO_ROOT; register_in_splify; restart_splify; echo -e "\nWARP ${GREEN}изменён!${NC}\n"; fi; PAUSE ;;
-6) if [ -z "$SPL_INST_VER" ]; then echo -e "\nsplify ${RED}не установлен!${NC}\n"; else register_in_splify; restart_splify; fi; echo; PAUSE ;; *) return ;; esac; done; }
 uget() { uci -q get "$1" 2>/dev/null; }
+ZMB="/opt/zapret-manager-luci/backend.sh"; ZM_JOBS="/tmp/zapret-manager-luci"
+st_panel() { [ -x "$ZMB" ] && grep -q '^steer_action() {' "$ZMB" 2>/dev/null; }
+st_zm_owned() { command -v steer >/dev/null 2>&1 && grep -qE '^(engine|pkg steer|net zmwarp)$' /etc/zm-steer/owned 2>/dev/null; }
+st_splify2() { [ -x /etc/init.d/splify2 ] || { command -v steer >/dev/null 2>&1 && ! st_zm_owned; }; }
+st_state_line() { if [ -f /etc/zm-steer/stopped ]; then echo -e "${RED}выключен${NC}"; elif /etc/init.d/steer running >/dev/null 2>&1; then echo -e "${GREEN}запущен${NC}"; elif grep -qx 'steer-spec' /etc/zm-steer/owned 2>/dev/null; then echo -e "${RED}остановлен${NC}"; else echo -e "${YELLOW}сервисы не выбраны${NC}"; fi; }
+st_j() { jsonfilter -s "$ST_JS" -e "$1" 2>/dev/null; }
+st_err() { echo "$1" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p'; }
+st_run() { local r log="$ZM_JOBS/steer.log" n=0 c rc; r=$("$ZMB" steer_action "$@" 2>/dev/null); if [ -n "$(st_err "$r")" ]; then echo -e "\n${RED}$(st_err "$r")${NC}\n"; return 1; fi
+case "$r" in *'"started"'*) ;; *) echo -e "${GREEN}Сохранено!${NC}\n"; return 0 ;; esac; echo -e "${YELLOW}Прервать — ${NC}Ctrl+C\n"; trap '"$ZMB" steer_action halt >/dev/null 2>&1' INT; sleep 1
+while :; do c=$(wc -l < "$log" 2>/dev/null); c=${c:-0}; if [ "$c" -gt "$n" ]; then sed -n "$((n + 1)),${c}p" "$log" | grep -v '^__DONE__'; n=$c; fi; grep -q '^__DONE__' "$log" 2>/dev/null && break; sleep 1; done; trap - INT
+rc=$(grep '^__DONE__' "$log" | tail -n 1 | awk '{print $2}'); if [ "$rc" = 0 ]; then echo -e "\n${GREEN}Готово!${NC}\n"; else echo -e "\n${RED}Завершено с ошибкой!${NC}\n"; return 1; fi; }
+st_services() { local i=0 id name on sel want="" x; clear; echo -e "${MAGENTA}Сервисы через Steer${NC}\n"; while :; do id=$(st_j "@.services[$i].id"); [ -n "$id" ] || break; name=$(st_j "@.services[$i].name"); on=$(st_j "@.services[$i].on"); i=$((i + 1)); eval "ST_ID_$i=\$id"
+if [ "$on" = true ]; then echo -e "${CYAN}$(printf "%2d" "$i")) ${GREEN}[x] ${NC}${name:-$id}"; else echo -e "${CYAN}$(printf "%2d" "$i")) ${NC}[ ] ${name:-$id}"; fi; done; [ "$i" -gt 0 ] || { echo -e "${RED}Список сервисов пуст${NC}\n"; PAUSE; return; }
+echo -e "\n${YELLOW}Введите номера нужных сервисов через пробел — выбор заменится целиком\n${NC}0${YELLOW} — снять все, ${NC}Enter${YELLOW} — вернуться${NC}\n"; echo -ne "${YELLOW}Сервисы:${NC} "; read sel; [ -z "$sel" ] && return
+if [ "$sel" != 0 ]; then for x in $(echo "$sel" | tr ',' ' '); do case "$x" in ''|*[!0-9]*) continue ;; esac; [ "$x" -ge 1 ] && [ "$x" -le "$i" ] || continue; eval "id=\$ST_ID_$x"; case ",$want," in *",$id,"*) ;; *) want="$want${want:+,}$id" ;; esac; done; [ -n "$want" ] || { echo -e "\n${RED}Неверный ввод!${NC}\n"; PAUSE; return; }; fi
+echo -e "\n${MAGENTA}Применяем выбор сервисов${NC}"; st_run lists "$want"; PAUSE; }
+st_autorestart() { local cur m v; cur=$(st_j '@.autorestart'); echo -e "\n${MAGENTA}Автоперезапуск Steer${NC}\n${CYAN}1) ${GREEN}Каждые N часов ${NC}(2, 4, 6, 8, 12)\n${CYAN}2) ${GREEN}Ежедневно в указанный час${NC}"; [ -n "$cur" ] && echo -e "${CYAN}3) ${GREEN}Выключить${NC}"
+echo -ne "${CYAN}Enter) ${GREEN}Вернуться${NC}\n\n${YELLOW}Выберите пункт:${NC} "; read m; case "$m" in 1) echo -ne "${YELLOW}Каждые сколько часов:${NC} "; read v; v="every:$v" ;; 2) echo -ne "${YELLOW}Час (0-23):${NC} "; read v; v="daily:$v" ;; 3) [ -n "$cur" ] || return; v=off ;; *) return ;; esac
+m=$("$ZMB" steer_action autorestart "$v" 2>/dev/null); if [ -n "$(st_err "$m")" ]; then echo -e "\n${RED}$(st_err "$m")${NC}\n"; else echo -e "\n${GREEN}Сохранено!${NC}\n"; fi; PAUSE; }
+st_splify2_delete() { echo -e "\n${MAGENTA}Удаляем splify2${NC}"; /etc/init.d/splify2 stop >/dev/null 2>&1; /etc/init.d/splify2 disable >/dev/null 2>&1; /etc/init.d/steer stop >/dev/null 2>&1; /etc/init.d/steer disable >/dev/null 2>&1
+for p in luci-app-splify2 splify2 steer-extended steer; do $DELETE "$p" >/dev/null 2>&1; done; rm -rf /etc/config/steer* /etc/config/splify2* /etc/init.d/steer /etc/init.d/splify2 /tmp/*steer* /tmp/*splify2* /etc/steer* /etc/splify2* /tmp/luci-indexcache* /tmp/luci-modulecache 2>/dev/null
+/etc/init.d/rpcd reload >/dev/null 2>&1; echo -e "splify2 ${GREEN}удалён!${NC}\n"; PAUSE; }
+STEER_MENU() { local ST_JS inst ex colo sub ver lat svc ar blk w k; while true; do SPL_V_VER; clear; echo -e "${MAGENTA}Меню Steer${NC}\n"
+if ! st_panel; then echo -e "${YELLOW}Steer:${NC}     $(st_zm_owned && st_state_line || echo -e "${RED}не установлен${NC}")\n\n${NC}Steer ${YELLOW}настраивается через ${NC}Zapret Manager ${YELLOW}для ${NC}WEB ${YELLOW}+ ${NC}LuCI"; ST_JS=""; inst=""; blk=""
+else ST_JS=$("$ZMB" steer_status 2>/dev/null); inst=$(st_j '@.installed'); blk=$(st_j '@.blocker'); ver=$(st_j '@.version'); lat=$(st_j '@.latest')
+if [ "$inst" = true ]; then if [ "$(st_j '@.stopped')" = true ]; then k="${RED}выключен${NC}"; elif [ "$(st_j '@.steer_running')" = true ]; then k="${GREEN}запущен${NC}"; elif [ "$(st_j '@.running')" = true ]; then k="${YELLOW}выполняется операция${NC}"; else k="${RED}не запущен${NC}"; fi; if [ -n "$lat" ] && [ -n "$ver" ] && zm_ver_gt "$lat" "$ver"; then echo -e "${YELLOW}Steer:${NC}            $k / ${RED}$ver (доступно обновление $lat)${NC}"; else echo -e "${YELLOW}Steer:${NC}            $k / ${GREEN}${ver:-?}${NC}"; fi
+ex=$(st_j '@.exit'); colo=$(st_j '@.warp_colo'); sub=$(st_j '@.sub_label'); case "$ex" in warp) echo -e "${YELLOW}Туннель:${NC}          ${GREEN}WARP${NC}${colo:+ ($colo)}" ;; vpn) echo -e "${YELLOW}Туннель:${NC}          ${GREEN}VPN${NC}${sub:+ ($sub)}" ;; *) echo -e "${YELLOW}Туннель:${NC}          ${RED}не подключён — подключите WARP или VPN${NC}" ;; esac
+svc=""; k=0; while [ -n "$(st_j "@.services[$k].id")" ]; do [ "$(st_j "@.services[$k].on")" = true ] && svc="$svc${svc:+, }$(st_j "@.services[$k].name")"; k=$((k + 1)); done; echo -e "${YELLOW}Сервисы:${NC}          ${svc:-${RED}не выбраны${NC}}"
+ar=$(st_j '@.autorestart'); case "$ar" in every:*) echo -e "${YELLOW}Автоперезапуск:${NC}   ${GREEN}каждые ${NC}${ar#every:}${GREEN} ч${NC}" ;; daily:*) echo -e "${YELLOW}Автоперезапуск:${NC}   ${GREEN}ежедневно в ${NC}$(printf '%02d' "${ar#daily:}"):00" ;; esac
+else echo -e "${YELLOW}Steer:${NC}            ${RED}не установлен${NC}"; fi; fi
+[ -n "$SPL_INST_VER" ] && echo -e "${YELLOW}splify:${NC}           ${RED}установлен ${NC}(заменён на Steer — удалите)"; st_splify2 && echo -e "${YELLOW}splify2:${NC}          ${RED}установлен ${NC}(заменён на Steer — удалите)"
+[ "$blk" = steer ] && echo -e "\n${RED}Движок Steer настроен не Zapret Manager — сначала удалите splify2${NC}"
+if ! st_panel; then echo -e "\n${CYAN}1) ${GREEN}Установить ${NC}Zapret Manager ${GREEN}для ${NC}WEB ${GREEN}+ ${NC}LuCI"
+elif [ "$inst" != true ]; then echo -e "\n${CYAN}1) ${GREEN}Установить ${NC}Steer"
+else echo -e "\n${CYAN}1) ${GREEN}Выбрать сервисы${NC}"; w=$(st_j '@.warp_on'); if [ "$w" = true ]; then echo -e "${CYAN}2) ${GREEN}Пересоздать ${NC}WARP\n${CYAN}3) ${GREEN}Подобрать ${NC}endpoint ${GREEN}для ${NC}WARP"; else echo -e "${CYAN}2) ${GREEN}Подключить ${NC}WARP"; fi
+[ "$(st_j '@.has_sub')" = true ] && echo -e "${CYAN}4) ${GREEN}Заменить подписку ${NC}VPN" || echo -e "${CYAN}4) ${GREEN}Добавить подписку ${NC}VPN"; [ "$w" = true ] && [ "$(st_j '@.has_sub')" = true ] && { [ "$ex" = vpn ] && echo -e "${CYAN}5) ${GREEN}Пустить сервисы через ${NC}WARP ${GREEN}вместо ${NC}VPN" || echo -e "${CYAN}5) ${GREEN}Пустить сервисы через ${NC}VPN ${GREEN}вместо ${NC}WARP"; }
+[ "$(st_j '@.stopped')" = true ] && echo -e "${CYAN}6) ${GREEN}Запустить ${NC}Steer" || echo -e "${CYAN}6) ${GREEN}Остановить ${NC}Steer"; echo -e "${CYAN}7) ${GREEN}Автоперезапуск ${NC}Steer"
+[ -n "$lat" ] && [ -n "$ver" ] && zm_ver_gt "$lat" "$ver" && echo -e "${CYAN}8) ${GREEN}Обновить движок ${NC}Steer ${GREEN}(${NC}$ver → $lat${GREEN})${NC}"; echo -e "${CYAN}9) ${GREEN}Удалить ${NC}Steer"; fi
+[ -n "$SPL_INST_VER" ] && echo -e "${CYAN}p) ${GREEN}Удалить ${NC}splify"; st_splify2 && echo -e "${CYAN}d) ${GREEN}Удалить ${NC}splify2"
+echo -e "${CYAN}Enter) ${GREEN}Вернуться в предыдущее меню${NC}\n"; echo -ne "${YELLOW}Выберите пункт:${NC} "; read choiceST
+case "$choiceST" in p|P|з|З) [ -n "$SPL_INST_VER" ] && DELETE_SPL; continue ;; d|D|в|В) st_splify2 && st_splify2_delete; continue ;; "") return ;; esac
+if ! st_panel; then [ "$choiceST" = 1 ] && install_zapret_manager_luci; continue; fi
+if [ "$inst" != true ]; then [ "$choiceST" = 1 ] || continue; echo -e "\n${MAGENTA}Устанавливаем Steer${NC}"; st_run install && { echo -e "${MAGENTA}Подключаем WARP${NC}"; st_run warp_setup; }; PAUSE; continue; fi
+case "$choiceST" in 1) st_services ;; 2) if [ "$w" = true ]; then echo -e "\n${MAGENTA}Пересоздаём WARP${NC}"; st_run warp_recreate; else echo -e "\n${MAGENTA}Подключаем WARP${NC}"; st_run warp_setup; fi; PAUSE ;;
+3) [ "$w" = true ] || continue; echo -e "\n${MAGENTA}Подбираем endpoint WARP${NC}"; st_run warp_endpoint; PAUSE ;;
+4) echo -ne "\n${YELLOW}Ссылка на подписку (${NC}https://...${YELLOW}) или ${NC}vless://...${YELLOW}:${NC} "; IFS= read -r sub; [ -n "$sub" ] || continue; echo -e "\n${MAGENTA}Подключаем подписку VPN${NC}"; st_run sub_set "$sub"; PAUSE ;;
+5) [ "$w" = true ] && [ "$(st_j '@.has_sub')" = true ] || continue; [ "$ex" = vpn ] && ex=warp || ex=vpn; echo -e "\n${MAGENTA}Переключаем туннель${NC}"; st_run sub_exit "$ex"; PAUSE ;;
+6) if [ "$(st_j '@.stopped')" = true ]; then echo -e "\n${MAGENTA}Запускаем Steer${NC}"; st_run start; else echo -e "\n${MAGENTA}Останавливаем Steer${NC}"; st_run stop; fi; PAUSE ;; 7) st_autorestart ;;
+8) echo -e "\n${MAGENTA}Обновляем движок Steer${NC}"; st_run engine; PAUSE ;; 9) echo -ne "\n${YELLOW}Удалить Steer вместе с WARP? (y/N):${NC} "; read w; case "$w" in y|Y|д|Д|н|Н) echo -e "\n${MAGENTA}Удаляем Steer${NC}"; st_run remove; PAUSE ;; esac ;; esac; done; }
 DELETE_SPL() { echo -e "\n${MAGENTA}Удаляем splify${NC}"; 
 # ──────────────────────────── 1. stop splify services ───────────────────────
 echo -e "${CYAN}Останавливаем службы${NC}"; for s in splify splify-agent; do if [ -x "/etc/init.d/$s" ]; then "/etc/init.d/$s" stop >/dev/null 2>&1; "/etc/init.d/$s" disable >/dev/null 2>&1; fi; done; if [ -x /etc/init.d/splify-singbox ]; then /etc/init.d/splify-singbox stop >/dev/null 2>&1; /etc/init.d/splify-singbox disable >/dev/null 2>&1; fi
@@ -563,7 +556,7 @@ awk -v new="$new_fileD" '{if($0=="--filter-l7=discord,stun"){print;getline;print
 ZAPRET_RESTART; if [ "$new_fileD" = "DELETE" ]; then echo -e "fake ${GREEN}удалён!${NC}\n"; else echo -e "fake ${GREEN}изменён на ${NC}${new_fileD}${GREEN}!${NC}\n"; fi; PAUSE; }
 select_Dv() { DVS=$(set | grep -E '^Dv[0-9]+=' | sed 's/=.*//' | sort -V); COUNT_dv=$(echo "$DVS" | wc -l); echo; echo -en "${YELLOW}Введите версию стратегии для discord.media (${NC}1-$COUNT_dv${YELLOW}):${NC} "; read CHOICE_DV </dev/tty
 case "$CHOICE_DV" in ''|*[!0-9]*|0) return 1;; esac; SELECTED_dv="Dv$CHOICE_DV"; echo "$DVS" | grep -qx "$SELECTED_dv" || return 1; NEW_NUM="$CHOICE_DV"; NEW_STRAT=$(eval echo \"\$$SELECTED_dv\"); }
-switch_Dv() { select_Dv || return 1; grep -q -E '^[[:space:]]*--filter-tcp=2053,2083,2087,2096,8443' "$CONF" || { echo -e "\n${RED}Стратегия не подходит!${NC}\n"; PAUSE; return 1; }; START=$(grep -n -E '^[[:space:]]*--filter-tcp=2053,2083,2087,2096,8443' "$CONF" | cut -d: -f1)
+switch_Dv() { select_Dv || return 1; grep -q -E '^[[:space:]]*--filter-tcp=2053,2083,2087,2096,8443' "$CONF" || { rm -f "$ZM_DV_OFF"; discord_str_add; }; grep -q -E '^[[:space:]]*--filter-tcp=2053,2083,2087,2096,8443' "$CONF" || { echo -e "\n${RED}Стратегия не подходит!${NC}\n"; PAUSE; return 1; }; START=$(grep -n -E '^[[:space:]]*--filter-tcp=2053,2083,2087,2096,8443' "$CONF" | cut -d: -f1)
 END=$(tail -n +"$START" "$CONF" | grep -n -m1 -E '^--new$|^#|^'\''$' | cut -d: -f1); END=$((START + END - 1)); sed -i "${START},$((END-1))d" "$CONF"; LINE=$START; echo "$NEW_STRAT" | while IFS= read -r l; do sed -i "${LINE}i$l" "$CONF"; LINE=$((LINE + 1)); done
 if grep -q -E '^#[[:space:]]*Dv' "$CONF"; then sed -i "s/^#[[:space:]]*Dv[0-9]\+/#Dv$NEW_NUM/" "$CONF"; else sed -i "$START i#Dv$NEW_NUM" "$CONF"; fi; echo -e "\n${MAGENTA}Меняем стратегию для discord.media${NC}"; ZAPRET_RESTART; echo -e "${GREEN}Стратегия ${NC}Dv$NEW_NUM${GREEN} применена!${NC}\n"; PAUSE; }
 toggle_finland_hosts() { if grep -q "$Fin_IP_Dis" /etc/hosts; then sed -i "/$Fin_IP_Dis/d" /etc/hosts; echo -e "\n${MAGENTA}Удаляем Финские IP${NC}"; /etc/init.d/dnsmasq restart 2>/dev/null
@@ -654,7 +647,7 @@ if /etc/init.d/zapret2 status >/dev/null 2>&1; then echo -e "Zapret2 ${GREEN}з�
 # ==========================================
 uninstall_zapret() { local NO_PAUSE=$1; [ "$NO_PAUSE" != "1" ] && echo; echo -e "${MAGENTA}Удаляем Zapret${NC}\n${CYAN}Останавливаем ${NC}zapret"; /etc/init.d/zapret stop >/dev/null 2>&1; /etc/init.d/zapret disable >/dev/null 2>&1; echo -e "${CYAN}Убиваем процессы${NC}"
 for pid in $(pgrep -f /opt/zapret 2>/dev/null); do kill -9 "$pid" 2>/dev/null; done; echo -e "${CYAN}Удаляем пакеты${NC}"; $DELETE luci-app-zapret >/dev/null 2>&1; $DELETE zapret >/dev/null 2>&1; echo -e "${CYAN}Удаляем временные файлы${NC}"
-rm -rf /opt/zapret $CONF /etc/firewall.zapret /etc/init.d/zapret /tmp/*.ipk /tmp/*.zip 2>/dev/null; crontab -l 2>/dev/null | grep -v -i -E "zapret|/usr/bin/zmsA --auto-best" | crontab - 2>/dev/null; /etc/init.d/cron restart >/dev/null 2>&1
+rm -rf /opt/zapret $CONF /etc/firewall.zapret /etc/init.d/zapret /tmp/*.ipk /tmp/*.zip "$ZM_YV_OFF" "$ZM_DV_OFF" 2>/dev/null; crontab -l 2>/dev/null | grep -v -i -E "zapret|/usr/bin/zmsA --auto-best" | crontab - 2>/dev/null; /etc/init.d/cron restart >/dev/null 2>&1
 nft list tables 2>/dev/null | awk '{print $2}' | grep -E '(zapret|ZAPRET)' | while read t; do [ -n "$t" ] && nft delete table "$t" 2>/dev/null; done; rm -rf -- "$TMP_SF" tmp/zapret* ; echo -e "Zapret ${GREEN}удалён!${NC}\n"; [ "$NO_PAUSE" != "1" ] && PAUSE; }
 uninstall_zapret_all() { local NO_PAUSE=$1; [ "$NO_PAUSE" != "1" ] && echo; echo -e "${MAGENTA}Удаляем Zapret и Zapret2${NC}"
 echo -e "${CYAN}Останавливаем службы${NC}"; /etc/init.d/zapret stop >/dev/null 2>&1; /etc/init.d/zapret2 stop >/dev/null 2>&1; /etc/init.d/zapret disable >/dev/null 2>&1; /etc/init.d/zapret2 disable >/dev/null 2>&1
@@ -744,7 +737,7 @@ if [ -f "$CONF" ] && { grep -q -- "--hostlist=/opt/zapret/ipset/zapret-hosts-use
 # ==========================================
 # Стратегии
 # ==========================================
-ADD_Yv() { if ! grep -q "^#Yv" "$CONF" && ! grep -q "^#general" "$CONF"; then sed -i "/^[[:space:]]*option NFQWS_OPT '/a\\#Yv08\\n--filter-tcp=443\\n--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt\\n--dpi-desync=hostfakesplit\\n--dpi-desync-hostfakesplit-mod=host=google.com\\n--dpi-desync-fooling=ts\\n--new" "$CONF"; fi; }
+ADD_Yv() { [ -f "$ZM_YV_OFF" ] && return 0; if ! grep -q "^#Yv" "$CONF" && ! grep -q "^#general" "$CONF"; then sed -i "/^[[:space:]]*option NFQWS_OPT '/a\\#Yv08\\n--filter-tcp=443\\n--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt\\n--dpi-desync=hostfakesplit\\n--dpi-desync-hostfakesplit-mod=host=google.com\\n--dpi-desync-fooling=ts\\n--new" "$CONF"; fi; }
 strategy_v1() { printf '%s\n' "#v1" "--filter-tcp=443" "--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt" "--dpi-desync=split2" "--dpi-desync-split-seqovl=681" "--dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/stun.bin"; }
 strategy_v2() { printf '%s\n' "#v2" "--filter-tcp=443" "--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt" "--dpi-desync=fake,multisplit" "--dpi-desync-split-seqovl=681" "--dpi-desync-split-pos=1" "--dpi-desync-fooling=ts" "--dpi-desync-repeats=8" "--dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/stun.bin" "--dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com"; }
 strategy_v3() { printf '%s\n' "#v3" "--filter-tcp=443" "--hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt" "--dpi-desync=hostfakesplit" "--dpi-desync-hostfakesplit-mod=host=ozon.ru" "--dpi-desync-repeats=4" "--dpi-desync-fooling=ts,md5sig" "--dpi-desync-badseq-increment=0"; }
@@ -762,10 +755,11 @@ flowseal_menu() { [ ! -f "$OUT" ] && download_strategies; while true; do STRATEG
 echo -e "${YELLOW}Список стратегий от Flowseal${NC}\n"; i=1; echo "$STRATEGIES" | while IFS= read -r line; do if [ "$i" -lt 10 ]; then echo -e " ${CYAN}$i) ${NC}$line"; else echo -e "${CYAN}$i) ${NC}$line"; fi; i=$((i+1)); done
 echo -en "${CYAN}99) ${GREEN}Обновить стратегии${NC}\n${CYAN}Enter) ${GREEN}Вернуться в предыдущее меню${NC}\n\n${YELLOW}Выберите пункт: ${NC}"; read CHOICE_SF
 [ -z "$CHOICE_SF" ] && return; echo "$CHOICE_SF" | grep -qE '^[0-9]+$' || return; [ "$CHOICE_SF" -eq 99 ] && { rm -rf "$TMP_SF"; download_strategies; continue; mkdir -p "$TMP_SF"; }; SEL_NAME=$(echo "$STRATEGIES" | sed -n "${CHOICE_SF}p"); [ -z "$SEL_NAME" ] && return
-BLOCK=$(awk -v name="$SEL_NAME" '$0=="#"name {flag=1; print; next} /^#/ && flag {exit} flag {print}' "$OUT"); save_custom_block; sed -i "/option NFQWS_OPT '/,/^[[:space:]]*'[[:space:]]*\$/d" "$CONF"; { echo "	option NFQWS_OPT '"; echo "$BLOCK"; echo "'"; } >> "$CONF"; restore_custom_block
+BLOCK=$(awk -v name="$SEL_NAME" '$0=="#"name {flag=1; print; next} /^#/ && flag {exit} flag {print}' "$OUT"); rm -f "$ZM_YV_OFF" "$ZM_DV_OFF"; save_custom_block; sed -i "/option NFQWS_OPT '/,/^[[:space:]]*'[[:space:]]*\$/d" "$CONF"; { echo "	option NFQWS_OPT '"; echo "$BLOCK"; echo "'"; } >> "$CONF"; restore_custom_block
 if ! grep -q "option NFQWS_PORTS_UDP.*19294-19344,50000-50100" "$CONF"; then sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,19294-19344,50000-50100'/" "$CONF"; fi; if ! grep -q "option NFQWS_PORTS_TCP.*2053,2083,2087,2096,8443" "$CONF"
 then sed -i "/^[[:space:]]*option NFQWS_PORTS_TCP '/s/'$/,2053,2083,2087,2096,8443'/" "$CONF"; fi; echo -e "\n${MAGENTA}Устанавливаем стратегию\n${CYAN}Добавляем домены в исключения${NC}"; ADD_GP_DOMAINS; rm -f "$EXCLUDE_FILE"
 wget -q -U "Mozilla/5.0" -O "$EXCLUDE_FILE" "$EXCLUDE_URL" || { echo -e "\n${RED}Не удалось загрузить exclude файл${NC}\n"; PAUSE; return; }; sed -i '/--new/{N;/--filter-tcp=2802/{s/--new/#Gv0\n--new/;};}' "$CONF"
+if echo "$BLOCK" | grep -qxF -e "--filter-udp=$PORTS_UDP" -e "--filter-tcp=$PORTS_TCP"; then for zp in UDP TCP; do eval "zl=\$PORTS_$zp"; zc=$(sed -n "s/^[[:space:]]*option NFQWS_PORTS_$zp '\([^']*\)'.*/\1/p" "$CONF" | head -n1); for p in $(echo "$zl" | tr ',' ' '); do case ",$zc," in *",$p,"*) ;; *) zc="$zc${zc:+,}$p" ;; esac; done; sed -i "s|^\([[:space:]]*option NFQWS_PORTS_$zp '\)[^']*'|\1$zc'|" "$CONF"; done; fi
 echo -e "${CYAN}Применяем стратегию${NC}"; ZAPRET_RESTART; echo -e "${GREEN}Стратегия ${NC}$SEL_NAME ${GREEN}установлена!${NC}\n"; show_ts_warning; PAUSE; break; done; }
 download_strategies() { local NO_PAUSE=$1; [ "$NO_PAUSE" != "1" ] && echo -e "\n${MAGENTA}Скачиваем и формируем стратегии${NC}"; mkdir -p "$TMP_SF"; : > "$OUT"; wget -q -U "Mozilla/5.0" -O "$ZIP" "$FLOWSEAL_STR_ZIP" || { echo -e "\n${RED}Не удалось загрузить файл стратегий${NC}\n"; PAUSE; return; }
 if ! command -v unzip >/dev/null 2>&1; then echo -e "${CYAN}Устанавливаем ${NC}unzip";  update_packages || return; $INSTALL unzip >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось установить unzip!${NC}\n"; PAUSE; return; }; fi
@@ -807,7 +801,7 @@ sed -i "/^[[:space:]]*option NFQWS_OPT '/a\\#udp443\\n--filter-udp=443\\n--hostl
 ZAPRET_RESTART; echo -e "${GREEN}Блок с ${NC}--filter-udp=443${GREEN} добавлен!${NC}\n"; PAUSE; fi ;; *) return;; esac; done; }
 strategy_CHOUSE() { echo -ne "\n${YELLOW}Введите версию стратегии (${NC}1-10${YELLOW}):${NC} "; read -r choice; if [[ "$choice" =~ ^[0-9]+$ ]] && [[ "$choice" -ge 1 ]] && [[ "$choice" -le 10 ]]; then install_strategy "v$choice"; fi; }
 show_current_strategy() { [ -f "$CONF" ] || return; ver=$(grep -o '#v[0-9]*' "$CONF" | sed 's/#v//' | sort -n | tail -1 | sed 's/^/v/'); yv_ver=$(grep -o '#Yv[0-9]*' "$CONF" | sed 's/#Yv//' | sort -n | tail -1 | sed 's/^/Yv/'); }
-discord_str_add() { if ! grep -q "option NFQWS_PORTS_UDP.*19294-19344,50000-50100" "$CONF"; then sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,19294-19344,50000-50100'/" "$CONF"; fi
+discord_str_add() { [ -f "$ZM_DV_OFF" ] && return 0; if ! grep -q "option NFQWS_PORTS_UDP.*19294-19344,50000-50100" "$CONF"; then sed -i "/^[[:space:]]*option NFQWS_PORTS_UDP '/s/'$/,19294-19344,50000-50100'/" "$CONF"; fi
 if ! grep -q "option NFQWS_PORTS_TCP.*2053,2083,2087,2096,8443" "$CONF"; then sed -i "/^[[:space:]]*option NFQWS_PORTS_TCP '/s/'$/,2053,2083,2087,2096,8443'/" "$CONF"; fi
 if ! grep -q -- "--filter-udp=19294-19344,50000-50100" "$CONF"; then last_line1=$(grep -n "^'$" "$CONF" | tail -n1 | cut -d: -f1); if [ -n "$last_line1" ]; then sed -i "${last_line1},\$d" "$CONF"; fi
 printf "%s\n" "--new" "--filter-udp=19294-19344,50000-50100" "--filter-l7=discord,stun" "--dpi-desync=fake" "--dpi-desync-fake-discord=/opt/zapret/files/fake/stun.bin" "--dpi-desync-fake-stun=/opt/zapret/files/fake/stun.bin" \
@@ -868,7 +862,7 @@ echo -e "\n${CYAN}Применяем стратегию: ${NC}$DISPLAY_NAME"; SA
 [ "$FLAG" -eq 1 ] && printf "%b\n" "$LINE" >> "$SAVED_STR"; done < "$TMP_LIST"; awk '/^[[:space:]]*option NFQWS_OPT '\''/{flag=1} flag{print} flag && /^[[:space:]]*'\''[[:space:]]*$/{flag=0}' "$CONF" > "$OLD_STR"; sed -i "/^[[:space:]]*option NFQWS_OPT '/,/^[[:space:]]*'[[:space:]]*\$/d" "$CONF"; sed -i "/^[[:space:]]*#Yv[0-9]\+/d" "$OLD_STR"
 awk '{if(skip){if($0=="--new"||$0~/\047/){skip=0;next}if($0~/^[[:space:]]*$/)next;next}if($0=="--filter-tcp=443"){getline n;if(n=="--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt"){skip=1;next}else{print $0;print n;next}}if($0=="--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt")has_google=1;if($0~/^[[:space:]]*#Yv/)next;print}' "$OLD_STR" > "$NEW_STR"
 awk 'BEGIN{inserted=0;has_google=0} $0=="--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt"{has_google=1} $0=="--new"&&!inserted{while((getline l<"'"$SAVED_STR"'")>0) if(l!~/^[[:space:]]*$/) print l; print "--new"; inserted=1; next} $0~/^[[:space:]]*option NFQWS_OPT \047$/&&!has_google&&!inserted{print; print "'"$SELECTED_NAME"'"; while((getline l<"'"$SAVED_STR"'")>0) if(l!~/^[[:space:]]*$/) print l; print "--new"; inserted=1; next} {print}' "$NEW_STR" > "$FINAL_STR"
-cat "$FINAL_STR" >> "$CONF"; awk '{if($0=="--new"){if(prev!="--new")print}else print;prev=$0}' "$CONF" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"; grep -q "^[[:space:]]*' *\$" "$CONF" || echo "'" >> "$CONF"; ADD_GP_DOMAINS; ZAPRET_RESTART; echo -e "${GREEN}Стратегия применена!${NC}\n"; show_ts_warning; PAUSE; }
+rm -f "$ZM_YV_OFF"; cat "$FINAL_STR" >> "$CONF"; awk '{if($0=="--new"){if(prev!="--new")print}else print;prev=$0}' "$CONF" > "$CONF.tmp" && mv "$CONF.tmp" "$CONF"; grep -q "^[[:space:]]*' *\$" "$CONF" || echo "'" >> "$CONF"; ADD_GP_DOMAINS; ZAPRET_RESTART; echo -e "${GREEN}Стратегия применена!${NC}\n"; show_ts_warning; PAUSE; }
 # ==========================================
 # DNS over HTTPS
 # ==========================================
@@ -929,26 +923,31 @@ uci commit firewall >/dev/null 2>&1; /etc/init.d/firewall restart >/dev/null 2>&
 # Системное меню
 # ==========================================
 install_zapret_manager_luci() {
-    if [ -e "$LUCI_EDITION" ]; then
-        echo -e "\n${MAGENTA}Удаляем Zapret Manager для LuCI${NC}"
-rm -rf \
-	/usr/lib/zapret-manager* \
-	/usr/libexec/rpcd/zapret-manager* \
+zm_luci_state
+if [ "$ZML_ACT" = remove ]; then
+echo -e "\n${MAGENTA}Удаляем Zapret Manager для WEB + LuCI${NC}"
+[ -x /opt/zapret-manager-luci/backend.sh ] && /opt/zapret-manager-luci/backend.sh redbtn_panel_gone >/dev/null 2>&1
+rm -rf /opt/zapret-manager-luci /usr/lib/zapret-manager* /usr/libexec/rpcd/zapret-manager* \
 	/usr/share/luci/menu.d/luci-app-zapret-manager.json \
 	/usr/share/rpcd/acl.d/luci-app-zapret-manager.json \
 	/www/luci-static/resources/view/zapret-manager* \
 	/www/luci-static/resources/zapret-manager* \
-	/tmp/zapret-manager* \
-	/tmp/zm_uninstall_panel.sh \
-	/tmp/luci-indexcache* \
-	/tmp/luci-modulecache/* 2>/dev/null
+	/www/luci-static/resources/bytetube \
+	/www/luci-static/resources/view/bytetube \
+	/www/zm /www/zm-webui.html \
+	/tmp/zapret-manager* /tmp/zm_uninstall_panel.sh "$ZM_LUCI_CACHE" \
+	/tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null
+[ -s /etc/zm-steer/owned ] || rm -rf /usr/share/zm-redbtn
+uci -q delete uhttpd.zmweb && uci -q commit uhttpd
 /etc/init.d/rpcd restart >/dev/null 2>&1
-/etc/init.d/uhttpd restart >/dev/null 2>&1             
-        echo -e "Zapret Manager ${GREEN}для ${NC}LuCI ${GREEN}удалён!${NC}\n"
-    else
-        sh <(wget -qO - "${GH_RAW}/StressOzz/Zapret-Manager/main/ZapretManager_LuCI.sh")
-    fi
-    PAUSE
+/etc/init.d/uhttpd restart >/dev/null 2>&1
+echo -e "Zapret Manager ${GREEN}для ${NC}WEB ${GREEN}+ ${NC}LuCI ${GREEN}удалён!${NC}\n"
+else
+[ "$ZML_ACT" = update ] && echo -e "\n${MAGENTA}Обновляем Zapret Manager для WEB + LuCI${NC} ${ZML_INST:-?} → $ZML_LAST"
+rm -f "$ZM_LUCI_CACHE"
+sh <(wget -qO - "$ZM_LUCI_URL")
+fi
+PAUSE
 }
 is_expert_mode() { [ -f "$EXPERT_MODE_FILE" ]; }; toggle_expert_mode() { if is_expert_mode; then rm -f "$EXPERT_MODE_FILE"; echo -e "\nExpert mode ${GREEN}выключен!${NC}\n"; else echo 1 > "$EXPERT_MODE_FILE"; echo -e "\nExpert mode ${GREEN}включён!${NC}\n"; fi; PAUSE; }
 sys_menu() { while true; do web_is_enabled && WEB_TEXT="Удалить доступ к скрипту из браузера" || WEB_TEXT="Активировать доступ к скрипту из браузера"; is_expert_mode && EXPERT_TEXT="${GREEN}Выключить${NC} Expert mode" || EXPERT_TEXT="${GREEN}Включить${NC} Expert mode"
@@ -1554,7 +1553,7 @@ BYEDPI_INSTALL() { if pkg_is_installed byedpi; then BYEDPI_DELETE; return; fi; e
 BYEDPI_URL="${GH_MAIN}/DPITrickster/ByeDPI-OpenWrt/releases/download/${RELEASE_TAG}/${BYEDPI_FILE}"; echo -e "${CYAN}Скачиваем ${NC}$BYEDPI_FILE"; cd "$tmpDIR" || return 1; wget -q -U "Mozilla/5.0" -O "$BYEDPI_FILE" "$BYEDPI_URL" || { echo -e "\n${RED}Не удалось скачать:${NC}\n"; echo "$BYEDPI_URL"; rm -rf "$tmpDIR"; PAUSE; return 1; }
 echo -e "${CYAN}Устанавливаем ${NC}ByeDPI"; if ! $INSTALL "$BYEDPI_FILE" >/dev/null 2>&1; then echo -e "\n${RED}Не удалось установить ByeDPI!${NC}\n"; rm -rf "$tmpDIR"; PAUSE; return 1; fi; rm -rf "$tmpDIR"; if [ -f /etc/init.d/byedpi ]
 then /etc/init.d/byedpi enable >/dev/null 2>&1; /etc/init.d/byedpi start >/dev/null 2>&1; fi; echo -e "ByeDPI ${GREEN}установлен!${NC}\n"; PAUSE; }
-BYEDPI_DELETE() { echo -e "\n${MAGENTA}Удаление ByeDPI${NC}"; echo -e "${CYAN}Останавливаем ${NC}ByeDPI"; /etc/init.d/byedpi stop >/dev/null 2>&1; /etc/init.d/byedpi disable >/dev/null 2>&1; echo -e "${CYAN}Удаляем пакет ${NC}ByeDPI"
+BYEDPI_DELETE() { echo -e "\n${MAGENTA}Удаление ByeDPI${NC}"; echo -e "${CYAN}Останавливаем ${NC}ByeDPI"; /etc/init.d/byedpi stop >/dev/null 2>&1; /etc/init.d/byedpi disable >/dev/null 2>&1; if bt_installed; then BYEDPI_RESTORE_DNS_STATE; echo -e "${YELLOW}Пакет используется ${NC}ByeTube${YELLOW} — служба ByeDPI остановлена, пакет оставлен${NC}\n"; PAUSE; return; fi; echo -e "${CYAN}Удаляем пакет ${NC}ByeDPI"
 $DELETE byedpi >/dev/null 2>&1; rm -f /etc/init.d/byedpi; rm -rf /opt/byedpi; rm -f /etc/config/byedpi; BYEDPI_RESTORE_DNS_STATE; echo -e "ByeDPI ${GREEN}удалён!${NC}\n"; PAUSE; }
 BYEDPI_NETSHIFT() { if ! pkg_is_installed byedpi; then echo -e "\nByeDPI${RED} не установлен!${NC}\n"; PAUSE; return; fi; if ! pkg_is_installed netshift; then echo -e "\nNetShift${RED} не установлен!${NC}\n"; PAUSE; return; fi; echo -e "\n${MAGENTA}Интеграция ByeDPI в NetShift${NC}"
 rm -f /tmp/byedpi_dns_backup; BYEDPI_SAVE_DNS_STATE; echo -e "${CYAN}Отключаем локальный ${NC}DNS"; uci set dhcp.@dnsmasq[0].localuse='0'; uci commit dhcp; echo -e "${CYAN}Перезапускаем ${NC}dnsmasq"; /etc/init.d/dnsmasq restart >/dev/null 2>&1; echo -e "${CYAN}Настраиваем стратегию ${NC}ByeDPI"
@@ -1578,8 +1577,7 @@ else echo -e "${CYAN}3) ${GREEN}Установить ${NC}AmneziaWG"; fi; if uci
 if [ -f /etc/config/netshift ] && grep -q "^[[:space:]]*option subscription_url" /etc/config/netshift; then echo -e "${CYAN}5) ${GREEN}Сменить ${NC}VPN подписку${GREEN} в ${NC}NetShift"; else echo -e "${CYAN}5) ${GREEN}Интегрировать ${NC}VPN подписку${GREEN} в ${NC}NetShift"; fi
 echo -e "${CYAN}6) ${GREEN}Интегрировать ${NC}AWG${GREEN} в ${NC}NetShift"; echo -e "${CYAN}7) ${GREEN}Интегрировать ${NC}ByeDPI${GREEN} в ${NC}NetShift"; if pkg_is_installed byedpi; then echo -e "${CYAN}8) ${GREEN}Изменить стратегию ${NC}ByeDPI"; fi
 echo -e "${CYAN}Enter) ${GREEN}Вернуться в предыдущее меню${NC}"; echo -ne "\n${YELLOW}Выберите пункт:${NC} "; read -r choicePOD; case "$choicePOD" in 1) PODKOP_INSTALL ;; 2) BYEDPI_INSTALL ;;
-3) if pkg_is_installed amneziawg-tools && pkg_is_installed luci-proto-amneziawg && pkg_is_installed kmod-amneziawg; then if ! pkg_is_installed splify; then AWG_DELETE
-else echo -e "\n${RED}Удаление невозможно!${NC}"; echo -e "AmneziaWG ${YELLOW}используется в ${NC}splify\n"; PAUSE; fi; else install_AWG; echo -e "\nAmneziaWG ${GREEN}установлен!${NC}\n"; PAUSE; fi ;;
+3) if pkg_is_installed amneziawg-tools && pkg_is_installed luci-proto-amneziawg && pkg_is_installed kmod-amneziawg; then if pkg_is_installed splify; then echo -e "\n${RED}Удаление невозможно!${NC}"; echo -e "AmneziaWG ${YELLOW}используется в ${NC}splify\n"; PAUSE; elif grep -q '^net zmwarp' /etc/zm-steer/owned 2>/dev/null; then echo -e "\n${RED}Удаление невозможно!${NC}"; echo -e "AmneziaWG ${YELLOW}используется в ${NC}Steer\n"; PAUSE; else AWG_DELETE; fi; else install_AWG; echo -e "\nAmneziaWG ${GREEN}установлен!${NC}\n"; PAUSE; fi ;;
 4) if uci -q get network.AWG >/dev/null 2>&1; then INT_DELETE; else install_AWG_INTER; echo -e "\n\nИнтерфейс AWG ${GREEN}установлен!${NC}\n"; fi ;; 5) PODKOP_VPN ;; 6) integration_AWG ;; 7) BYEDPI_NETSHIFT ;; 8) if pkg_is_installed byedpi; then fix_strategy; fi ;; *) return ;; esac; done; }
 # ==========================================
 # Информация
@@ -1606,14 +1604,12 @@ get_TG_versions
             fi
         fi
         is_expert_mode && echo -e "${YELLOW}Expert mode:${NC}         ${GREEN}включён${NC}"
-        SPL_V_VER
-        [ -n "$SPL_INST_VER" ] && { [ "$SPL_VER" = "$SPL_INST_VER" ] && echo -e "${YELLOW}splify:${NC}              ${GREEN}$SPL_INST_VER${NC}" || echo -e "${YELLOW}splify:${NC}              ${RED}$SPL_INST_VER (доступно обновление)${NC}"; }
-
-        if [ -f /etc/init.d/steer ]; then echo -e "${YELLOW}splify2:${NC}             ${GREEN}установлен${NC}"; fi
+        st_zm_owned && echo -e "${YELLOW}Steer:${NC}               $(st_state_line)"
         case "$(/etc/init.d/mihomo status 2>/dev/null)" in
             running) echo -e "${YELLOW}Mixomo:              ${GREEN}запущен${NC}" ;;
             inactive) echo -e "${YELLOW}Mixomo:              ${RED}остановлен${NC}" ;;
         esac
+        bt_installed && echo -e "${YELLOW}ByeTube:${NC}             $(bt_state_line)"
         TGSTATUS=""
         if pidof tg-ws-proxy-go >/dev/null 2>&1; then
             if [ -n "$INSTALLED_VER_GO" ] && [ -n "$TG_GO_VERSION" ] && [ "$INSTALLED_VER_GO" != "$TG_GO_VERSION" ]; then
@@ -1658,7 +1654,7 @@ fi
         fi
         pkg_is_installed netshift && PODKOP_VER && echo -e "${YELLOW}NetShift:${NC}            $PODKOP_STATUS"
         if web_is_enabled; then echo -e "${YELLOW}Доступ из браузера:${NC}  $LAN_IP:7681"; fi
-        if [ -f /www/zm-webui.html ] && uci -q get uhttpd.zmweb >/dev/null 2>&1; then ZMW_PORT=$(uci -q get uhttpd.zmweb.listen_http | awk '{print $1}' | sed 's/.*://'); echo -e "${YELLOW}Web-панель:${NC}          http://$LAN_IP:${ZMW_PORT:-7788}"; fi
+        if [ -e "$LUCI_EDITION" ]; then zm_luci_state; ZMW_URL=""; if [ -f /www/zm-webui.html ] && uci -q get uhttpd.zmweb >/dev/null 2>&1; then ZMW_PORT=$(uci -q get uhttpd.zmweb.listen_http | awk '{print $1}' | sed 's/.*://'); ZMW_URL=" ${NC}/ http://$LAN_IP:${ZMW_PORT:-7788}"; fi; if [ "$ZML_ACT" = update ]; then echo -e "${YELLOW}WEB + LuCI:${NC}          ${RED}${ZML_INST:-?} (доступно обновление $ZML_LAST)$ZMW_URL${NC}"; else echo -e "${YELLOW}WEB + LuCI:${NC}          ${GREEN}${ZML_INST:-установлен}$ZMW_URL${NC}"; fi; fi
 
 		
         quic_is_blocked && if quic_is_blocked; then echo -e "${YELLOW}Блокировка QUIC:${NC}     ${GREEN}включена${NC}"; fi
@@ -1737,6 +1733,63 @@ read HOUR; case "$HOUR" in ''|*[!0-9]*) echo -e "\n${RED}Ошибка! Введ�
 then echo -e "\n${RED}Ошибка! Диапазон должен быть от ${NC}0 ${RED}до ${NC}23\n"; PAUSE; return; fi; break; done; echo "0 $HOUR * * * $CRON_CMD" >> "$CRON_FILE"; /etc/init.d/cron restart
 echo -e "\n${GREEN}Автоперезапуск ${NC}Mihomo ${GREEN}включен!${NC}\n"; PAUSE ;; *) return ;; esac; }
 check_mihomo() { if [ ! -f /etc/init.d/mihomo ]; then echo -e "\n${RED}Mixomo не установлен!${NC}\n"; PAUSE; return 1; fi; return 0; }
+BT_TEST_DIR="/tmp/bytetube-test"
+bt_installed() { [ -x /usr/bin/bytetube ] && [ -x /etc/init.d/bytetube ]; }
+bt_running() { ubus call service list '{"name":"bytetube"}' 2>/dev/null | grep -q '"running": *true'; }
+bt_state_line() { if ! bt_installed; then echo -e "${RED}не установлен${NC}"; elif [ "$(uci -q get bytetube.main.enabled)" != "1" ]; then echo -e "${RED}выключен${NC}"; elif bt_running; then echo -e "${GREEN}запущен${NC}"; else echo -e "${RED}остановлен${NC}"; fi; }
+bt_payload() { local src="/tmp/zm_bt_src.sh" f="/tmp/zm_bt_payload.sh"; rm -f "$src" "$f"
+echo -e "${CYAN}Скачиваем файлы ${NC}ByeTube"; { curl -fsSL --connect-timeout 10 --max-time 180 -o "$src" "$ZM_LUCI_URL" || wget -q -U "Mozilla/5.0" -T 20 -O "$src" "$ZM_LUCI_URL"; } >/dev/null 2>&1
+grep -q '^_bytetube_install_payload() {$' "$src" 2>/dev/null || cp /opt/zapret-manager-luci/backend.sh "$src" 2>/dev/null
+awk '/^_bytetube_install_payload\(\) \{$/{p=1} p{print; if(h){ if($0=="YTB_FILE_END_7f3a9c") h=0; next } if($0 ~ /<<.YTB_FILE_END_7f3a9c.$/) h=1; else if($0=="}") exit}' "$src" > "$f" 2>/dev/null; rm -f "$src"
+if [ "$(tail -n 1 "$f" 2>/dev/null)" != "}" ] || ! grep -q "cat > /usr/bin/bytetube" "$f"; then rm -f "$f"; echo -e "\n${RED}Не удалось получить файлы ${NC}ByeTube\n"; return 1; fi; . "$f"; rm -f "$f"; }
+bt_dnsmasq_full() { if dnsmasq --version 2>/dev/null | grep -Eq '(^| )nftset( |$)'; then return 0; fi; echo -e "${CYAN}Заменяем ${NC}dnsmasq${CYAN} на ${NC}dnsmasq-full${CYAN} (нужен nftset)${NC}"; cp /etc/config/dhcp /tmp/dhcp.ytb.bak 2>/dev/null
+pkg_is_installed dnsmasq && $DELETE dnsmasq >/dev/null 2>&1; pkg_is_installed dnsmasq-dhcpv6 && $DELETE dnsmasq-dhcpv6 >/dev/null 2>&1; rm -f /tmp/resolv.conf
+if grep -qs '^nameserver' /tmp/resolv.conf.d/resolv.conf.auto; then cp /tmp/resolv.conf.d/resolv.conf.auto /tmp/resolv.conf; else printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /tmp/resolv.conf; fi
+if ! $INSTALL dnsmasq-full >/dev/null 2>&1; then echo -e "${RED}Не удалось установить ${NC}dnsmasq-full${RED}, возвращаем ${NC}dnsmasq"; $INSTALL dnsmasq >/dev/null 2>&1; [ -f /etc/config/dhcp ] || cp /tmp/dhcp.ytb.bak /etc/config/dhcp 2>/dev/null; /etc/init.d/dnsmasq restart >/dev/null 2>&1; return 1; fi
+[ -f /etc/config/dhcp ] || cp /tmp/dhcp.ytb.bak /etc/config/dhcp 2>/dev/null; /etc/init.d/dnsmasq enable >/dev/null 2>&1; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }
+bt_byedpi() { BT_NEW_BYEDPI=0; { [ -x /usr/bin/ciadpi ] || [ -x /usr/bin/byedpi ]; } && return 0; local f="byedpi_${BYEDPI_LATEST_VER}-r1_${LOCAL_ARCH}.${RAZ}"; local u="${GH_MAIN}/DPITrickster/ByeDPI-OpenWrt/releases/download/${RELEASE_TAG}/$f"
+echo -e "${CYAN}Скачиваем ${NC}$f"; wget -q -U "Mozilla/5.0" -O "/tmp/$f" "$u" || { echo -e "\n${RED}Не удалось скачать:\n${NC}$u\n"; rm -f "/tmp/$f"; return 1; }
+echo -e "${CYAN}Устанавливаем ${NC}ByeDPI"; $INSTALL "/tmp/$f" >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось установить:\n${NC}$u\n"; rm -f "/tmp/$f"; return 1; }; rm -f "/tmp/$f"; BT_NEW_BYEDPI=1; }
+BYETUBE_INSTALL() { local act="Устанавливаем"; bt_installed && act="Обновляем"; echo -e "\n${MAGENTA}$act ByeTube${NC}"
+command -v fw4 >/dev/null 2>&1 || { echo -e "\n${RED}Нужен ${NC}firewall4${RED} (OpenWrt 22.03+)${NC}\n"; PAUSE; return 1; }; command -v nft >/dev/null 2>&1 || { echo -e "\n${RED}Не найден ${NC}nft\n"; PAUSE; return 1; }
+if ip rule add pref 8999 fwmark 0x10000/0x10000 lookup 89 2>/dev/null; then ip rule del pref 8999 2>/dev/null; else echo -e "\n${RED}Ваш ${NC}ip${RED} не поддерживает fwmark с маской!\n${YELLOW}Установите ${NC}ip-full${YELLOW} и повторите${NC}\n"; PAUSE; return 1; fi
+update_packages || return 1; if ! pkg_is_installed kmod-tun; then echo -e "${CYAN}Устанавливаем ${NC}kmod-tun"; $INSTALL kmod-tun >/dev/null 2>&1 || { echo -e "\n${RED}Не удалось установить ${NC}kmod-tun\n"; PAUSE; return 1; }; fi
+bt_dnsmasq_full || { echo; PAUSE; return 1; }; BT_NEW_HEV=0; if ! pkg_is_installed hev-socks5-tunnel; then echo -e "${CYAN}Устанавливаем ${NC}hev-socks5-tunnel"; $INSTALL hev-socks5-tunnel >/dev/null 2>&1 || { echo -e "\n${RED}Пакет ${NC}hev-socks5-tunnel${RED} не найден (есть в OpenWrt 24.10+)${NC}\n"; PAUSE; return 1; }; BT_NEW_HEV=1; fi
+bt_byedpi || { PAUSE; return 1; }; for p in ca-bundle curl; do pkg_is_installed "$p" || $INSTALL "$p" >/dev/null 2>&1 || echo -e "${YELLOW}Не удалось установить ${NC}$p${YELLOW} — подбор стратегии работать не будет${NC}"; done
+[ "$BT_NEW_BYEDPI" = 1 ] && [ -x /etc/init.d/byedpi ] && { /etc/init.d/byedpi stop >/dev/null 2>&1; /etc/init.d/byedpi disable >/dev/null 2>&1; }
+[ "$BT_NEW_HEV" = 1 ] && [ -x /etc/init.d/hev-socks5-tunnel ] && { /etc/init.d/hev-socks5-tunnel stop >/dev/null 2>&1; /etc/init.d/hev-socks5-tunnel disable >/dev/null 2>&1; }
+bt_payload || { PAUSE; return 1; }; echo -e "${CYAN}Устанавливаем службу ${NC}ByeTube"; _bytetube_install_payload; rm -rf /tmp/luci-indexcache* /tmp/luci-modulecache; /etc/init.d/rpcd reload >/dev/null 2>&1
+echo -e "${CYAN}Запускаем ${NC}ByeTube"; /etc/init.d/bytetube enable >/dev/null 2>&1; /etc/init.d/bytetube restart >/dev/null 2>&1; sleep 4; nslookup youtube.com 127.0.0.1 >/dev/null 2>&1; sleep 1; bt_check; echo -e "\nByeTube ${GREEN}$( [ "$act" = Обновляем ] && echo обновлён || echo установлен )!${NC}\n"; PAUSE; }
+bt_check() { local ST k; ST=$(/usr/bin/bytetube status 2>/dev/null); echo -e "\n${MAGENTA}Проверка компонентов${NC}"; for k in "byedpi:ByeDPI (ciadpi)" "hev:hev-socks5-tunnel" "tun:интерфейс ytb0" "nft:правила nftables" "route:policy routing" "dns:dnsmasq → nftset" "fw:firewall forward"
+do if [ "$(jsonfilter -s "$ST" -e "@.${k%%:*}" 2>/dev/null)" = "true" ]; then echo -e "${GREEN}[ok]${NC} ${k#*:}"; else echo -e "${RED}[--]${NC} ${k#*:}"; fi; done; }
+BYETUBE_REMOVE() { echo -e "\n${MAGENTA}Удаляем ByeTube${NC}"; [ -x /usr/bin/bytetube ] && /usr/bin/bytetube test stop >/dev/null 2>&1; if [ -x /etc/init.d/bytetube ]; then echo -e "${CYAN}Останавливаем ${NC}ByeTube"; /etc/init.d/bytetube stop >/dev/null 2>&1; /etc/init.d/bytetube disable >/dev/null 2>&1; fi
+if [ -x /usr/libexec/bytetube/net.sh ]; then /usr/libexec/bytetube/net.sh purge >/dev/null 2>&1; ( . /usr/libexec/bytetube/common.sh; rm -f "$(dnsmasq_confdir)/bytetube.conf" ); fi; echo -e "${CYAN}Удаляем файлы ${NC}ByeTube"
+rm -rf /etc/config/bytetube /etc/init.d/bytetube /etc/hotplug.d/firewall/90-bytetube /usr/bin/bytetube /usr/libexec/bytetube /usr/share/bytetube /usr/share/nftables.d/chain-pre/forward/50-bytetube.nft /var/etc/bytetube /var/run/bytetube.started "$BT_TEST_DIR" /etc/bytetube /lib/upgrade/keep.d/bytetube
+if [ "$1" = "purge" ]; then if pkg_is_installed netshift && [ -f /etc/config/byedpi ]; then echo -e "${YELLOW}ByeDPI используется для ${NC}NetShift${YELLOW} — оставляем пакет${NC}"; else echo -e "${CYAN}Удаляем пакет ${NC}ByeDPI"; $DELETE byedpi >/dev/null 2>&1; fi
+if [ -x /usr/bin/mihomo ] && [ -x /etc/init.d/magitrickle ]; then echo -e "${YELLOW}hev-socks5-tunnel используется ${NC}Mixomo${YELLOW} — оставляем пакет${NC}"; else echo -e "${CYAN}Удаляем пакет ${NC}hev-socks5-tunnel"; $DELETE hev-socks5-tunnel >/dev/null 2>&1; fi; fi
+/etc/init.d/dnsmasq restart >/dev/null 2>&1; /etc/init.d/firewall reload >/dev/null 2>&1; rm -rf /tmp/luci-indexcache* /tmp/luci-modulecache; /etc/init.d/rpcd reload >/dev/null 2>&1; echo -e "ByeTube ${GREEN}удалён!${NC}\n"; PAUSE; }
+bt_need() { bt_installed && return 0; echo -e "\nByeTube ${RED}не установлен!${NC}\n"; PAUSE; return 1; }
+BYETUBE_TOGGLE() { if [ "$(uci -q get bytetube.main.enabled)" = "1" ] && bt_running; then echo -e "\n${MAGENTA}Останавливаем ByeTube${NC}"; uci set bytetube.main.enabled='0'; uci commit bytetube; /etc/init.d/bytetube stop >/dev/null 2>&1; /etc/init.d/bytetube disable >/dev/null 2>&1; echo -e "ByeTube ${GREEN}остановлен!${NC}\n"
+else echo -e "\n${MAGENTA}Запускаем ByeTube${NC}"; uci set bytetube.main.enabled='1'; uci commit bytetube; /etc/init.d/bytetube enable >/dev/null 2>&1; /etc/init.d/bytetube restart >/dev/null 2>&1; sleep 3; bt_running && echo -e "ByeTube ${GREEN}запущен!${NC}\n" || { echo -e "ByeTube ${RED}не запустился!${NC}"; bt_check; echo; }; fi; PAUSE; }
+bt_apply() { echo -e "${CYAN}Применяем стратегию${NC}"; if /usr/bin/bytetube set-strategy "$1" 2>/dev/null | grep -q '"ok"'; then sleep 2; echo -e "${GREEN}Стратегия применена!${NC}\n"; else echo -e "${RED}Не удалось применить стратегию!${NC}\n"; fi; }
+BYETUBE_STRATEGY() { local cur list n=0 i line sel; cur=$(uci -q get bytetube.main.byedpi_opts); list=/etc/bytetube/strategies.txt; [ -s "$list" ] || list=/usr/share/bytetube/strategies.txt
+clear; echo -e "${MAGENTA}Выбор стратегии ByeTube${NC}\n\n${YELLOW}Текущая:${NC} $cur\n"; while IFS= read -r line; do line=$(printf '%s' "$line" | tr -d '\r' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//'); case "$line" in ''|'#'*) continue ;; esac; n=$((n + 1)); eval "BT_S_$n=\$line"
+if [ "$line" = "$cur" ]; then echo -e "${CYAN}$(printf "%2d" "$n")) ${GREEN}$line ${NC}(текущая)"; else echo -e "${CYAN}$(printf "%2d" "$n")) ${NC}$line"; fi; done < "$list"
+echo -e "${CYAN} 0) ${GREEN}Ввести свою стратегию${NC}\n${CYAN}Enter) ${GREEN}Вернуться в предыдущее меню${NC}\n"; echo -ne "${YELLOW}Выберите пункт:${NC} "; read sel; [ -z "$sel" ] && return
+if [ "$sel" = "0" ]; then echo -ne "\n${YELLOW}Введите параметры ciadpi:${NC} "; IFS= read -r line; [ -z "$line" ] && return; echo; bt_apply "$line"; PAUSE; return; fi
+case "$sel" in *[!0-9]*) return ;; esac; [ "$sel" -ge 1 ] && [ "$sel" -le "$n" ] || return; eval "line=\$BT_S_$sel"; echo; bt_apply "$line"; PAUSE; }
+BYETUBE_TEST() { local log="$BT_TEST_DIR/job.log" res="$BT_TEST_DIR/results.txt" r c n=0 i=0 line sel; command -v curl >/dev/null 2>&1 || { echo -e "\n${RED}Не установлен ${NC}curl\n"; PAUSE; return; }
+echo -e "\n${MAGENTA}Подбор стратегии ByeTube${NC}\n${YELLOW}Основная служба не затрагивается. Прервать — ${NC}Ctrl+C\n"; r=$(/usr/bin/bytetube test start 2>/dev/null); echo "$r" | grep -q '"error"' && { echo -e "${RED}$(echo "$r" | sed 's/.*"error":"\([^"]*\)".*/\1/')${NC}\n"; PAUSE; return; }
+trap '/usr/bin/bytetube test stop >/dev/null 2>&1' INT; sleep 1; while :; do c=$(wc -l < "$log" 2>/dev/null); c=${c:-0}; if [ "$c" -gt "$n" ]; then sed -n "$((n + 1)),${c}p" "$log" | grep -v '^__DONE__'; n=$c; fi; grep -q '^__DONE__' "$log" 2>/dev/null && break; sleep 1; done; trap - INT
+[ -s "$res" ] || { echo -e "\n${RED}Результатов нет${NC}\n"; PAUSE; return; }; echo -e "\n${MAGENTA}Результаты (лучшие сверху)${NC}"; while IFS= read -r line; do case "$line" in "Контрольный тест"*) echo -e "${YELLOW}$line${NC}"; continue ;; esac
+i=$((i + 1)); [ "$i" -gt 10 ] && break; eval "BT_R_$i=\${line% → *}"; echo -e "${CYAN}$(printf "%2d" "$i")) ${GREEN}${line##* → }${NC} ${line% → *}"; done < "$res"
+echo -ne "\n${YELLOW}Номер стратегии для применения (Enter — не применять):${NC} "; read sel; case "$sel" in ''|*[!0-9]*) return ;; esac; [ "$sel" -ge 1 ] && [ "$sel" -le "$i" ] || return; eval "line=\$BT_R_$sel"; echo; bt_apply "$line"; PAUSE; }
+BYETUBE_MENU() { local cur; while true; do clear; echo -e "${MAGENTA}Меню ByeTube${NC}\n"; echo -e "${YELLOW}ByeTube:${NC}             $(bt_state_line)"
+if bt_installed; then cur=$(uci -q get bytetube.main.byedpi_opts); [ ${#cur} -gt 70 ] && cur="$(printf '%s' "$cur" | cut -c1-70)..."; echo -e "${YELLOW}Стратегия:${NC}           $cur"; fi
+if bt_installed; then echo -e "\n${CYAN}1) ${GREEN}Обновить ${NC}ByeTube\n${CYAN}2) ${GREEN}Удалить ${NC}ByeTube\n${CYAN}3) ${GREEN}Удалить ${NC}ByeTube ${GREEN}вместе с пакетами ${NC}ByeDPI${GREEN} и ${NC}hev-socks5-tunnel"
+if [ "$(uci -q get bytetube.main.enabled)" = "1" ] && bt_running; then echo -e "${CYAN}4) ${GREEN}Остановить ${NC}ByeTube"; else echo -e "${CYAN}4) ${GREEN}Запустить ${NC}ByeTube"; fi
+echo -e "${CYAN}5) ${GREEN}Выбрать стратегию${NC}\n${CYAN}6) ${GREEN}Подобрать стратегию ${NC}(тест)\n${CYAN}7) ${GREEN}Проверить компоненты${NC}"; else echo -e "\n${CYAN}1) ${GREEN}Установить ${NC}ByeTube"; fi
+echo -e "${CYAN}Enter) ${GREEN}Вернуться в предыдущее меню${NC}\n"; echo -ne "${YELLOW}Выберите пункт:${NC} "; read choiceB; case "$choiceB" in 1) BYETUBE_INSTALL ;; 2) bt_need && BYETUBE_REMOVE ;; 3) bt_need && BYETUBE_REMOVE purge ;; 4) bt_need && BYETUBE_TOGGLE ;; 5) bt_need && BYETUBE_STRATEGY ;; 6) bt_need && BYETUBE_TEST ;; 7) bt_need && { bt_check; echo; PAUSE; } ;; *) return ;; esac; done; }
 MIXOMO_MENU() { while true; do LINECRON=$(grep -F "/etc/init.d/mihomo restart" /etc/crontabs/root 2>/dev/null | head -n 1); if command -v apk >/dev/null 2>&1; then Magi_INSTALL_VER="$(apk info -v 2>/dev/null | grep '^magitrickle-' | cut -d- -f2)"
 else Magi_INSTALL_VER="$(opkg status magitrickle 2>/dev/null | awk '/^Version:/ {sub(/-1$/,"",$2); sub(/-r1$/,"",$2); print $2}')"; fi; clear; echo -e "${MAGENTA}Меню Mixomo${NC}\n"; check_status; [ -f /etc/mihomo/config.yaml ] && grep -q "engage.cloudflareclient.com" /etc/mihomo/config.yaml && echo -e "${YELLOW}WARP endpoint:       ${CYAN}Россия${NC}"
 if [ -f "$CONFIGPATH" ]; then if grep -Fq 'name: Google_ai' "$CONFIGPATH"; then echo -e "${YELLOW}Используется список: ${NC}ITDog"; elif grep -Fq 'name: Meta (WA+FB+Instagram)' "$CONFIGPATH"
@@ -1749,7 +1802,7 @@ then echo -e "${CYAN}4) ${GREEN}Сменить ${NC}VPN${GREEN} подписку
 echo -e "${CYAN}6) ${GREEN}Интегрировать ${NC}/root/WARP.conf${GREEN} в ${NC}Mihomo"; echo -e "${CYAN}7) ${GREEN}Выбрать и установить панель для ${NC}Mihomo"; if grep -qF "/etc/init.d/mihomo restart" /etc/crontabs/root 2>/dev/null
 then echo -e "${CYAN}8) ${GREEN}Выключить автоперезапуск ${NC}Mihomo"; else echo -e "${CYAN}8) ${GREEN}Включить автоперезапуск ${NC}Mihomo"; fi; [ -n "$Magi_INSTALL_VER" ] && { [ "$Magi_INSTALL_VER" != "$MT_VERSION" ] && echo -e "${CYAN}9) ${GREEN}Обновить ${NC}MagiTrickle"; }
 echo -e "${CYAN}Enter) ${GREEN}Вернуться в предыдущее меню\n"; echo -ne "${YELLOW}Выберите пункт: ${NC}"; read choiceM; case "$choiceM" in 1) wget -q -O - ${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Mixomo/mixomo_openwrt_install.sh | sh; PAUSE ;;
-2) wget -q -O - ${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Mixomo/mixomo_openwrt_delete.sh | sh; sed -i "\|$CRON_CMD|d" "$CRON_FILE" >/dev/null 2>&1; /etc/init.d/cron restart >/dev/null 2>&1; echo -e "\n${YELLOW}Рекомендую сделать перезагрузку роутера!${NC}\n"; PAUSE ;;
+2) wget -q -O - ${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Mixomo/mixomo_openwrt_delete.sh | sh; if bt_installed && ! pkg_is_installed hev-socks5-tunnel; then echo -e "${CYAN}Возвращаем ${NC}hev-socks5-tunnel${CYAN} для ${NC}ByeTube"; $INSTALL hev-socks5-tunnel >/dev/null 2>&1; /etc/init.d/hev-socks5-tunnel disable >/dev/null 2>&1; /etc/init.d/hev-socks5-tunnel stop >/dev/null 2>&1; /etc/init.d/bytetube restart >/dev/null 2>&1; fi; sed -i "\|$CRON_CMD|d" "$CRON_FILE" >/dev/null 2>&1; /etc/init.d/cron restart >/dev/null 2>&1; echo -e "\n${YELLOW}Рекомендую сделать перезагрузку роутера!${NC}\n"; PAUSE ;;
 3) check_mihomo || continue; magitrickle_config ;; 4) check_mihomo || continue; PODPISKA ;; 5) register_warp || return 1; choose_endpoint || return 1; WARP_TO_ROOT; echo; PAUSE ;; 6) check_mihomo || continue; wget -q -O - ${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Mixomo/WARP_to_conf.sh | sh; echo; PAUSE ;;
 7) check_mihomo || continue; UI_INSTALL ;; 8) check_mihomo || continue; MIXOMO_RESTART ;; 9) check_mihomo || continue; ARCH_MT=$(grep "^OPENWRT_ARCH=" /etc/os-release | cut -d'"' -f2); FILE_MT="/tmp/magitrickle.$RAZ"; URL_MT="${GH_MAIN}/MagiTrickle/MagiTrickle/releases/download/${MT_VERSION}/magitrickle_${MT_VERSION}-${SUF_MT}1_openwrt_${ARCH_MT}.$RAZ"
 echo -e "\n${MAGENTA}Обновляем MagiTrickle\n${CYAN}Скачиваем\n${NC}$URL_MT"; curl -Lf --connect-timeout 6 --retry 3 --retry-delay 1 -o "$FILE_MT" "$URL_MT" >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка скачивания${NC}\n"; PAUSE; return 1; };  update_packages || return 1
@@ -1948,19 +2001,20 @@ if grep -qE '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' "$EXCL_FILE" 2>/dev
         echo -e "${YELLOW}Исключённые IP:      ${GREEN}есть${NC}"
     fi
 fi
-echo -e "\n${CYAN}1) ${GREEN}Меню${NC} Zapret\n${CYAN}2) ${GREEN}$Z2_ACTION_TEXT${NC} Zapret2\n${CYAN}3) ${GREEN}Меню ${NC}splify\n${CYAN}4) ${GREEN}Меню ${NC}Mixomo\n${CYAN}5) ${GREEN}Меню ${NC}NetShift\n${CYAN}6) ${GREEN}Меню ${NC}TG WS Proxy\n${CYAN}7) ${GREEN}Меню ${NC}DNS over HTTPS\n${CYAN}8) ${GREEN}Меню управления доменами в ${NC}hosts"
+echo -e "\n${CYAN}1) ${GREEN}Меню${NC} Zapret\n${CYAN}2) ${GREEN}$Z2_ACTION_TEXT${NC} Zapret2\n${CYAN}3) ${GREEN}Меню ${NC}Steer\n${CYAN}4) ${GREEN}Меню ${NC}Mixomo\n${CYAN}5) ${GREEN}Меню ${NC}ByeTube\n${CYAN}6) ${GREEN}Меню ${NC}NetShift\n${CYAN}7) ${GREEN}Меню ${NC}TG WS Proxy\n${CYAN}8) ${GREEN}Меню ${NC}DNS over HTTPS\n${CYAN}9) ${GREEN}Меню управления доменами в ${NC}hosts"
 echo -e "${CYAN}f) ${GREEN}Удалить ${NC}→${GREEN} установить ${NC}→${GREEN} настроить${NC} Zapret\n${CYAN}m) ${GREEN}Системное меню${NC}"; [ "$SHOW_S" = "1" ] && echo -e "${CYAN}s) ${GREEN}$S_ACTION${NC} $S_NAME"
-echo -e "${CYAN}w)${GREEN} $( [ -e "$LUCI_EDITION" ] && echo -e "Удалить ${NC}Zapret Manager ${GREEN}для ${NC}WEB ${GREEN}+ ${NC}LuCI" || echo -e "Установить ${NC}Zapret Manager ${GREEN}для ${NC}WEB ${GREEN}+ ${NC}LuCI" )"
+zm_luci_state; case "$ZML_ACT" in update) echo -e "${CYAN}w)${GREEN} Обновить ${NC}Zapret Manager ${GREEN}для ${NC}WEB ${GREEN}+ ${NC}LuCI ${GREEN}(${NC}${ZML_INST:-?} → $ZML_LAST${GREEN})${NC}" ;; remove) echo -e "${CYAN}w)${GREEN} Удалить ${NC}Zapret Manager ${GREEN}для ${NC}WEB ${GREEN}+ ${NC}LuCI" ;; *) echo -e "${CYAN}w)${GREEN} Установить ${NC}Zapret Manager ${GREEN}для ${NC}WEB ${GREEN}+ ${NC}LuCI" ;; esac
 [ "$SHOW_S" = "2" ] && echo -e "${CYAN}s1) ${GREEN}$S1_ACTION${NC} Zapret\n${CYAN}s2) ${GREEN}$S2_ACTION${NC} Zapret2"; echo -ne "${CYAN}Enter) ${GREEN}Выход${NC}\n\n${YELLOW}Выберите пункт:${NC} " && read choice
 case "$choice" in 999) echo; uninstall_zapret "1"; install_Zapret "1"; curl -fsSL ${GH_RAW}/StressOzz/Test/refs/heads/main/zapret -o "$CONF"; hosts_add "$ALL_BLOCKS"; rm -f "$EXCLUDE_FILE"; wget -q -U "Mozilla/5.0" -O "$EXCLUDE_FILE" "$EXCLUDE_URL"; ZAPRET_RESTART; PAUSE;;
 1) MENU_ZAPRET;;
 2) $Z2_ACTION_FUNC;;
-3) SPL_MENU ;;
+3) STEER_MENU ;;
 4) MIXOMO_MENU;;
-5) PODKOP_menu;;
-6) menu_TG;;
-7) DoH_menu;;
-8) menu_hosts;;
+5) BYETUBE_MENU;;
+6) PODKOP_menu;;
+7) menu_TG;;
+8) DoH_menu;;
+9) menu_hosts;;
 f|F|а|А) zapret_key;;
 m|M|ь|Ь) sys_menu;;
 s|S|ы|Ы) toggle_zapret;;
