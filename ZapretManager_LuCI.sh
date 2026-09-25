@@ -1,5 +1,5 @@
 #!/bin/sh
-# Version: 1.45
+# Version: 1.46
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -70,7 +70,7 @@ cat > '/opt/zapret-manager-luci/backend.sh' << 'ZM_INSTALLER_EOF'
 umask 022
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.45"
+ZM_VERSION="1.46"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -5783,9 +5783,16 @@ _st_srs_get() { # НАБОР
 	touch "$ST_RUN/srs.$1.done"
 }
 
+_st_chname() {
+	local n="$2$3"
+	[ "$(printf '%s' "$n" | wc -c)" -le 31 ] || n="$1$3"
+	[ "$(printf '%s' "$n" | wc -c)" -le 31 ] || n="$(printf '%s' "$1" | cut -c1-20)$3"
+	esc "$n"
+}
+
 _st_svc_channels() { # ID
 	local id="$1" name sets set dom="" pfx="" narrow="" f proto ports ch="" sep="" took=""
-	name="$(esc "$(_rb_svc_field "$id" 2)")"
+	name="$(_rb_svc_field "$id" 2)"
 	sets="$(_rb_svc_field "$id" 8 | tr ',' ' ')"
 	for set in $sets; do
 		[ -f "$ST_RUN/used.$set" ] && continue
@@ -5809,13 +5816,13 @@ _st_svc_channels() { # ID
 		narrow=""
 	fi
 	[ "$id" = custom ] && [ -s "$ST_USER_DIR/$id.lst" ] && dom="\"$ST_USER_DIR/$id.lst\""
-	[ -n "$dom" ] && { ch="$ch$sep{\"name\":\"$name\",\"out\":\"$ST_OUT\",\"match\":{\"domains_files\":[$dom]}}"; sep=","; }
-	[ -n "$pfx" ] && { ch="$ch$sep{\"name\":\"$name (адреса)\",\"out\":\"$ST_OUT\",\"match\":{\"prefixes_files\":[$pfx]}}"; sep=","; }
+	[ -n "$dom" ] && { ch="$ch$sep{\"name\":\"$(_st_chname "$id" "$name")\",\"out\":\"$ST_OUT\",\"match\":{\"domains_files\":[$dom]}}"; sep=","; }
+	[ -n "$pfx" ] && { ch="$ch$sep{\"name\":\"$(_st_chname "$id" "$name" " (адреса)")\",\"out\":\"$ST_OUT\",\"match\":{\"prefixes_files\":[$pfx]}}"; sep=","; }
 	for set in $narrow; do
 		f="$ST_DIR/lists/$set"
 		proto=$(sed -n 's/^proto=//p' "$f.meta" | head -n1)
 		ports=$(sed -n 's/^ports=//p' "$f.meta" | head -n1 | sed 's/,/","/g')
-		ch="$ch$sep{\"name\":\"$name (голос)\",\"out\":\"$ST_OUT\",\"match\":{\"prefixes_files\":[\"$f.pfx\"]${proto:+,\"proto\":\"$proto\"}${ports:+,\"ports\":[\"$ports\"]}}}"
+		ch="$ch$sep{\"name\":\"$(_st_chname "$id" "$name" " (голос)")\",\"out\":\"$ST_OUT\",\"match\":{\"prefixes_files\":[\"$f.pfx\"]${proto:+,\"proto\":\"$proto\"}${ports:+,\"ports\":[\"$ports\"]}}}"
 		sep=","
 	done
 	printf '%s' "$ch"
