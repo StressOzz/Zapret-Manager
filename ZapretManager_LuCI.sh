@@ -1,5 +1,5 @@
 #!/bin/sh
-# Version: 1.56
+# Version: 1.60
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -70,7 +70,7 @@ cat > '/opt/zapret-manager-luci/backend.sh' << 'ZM_INSTALLER_EOF'
 umask 022
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.56"
+ZM_VERSION="1.60"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -5539,6 +5539,7 @@ _st_warp_iface_write() { # ХОСТ ПОРТ
 	case "$addr" in */*) ;; *) addr="$addr/32" ;; esac
 	uci -q delete "network.$ST_WARP_IF"
 	uci -q delete "network.${ST_WARP_IF}_peer"
+	_st_peers_drop "$ST_WARP_IF"
 	uci set "network.$ST_WARP_IF=interface"
 	uci set "network.$ST_WARP_IF.proto=amneziawg"
 	uci set "network.$ST_WARP_IF.private_key=$priv"
@@ -5592,6 +5593,13 @@ _st_warp_zone() {
 		_st_own "fw $ST_WARP_ZONE"
 		/etc/init.d/firewall reload >/dev/null 2>&1
 	fi
+}
+
+# Все пиры интерфейса, и безымянные тоже (их создаёт импорт конфига в LuCI): иначе у интерфейса
+# останется старый пир с тем же 0.0.0.0/0, трафик уйдёт ему, и новый сервер не ответит
+_st_peers_drop() { # ИНТЕРФЕЙС
+	local p
+	for p in $(uci -q -X show network | sed -n "s/^network\.\([^.=]*\)=amneziawg_$1\$/\1/p"); do uci -q delete "network.$p"; done
 }
 
 _st_warp_is_ru() { case " $ST_RU_COLOS " in *" $1 "*) return 0 ;; esac; return 1; }
@@ -5666,7 +5674,7 @@ _st_warp_ports() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА АДРЕС
 	echo "$ok"
 }
 
-_st_warp_scan() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА ЗАНЯТЫЕ_КОЛОНИИ ЗАНЯТЫЕ_АДРЕСА
+_st_warp_scan() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА ЗАНЯТЫЕ_КОЛОНИИ ЗАНЯТЫЕ_АДРЕСА [ФАЙЛ_ОБЩЕГО_СПИСКА]
 	local dev="$1" peer="$2" busy=" $3 " busyip=" $4 " r="$ST_RUN/scan.$1" cand ip ports port loss rtt colo pick f cls
 	mkdir -p "$ST_RUN"
 	: > "$r"; : > "$r.same"; : > "$r.nc"; : > "$r.ru"; : > "$r.notls"
@@ -5701,6 +5709,15 @@ _st_warp_scan() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА ЗАНЯТЫЕ_КОЛО
 		echo "$loss $rtt $ip $port $colo" >> "$r"
 		[ "$(grep -c . "$r")" -ge 3 ] && break
 	done
+	# Все найденные точки — в общий список, лучшие первыми: остальные туннели возьмут точки
+	# оттуда, без своей разведки (точка входа не зависит от ключей WARP)
+	if [ -n "$5" ]; then
+		for f in "$r" "$r.same" "$r.nc" "$r.ru" "$r.notls"; do
+			[ -s "$f" ] || continue
+			case "$f" in *.nc) cls=1 ;; *.ru) cls=2 ;; *.notls) cls=3 ;; *) cls=0 ;; esac
+			awk -v c="$cls" '{ printf "%d %s %s %s\n", c * 100000000 + $1 * 100000 + $2, $3, $4, $5 }' "$f"
+		done | sort -n | awk '{ print $2, $3, $4, $1 }' > "$5"
+	fi
 	for f in "$r" "$r.same" "$r.nc" "$r.ru" "$r.notls"; do
 		[ -s "$f" ] || continue
 		case "$f" in *.nc) cls=1 ;; *.ru) cls=2 ;; *.notls) cls=3 ;; *) cls=0 ;; esac
@@ -5713,6 +5730,30 @@ _st_warp_scan() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА ЗАНЯТЫЕ_КОЛО
 		esac
 		echo "$pick"
 		return 0
+	done
+	return 1
+}
+
+# Точка из общего списка разведки: подключиться и проверить HTTPS — секунды вместо новой разведки.
+# Порядок как у разведки: хорошая чужая колония → та же колония через другой адрес → запасные (без колонии, российские, без HTTPS).
+_st_warp_from_pool() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА ЗАНЯТЫЕ_КОЛОНИИ ЗАНЯТЫЕ_АДРЕСА ФАЙЛ -> «адрес порт колония ключ»
+	local dev="$1" peer="$2" busy=" $3 " busyip=" $4 " f="$5" ip port colo k pass good isbusy
+	[ -s "$f" ] || return 1
+	for pass in 1 2 3 4; do
+		while read -r ip port colo k <&3; do
+			[ -n "$ip" ] || continue
+			case "$busyip" in *" $ip "*) continue ;; esac
+			good=0; [ "$k" -lt 100000000 ] 2>/dev/null && good=1
+			isbusy=0; case "$busy" in *" $colo "*) isbusy=1 ;; esac
+			case "$pass$good$isbusy" in 110|211|300|401) ;; *) continue ;; esac
+			_st_stopped && return 1
+			_st_warp_link "$dev" "$peer" "$ip" "$port" || { echo "   $ip:$port — с этими ключами рукопожатия нет" >&2; continue; }
+			if [ "$good" = 1 ] && ! curl -s -o /dev/null --interface "$dev" --connect-timeout 4 --max-time 8 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null; then
+				echo "   $ip:$port — HTTPS через туннель не проходит" >&2; continue
+			fi
+			echo "$ip $port $colo $k"
+			return 0
+		done 3< "$f"
 	done
 	return 1
 }
@@ -5764,6 +5805,7 @@ _st_warp_own_iface() { # ФАЙЛ — интерфейс zmwarp из конфи�
 	fi
 	uci -q delete "network.$i"
 	uci -q delete "network.${i}_peer"
+	_st_peers_drop "$i"
 	uci set "network.$i=interface"
 	uci set "network.$i.proto=amneziawg"
 	uci set "network.$i.private_key=$priv"
@@ -5772,10 +5814,7 @@ _st_warp_own_iface() { # ФАЙЛ — интерфейс zmwarp из конфи�
 		uci add_list "network.$i.addresses=$a"
 	done
 	uci set "network.$i.mtu=${mtu:-1280}"
-	for k in jc jmin jmax s1 s2 s3 s4 h1 h2 h3 h4 i1 i2 i3 i4 i5 j1 j2 j3 itime; do
-		v="$(_awg_cv "$kv" interface "$k")"
-		[ -n "$v" ] && uci set "network.$i.awg_$k=$v"
-	done
+	_awg_iface_set "$f" "$i"
 	uci set "network.${i}_peer=amneziawg_$i"
 	uci set "network.${i}_peer.description=Свой WARP"
 	uci set "network.${i}_peer.public_key=$pub"
@@ -5869,6 +5908,8 @@ _st_warp_up() { # [repick]
 		while [ "$w" -lt 20 ] && ! _st_warp_ready_if "$i"; do w=$((w + 1)); sleep 1; done
 	done
 	: > "$ST_WARP_UP.tmp"
+	local pool="$ST_RUN/warp.pool"
+	rm -f "$pool"
 	for n in $ready; do
 		_st_stopped && break
 		i="$(_st_wif "$n")"
@@ -5878,9 +5919,12 @@ _st_warp_up() { # [repick]
 		if [ "$repick" != repick ] && grep -q "^$i " "$ST_WARP_UP" 2>/dev/null && _st_warp_alive_if "$i" && c="$(_st_colo_of "$i")" && ! _st_warp_is_ru "$c"; then
 			got="$(uci -q get "network.${i}_peer.endpoint_host") $(uci -q get "network.${i}_peer.endpoint_port") $c -"
 			_rb_say "WARP $n работает: колония $c"
+		elif [ -s "$pool" ] && got="$(_st_warp_from_pool "$i" "$peer" "$busy" "$busyip" "$pool")"; then
+			set -- $got
+			_rb_say "WARP $n работает: $1:$2, колония $3 — точка из общей разведки"
 		else
 			echo "   WARP $n: разведка"
-			if got="$(_st_warp_scan "$i" "$peer" "$busy" "$busyip")"; then
+			if got="$(_st_warp_scan "$i" "$peer" "$busy" "$busyip" "$pool")"; then
 				set -- $got
 				if ! _st_warp_link "$i" "$peer" "$1" "$2"; then
 					alt=""
@@ -7655,6 +7699,36 @@ $m"; done
 	fi
 }
 
+# Параметры AmneziaWG из [Interface] -> опции uci так же, как их пишет LuCI при импорте конфига:
+# HeaderProtectionKey -> awg_header_protection_key, Jc -> awg_jc, I1 -> awg_i1. Переносятся все,
+# кроме ключа, адресов, DNS и MTU (их панель задаёт сама) — новые версии AmneziaWG заработают без правок панели.
+_awg_iface_opts() { # ФАЙЛ -> строки «awg_имя значение»
+	awk 'function trim(s) { gsub(/^[ \t\r]+|[ \t\r]+$/, "", s); return s }
+		{ l = $0; sub(/[#;].*$/, "", l); l = trim(l); if (l == "") next
+		  if (l ~ /^\[.*\]$/) { sec = tolower(trim(substr(l, 2, length(l) - 2))); next }
+		  if (sec != "interface") next
+		  p = index(l, "="); if (!p) next
+		  k = trim(substr(l, 1, p - 1)); v = trim(substr(l, p + 1))
+		  if (v == "" || tolower(k) ~ /^(privatekey|address|dns|mtu|listenport|table|saveconfig|preup|postup|predown|postdown|fwmark)$/) next
+		  n = ""
+		  for (i = 1; i <= length(k); i++) { c = substr(k, i, 1); if (c ~ /[A-Z]/ && i > 1 && substr(k, i - 1, 1) ~ /[a-z0-9]/) n = n "_"; n = n tolower(c) }
+		  gsub(/[^a-z0-9_]/, "", n); if (n == "") next
+		  print "awg_" n, v }' "$1"
+}
+_awg_iface_set() { # ФАЙЛ ИНТЕРФЕЙС — записать эти параметры в uci
+	local o v
+	_awg_iface_opts "$1" | while read -r o v; do uci set "network.$2.$o=$v"; done
+}
+# Обратно: опции awg_* интерфейса -> строки конфига «Имя = значение» (awg_header_protection_key -> HeaderProtectionKey)
+_awg_uci_conf() { # ИНТЕРФЕЙС
+	local o v
+	for o in $(uci -q show "network.$1" | sed -n "s/^network\.$1\.\(awg_[a-z0-9_]*\)=.*/\1/p"); do
+		v="$(uci -q get "network.$1.$o")"
+		[ -n "$v" ] || continue
+		echo "$(echo "${o#awg_}" | awk -F_ '{ for (i = 1; i <= NF; i++) printf "%s%s", toupper(substr($i, 1, 1)), substr($i, 2) }') = $v"
+	done
+}
+
 _awg_conf_kv() { # ФАЙЛ
 	awk 'function trim(s) { gsub(/^[ \t\r]+|[ \t\r]+$/, "", s); return s }
 		{ l = $0; sub(/[#;].*$/, "", l); l = trim(l); if (l == "") next
@@ -7691,10 +7765,7 @@ do_awg_create() { # ИМЯ МАРШРУТ(0|1) ЗОНА(0|1)
 		uci add_list "network.$name.addresses=$a"
 	done
 	uci set "network.$name.mtu=${mtu:-1280}"
-	for k in jc jmin jmax s1 s2 s3 s4 h1 h2 h3 h4 i1 i2 i3 i4 i5 j1 j2 j3 itime; do
-		v="$(_awg_cv "$kv" interface "$k")"
-		[ -n "$v" ] && uci set "network.$name.awg_$k=$v"
-	done
+	_awg_iface_set "$f" "$name"
 	p="$(uci add network "amneziawg_$name")"
 	uci set "network.$p.description=$name"
 	uci set "network.$p.public_key=$pub"
@@ -7780,9 +7851,7 @@ do_awg_regen() { # ИНТЕРФЕЙС — новые ключи WARP прямо 
 		{ echo "ОШИБКА: ключи не получены — генераторы и Cloudflare не ответили"; return 1; }
 	_awg_say "Ключи получены (адрес $G_V4)"
 	if [ "$warp" = 1 ]; then
-		for k in jc jmin jmax s1 s2 s3 s4 h1 h2 h3 h4 i1 i2 i3 i4 i5 j1 j2 j3 itime; do
-			[ -n "$(uci -q get "network.$i.awg_$k")" ] && have=1
-		done
+		[ -n "$(_awg_uci_conf "$i")" ] && have=1
 	fi
 	{
 		echo "[Interface]"
@@ -7790,12 +7859,7 @@ do_awg_regen() { # ИНТЕРФЕЙС — новые ключи WARP прямо 
 		echo "Address = $G_V4${G_V6:+, $G_V6}"
 		echo "MTU = $(uci -q get "network.$i.mtu" || echo 1280)"
 		if [ "$have" = 1 ]; then
-			for k in jc jmin jmax s1 s2 s3 s4 h1 h2 h3 h4 i1 i2 i3 i4 i5 j1 j2 j3 itime; do
-				v="$(uci -q get "network.$i.awg_$k")"
-				[ -n "$v" ] || continue
-				case "$k" in jc) kk=Jc ;; jmin) kk=Jmin ;; jmax) kk=Jmax ;; itime) kk=Itime ;; *) kk="$(echo "$k" | tr 'a-z' 'A-Z')" ;; esac
-				echo "$kk = $v"
-			done
+			_awg_uci_conf "$i"
 		else
 			AWG_NO_I1=0
 			if _awg_installed; then
@@ -7855,10 +7919,7 @@ do_awg_steer_replace() { # ИНТЕРФЕЙС
 	cp "$f" "$c"; chmod 600 "$c"
 	_awg_say "Записываем конфиг в туннель Steer $i"
 	_st_with "$n" _st_warp_iface_write "${host:-162.159.192.1}" "${port:-2408}"
-	for k in jc jmin jmax s1 s2 s3 s4 h1 h2 h3 h4 i1 i2 i3 i4 i5 j1 j2 j3 itime; do
-		v="$(_awg_cv "$kv" interface "$k")"
-		[ -n "$v" ] && uci set "network.$i.awg_$k=$v"
-	done
+	_awg_iface_set "$f" "$i"
 	uci -q delete "network.$i.auto"
 	uci commit network
 	rm -f "$f" "$kv"
@@ -7898,12 +7959,7 @@ _awg_export() { # ИНТЕРФЕЙС -> .conf в stdout
 	echo "PrivateKey = $(uci -q get "network.$i.private_key")"
 	echo "Address = $(uci -q get "network.$i.addresses" | sed 's/ /, /g')"
 	v="$(uci -q get "network.$i.mtu")"; [ -n "$v" ] && echo "MTU = $v"
-	for k in jc jmin jmax s1 s2 s3 s4 h1 h2 h3 h4 i1 i2 i3 i4 i5 j1 j2 j3 itime; do
-		v="$(uci -q get "network.$i.awg_$k")"
-		[ -n "$v" ] || continue
-		case "$k" in jc) k=Jc ;; jmin) k=Jmin ;; jmax) k=Jmax ;; itime) k=Itime ;; *) k="$(echo "$k" | tr 'a-z' 'A-Z')" ;; esac
-		echo "$k = $v"
-	done
+	_awg_uci_conf "$i"
 	echo ""
 	echo "[Peer]"
 	echo "PublicKey = $(uci -q get "network.$p.public_key")"
@@ -8594,6 +8650,24 @@ function parseSize(v) {
 	return parseFloat(m[1].replace(',', '.')) * ({ '': 1, K: 1024, M: 1048576, G: 1073741824, T: 1099511627776 })[m[2].toUpperCase()];
 }
 
+// Скрытое значение (IP, адрес сервера): размыто, по нажатию показывается и снова прячется.
+// Открытые запоминаются до перезагрузки страницы, чтобы перерисовка не прятала их обратно.
+var _zmRevealed = {};
+function secret(text) {
+	text = String(text == null ? '' : text);
+	var el = E('span', { 'class': 'zm-secret' + (_zmRevealed[text] ? ' zm-secret-open' : ''), 'title': _zmRevealed[text] ? 'Нажмите, чтобы скрыть' : 'Нажмите, чтобы показать', 'role': 'button', 'tabindex': '0' }, [ text ]);
+	function toggle(ev) {
+		if (ev) { ev.preventDefault(); ev.stopPropagation(); }
+		var open = !el.classList.contains('zm-secret-open');
+		el.classList.toggle('zm-secret-open', open);
+		el.title = open ? 'Нажмите, чтобы скрыть' : 'Нажмите, чтобы показать';
+		if (open) _zmRevealed[text] = true; else delete _zmRevealed[text];
+	}
+	el.addEventListener('click', toggle);
+	el.addEventListener('keydown', function(ev) { if (ev.key === 'Enter' || ev.key === ' ') toggle(ev); });
+	return el;
+}
+
 function fmtSize(b) {
 	if (!isFinite(b)) return '—';
 	var u = [ 'Б', 'КБ', 'МБ', 'ГБ', 'ТБ' ], i = 0;
@@ -8897,6 +8971,7 @@ return baseclass.extend({
 	boardInfo: callBoardInfo,
 	parseSize: parseSize,
 	fmtSize: fmtSize,
+	secret: secret,
 	usageText: usageText,
 	stateBadge: stateBadge
 });
@@ -9511,15 +9586,17 @@ return view.extend({
 				steer ? badge('zm-off', 'Steer') : ''
 			]);
 			var box = E('div', { 'class': 'zm-awg-if' }, [ head ]);
-			if (f.address) box.appendChild(row('Адрес', E('span', {}, f.address.replace(/,/g, ', '))));
-			box.appendChild(row('Точка входа', E('span', { 'style': 'overflow-wrap:anywhere' }, f.endpoint || '—')));
+			// Свои серверы (не Cloudflare WARP) и свой WARP Steer — адреса скрыты, по нажатию видны
+			var hide = !f.warp || f.name === 'zmwarp4';
+			if (f.address) box.appendChild(row('Адрес', E('span', {}, hide ? zm.secret(f.address.replace(/,/g, ', ')) : f.address.replace(/,/g, ', '))));
+			box.appendChild(row('Точка входа', E('span', { 'style': 'overflow-wrap:anywhere' }, f.endpoint ? (hide ? zm.secret(f.endpoint) : f.endpoint) : '—')));
 			box.appendChild(row('Рукопожатие', E('span', {}, age(f.hs_age))));
 			if (f.rx || f.tx) box.appendChild(row('Трафик', E('span', {}, '↓ ' + bytes(f.rx) + ' · ↑ ' + bytes(f.tx))));
 			box.appendChild(row('Зона firewall', E('span', {}, f.zone || 'нет — устройства сети в туннель не попадут')));
 			box.appendChild(row('Маршруты', E('span', {}, f.route_all ? 'весь трафик роутера через туннель' : 'не трогает — трафик направляют Steer, Mihomo или PBR')));
 			var t = testRes[f.name];
 			if (t) box.appendChild(row('Проверка', t.ok
-				? badge('zm-ok', 'выход ' + (t.ip || '?') + (t.colo ? ' · колония ' + t.colo : '') + (t.warp && t.warp !== 'off' ? ' · warp=' + t.warp : ''))
+				? badge('zm-ok', E('span', {}, [ 'выход ', hide ? zm.secret(t.ip || '?') : (t.ip || '?'), (t.colo ? ' · колония ' + t.colo : '') + (t.warp && t.warp !== 'off' ? ' · warp=' + t.warp : '') ]))
 				: badge('zm-bad', 'через туннель ничего не открылось')));
 
 			var acts = [
@@ -10224,7 +10301,7 @@ return view.extend({
 			if (diagRes) {
 				var items = [];
 				var tn = diagRes.tunnels || [];
-				if (diagRes.vpn === 'on') items.push([ 'ok', 'Трафик идёт через подписку' + (diagRes.vpn_ip ? ' (выход ' + diagRes.vpn_ip + (diagRes.vpn_loc ? ', ' + diagRes.vpn_loc : '') + ')' : ''), '' ]);
+				if (diagRes.vpn === 'on') items.push([ 'ok', diagRes.vpn_ip ? [ 'Трафик идёт через подписку (выход ', zm.secret(diagRes.vpn_ip), (diagRes.vpn_loc ? ', ' + diagRes.vpn_loc : '') + ')' ] : 'Трафик идёт через подписку', '' ]);
 				else if (diagRes.vpn === 'off') items.push([ 'fail', 'Трафик через подписку не идёт', 'проверьте задержку узлов на вкладке «Подписка» или выберите другой узел' ]);
 				else if (tn.length) tn.forEach(function(t) {
 					var who = tn.length > 1 ? 'Туннель ' + t.n + ': ' : '';
@@ -10246,7 +10323,7 @@ return view.extend({
 				items.forEach(function(i) {
 					checkCard.appendChild(E('div', { 'class': 'zm-row' }, [
 						badge(CLS[i[0]], TXT[i[0]]),
-						E('span', {}, i[1] + (i[2] ? ' — ' + i[2] : ''))
+						E('span', {}, [].concat(i[1], i[2] ? ' — ' + i[2] : ''))
 					]));
 				});
 			}
@@ -10320,14 +10397,14 @@ return view.extend({
 			if (own) {
 				if (data.exit === 'vpn') warpCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сейчас сервисы идут через подписку — свой WARP не используется.'));
 				var t0 = tl[0] || {}, live0 = tunnelLive(t0), info0 = [];
-				if (t0.host) info0.push(t0.host + ':' + t0.port);
+				var ep0 = t0.host ? zm.secret(t0.host + ':' + t0.port) : null;
 				if (t0.colo && t0.colo !== '?') info0.push('сервер ' + t0.colo);
 				if (t0.up) info0.push('связь ' + fmtAge(t0.hs_age));
 				if (t0.up) info0.push('↓ ' + zm.fmtSize(+t0.rx || 0) + ' / ↑ ' + zm.fmtSize(+t0.tx || 0));
 				warpCard.appendChild(E('div', { 'class': 'zm-row' }, [
 					E('span', { 'class': 'zm-label' }, 'Туннель'),
 					badge(live0 ? 'zm-ok' : t0.up ? 'zm-warn' : 'zm-bad', live0 ? 'работает' : t0.up ? 'нет связи' : 'не поднят'),
-					E('span', {}, info0.join(' · '))
+					E('span', {}, ep0 ? [ ep0, info0.length ? ' · ' + info0.join(' · ') : '' ] : info0.join(' · '))
 				]));
 				if (ownOpen) { ownEditor('Сохранить и подключить', 'Меняем конфиг WARP'); return; }
 				warpCard.appendChild(E('div', { 'class': 'zm-actions' }, [
@@ -10590,15 +10667,15 @@ return view.extend({
 				name: 'Авто', foot: 'первый рабочий узел', active: !subData.node,
 				click: function() { if (subData.node && !busy) subAct('sub_node', '', 'Выбираем узел автоматически'); }
 			}));
-			nodes.forEach(function(n) {
+			nodes.forEach(function(n, ni) {
 				var l = lat[n.index], txt = '', cls = 'zm-lat-none', dead = false;
 				if (l && l.busy) txt = '…';
 				else if (l && l.ok) { txt = (l.ms > 0 ? l.ms : '?') + ' мс'; cls = latClass(l.ms); }
 				else if (l) { txt = 'нет ответа'; cls = 'zm-lat-bad'; dead = true; }
 				var foot = [ n.type, n.security !== 'none' ? n.security : '', n.vision ? 'vision' : '' ].filter(function(x) { return x; }).join(' · ');
 				grid.appendChild(nodeCard({
-					name: n.name || (n.host + ':' + n.port), foot: foot, lat: txt, latCls: cls, dead: dead,
-					active: subData.node === n.name, title: n.host + ':' + n.port + (l && l.why ? '\n' + l.why : ''),
+					name: n.name || 'Узел ' + (ni + 1), foot: foot, lat: txt, latCls: cls, dead: dead,
+					active: subData.node === n.name, title: l && l.why ? l.why : '',
 					click: function() { if (subData.node !== n.name && !busy) subAct('sub_node', n.name, 'Выбираем узел ' + n.name); }
 				}));
 			});
@@ -13374,6 +13451,11 @@ html.zm-theme-dark .zm-card {
 .zm-off .zm-dot { background: #57606a; }
 
 .zm-actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin: 14px 0; }
+
+/* Скрытые IP и адреса серверов: размыты, по нажатию видны */
+.zm-secret { filter: blur(5px); cursor: pointer; user-select: none; -webkit-user-select: none; border-radius: 4px; transition: filter .2s; }
+.zm-secret:hover { filter: blur(4px); }
+.zm-secret.zm-secret-open { filter: none; user-select: text; -webkit-user-select: text; }
 
 /* Шкалы в «Системе» (как в боковой панели Web UI) */
 .zm-meters { display: flex; flex-direction: column; gap: 13px; padding-top: 7px; }
