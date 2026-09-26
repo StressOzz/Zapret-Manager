@@ -1,5 +1,5 @@
 #!/bin/sh
-# Version: 1.54
+# Version: 1.56
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -70,7 +70,7 @@ cat > '/opt/zapret-manager-luci/backend.sh' << 'ZM_INSTALLER_EOF'
 umask 022
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.54"
+ZM_VERSION="1.56"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -5175,12 +5175,24 @@ ST_STEER_URLS="https://github.com/xyzmean/steer/releases/download/v@VER@ https:/
 ST_AWG_MIRRORS="${GH_MAIN}/2Grey/awg-openwrt/releases/download ${GH_MAIN}/Slava-Shchipunov/awg-openwrt/releases/download"
 ST_AWG_MIRROR_FLAT="https://gitlab.com/xyzmean/brb/-/raw/main/deps/awg"
 ST_CRON_TAG="# zm-steer"
-ST_CRON_CMD="/etc/init.d/steer enabled && { for i in zmwarp zmwarp2 zmwarp3; do ifup \$i; done; sleep 15; /etc/init.d/steer restart; }"
+ST_CRON_CMD="/etc/init.d/steer enabled && { for i in \$(awk '{print \$1}' /etc/zm-steer/warp.up 2>/dev/null); do ifup \$i; done; sleep 15; /etc/init.d/steer restart; }"
 ST_WARP_N=3
-ST_WARP_MAX=3                         # столько туннелей бывает в автоматическом режиме
-ST_WARP_MODE="$ST_DIR/warp.mode"       # own — «Свой конфиг»: один туннель zmwarp по конфигу пользователя
-ST_WARP_OWN="$ST_DIR/warp.own.conf"    # копия своего конфига — вернуться к нему можно в один клик
-[ "$(cat "$ST_WARP_MODE" 2>/dev/null)" = own ] && ST_WARP_N=1
+ST_WARP_MAX=3                         # столько туннелей в автоматическом режиме: zmwarp, zmwarp2, zmwarp3
+ST_OWN_IF="zmwarp4"                   # «Свой конфиг» — отдельный интерфейс; автоматические при этом не удаляются
+ST_WARP_MODE="$ST_DIR/warp.mode"       # own — сейчас работает свой конфиг
+ST_WARP_OWN="$ST_DIR/warp.own.conf"    # свой конфиг (он же — конфиг zmwarp4)
+ST_WARP_UP_AUTO="$ST_DIR/warp.up.auto" # список автоматических туннелей, пока работает свой конфиг
+# Туннель №1 — zmwarp в автоматическом режиме и zmwarp4 в режиме «Свой конфиг»
+ST_WIF1="zmwarp"; ST_WCONF1="$ST_WARP_CONF"
+_st_mode_vars() {
+	if [ "$(cat "$ST_WARP_MODE" 2>/dev/null)" = own ]; then
+		ST_WARP_N=1; ST_WIF1="$ST_OWN_IF"; ST_WCONF1="$ST_WARP_OWN"
+	else
+		ST_WARP_N="$ST_WARP_MAX"; ST_WIF1="zmwarp"; ST_WCONF1="$ST_DIR/warp.conf"
+	fi
+	ST_WARP_IF="$ST_WIF1"; ST_WARP_CONF="$ST_WCONF1"
+}
+_st_mode_vars
 ST_WARP_UP="$ST_DIR/warp.up"          # поднятые туннели «интерфейс колония», лучший первым (_st_warp_order)
 ST_RU_COLOS="DME SVX LED KJA REN OVB KZN AER VVO"
 ST_DEFAULT_SEL=""
@@ -5190,7 +5202,7 @@ _st_stopped() { [ -f "$ST_STOP_FLAG" ]; }
 _st_own() { mkdir -p "$ST_DIR"; grep -qxF "$1" "$ST_OWNED" 2>/dev/null || echo "$1" >> "$ST_OWNED"; }
 _st_owns() { grep -qxF "$1" "$ST_OWNED" 2>/dev/null; }
 _st_running() { _job_alive steer; }
-_st_installed() { command -v steer >/dev/null 2>&1 && { _st_owns "engine" || _st_owns "pkg steer" || _st_owns "net $ST_WARP_IF"; }; }
+_st_installed() { command -v steer >/dev/null 2>&1 && { _st_owns "engine" || _st_owns "pkg steer" || _st_owns "net zmwarp" || _st_owns "net $ST_OWN_IF"; }; }
 _st_warp_on() { _st_owns "net $ST_WARP_IF" && [ -s "$ST_WARP_CONF" ]; }
 _st_warp_own() { [ "$(cat "$ST_WARP_MODE" 2>/dev/null)" = own ]; }
 _st_ready() { _st_installed && [ ! -f "$ST_OFF" ] && [ -z "$(_st_blocker)" ]; }
@@ -5556,7 +5568,8 @@ _st_warp_iface_write() { # ХОСТ ПОРТ
 
 _st_warp_zone() {
 	local want i changed=0
-	want="$(_st_wifs_all | tr '\n' ' ' | sed 's/ $//')"
+	# в зоне — все туннели Steer, и автоматические, и свой: переключение режима не трогает firewall
+	want="$(for i in $(_st_wifs_every); do { _st_owns "net $i" || _st_wifs_all | grep -qx "$i"; } && echo "$i"; done | tr '\n' ' ' | sed 's/ $//')"
 	if [ "$(uci -q get "firewall.$ST_WARP_ZONE")" = "zone" ] && [ "$(uci -q get "firewall.$ST_WARP_ZONE.network")" != "$want" ]; then
 		uci -q delete "firewall.$ST_WARP_ZONE.network"
 		for i in $want; do uci add_list "firewall.$ST_WARP_ZONE.network=$i"; done
@@ -5583,8 +5596,8 @@ _st_warp_zone() {
 
 _st_warp_is_ru() { case " $ST_RU_COLOS " in *" $1 "*) return 0 ;; esac; return 1; }
 
-_st_wif() { [ "$1" = 1 ] && echo zmwarp || echo "zmwarp$1"; }
-_st_wconf() { [ "$1" = 1 ] && echo "$ST_DIR/warp.conf" || echo "$ST_DIR/warp$1.conf"; }
+_st_wif() { [ "$1" = 1 ] && echo "$ST_WIF1" || echo "zmwarp$1"; }
+_st_wconf() { [ "$1" = 1 ] && echo "$ST_WCONF1" || echo "$ST_DIR/warp$1.conf"; }
 _st_with() { # N КОМАНДА... — выполнить команду в контексте туннеля N
 	local n="$1" oi="$ST_WARP_IF" oc="$ST_WARP_CONF" rc
 	shift
@@ -5594,7 +5607,8 @@ _st_with() { # N КОМАНДА... — выполнить команду в ко
 	return $rc
 }
 _st_wifs_all() { local n=1; while [ "$n" -le "$ST_WARP_N" ]; do _st_wif "$n"; n=$((n + 1)); done; }
-_st_wifs_max() { local n=1; while [ "$n" -le "$ST_WARP_MAX" ]; do _st_wif "$n"; n=$((n + 1)); done; }
+_st_wifs_auto() { echo zmwarp; local n=2; while [ "$n" -le "$ST_WARP_MAX" ]; do echo "zmwarp$n"; n=$((n + 1)); done; }
+_st_wifs_every() { _st_wifs_auto; echo "$ST_OWN_IF"; }
 _st_warp_first() {
 	local i
 	[ -s "$ST_WARP_UP" ] && while read -r i _; do [ -d "/sys/class/net/$i" ] && { echo "$i"; return 0; }; done < "$ST_WARP_UP"
@@ -5777,21 +5791,14 @@ _st_warp_own_iface() { # ФАЙЛ — интерфейс zmwarp из конфи�
 	rm -f "$kv"
 }
 
-_st_warp_drop_extra() { # убрать туннели zmwarp2…: в режиме «Свой конфиг» туннель один
-	local n=2 i changed=0
-	while [ "$n" -le "$ST_WARP_MAX" ]; do
-		i="$(_st_wif "$n")"
-		if _st_owns "net $i"; then
-			ifdown "$i" >/dev/null 2>&1
-			uci -q delete "network.$i"
-			uci -q delete "network.${i}_peer"
-			sed -i "/^net $i\$/d" "$ST_OWNED"
-			changed=1
-		fi
-		rm -f "$(_st_wconf "$n")"
-		n=$((n + 1))
+_st_warp_park() { # ИНТЕРФЕЙС... — выключить и не поднимать при загрузке; конфиг и настройки остаются
+	local i
+	for i in "$@"; do
+		_st_owns "net $i" || continue
+		ifdown "$i" >/dev/null 2>&1
+		uci -q set "network.$i.auto=0"
 	done
-	[ "$changed" = 1 ] && uci commit network
+	uci -q commit network
 	return 0
 }
 
@@ -6133,6 +6140,16 @@ do_steer_dns_fix() {
 
 
 
+# Старую строку автоперезапуска (поднимала zmwarp…zmwarp3 поимённо) переписываем на новую — по списку работающих туннелей
+_st_cron_refresh() {
+	local cur
+	cur="$(_st_cron_get)"
+	[ -n "$cur" ] || return 0
+	grep -F "$ST_CRON_TAG" "$CRON_FILE" 2>/dev/null | grep -qF "$ST_CRON_CMD" && return 0
+	_st_cron_set "$cur" >/dev/null 2>&1
+	return 0
+}
+
 _st_cron_get() {
 	local line hour
 	line=$(grep -F "$ST_CRON_TAG" "$CRON_FILE" 2>/dev/null | head -n1)
@@ -6338,19 +6355,21 @@ do_steer_warp_own() { # подключить свой конфиг (из warp.pe
 	_st_install_awg || return 1
 	_st_phase tunnel
 	_rb_say "Свой WARP: один туннель по вашему конфигу"
-	_st_owns "net $(_st_wif 2)" && _rb_say "Убираем автоматические туннели WARP 2 и 3"
+	if ! _st_warp_own; then
+		# автоматические туннели не удаляем — только выключаем; их список помним, чтобы вернуться к ним как было
+		grep -qv "^$ST_OWN_IF " "$ST_WARP_UP" 2>/dev/null && grep -v "^$ST_OWN_IF " "$ST_WARP_UP" > "$ST_WARP_UP_AUTO"
+		_st_owns "net zmwarp" && _rb_say "Автоматические туннели WARP выключаем — они сохранятся, вернуться к ним можно в один клик"
+	fi
+	_st_warp_park $(_st_wifs_auto)
 	echo own > "$ST_WARP_MODE"
-	ST_WARP_N=1
-	_st_warp_drop_extra
-	cp "$ST_WARP_OWN" "$ST_WARP_CONF"
-	chmod 600 "$ST_WARP_CONF"
-	rm -f "$ST_DIR/warp.ports"
+	_st_mode_vars
 	_st_awg_loaded || modprobe amneziawg >/dev/null 2>&1
 	_st_warp_own_iface "$ST_WARP_CONF" || return 1
 	_st_warp_zone
 	ubus call network reload >/dev/null 2>&1
 	sleep 2
 	_st_warp_own_up || return 1
+	_st_cron_refresh
 	[ "$(cat "$ST_EXIT" 2>/dev/null)" = vpn ] && [ -s "$ST_SUB" ] || echo warp > "$ST_EXIT"
 	if [ ! -f "$ST_OFF" ] && [ -n "$(_st_sel)" ]; then
 		_st_phase rules
@@ -6370,16 +6389,26 @@ do_steer_warp_auto() { # вернуться к автоматическому р
 	_ensure_deps
 	_st_install_awg || return 1
 	_st_phase tunnel
-	_rb_say "Автоматический WARP: роутер получит ключи у Cloudflare и подберёт три туннеля"
-	[ -s "$ST_WARP_OWN" ] && _rb_say "Ваш конфиг сохранён — вернуться к нему можно в один клик"
+	_rb_say "Автоматический WARP: три туннеля с ключами от Cloudflare"
+	_st_owns "net $ST_OWN_IF" && _rb_say "Свой туннель $ST_OWN_IF выключаем — он сохранится, вернуться к нему можно в один клик"
 	rm -f "$ST_WARP_MODE"
-	ST_WARP_N="$ST_WARP_MAX"
-	ifdown "$ST_WARP_IF" >/dev/null 2>&1
-	uci -q delete "network.$ST_WARP_IF"
-	uci -q delete "network.${ST_WARP_IF}_peer"
-	uci commit network
-	rm -f "$ST_WARP_CONF" "$ST_DIR/warp.ports" "$ST_WARP_UP" "$ST_DIR/warp.colo"
-	_st_warp_up || return 1
+	_st_mode_vars
+	_st_warp_park "$ST_OWN_IF"
+	# 1.54 держал свой конфиг прямо в zmwarp — такой zmwarp переделываем в обычный автоматический
+	if [ "$(uci -q get "network.zmwarp_peer.description")" = "Свой WARP" ]; then
+		ifdown zmwarp >/dev/null 2>&1
+		uci -q delete network.zmwarp; uci -q delete network.zmwarp_peer; uci commit network
+		rm -f "$ST_DIR/warp.conf" "$ST_WARP_UP_AUTO"
+	fi
+	rm -f "$ST_WARP_UP"
+	[ -s "$ST_WARP_UP_AUTO" ] && mv -f "$ST_WARP_UP_AUTO" "$ST_WARP_UP"
+	if _st_warp_resume; then
+		awk '{ printf "%s%s", (NR > 1 ? ", " : ""), $2 }' "$ST_WARP_UP" > "$ST_DIR/warp.colo"
+		_st_tgws_warp
+	else
+		_st_warp_up || return 1
+	fi
+	_st_cron_refresh
 	[ "$(cat "$ST_EXIT" 2>/dev/null)" = vpn ] && [ -s "$ST_SUB" ] || echo warp > "$ST_EXIT"
 	if [ ! -f "$ST_OFF" ] && [ -n "$(_st_sel)" ]; then
 		_st_phase rules
@@ -6394,6 +6423,7 @@ do_steer_warp_auto() { # вернуться к автоматическому р
 _st_warp_fix() { # N [keys]
 	local n="$1" i c peer got busy="" busyip="" w=0 host port x col
 	_st_warp_own && { echo "ОШИБКА: у Steer свой конфиг WARP — замените его на вкладке WARP страницы Steer"; return 1; }
+	[ "$n" -ge 1 ] 2>/dev/null && [ "$n" -le "$ST_WARP_MAX" ] || { echo "ОШИБКА: $ST_OWN_IF — свой туннель, новые ключи ему не нужны; замените конфиг на странице Steer"; return 1; }
 	i="$(_st_wif "$n")"; c="$(_st_wconf "$n")"
 	_st_awg_loaded || modprobe amneziawg >/dev/null 2>&1
 	if [ "$2" = keys ] || [ ! -s "$c" ] || [ "$(uci -q get "network.$i.proto")" != amneziawg ]; then
@@ -6544,7 +6574,7 @@ do_steer_remove() {
 		/etc/init.d/steer stop >/dev/null 2>&1
 	fi
 	local wi netrl=0
-	for wi in $(_st_wifs_max); do
+	for wi in $(_st_wifs_every); do
 		_st_owns "net $wi" || continue
 		ifdown "$wi" >/dev/null 2>&1
 		uci -q delete "network.$wi"
@@ -7795,12 +7825,23 @@ _awg_steer_n() { case "$1" in zmwarp) echo 1 ;; *) echo "${1#zmwarp}" ;; esac; }
 do_awg_steer_replace() { # ИНТЕРФЕЙС
 	local i="$1" n c f="$AWG_DIR/pending.conf" kv="$AWG_RUN/kv" ep host port k v w=0 col
 	echo replace > "$AWG_RUN/phase"
-	if _st_warp_own; then
-		# у Steer «Свой конфиг» — новый конфиг становится своим конфигом Steer
+	if [ "$i" = "$ST_OWN_IF" ]; then
+		# свой туннель Steer: новый конфиг становится своим конфигом
 		mkdir -p "$ST_DIR" "$ST_RUN"
-		mv -f "$f" "$ST_DIR/warp.pending"
-		do_steer_warp_own
-		return
+		if _st_warp_own; then
+			mv -f "$f" "$ST_DIR/warp.pending"
+			do_steer_warp_own
+			return
+		fi
+		mv -f "$f" "$ST_WARP_OWN"; chmod 600 "$ST_WARP_OWN"
+		( ST_WARP_IF="$ST_OWN_IF"; _st_warp_own_iface "$ST_WARP_OWN" ) || return 1
+		_st_warp_park "$ST_OWN_IF"
+		_awg_say "Готово: конфиг сохранён — он заработает, когда на странице Steer выберете «Свой конфиг»"
+		return 0
+	fi
+	if _st_warp_own; then
+		echo "ОШИБКА: сейчас у Steer работает свой конфиг ($ST_OWN_IF) — автоматические туннели меняются, когда они включены"
+		return 1
 	fi
 	n="$(_awg_steer_n "$i")"; c="$(_st_wconf "$n")"
 	_awg_conf_kv "$f" > "$kv"
@@ -9498,7 +9539,7 @@ return view.extend({
 					: E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() { quick('up', f.name, f.name + ' включён'); } }, 'Включить'));
 				acts.push(E('button', { 'class': 'cbi-button', 'click': function() { open[f.name] = open[f.name] === 'ep' ? null : 'ep'; renderIfaces(); } }, 'Точка входа'));
 			}
-			if (!(steer && data.steer_own)) acts.push(E('button', { 'class': 'cbi-button cbi-button-action', 'click': function() {
+			if (!(steer && (data.steer_own || f.name === 'zmwarp4'))) acts.push(E('button', { 'class': 'cbi-button cbi-button-action', 'click': function() {
 				if (!confirm('Сгенерировать новый WARP для ' + f.name + '?\n\nНовые ключи Cloudflare WARP получит только этот интерфейс' + (f.warp ? ', точка входа и маскировка сохранятся.' : ' — вместо текущего сервера.'))) return;
 				job('regen', f.name, 'Генерируем новый WARP для ' + f.name);
 			} }, 'Новый WARP'));
@@ -9514,8 +9555,9 @@ return view.extend({
 				quick('delete', f.name, f.name + ' удалён');
 			} }, 'Удалить'));
 			box.appendChild(E('div', { 'class': 'zm-actions' }, acts));
-			if (steer) box.appendChild(E('p', { 'class': 'zm-hint' }, data.steer_own
-				? 'Свой WARP для Steer: новый конфиг можно вставить здесь («Изменить конфиг») или на странице Steer.'
+			if (steer) box.appendChild(E('p', { 'class': 'zm-hint' }, f.name === 'zmwarp4'
+				? 'Свой WARP для Steer' + (data.steer_own ? '' : ' — сейчас выключен, работают автоматические туннели') + '. Новый конфиг можно вставить здесь («Изменить конфиг») или на странице Steer.'
+				: data.steer_own ? 'Автоматический туннель Steer — выключен, пока работает свой WARP (zmwarp4).'
 				: 'Туннель Steer: конфиг и ключи можно менять здесь, остальным управляет страница Steer.'));
 			if (open[f.name] === 'ep') box.appendChild(epEditor(f));
 			if (open[f.name] === 'conf') {
@@ -10226,14 +10268,14 @@ return view.extend({
 			if (!data.installed) { warpCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сначала установите Steer.')); return; }
 
 			// Переключатель режима: «Автоматически» — ключи от Cloudflare и три туннеля; «Свой конфиг» — один туннель по конфигу.
-			var sel = warpPick || (data.warp_on ? (own ? 'own' : 'auto') : 'auto');
+			var sel = warpPick || (data.warp_mode === 'own' ? 'own' : 'auto');
 			warpCard.appendChild(E('div', { 'class': 'zm-row' }, [
 				E('span', { 'class': 'zm-label' }, 'Режим'),
 				E('div', { 'class': 'zm-seg' }, [
 					E('div', { 'class': 'zm-seg-item' + (sel === 'auto' ? ' zm-active' : ''), 'click': function() {
 						if (busy || sel === 'auto') return;
 						if (own) {
-							if (!confirm('Перейти на автоматический WARP?\n\nРоутер получит ключи у Cloudflare и подберёт три туннеля — это займёт несколько минут. Ваш конфиг сохранится, вернуться к нему можно в один клик.')) return;
+							if (!confirm('Перейти на автоматический WARP?\n\nВключатся прежние автоматические туннели (если их ещё не было — роутер получит ключи у Cloudflare и подберёт три туннеля за несколько минут). Свой туннель выключится, но сохранится.')) return;
 							act('warp_mode', 'auto', 'Переходим на автоматический WARP — это займёт несколько минут');
 							return;
 						}
@@ -10264,7 +10306,7 @@ return view.extend({
 
 			if (sel === 'own' && !own) {
 				warpCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Один туннель по вашему конфигу. Роутер не будет получать ключи и искать точки входа сам.' +
-					(data.warp_on ? ' Три автоматических туннеля будут удалены.' : '')));
+					(data.warp_on ? ' Автоматические туннели выключатся, но сохранятся — вернуться к ним можно в один клик.' : '')));
 				ownEditor(data.warp_on ? 'Перейти на свой конфиг' : 'Подключить', 'Подключаем свой WARP');
 				return;
 			}
