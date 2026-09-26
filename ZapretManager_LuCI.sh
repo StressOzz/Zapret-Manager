@@ -1,5 +1,5 @@
 #!/bin/sh
-# Version: 1.64
+# Version: 1.65
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -70,7 +70,7 @@ cat > '/opt/zapret-manager-luci/backend.sh' << 'ZM_INSTALLER_EOF'
 umask 022
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.64"
+ZM_VERSION="1.65"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -2648,42 +2648,70 @@ test_results() {
 	printf '{"lines":"%s"}\n' "$(esc_ml "$(cat "$f")")"
 }
 
-zm_update_status() {
-	local latest_line latest=""
-	latest_line=$(curl -fsSL --connect-timeout 5 --max-time 8 -r 0-400 "$ZM_SCRIPT_URL" 2>/dev/null | grep -m1 '^# Version:')
-	if [ -z "$latest_line" ]; then
-		latest_line=$(curl -fsSL --connect-timeout 5 --max-time 10 "$ZM_SCRIPT_URL" 2>/dev/null | grep -m1 '^# Version:')
-	fi
-	latest=$(echo "$latest_line" | sed 's/^# Version:[[:space:]]*//')
-	printf '{"current":"%s","latest":"%s"}\n' "$(esc "$ZM_VERSION")" "$(esc "$latest")"
+_zm_gh_get() { # URL ФАЙЛ [ДИАПАЗОН] — напрямую, а если GitHub не открывается — через туннель WARP
+	local i
+	curl -fsSL --connect-timeout 6 --max-time 120 ${3:+-r "$3"} -o "$2" "$1" 2>/dev/null && [ -s "$2" ] && return 0
+	i="$(_st_warp_first 2>/dev/null)"
+	[ -n "$i" ] && [ -d "/sys/class/net/$i" ] || return 1
+	curl -fsSL --interface "$i" --connect-timeout 6 --max-time 120 ${3:+-r "$3"} -o "$2" "$1" 2>/dev/null && [ -s "$2" ]
 }
 
-do_zm_update() {
-	echo "==> Скачиваем установщик"
-	local tmp="/tmp/zm_update_install.sh"
-	rm -f "$tmp"
-	wget -q --timeout=20 -U "Mozilla/5.0" -O "$tmp" "$ZM_SCRIPT_URL" || { echo "ОШИБКА: не удалось скачать установщик"; rm -f "$tmp"; return 1; }
-	[ -s "$tmp" ] || { echo "ОШИБКА: скачался пустой файл"; rm -f "$tmp"; return 1; }
-	head -c 200 "$tmp" | grep -q '^#!/bin/sh' || { echo "ОШИБКА: скачанный файл не похож на установщик"; rm -f "$tmp"; return 1; }
-	chmod +x "$tmp"
-	echo "==> Установка запущена в фоне — она перезапускает rpcd/uhttpd, поэтому не может отслеживаться этой же задачей. Панель перезагрузится сама через несколько секунд"
-	( sh "$tmp" >/tmp/zm_update_install.log 2>&1; rm -f "$tmp" ) &
+_zm_panel_latest() {
+	local f="$JOBS_DIR/zm_head.$$" v
+	mkdir -p "$JOBS_DIR"
+	_zm_gh_get "$ZM_SCRIPT_URL" "$f" 0-400 || { rm -f "$f"; return 1; }
+	v="$(grep -m1 '^# Version:' "$f" | sed 's/^# Version:[[:space:]]*//' | tr -d '\r ')"
+	rm -f "$f"
+	echo "$v" | grep -qE '^[0-9]+(\.[0-9]+)*$' && echo "$v"
+}
+
+_zm_newer() { [ -n "$1" ] && _st_ver_lt "$ZM_VERSION" "$1"; }
+
+zm_update_status() {
+	local latest
+	if [ -s "$ZM_STATE_DIR/latest.panel" ]; then latest="$(_zm_cached panel _zm_panel_latest)"
+	else latest="$(ZM_VER_FORCE=1 _zm_cached panel _zm_panel_latest)"; fi
+	printf '{"current":"%s","latest":"%s","newer":%s}\n' "$(esc "$ZM_VERSION")" "$(esc "$latest")" "$(_zm_newer "$latest" && echo true || echo false)"
+}
+
+_zm_update_fetch() { # ФАЙЛ -> причина отказа в stdout
+	rm -f "$1"
+	_zm_gh_get "$ZM_SCRIPT_URL" "$1" || { echo "не удалось скачать установщик с GitHub — ни напрямую, ни через WARP"; return 1; }
+	head -n1 "$1" | grep -qx '#!/bin/sh' || { echo "скачанный файл не похож на установщик (возможно, вместо него пришла страница-заглушка)"; return 1; }
+	grep -q '^# Version:' "$1" || { echo "в установщике нет номера версии"; return 1; }
+	tail -n 5 "$1" | grep -q 'Web UI:' || { echo "установщик скачался не полностью — попробуйте ещё раз"; return 1; }
+	sh -n "$1" 2>/dev/null || { echo "установщик повреждён — установка отменена"; return 1; }
+	return 0
 }
 
 zm_update_action() {
-	job_start zm_update do_zm_update
+	local tmp="/tmp/zm_update_install.sh" why v j
+	for j in steer awg redbtn; do
+		_job_alive "$j" && { echo '{"error":"идёт операция Steer или AmneziaWG — дождитесь её окончания и обновите панель"}'; return 1; }
+	done
+	if ! why="$(_zm_update_fetch "$tmp")"; then
+		rm -f "$tmp"
+		printf '{"error":"%s"}\n' "$(esc "$why")"
+		return 1
+	fi
+	v="$(grep -m1 '^# Version:' "$tmp" | sed 's/^# Version:[[:space:]]*//' | tr -d '\r ')"
+	chmod +x "$tmp"
+	rm -f "$ZM_STATE_DIR/latest.panel"
+	( sh "$tmp" >/tmp/zm_update_install.log 2>&1; rm -f "$tmp" ) >/dev/null 2>&1 </dev/null &
+	printf '{"ok":true,"version":"%s"}\n' "$(esc "$v")"
 }
 
 _mixomo_lan_ip() { _zm_lan_ip; }
 
 _zm_cached() { # КЛЮЧ КОМАНДА... — значение из кеша на 6 часов; устаревшее обновляется в фоне, страница не ждёт сеть
-	local f="$ZM_STATE_DIR/latest.$1" v
+	local f="$ZM_STATE_DIR/latest.$1" v age=360
+	[ "$1" = panel ] && age=60
 	shift
 	mkdir -p "$ZM_STATE_DIR"
 	if [ -n "$ZM_VER_FORCE" ]; then
 		v="$("$@")"
 		[ -n "$v" ] && echo "$v" > "$f"
-	elif [ ! -s "$f" ] || [ -n "$(find "$f" -mmin +360 2>/dev/null)" ]; then
+	elif [ ! -s "$f" ] || [ -n "$(find "$f" -mmin +$age 2>/dev/null)" ]; then
 		if mkdir "$f.lock" 2>/dev/null; then
 			( v="$("$@")"; [ -n "$v" ] && echo "$v" > "$f"; rmdir "$f.lock" ) >/dev/null 2>&1 &
 		elif [ -n "$(find "$f.lock" -mmin +2 2>/dev/null)" ]; then
@@ -3578,7 +3606,11 @@ do_versions_refresh() {
 	local out="" sep="" j it tmp="$VERSIONS_CACHE.tmp"
 	add() { [ -n "$1" ] && { out="$out$sep$1"; sep=","; }; }
 	j="$(zm_update_status)"
-	add "$(_ver_item 'Zapret Manager' "$(_jf "$j" '@.current')" "$(_jf "$j" '@.latest')")"
+	if [ "$(_jf "$j" '@.newer')" = true ]; then
+		add "$(_ver_item 'Zapret Manager' "$(_jf "$j" '@.current')" "$(_jf "$j" '@.latest')")"
+	else
+		add "$(_ver_item 'Zapret Manager' "$(_jf "$j" '@.current')" "$(_jf "$j" '@.current')")"
+	fi
 	if [ -f /etc/init.d/zapret ]; then
 		j="$(status)"
 		add "$(_ver_item Zapret "$(_jf "$j" '@.zapret_version')" "$(_zapret_latest_version)")"
@@ -9679,7 +9711,7 @@ return view.extend({
 		}
 		function renderZmUpdate() {
 			updateEl.innerHTML = '';
-			if (!zmUpdate.latest || zmUpdate.latest === zmUpdate.current) return;
+			if (!zmUpdate.latest || zmUpdate.latest === zmUpdate.current || zmUpdate.newer === false) return;
 			updateEl.appendChild(E('div', { 'class': 'zm-refresh-banner zm-show' }, [
 				E('span', {}, 'Доступна новая версия панели Zapret Manager: ' + zmUpdate.latest + ' (у вас установлена ' + zmUpdate.current + ').'),
 				E('button', {
@@ -9687,10 +9719,11 @@ return view.extend({
 					'click': function() {
 						if (zmUpdateBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
 						zmUpdateBusy = true;
-						zm.toast('Обновление запущено — через 4 секунды вы будете автоматически выведены из LuCI. Просто зайдите заново', 'warning', 6000);
+						zm.toast('Скачиваем и проверяем новую версию…', 'info', 4000);
 						zm.zmUpdateAction().then(function(res) {
 							zmUpdateBusy = false;
-							if (res.error) { zm.toast(res.error, 'error'); return; }
+							if (res.error) { zm.toast('Обновление не началось: ' + res.error, 'error', 8000); return; }
+							zm.toast('Устанавливаем версию ' + (res.version || zmUpdate.latest) + ' — через 4 секунды вы будете выведены из LuCI. Подождите полминуты и зайдите заново', 'warning', 8000);
 							waitForServerAndReload();
 						}).catch(function() { zmUpdateBusy = false; });
 					}
@@ -16180,7 +16213,7 @@ cat > '/www/zm/app.js' << 'ZM_INSTALLER_EOF'
 var BUILD = '__ZMW_BUILD__';
 var RES = '/luci-static/resources/';
 var NULL_SID = '00000000000000000000000000000000';
-var K_SID = 'zmw.sid', K_THEME = 'zmw.theme', K_USER = 'zmw.user';
+var K_SID = 'zmw.sid', K_THEME = 'zmw.theme', K_USER = 'zmw.user', K_NOTE = 'zmw.note';
 
 /* ───────────────────────── storage ───────────────────────── */
 
@@ -17068,7 +17101,7 @@ function loadShellInfo() {
 	callUpd().then(function (u) {
 		if (!u || u.error) return;
 		if (u.current) verEl.textContent = 'by StressOzz · v' + u.current;
-		if (u.latest && u.current && u.latest !== u.current) {
+		if (u.latest && u.current && u.latest !== u.current && u.newer !== false) {
 			updateEl.hidden = false;
 			updateEl.textContent = 'Доступна версия ' + u.latest;
 		}
@@ -17248,7 +17281,34 @@ function authLost() {
 	authLostShown = true;
 	sid = null;
 	sset(K_SID, null);
-	showLogin('Сессия истекла — войдите снова', 'warning');
+	poll._reset();
+	freshLogin('Сессия истекла — войдите снова.', 'warning');
+}
+
+function dropCaches() {
+	srcCache = {};
+	modCache = {};
+	try { if (window.caches && caches.keys) caches.keys().then(function (ks) { ks.forEach(function (k) { caches.delete(k); }); }).catch(function () {}); } catch (e) {}
+	try { var s = store('session'); if (s) Object.keys(s).forEach(function (k) { if (/^zmw\./.test(k) && k !== K_THEME && k !== K_USER && k !== K_NOTE) s.removeItem(k); }); } catch (e) {}
+}
+
+function freshLogin(note, kind) {
+	dropCaches();
+	var shown = false;
+	var show = function () { if (!shown) { shown = true; showLogin(note, kind); } };
+	var t = setTimeout(show, 2500);
+	fetch('/zm-webui.html?t=' + Date.now(), { cache: 'no-store' }).then(function (r) { return r.ok ? r.text() : ''; }).then(function (html) {
+		var m = /app\.js\?v=([0-9A-Za-z_]+)/.exec(html || '');
+		if (m && m[1] !== BUILD && !shown) {
+			clearTimeout(t);
+			shown = true;
+			try { var s = store('session'); if (s) s.setItem(K_NOTE, JSON.stringify([ (note ? note + ' ' : '') + 'Панель обновлена — загружена новая версия.', kind || 'info' ])); } catch (e) {}
+			location.replace('/?fresh=' + Date.now() + location.hash);
+			return;
+		}
+		clearTimeout(t);
+		show();
+	}).catch(function () { clearTimeout(t); show(); });
 }
 
 function logout() {
@@ -17258,7 +17318,7 @@ function logout() {
 	var done = function () {
 		poll._reset();
 		if (viewEl) viewEl.innerHTML = '';
-		showLogin('Вы вышли из панели.', 'info');
+		freshLogin('Вы вышли из панели.', 'info');
 	};
 	if (!s) return done();
 	ubus('session', 'destroy', {}, s).catch(function () {}).then(done);
@@ -17288,13 +17348,20 @@ function boot() {
 
 	document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { closeDrawer(); } });
 
+	var note = null;
+	try { var ss = store('session'); note = ss && JSON.parse(ss.getItem(K_NOTE) || 'null'); if (ss) ss.removeItem(K_NOTE); } catch (e) {}
+	if (/[?&]fresh=/.test(location.search)) {
+		try { history.replaceState(null, '', '/' + location.hash); } catch (e) {}
+	}
+	if (note && !sid) { showLogin(note[0], note[1]); return; }
+
 	if (/[?&]logout=1/.test(location.search)) {
 		var s = sid;
 		sid = null;
 		sset(K_SID, null);
 		try { history.replaceState(null, '', '/' + location.hash); } catch (e) {}
 		if (s) ubus('session', 'destroy', {}, s).catch(function () {});
-		showLogin('Вы вышли из панели. Войдите снова.', 'info');
+		freshLogin('Вы вышли из панели. Войдите снова.', 'info');
 		return;
 	}
 
