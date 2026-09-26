@@ -1,5 +1,5 @@
 #!/bin/sh
-# Version: 1.68
+# Version: 1.69
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -70,7 +70,7 @@ cat > '/opt/zapret-manager-luci/backend.sh' << 'ZM_INSTALLER_EOF'
 umask 022
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.68"
+ZM_VERSION="1.69"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -6669,13 +6669,16 @@ _st_srs_url() { # НАБОР -> ссылка: из catalog.idx, из скача�
 }
 
 _st_srs_get() { # НАБОР — набор sing-box (.srs) или текстовый список каталога (.lst: домены и подсети вперемешку)
+	# Набор .srs хранится как есть ($ST_DIR/lists/НАБОР.srs): движок читает его сам (srs_files) —
+	# с сужением по протоколу и портам у каждой подсети. В списки (dom/pfx/meta) он раскладывается,
+	# только если движок наборы напрямую не принял (ST_SRS_NATIVE=0).
 	local set="$1" d="$ST_DIR/lists" f fmt x
 	mkdir -p "$d"
 	[ -f "$ST_RUN/srs.$set.done" ] && return 0
 	fmt="$(awk -F'|' -v k="$set" '$1 == k { print $2; exit }' "$ST_CAT_IDX" 2>/dev/null)"
 	f="$ST_RUN/$set.src"
-	_st_fetch "$(_st_srs_url "$set")" "$f" || return 1
 	if [ "$fmt" = lst ]; then
+		_st_fetch "$(_st_srs_url "$set")" "$f" || return 1
 		tr -d '\r' < "$f" | sed 's/[[:space:]]*#.*$//; s/^[[:space:]]*//; s/[[:space:]]*$//' | tr 'A-Z' 'a-z' > "$f.n"
 		grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?$' "$f.n" | awk '!s[$0]++' > "$d/$set.pfx.tmp"
 		sed 's/^domain://; s/^full://; s/^suffix://; s/^\*\.//; s/^\.//' "$f.n" |
@@ -6684,23 +6687,52 @@ _st_srs_get() { # НАБОР — набор sing-box (.srs) или тексто�
 		rm -f "$f.n"
 		[ -s "$d/$set.dom.tmp" ] || [ -s "$d/$set.pfx.tmp" ] || { rm -f "$f" "$d/$set".*.tmp; return 1; }
 	else
-		steer srs-read "$f" --out "$d/$set.dom.tmp" --prefixes-out "$d/$set.pfx.tmp" --meta-out "$d/$set.meta.tmp" >/dev/null 2>&1 || {
-			rm -f "$f" "$d/$set".*.tmp; return 1; }
+		# Скачиваем один раз за применение; не скачалось — берём прошлую копию набора, а не пакет
+		if [ ! -f "$ST_RUN/dl.$set" ]; then
+			if _st_fetch "$(_st_srs_url "$set")" "$f" && [ "$(head -c 3 "$f")" = SRS ]; then
+				mv -f "$f" "$d/$set.srs"
+				touch "$ST_RUN/dl.$set"
+			else
+				rm -f "$f"
+				[ -s "$d/$set.srs" ] || return 1
+				_rb_warn "Набор $set не скачался — беру прошлую копию" >&2
+				touch "$ST_RUN/dl.$set"
+			fi
+		fi
+		[ -s "$d/$set.srs" ] || return 1
+		if [ "${ST_SRS_NATIVE:-1}" = 1 ]; then touch "$ST_RUN/srs.$set.done"; return 0; fi
+		steer srs-read "$d/$set.srs" --out "$d/$set.dom.tmp" --prefixes-out "$d/$set.pfx.tmp" --meta-out "$d/$set.meta.tmp" >/dev/null 2>&1 || {
+			rm -f "$d/$set".*.tmp; return 1; }
 	fi
 	for x in dom pfx meta; do touch "$d/$set.$x.tmp"; mv "$d/$set.$x.tmp" "$d/$set.$x"; done
 	rm -f "$f"
 	touch "$ST_RUN/srs.$set.done"
 }
 
-_st_chname() {
-	local n="$2$3"
-	[ "$(printf '%s' "$n" | wc -c)" -le 31 ] || n="$1$3"
-	[ "$(printf '%s' "$n" | wc -c)" -le 31 ] || n="$(printf '%s' "$1" | cut -c1-20)$3"
+_st_chname() { # ID ИМЯ [СУФФИКС] — имя канала Steer: не длиннее 31 байта (иначе движок отвергает спеку)
+	# Кириллица — 2 байта на букву: « (адреса)» сам по себе 15 байт, поэтому при нехватке места
+	# переходим на ID с коротким латинским суффиксом, а длинный ID режем с хвостиком-хешем (имена не совпадут)
+	local n="$2$3" s b
+	[ "$(printf '%s' "$n" | wc -c)" -le 31 ] && { esc "$n"; return; }
+	n="$1$3"
+	[ "$(printf '%s' "$n" | wc -c)" -le 31 ] && { esc "$n"; return; }
+	case "$3" in
+		'') s="" ;;
+		' (список)') s="-list" ;;
+		' (адреса)') s="-ip" ;;
+		' (голос)') s="-voice" ;;
+		*) s="-x" ;;
+	esac
+	n="$1$s"
+	if [ "$(printf '%s' "$n" | wc -c)" -gt 31 ]; then
+		b=$(( 31 - ${#s} - 5 ))
+		n="$(printf '%s' "$1" | head -c "$b")~$(printf '%s' "$1" | md5sum | cut -c1-4)$s"
+	fi
 	esc "$n"
 }
 
 _st_svc_channels() { # ID
-	local id="$1" name sets set dom="" pfx="" narrow="" f proto ports ch="" sep="" took=""
+	local id="$1" name sets set dom="" pfx="" srs="" narrow="" f fmt proto ports ch="" sep="" took=""
 	name="$(_rb_svc_field "$id" 2)"
 	sets="$(_rb_svc_field "$id" 8 | tr ',' ' ')"
 	for set in $sets; do
@@ -6708,6 +6740,8 @@ _st_svc_channels() { # ID
 		if _st_srs_get "$set"; then
 			took="$took $set"
 			f="$ST_DIR/lists/$set"
+			fmt="$(awk -F'|' -v k="$set" '$1 == k { print $2; exit }' "$ST_CAT_IDX" 2>/dev/null)"
+			if [ "$fmt" != lst ] && [ "${ST_SRS_NATIVE:-1}" = 1 ]; then srs="$srs${srs:+,}\"$f.srs\""; continue; fi
 			[ -s "$f.dom" ] && dom="$dom${dom:+,}\"$f.dom\""
 			if [ -s "$f.pfx" ]; then
 				if [ -s "$f.meta" ]; then narrow="$narrow $set"; else pfx="$pfx${pfx:+,}\"$f.pfx\""; fi
@@ -6723,10 +6757,13 @@ _st_svc_channels() { # ID
 	if [ -z "$sets" ]; then
 		dom="$(_st_json_list "$(_rb_svc_field "$id" 3 | tr ',' ' ')")"
 		pfx="$(_st_json_list "$(_rb_svc_field "$id" 4 | tr ',' ' ')")"
-		narrow=""
+		narrow=""; srs=""
 	fi
 	[ "$id" = custom ] && [ -s "$ST_USER_DIR/$id.lst" ] && dom="\"$ST_USER_DIR/$id.lst\""
-	[ -n "$dom" ] && { ch="$ch$sep{\"name\":\"$(_st_chname "$id" "$name")\",\"out\":\"$ST_OUT\",\"match\":{\"domains_files\":[$dom]}}"; sep=","; }
+	# Набор .srs целиком одним каналом: у Discord домены идут в туннель полностью, а подсети —
+	# только UDP-голос (свои порты у подсетей Discord и у Cloudflare 104.16.0.0/12)
+	[ -n "$srs" ] && { ch="$ch$sep{\"name\":\"$(_st_chname "$id" "$name")\",\"out\":\"$ST_OUT\",\"match\":{\"srs_files\":[$srs]}}"; sep=","; }
+	[ -n "$dom" ] && { ch="$ch$sep{\"name\":\"$(_st_chname "$id" "$name" "$([ -n "$srs" ] && echo ' (список)')")\",\"out\":\"$ST_OUT\",\"match\":{\"domains_files\":[$dom]}}"; sep=","; }
 	[ -n "$pfx" ] && { ch="$ch$sep{\"name\":\"$(_st_chname "$id" "$name" " (адреса)")\",\"out\":\"$ST_OUT\",\"match\":{\"prefixes_files\":[$pfx]}}"; sep=","; }
 	for set in $narrow; do
 		f="$ST_DIR/lists/$set"
@@ -6770,9 +6807,18 @@ _st_spec_build() { # ID... -> JSON в stdout
 }
 
 _st_spec_apply() { # ID...
-	local tmp="$ST_RUN/spec.json" out
+	local tmp="$ST_RUN/spec.json" out rc
+	ST_SRS_NATIVE=1
 	_st_spec_build "$@" > "$tmp" || { echo "ОШИБКА: для выбранных сервисов нет ни одного списка"; return 1; }
-	if ! out=$(steer apply --spec "$tmp" --dry-run 2>&1 >/dev/null); then
+	out=$(steer apply --spec "$tmp" --dry-run 2>&1 >/dev/null); rc=$?
+	if [ "$rc" != 0 ] && grep -q '"srs_files"' "$tmp"; then
+		# Старый движок не читает наборы .srs сам — раскладываем их в списки, как раньше
+		_rb_warn "Движок Steer не принял наборы .srs напрямую — раскладываем их в списки (обновите движок)"
+		ST_SRS_NATIVE=0
+		_st_spec_build "$@" > "$tmp" || { echo "ОШИБКА: для выбранных сервисов нет ни одного списка"; return 1; }
+		out=$(steer apply --spec "$tmp" --dry-run 2>&1 >/dev/null); rc=$?
+	fi
+	if [ "$rc" != 0 ]; then
 		echo "ОШИБКА: движок Steer отверг настройку"
 		printf '%s\n' "$out" | tail -n 5
 		return 1
@@ -6966,7 +7012,7 @@ _st_warp_resume() {
 
 _st_apply() { # [tunnel_ready] — туннель только что проверен, второй раз не поднимаем
 	local sel
-	rm -f "$ST_RUN/lists.json"
+	rm -f "$ST_RUN/lists.json" "$ST_RUN"/dl.*
 	_st_cat_refresh force >/dev/null 2>&1 || [ -f "$ST_CAT_OFF" ] || _rb_warn "Каталог списков не скачался — сервисы из каталога берём по прежнему списку"
 	sel="$(_st_sel | tr '\n' ' ')"
 	if [ -z "$(echo $sel)" ]; then
@@ -11395,20 +11441,7 @@ return view.extend({
 				var gTitle = m ? m[1] : g, gSub = m ? m[2] : '';
 				var open = g in openGroups ? openGroups[g] : on > 0;
 				var grid = E('div', { 'class': 'zm-grid zm-cat-grid' }, items.map(tile));
-				function setAll(val) {
-					if (busy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
-					pick = {};
-					for (var k in sel) if (sel[k]) pick[k] = true;
-					items.forEach(function(s) { if (val) pick[s.id] = true; else delete pick[s.id]; });
-					renderLists();
-				}
 				var body = E('div', { 'class': 'zm-cat-body', 'style': open ? '' : 'display:none' }, [
-					E('div', { 'class': 'zm-cat-tools' }, [
-						E('div', { 'class': 'zm-cat-links' }, [
-							E('button', { 'class': 'zm-linkbtn', 'type': 'button', 'click': function() { setAll(true); } }, 'Выбрать все'),
-							E('button', { 'class': 'zm-linkbtn', 'type': 'button', 'click': function() { setAll(false); }, 'disabled': on ? null : '' }, 'Снять все')
-						])
-					]),
 					grid
 				]);
 				var badge = E('span', { 'class': 'zm-badge zm-cat-count ' + (on ? 'zm-ok' : 'zm-off') }, on ? 'выбрано ' + on + ' из ' + items.length : items.length + ' ' + (function(n) { var a = n % 10, h = n % 100; return a === 1 && h !== 11 ? 'список' : (a >= 2 && a <= 4 && (h < 12 || h > 14) ? 'списка' : 'списков'); })(items.length));
@@ -12117,34 +12150,38 @@ ytimg.l.google.com
 yting.com
 ZM_INSTALLER_EOF
 cat > '/usr/share/zm-redbtn/lists/svc_telegram.lst' << 'ZM_INSTALLER_EOF'
-t.me
-telegram.me
-telegram.org
-telegram.dog
-telegra.ph
-telesco.pe
-tdesktop.com
-telegram-cdn.org
 cdn-telegram.org
-graph.org
-tg.dev
-fragment.com
 comments.app
 contest.com
-tx.me
+fragment.com
+graph.org
+quiz.directory
+t.me
+tdesktop.com
+telega.one
+telegra.ph
+telegram-cdn.org
+telegram.dog
+telegram.me
+telegram.org
 telegram.space
+telesco.pe
+tg.dev
+tx.me
+usercontent.dev
+ton.org
 ZM_INSTALLER_EOF
 cat > '/usr/share/zm-redbtn/lists/telegram.lst' << 'ZM_INSTALLER_EOF'
+5.28.192.0/18
 91.105.192.0/23
 91.108.4.0/22
-91.108.8.0/22
-91.108.12.0/22
-91.108.16.0/22
-91.108.20.0/22
+91.108.8.0/21
+91.108.16.0/21
 91.108.56.0/22
 95.161.64.0/20
 149.154.160.0/20
 185.76.151.0/24
+194.221.0.0/16
 ZM_INSTALLER_EOF
 cat > '/usr/share/zm-redbtn/lists/svc_discord.lst' << 'ZM_INSTALLER_EOF'
 dis.gd
@@ -12718,17 +12755,61 @@ cat > '/usr/share/zm-redbtn/lists/meta.lst' << 'ZM_INSTALLER_EOF'
 69.171.224.0/19
 74.119.76.0/22
 102.132.96.0/20
+102.132.112.0/24
+102.132.115.0/24
+102.132.116.0/23
+102.132.119.0/24
+102.132.120.0/23
+102.132.123.0/24
+102.132.125.0/24
+102.132.126.0/24
+102.221.188.0/22
 103.4.96.0/22
 129.134.0.0/17
+129.134.130.0/24
+129.134.132.0/24
+129.134.135.0/24
+129.134.136.0/22
+129.134.140.0/24
+129.134.143.0/24
+129.134.144.0/24
+129.134.148.0/23
+129.134.150.0/24
+129.134.154.0/23
+129.134.156.0/22
+129.134.160.0/22
+129.134.164.0/23
+129.134.168.0/21
+129.134.176.0/20
+129.134.194.0/23
+129.134.196.0/23
 157.240.0.0/17
+157.240.128.0/23
+157.240.131.0/24
+157.240.132.0/24
+157.240.134.0/24
+157.240.136.0/23
+157.240.139.0/24
+157.240.140.0/24
+157.240.156.0/22
+157.240.169.0/24
+157.240.170.0/24
+157.240.175.0/24
+157.240.177.0/24
+157.240.179.0/24
+157.240.181.0/24
+157.240.182.0/23
+157.240.184.0/21
 157.240.192.0/18
 163.70.128.0/17
 163.77.132.0/23
 163.77.136.0/23
+163.114.128.0/20
 173.252.64.0/18
 179.60.192.0/22
 185.60.216.0/22
 185.89.216.0/22
+199.201.64.0/22
 204.15.20.0/22
 ZM_INSTALLER_EOF
 cat > '/usr/share/zm-redbtn/lists/whatsapp.lst' << 'ZM_INSTALLER_EOF'
@@ -12753,17 +12834,61 @@ cat > '/usr/share/zm-redbtn/lists/whatsapp.lst' << 'ZM_INSTALLER_EOF'
 69.171.224.0/19
 74.119.76.0/22
 102.132.96.0/20
+102.132.112.0/24
+102.132.115.0/24
+102.132.116.0/23
+102.132.119.0/24
+102.132.120.0/23
+102.132.123.0/24
+102.132.125.0/24
+102.132.126.0/24
+102.221.188.0/22
 103.4.96.0/22
 129.134.0.0/17
+129.134.130.0/24
+129.134.132.0/24
+129.134.135.0/24
+129.134.136.0/22
+129.134.140.0/24
+129.134.143.0/24
+129.134.144.0/24
+129.134.148.0/23
+129.134.150.0/24
+129.134.154.0/23
+129.134.156.0/22
+129.134.160.0/22
+129.134.164.0/23
+129.134.168.0/21
+129.134.176.0/20
+129.134.194.0/23
+129.134.196.0/23
 157.240.0.0/17
+157.240.128.0/23
+157.240.131.0/24
+157.240.132.0/24
+157.240.134.0/24
+157.240.136.0/23
+157.240.139.0/24
+157.240.140.0/24
+157.240.156.0/22
+157.240.169.0/24
+157.240.170.0/24
+157.240.175.0/24
+157.240.177.0/24
+157.240.179.0/24
+157.240.181.0/24
+157.240.182.0/23
+157.240.184.0/21
 157.240.192.0/18
 163.70.128.0/17
 163.77.132.0/23
 163.77.136.0/23
+163.114.128.0/20
 173.252.64.0/18
 179.60.192.0/22
 185.60.216.0/22
 185.89.216.0/22
+199.201.64.0/22
 204.15.20.0/22
 ZM_INSTALLER_EOF
 cat > '/usr/share/zm-redbtn/lists/twitter_x.lst' << 'ZM_INSTALLER_EOF'
