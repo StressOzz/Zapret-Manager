@@ -1,5 +1,5 @@
 #!/bin/sh
-# Version: 1.60
+# Version: 1.61
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -70,7 +70,7 @@ cat > '/opt/zapret-manager-luci/backend.sh' << 'ZM_INSTALLER_EOF'
 umask 022
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.60"
+ZM_VERSION="1.61"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -5316,8 +5316,10 @@ _st_install_steer() {
 			return 0
 		fi
 	fi
-	local arch tmp base url ver was_on=""
+	local arch tmp base url ver was_on="" old_plain="" dropped=""
 	command -v steer >/dev/null 2>&1 && /etc/init.d/steer enabled 2>/dev/null && was_on=1
+	# Обычный пакет steer конфликтует с steer-extended — его надо убрать перед установкой
+	command -v steer >/dev/null 2>&1 && ! _st_is_ext && _pkg_is_installed steer && old_plain="$(_st_steer_ver)"
 	arch="$(_rb_arch)"
 	[ -n "$arch" ] || { echo "ОШИБКА: не удалось определить архитектуру роутера"; return 1; }
 	tmp="$ST_RUN/steer.$RAZ"
@@ -5332,8 +5334,25 @@ _st_install_steer() {
 			echo "$ver" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || continue
 			_rb_fetch_pkg "$base/${pkg}-${ver}-1_${arch}.${RAZ}" "$tmp" || continue
 		fi
+		if [ -n "$old_plain" ] && [ -z "$dropped" ]; then
+			# новый пакет уже скачан — только теперь убираем старый; правила Steer сохраняем и возвращаем
+			_rb_say "Удаляем старый пакет steer $old_plain — он мешает установке steer-extended"
+			[ -s "$ST_STEER_SPEC" ] && cp -f "$ST_STEER_SPEC" "$ST_RUN/spec.keep"
+			/etc/init.d/steer stop >/dev/null 2>&1
+			if ! $DELETE steer >&2; then
+				rm -f "$tmp" "$ST_RUN/spec.keep"
+				echo "ОШИБКА: старый пакет steer не удалился — удалите его вручную и повторите"
+				return 1
+			fi
+			dropped=1
+		fi
 		if $INSTALL "$tmp" >&2; then
 			rm -f "$tmp"
+			if [ -s "$ST_RUN/spec.keep" ]; then
+				mkdir -p "$(dirname "$ST_STEER_SPEC")"
+				cp -f "$ST_RUN/spec.keep" "$ST_STEER_SPEC"
+				rm -f "$ST_RUN/spec.keep"
+			fi
 			_st_own "pkg steer"
 			_st_own "pkg steer-extended"
 			_st_tun_ensure
@@ -5350,6 +5369,7 @@ _st_install_steer() {
 		fi
 	done
 	rm -f "$tmp"
+	[ -n "$dropped" ] && _rb_warn "Старый steer $old_plain уже удалён, а новый не поставился — нажмите установку ещё раз, когда появится интернет"
 	echo "ОШИБКА: не удалось установить движок Steer"
 	return 1
 }
@@ -5675,7 +5695,8 @@ _st_warp_ports() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА АДРЕС
 }
 
 _st_warp_scan() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА ЗАНЯТЫЕ_КОЛОНИИ ЗАНЯТЫЕ_АДРЕСА [ФАЙЛ_ОБЩЕГО_СПИСКА]
-	local dev="$1" peer="$2" busy=" $3 " busyip=" $4 " r="$ST_RUN/scan.$1" cand ip ports port loss rtt colo pick f cls
+	# $5 запоминаем сразу: ниже «set --» затирает позиционные параметры
+	local dev="$1" peer="$2" busy=" $3 " busyip=" $4 " pool="$5" r="$ST_RUN/scan.$1" cand ip ports port loss rtt colo pick f cls
 	mkdir -p "$ST_RUN"
 	: > "$r"; : > "$r.same"; : > "$r.nc"; : > "$r.ru"; : > "$r.notls"
 	cand=$(awk -v p="$ST_WARP_POOLS" -v n="$ST_WARP_RAND" 'BEGIN { srand(); c = split(p, a, " ");
@@ -5711,12 +5732,12 @@ _st_warp_scan() { # ИНТЕРФЕЙС КЛЮЧ_УЗЛА ЗАНЯТЫЕ_КОЛО
 	done
 	# Все найденные точки — в общий список, лучшие первыми: остальные туннели возьмут точки
 	# оттуда, без своей разведки (точка входа не зависит от ключей WARP)
-	if [ -n "$5" ]; then
+	if [ -n "$pool" ]; then
 		for f in "$r" "$r.same" "$r.nc" "$r.ru" "$r.notls"; do
 			[ -s "$f" ] || continue
 			case "$f" in *.nc) cls=1 ;; *.ru) cls=2 ;; *.notls) cls=3 ;; *) cls=0 ;; esac
 			awk -v c="$cls" '{ printf "%d %s %s %s\n", c * 100000000 + $1 * 100000 + $2, $3, $4, $5 }' "$f"
-		done | sort -n | awk '{ print $2, $3, $4, $1 }' > "$5"
+		done | sort -n | awk '{ print $2, $3, $4, $1 }' > "$pool"
 	fi
 	for f in "$r" "$r.same" "$r.nc" "$r.ru" "$r.notls"; do
 		[ -s "$f" ] || continue
