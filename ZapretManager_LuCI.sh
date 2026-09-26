@@ -3442,9 +3442,11 @@ health() {
 			fi
 		fi
 	fi
-	printf '{"zapret":%s,"zapret2":%s,"bytetube":%s,"tg":%s,"mixomo":%s,"doh":%s,"hosts":%s,"steer":%s,"steer_off":%s,"awg":%s}\n' \
+	local sx=""
+	if _st_installed; then sx="$(_st_exit)"; [ "$sx" = warp ] && _st_warp_own && sx=own; fi
+	printf '{"zapret":%s,"zapret2":%s,"bytetube":%s,"tg":%s,"mixomo":%s,"doh":%s,"hosts":%s,"steer":%s,"steer_off":%s,"steer_exit":"%s","awg":%s}\n' \
 		"$zr" "$zr2" "$bt" "$tg" "$mx" "$doh" "$hs" "$sr" \
-		"$([ -f /etc/zm-steer/stopped ] && echo true || echo false)" "$(_awg_health)"
+		"$([ -f /etc/zm-steer/stopped ] && echo true || echo false)" "$sx" "$(_awg_health)"
 }
 
 VERSIONS_CACHE="$ZM_STATE_DIR/versions.json"
@@ -7331,11 +7333,11 @@ awg_status() {
 		ep="$(sed -n 's/^[[:space:]]*Endpoint[[:space:]]*=[[:space:]]*//p' "$MIXOMO_WARP_CONF" | head -n1)"
 	fi
 	[ -x /etc/init.d/mihomo ] && mih=true
-	printf '{"running":%s,"phase":"%s","installed":%s,"kmod":"%s","tools":"%s","luci":"%s","luci_pkg":"%s","module":%s,"proto":%s,"steer":%s,"warp_conf":%s,"warp_path":"%s","warp_endpoint":"%s","mihomo":%s,"endpoints":"%s","ifaces":[%s]}\n' \
+	printf '{"running":%s,"phase":"%s","installed":%s,"kmod":"%s","tools":"%s","luci":"%s","luci_pkg":"%s","module":%s,"proto":%s,"steer":%s,"warp_conf":%s,"warp_path":"%s","warp_endpoint":"%s","mihomo":%s,"endpoints":"%s","steer_own":%s,"ifaces":[%s]}\n' \
 		"$running" "$(cat "$AWG_RUN/phase" 2>/dev/null)" "$(_awg_installed && echo true || echo false)" \
 		"$(esc "$(_awg_pkg_ver kmod-amneziawg)")" "$(esc "$(_awg_pkg_ver amneziawg-tools)")" "$(esc "$lv")" "$lp" \
 		"$(_st_awg_loaded && echo true || echo false)" "$(_awg_proto_ok && echo true || echo false)" \
-		"$(_st_warp_on && echo true || echo false)" "$conf" "$MIXOMO_WARP_CONF" "$(esc "$ep")" "$mih" "$AWG_ENDPOINTS" "$list"
+		"$(_st_warp_on && echo true || echo false)" "$conf" "$MIXOMO_WARP_CONF" "$(esc "$ep")" "$mih" "$AWG_ENDPOINTS" "$(_st_warp_own && echo true || echo false)" "$list"
 }
 
 
@@ -8697,6 +8699,8 @@ function pollJob(job, logEl, onDone, onTick) {
 				finished = true;
 				clearInterval(timer);
 				delete _activePolls[job];
+				// Операция закончилась — пусть остальное (точки в меню Web UI и т. п.) обновится сразу
+				try { window.dispatchEvent(new CustomEvent('zm:changed', { detail: { job: job } })); } catch (e) {}
 				onDone(st.rc === '0');
 			}
 		}).catch(function() {
@@ -8936,9 +8940,10 @@ return view.extend({
 			var offBadge = function(text) { return E('span', { 'class': 'zm-badge zm-off' }, [ E('span', { 'class': 'zm-dot' }), text ]); };
 			// Steer: 2 — должен работать, но не работает; 5 — выключен или сервисы не выбраны.
 			var stSt = st(h, 'steer', 0);
-			items.push(row('Steer', stSt === 1 ? zm.badge(true, 'работает', '')
-				: stSt === 2 ? zm.badge(false, '', 'не работает')
-				: stSt === 5 ? offBadge(h.steer_off ? 'выключен' : 'сервисы не выбраны')
+			var stVia = { warp: 'через WARP', own: 'через свой WARP', vpn: 'через VPN' }[h.steer_exit] || '';
+			items.push(row('Steer', stSt === 1 ? zm.badge(true, 'работает' + (stVia ? ' · ' + stVia : ''), '')
+				: stSt === 2 ? zm.badge(false, '', 'не работает' + (stVia ? ' · ' + stVia : ''))
+				: stSt === 5 ? offBadge(h.steer_off ? 'выключен' : h.steer_exit === 'none' ? 'подключите WARP или VPN' : 'сервисы не выбраны')
 				: zm.badge(false, '', 'не установлен')));
 			items.push(row('ByeTube', zm.stateBadge(st(h, 'bytetube', 0))));
 			items.push(row('TG WS Proxy', zm.stateBadge(st(h, 'tg', 0))));
@@ -9493,7 +9498,7 @@ return view.extend({
 					: E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() { quick('up', f.name, f.name + ' включён'); } }, 'Включить'));
 				acts.push(E('button', { 'class': 'cbi-button', 'click': function() { open[f.name] = open[f.name] === 'ep' ? null : 'ep'; renderIfaces(); } }, 'Точка входа'));
 			}
-			acts.push(E('button', { 'class': 'cbi-button cbi-button-action', 'click': function() {
+			if (!(steer && data.steer_own)) acts.push(E('button', { 'class': 'cbi-button cbi-button-action', 'click': function() {
 				if (!confirm('Сгенерировать новый WARP для ' + f.name + '?\n\nНовые ключи Cloudflare WARP получит только этот интерфейс' + (f.warp ? ', точка входа и маскировка сохранятся.' : ' — вместо текущего сервера.'))) return;
 				job('regen', f.name, 'Генерируем новый WARP для ' + f.name);
 			} }, 'Новый WARP'));
@@ -9509,7 +9514,9 @@ return view.extend({
 				quick('delete', f.name, f.name + ' удалён');
 			} }, 'Удалить'));
 			box.appendChild(E('div', { 'class': 'zm-actions' }, acts));
-			if (steer) box.appendChild(E('p', { 'class': 'zm-hint' }, 'Туннель Steer: конфиг и ключи можно менять здесь, остальным управляет страница Steer.'));
+			if (steer) box.appendChild(E('p', { 'class': 'zm-hint' }, data.steer_own
+				? 'Свой WARP для Steer: новый конфиг можно вставить здесь («Изменить конфиг») или на странице Steer.'
+				: 'Туннель Steer: конфиг и ключи можно менять здесь, остальным управляет страница Steer.'));
 			if (open[f.name] === 'ep') box.appendChild(epEditor(f));
 			if (open[f.name] === 'conf') {
 				var ta = E('textarea', { 'class': 'zm-config-editor', 'spellcheck': 'false', 'style': 'min-height:220px' });
@@ -9910,6 +9917,9 @@ return view.extend({
 
 		// ── главная карточка ──
 
+		// Как называть туннель WARP: в режиме «Свой конфиг» — «Свой WARP».
+		function warpName() { return data.warp_mode === 'own' ? 'Свой WARP' : 'WARP'; }
+
 		function selectedCount() {
 			var n = (data.services || []).filter(function(s) { return s.on; }).length;
 			if (!n && (parseInt(data.channels, 10) || 0) > 0) n = 1;
@@ -9973,13 +9983,13 @@ return view.extend({
 					mainCard.appendChild(E('div', { 'class': 'zm-row' }, [
 						E('span', { 'class': 'zm-label' }, 'Сервисы идут через'),
 						E('div', { 'class': 'zm-seg' }, [
-							E('div', { 'class': 'zm-seg-item' + (!isVpn ? ' zm-active' : ''), 'click': function() { if (isVpn && !busy) act('sub_exit', 'warp', 'Переключаем на WARP'); } }, 'WARP'),
+							E('div', { 'class': 'zm-seg-item' + (!isVpn ? ' zm-active' : ''), 'click': function() { if (isVpn && !busy) act('sub_exit', 'warp', 'Переключаем на ' + warpName()); } }, warpName()),
 							E('div', { 'class': 'zm-seg-item' + (isVpn ? ' zm-active' : ''), 'click': function() { if (!isVpn && !busy) act('sub_exit', 'vpn', 'Переключаем на VPN'); } }, data.sub_label || 'VPN')
 						]),
 						isVpn ? vpnBadge() : badge(ts[1], ts[0])
 					]));
 				} else if (data.exit === 'vpn') mainCard.appendChild(row('Сервисы идут через', E('span', {}, [ 'VPN' + (data.sub_label ? ' · ' + data.sub_label : '') + ' ', vpnBadge() ])));
-				else if (data.exit === 'warp') mainCard.appendChild(row('Сервисы идут через', badge(ts[1], 'WARP · ' + ts[0])));
+				else if (data.exit === 'warp') mainCard.appendChild(row('Сервисы идут через', badge(ts[1], warpName() + ' · ' + ts[0])));
 				else mainCard.appendChild(row('Сервисы идут через', badge('zm-warn', 'туннель не подключён — выберите вкладку WARP или VPN')));
 				mainCard.appendChild(row('Через туннель', E('span', {}, n ? n + ' ' + plural(n, 'сервис', 'сервиса', 'сервисов') : 'ничего не выбрано')));
 				var newer = data.latest && data.version && verLt(data.version, data.latest);
@@ -10121,9 +10131,11 @@ return view.extend({
 			var n = customData ? (parseInt(customData.count, 10) || 0) : 0;
 			customCard.appendChild(row('Состояние', !n ? badge('zm-off', 'список пуст')
 				: !svc.on ? badge('zm-warn', 'не выбран')
-				: !data.installed ? badge('zm-warn', 'пойдёт через WARP после установки')
+				: !data.installed ? badge('zm-warn', 'пойдёт через Steer после установки')
 				: data.stopped ? badge('zm-off', 'Steer выключен')
-				: badge('zm-ok', 'идёт через WARP')));
+				: data.exit === 'vpn' ? badge('zm-ok', 'идёт через VPN')
+				: data.exit === 'warp' ? badge('zm-ok', 'идёт через ' + warpName())
+				: badge('zm-warn', 'подключите WARP или VPN')));
 			customCard.appendChild(row('Доменов', E('span', {}, String(n))));
 			customEditor = E('textarea', {
 				'class': 'zm-config-editor', 'spellcheck': 'false', 'style': 'min-height:200px', 'placeholder': 'example.com\nsite.org',
@@ -10174,9 +10186,11 @@ return view.extend({
 				else if (diagRes.vpn === 'off') items.push([ 'fail', 'Трафик через подписку не идёт', 'проверьте задержку узлов на вкладке «Подписка» или выберите другой узел' ]);
 				else if (tn.length) tn.forEach(function(t) {
 					var who = tn.length > 1 ? 'Туннель ' + t.n + ': ' : '';
-					if (t.warp === 'on') items.push([ 'ok', who + 'трафик идёт через WARP' + (t.colo ? ' (сервер ' + t.colo + ')' : ''), '' ]);
-					else if (t.warp === 'notls') items.push([ 'warn', who + 'соединение есть, но HTTPS через туннель не проходит', 'нажмите «Сменить точки входа»' ]);
-					else items.push([ tn.length > 1 && diagRes.warp === 'on' ? 'warn' : 'fail', who + 'трафик через WARP не идёт', 'нажмите «Перезапустить туннели» или «Сменить точки входа»' ]);
+					var ownW = data.warp_mode === 'own';
+					if (t.warp === 'on') items.push([ 'ok', who + 'трафик идёт через ' + warpName() + (t.colo ? ' (сервер ' + t.colo + ')' : ''), '' ]);
+					else if (t.warp === 'notls') items.push([ 'warn', who + 'соединение есть, но HTTPS через туннель не проходит', ownW ? 'замените конфиг на вкладке WARP' : 'нажмите «Сменить точки входа»' ]);
+					else items.push([ tn.length > 1 && diagRes.warp === 'on' ? 'warn' : 'fail', who + 'трафик через ' + warpName() + ' не идёт',
+						ownW ? 'нажмите «Перезапустить туннель» или замените конфиг на вкладке WARP' : 'нажмите «Перезапустить туннели» или «Сменить точки входа»' ]);
 				});
 				else if (diagRes.warp === 'on') items.push([ 'ok', 'Трафик идёт через WARP' + (diagRes.colo ? ' (сервер ' + diagRes.colo + ')' : ''), '' ]);
 				else if (diagRes.warp === 'off') items.push([ 'fail', 'Трафик через WARP не идёт', 'нажмите «Перезапустить туннели» или «Сменить точки входа»' ]);
@@ -10508,7 +10522,7 @@ return view.extend({
 				E('div', { 'class': 'zm-sub-facts' }, facts)
 			]));
 
-			var vpn = subData.exit === 'vpn';
+			var vpn = (data.exit || subData.exit) === 'vpn';
 			if (vpn) {
 				var v = subData.vpn || {}, pr = v.probe || {}, st;
 				if (v.up) st = badge('zm-ok', 'подключено');
@@ -10551,7 +10565,7 @@ return view.extend({
 			var sk = subData.list && subData.list.skipped_reasons || [];
 			if (subData.list && subData.list.skipped > 0) subCard.appendChild(E('p', { 'class': 'zm-hint' },
 				'Пропущено узлов: ' + subData.list.skipped + (sk.length ? ' — ' + sk.map(function(r) { return r.reason; }).slice(0, 2).join('; ') : '') + '. Steer умеет VLESS Reality (tcp, grpc, xhttp).'));
-			if (!vpn) subCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сейчас сервисы идут через WARP — переключить можно в карточке Steer вверху. Выбор узла сохранится.'));
+			if (!vpn && data.exit === 'warp') subCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сейчас сервисы идут через ' + warpName() + ' — переключить можно в карточке Steer вверху. Выбор узла сохранится.'));
 			if (subData.kind === 'url') {
 				var AUTO = [ { id: 'off', name: 'Не обновлять' }, { id: '3', name: 'Каждые 3 часа' }, { id: '6', name: 'Каждые 6 часов' }, { id: '12', name: 'Каждые 12 часов' }, { id: '24', name: 'Раз в сутки' } ];
 				var curAuto = subData.auto || 'off';
@@ -15724,6 +15738,9 @@ function ubus(object, method, params, useSid) {
 			throw e;
 		}
 		if (!msg || !Array.isArray(msg.result)) throw new Error('Некорректный ответ ubus');
+		// Любое действие в панели (не опрос состояния) — через секунду обновляем точки в меню,
+		// чтобы меню, дашборд и страницы показывали одно и то же, а не ждали 15 секунд.
+		if (object === 'zapret-manager' && !/(status|info|health|list|tail|log|latest|version|export|get)/.test(method)) scheduleShellRefresh();
 		return msg.result;
 	}, function (err) {
 		clearTimeout(tm);
@@ -16471,6 +16488,13 @@ function loadShellInfo() {
 }
 
 var shellTimer = null;
+var shellRefreshTimer = null;
+function scheduleShellRefresh() {
+	clearTimeout(shellRefreshTimer);
+	shellRefreshTimer = setTimeout(function () { refreshShellStatus(); }, 1200);
+}
+window.addEventListener('zm:changed', scheduleShellRefresh);
+
 function startShellPolling() {
 	if (shellTimer) return;
 	shellTimer = setInterval(function () { if (!document.hidden) refreshShellStatus(); }, 15000);
