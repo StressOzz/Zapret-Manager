@@ -41,6 +41,7 @@ yandex.com
 yandex.org
 yandex.net
 chatglm.cn
+gudsen.vip
 gstatic.com
 lichess.org
 premier.one
@@ -58,7 +59,6 @@ battleye.com
 opencity.pro
 ipstream.one
 godville.net
-gudsen.vip
 voidboost.cc
 hcaptcha.com
 mchose.com.cn
@@ -70,6 +70,7 @@ mozaracing.com
 vivoglobal.com
 dolynkcloud.com
 libreoffice.org
+payguide.online
 easy4ipcloud.com
 feralhosting.com
 moondroplab.tech
@@ -591,7 +592,7 @@ levelinfinite.com
 arenabreakout.com
 arenabreakoutinfinite.com
 #################################### Aniimo
+funplus.com
 guardease.com
 kingsgroupgames.com
-funplus.com
 ####################################
