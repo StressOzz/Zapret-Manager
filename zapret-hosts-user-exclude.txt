@@ -53,6 +53,7 @@ genesis.com
 carcade.com
 midnight.im
 easy4ip.com
+ibyteimg.com
 duolingo.com
 map-care.com
 gravatar.com
@@ -80,6 +81,7 @@ rockstargames.com
 docs.altlinux.org
 battleye.b-cdn.net
 download.nvidia.com
+tiktoklinksafety.com
 documentfoundation.org
 marketplace.visualstudio.com
 supporter-files.nexus-cdn.com
