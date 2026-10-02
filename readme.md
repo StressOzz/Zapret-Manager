@@ -59,6 +59,13 @@
 >
 > Там всё то же самое, что в SSH, но нагляднее: стратегии, YouTube / Discord / игры, Steer, ByeTube, Mixomo, DNS over HTTPS — с живыми статусами, логами и без ввода команд. SSH-меню остаётся для быстрых действий и работает с панелью заодно: изменения в одном месте сразу видны в другом.
 
+>
+> в SSH выполните команду:
+> ```
+> sh <(wget -qO - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/ZapretManager_LuCI.sh)
+> ```
+>
+
 ---
 
 # Оглавление
