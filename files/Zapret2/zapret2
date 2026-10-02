@@ -388,6 +388,14 @@ config strategy 'games_udp'
 --payload=known,unknown
 --lua-desync=fake:blob=blob_quic_initial_4pda_to:repeats=10:payload=known,unknown'
 
+config strategy 'games_udp_1'
+	option enabled '0'
+	option port '88,1024-2407,2409-4499,4502-19293,19345-49999,50101-65535'
+	list filter_l3 'ipv4'
+	list protocol 'udp'
+	option script '--out-range=<d2
+--lua-desync=fake:blob=blob_stun:payload=unknown'
+
 config strategy 'Youtube_circular'
 	option port '443'
 	list filter_l3 'ipv4'
