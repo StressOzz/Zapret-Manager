@@ -1,5 +1,5 @@
 #!/bin/sh
-# Version: 1.95
+# Version: 1.96
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -45,12 +45,12 @@ rm -f \
 
 mkdir -p /opt/zapret-manager-luci
 chmod 0755 /opt/zapret-manager-luci
-cat > '/opt/zapret-manager-luci/backend.sh' << 'ZM_INSTALLER_EOF'
+cat > '/opt/zapret-manager-luci/backend.sh.zm-new' << 'ZM_INSTALLER_EOF'
 #!/bin/sh
 umask 022
 
 CONF="/etc/config/zapret"
-ZM_VERSION="1.95"
+ZM_VERSION="1.96"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -661,8 +661,47 @@ rpcd_watch() {
 	if [ "$rc" = 7 ]; then
 		logger -t zapret-manager "rpcd завис — перезапускаем, чтобы вернуть вход в LuCI"
 		/etc/init.d/rpcd restart >/dev/null 2>&1
+		return 0
 	fi
+	_rpcd_plugin_watch
 	return 0
+}
+
+_rpcd_plugin_watch() {
+	local pl=/usr/libexec/rpcd/zapret-manager want have sig st stamp=/tmp/zm-rpcd-plugin.stamp
+	[ -x "$pl" ] || return 0
+	_rpcd_plugin_state "$pl" && { rm -f "$stamp"; return 0; }
+	sleep 5
+	_rpcd_plugin_state "$pl"
+	st=$?
+	[ "$st" = 0 ] && { rm -f "$stamp"; return 0; }
+	sig="$(date -r "$pl" +%s 2>/dev/null)"
+	if [ "$st" = 1 ]; then
+		case "$(cat "$stamp" 2>/dev/null)" in
+			"$sig.x3") return 0 ;;
+			"$sig.x2") echo "$sig.x3" > "$stamp" ;;
+			"$sig.x1") echo "$sig.x2" > "$stamp" ;;
+			*) echo "$sig.x1" > "$stamp" ;;
+		esac
+		logger -t zapret-manager "rpcd не видит панель (Object not found) — перезапускаем rpcd"
+	else
+		[ "$(cat "$stamp" 2>/dev/null)" = "$sig.m" ] && return 0
+		echo "$sig.m" > "$stamp"
+		logger -t zapret-manager "rpcd держит старый список методов панели — перезапускаем rpcd"
+	fi
+	/etc/init.d/rpcd restart >/dev/null 2>&1
+	return 0
+}
+
+_rpcd_plugin_state() {
+	local want have
+	ubus -t 5 list zapret-manager >/dev/null 2>&1 || return 1
+	want="$(grep -c 'json_add_object' "$1" 2>/dev/null)"
+	have="$(ubus -v list zapret-manager 2>/dev/null | grep -c '^[[:space:]]*"')"
+	[ "${want:-0}" -gt 0 ] 2>/dev/null || return 0
+	[ "${have:-0}" -gt 0 ] 2>/dev/null || return 0
+	[ "$have" = "$want" ] && return 0
+	return 2
 }
 
 ui_theme_get() {
@@ -11929,7 +11968,8 @@ case "$cmd" in
 	*) echo '{"error":"неизвестная команда"}'; exit 1 ;;
 esac
 ZM_INSTALLER_EOF
-chmod 0755 '/opt/zapret-manager-luci/backend.sh'
+chmod 0755 '/opt/zapret-manager-luci/backend.sh.zm-new'
+mv -f '/opt/zapret-manager-luci/backend.sh.zm-new' '/opt/zapret-manager-luci/backend.sh'
 cat > '/opt/zapret-manager-luci/forkop.uc' << 'ZM_INSTALLER_EOF'
 let fs = require("fs");
 let uci = require("uci");
@@ -12720,7 +12760,7 @@ chmod 0644 '/opt/zapret-manager-luci/forkop.uc'
 
 mkdir -p /usr/libexec/rpcd
 chmod 0755 /usr/libexec/rpcd
-cat > '/usr/libexec/rpcd/zapret-manager' << 'ZM_INSTALLER_EOF'
+cat > '/opt/zapret-manager-luci/rpcd-plugin.zm-new' << 'ZM_INSTALLER_EOF'
 #!/bin/sh
 
 . /usr/share/libubox/jshn.sh
@@ -12943,7 +12983,8 @@ case "$1" in
 	*) echo '{"error":"usage: zapret-manager {list|call <method>}"}'; exit 1 ;;
 esac
 ZM_INSTALLER_EOF
-chmod 0755 '/usr/libexec/rpcd/zapret-manager'
+chmod 0755 '/opt/zapret-manager-luci/rpcd-plugin.zm-new'
+mv -f '/opt/zapret-manager-luci/rpcd-plugin.zm-new' '/usr/libexec/rpcd/zapret-manager'
 
 mkdir -p /usr/share/rpcd/acl.d
 chmod 0755 /usr/share/rpcd/acl.d
@@ -13169,7 +13210,19 @@ function zmDeclare(o) {
 		if (typeof r === 'number') return r === 0 ? {} : { error: 'Роутер: ' + (UBUS_TEXT[r] || ('ошибка ubus ' + r)), ubus: r };
 		return r == null ? {} : r;
 	};
-	return rpc.declare(o);
+	var fn = rpc.declare(o);
+	return function() {
+		var self = this, args = arguments, left = 6;
+		if (document.body.classList.contains('zmw-body')) return fn.apply(self, args);
+		function go() {
+			return fn.apply(self, args).catch(function(e) {
+				if (left-- > 0 && /Object not found/i.test(String((e && e.message) || e)))
+					return new Promise(function(ok) { setTimeout(ok, 1500); }).then(go);
+				throw e;
+			});
+		}
+		return go();
+	};
 }
 
 var callStatus = zmDeclare({ object: 'zapret-manager', method: 'status', expect: {} });
@@ -13319,7 +13372,41 @@ function detectMissingThemeVar() {
 	} catch (e) {  }
 }
 
+var cacheGuardDone = false;
+function cacheGuard() {
+	if (cacheGuardDone) return;
+	cacheGuardDone = true;
+	try {
+		if (document.body.classList.contains('zmw-body') || !window.fetch || !window.localStorage) return;
+		var base = String(L.env.base_url || L.resource('x').replace(/\/x$/, '')), ver = L.env.resource_version;
+		fetch(base + '/zapret-manager/build.txt?t=' + Date.now(), { cache: 'no-store' }).then(function(r) { return r.ok ? r.text() : ''; }).then(function(t) {
+			var lines = String(t || '').split(/\r?\n/).map(function(x) { return x.trim(); }).filter(Boolean);
+			var build = lines.shift(), had = null, stale = false;
+			if (!/^[0-9]{6,}$/.test(build || '')) return;
+			try { had = localStorage.getItem('zm.build'); } catch (e) { return; }
+			if (had === build) return;
+			function grab(url, mode) {
+				return fetch(url, { cache: mode }).then(function(r) { return r.ok ? r.text() : null; }).catch(function() { return null; });
+			}
+			return lines.filter(function(p) { return /^[A-Za-z0-9_\/.-]+\.(js|css)$/.test(p) && p.indexOf('..') < 0; }).reduce(function(pr, p) {
+				var url = base + '/' + p + (/\.js$/.test(p) && ver != null ? '?v=' + ver : '');
+				return pr.then(function() {
+					return grab(url, 'force-cache').then(function(a) {
+						return grab(url, 'reload').then(function(b) { if (a != null && b != null && a !== b) stale = true; });
+					});
+				});
+			}, Promise.resolve()).then(function() {
+				try { localStorage.setItem('zm.build', build); if (localStorage.getItem('zm.build') !== build) return; } catch (e) { return; }
+				if (!stale) return;
+				toast('Панель обновлена — загружаем новую версию', 'info');
+				setTimeout(function() { location.reload(); }, 700);
+			});
+		}).catch(function() {});
+	} catch (e) {}
+}
+
 function injectCss() {
+	cacheGuard();
 	detectMissingThemeVar();
 	if (document.getElementById('zm-css')) return;
 	var l = document.createElement('link');
@@ -21414,7 +21501,7 @@ return view.extend({
 		}
 
 		function routeVerdict(r) {
-			var lines = [], via = cfg && cfg.mode === 'iface' ? 'интерфейс ' + (cfg.iface || '') : 'прокси';
+			var lines = [], via = cfg && cfg.mode === 'iface' ? 'интерфейс ' + (cfg.iface || '') : 'VPN';
 			if (r.verdict === 'off') return { tone: 'off', cls: 'zm-off', label: 'Forkozz не работает', title: 'запрос пойдёт напрямую', note: 'Запустите Forkozz и проверьте ещё раз.' };
 			if (r.addr && !r.ip) lines.push([ 'Адрес', r.how === 'fakeip' ? [ r.addr, ' (подменный — домен есть в списках Forkozz)' ] : r.addr ]);
 			if (r.how === 'subnet') lines.push([ 'Совпадение', 'адрес входит в подсети Forkozz' ]);
@@ -22867,7 +22954,40 @@ ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/bytetube.js'
 
 rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null || true
+ZM_BUILD_ID="$(date +%s)"
+{
+	echo "$ZM_BUILD_ID"
+	for _zm_f in /www/luci-static/resources/zapret-manager/*.js /www/luci-static/resources/bytetube/*.js /www/luci-static/resources/view/zapret-manager/*.js /www/luci-static/resources/view/zapret-manager/*.css /www/luci-static/resources/view/bytetube/*.css; do
+		[ -f "$_zm_f" ] && echo "${_zm_f#/www/luci-static/resources/}"
+	done
+} > /www/luci-static/resources/zapret-manager/build.txt.zm-new 2>/dev/null || true
+mv -f /www/luci-static/resources/zapret-manager/build.txt.zm-new /www/luci-static/resources/zapret-manager/build.txt 2>/dev/null || true
+chmod 0644 /www/luci-static/resources/zapret-manager/build.txt 2>/dev/null || true
+
+ZM_RPC_WANT="$(grep -c 'json_add_object' /usr/libexec/rpcd/zapret-manager 2>/dev/null || true)"
+_zm_rpcd_ready() {
+	ubus -t 5 list zapret-manager >/dev/null 2>&1 || return 1
+	_zm_have="$(ubus -v list zapret-manager 2>/dev/null | grep -c '^[[:space:]]*"' || true)"
+	[ "$_zm_have" = "$ZM_RPC_WANT" ] || [ "$_zm_have" = 0 ]
+}
+_zm_rpcd_wait() {
+	_zm_i=0
+	while [ "$_zm_i" -lt "$1" ]; do
+		if _zm_rpcd_ready; then return 0; fi
+		sleep 1
+		_zm_i=$((_zm_i + 1))
+	done
+	return 1
+}
 /etc/init.d/rpcd reload >/dev/null 2>&1 || /etc/init.d/rpcd restart >/dev/null 2>&1 || true
+if [ -x /etc/init.d/rpcd ] && command -v ubus >/dev/null 2>&1; then
+	if ! _zm_rpcd_wait 10; then
+		/etc/init.d/rpcd restart >/dev/null 2>&1 || true
+		if ! _zm_rpcd_wait 15; then
+			echo -e "${YELLOW}rpcd не подхватил панель — если страница покажет «Object not found», выполните: /etc/init.d/rpcd restart${NC}"
+		fi
+	fi
+fi
 if grep -qx 'steer-spec' /etc/zm-steer/owned 2>/dev/null && /etc/init.d/steer enabled 2>/dev/null; then
 	/etc/init.d/steer reload >/dev/null 2>&1 || true
 fi
@@ -22996,6 +23116,18 @@ var UBUS_ERR = [ 'OK', 'неверная команда', 'неверный ар
 var rpcSeq = 0;
 
 function ubus(object, method, params, useSid) {
+	var left = 6;
+	function go() {
+		return ubusOnce(object, method, params, useSid).catch(function (e) {
+			if (left-- > 0 && e && e.rpcCode === -32000 && /Object not found/i.test(e.message || ''))
+				return new Promise(function (ok) { setTimeout(ok, 1500); }).then(go);
+			throw e;
+		});
+	}
+	return go();
+}
+
+function ubusOnce(object, method, params, useSid) {
 	var ac = window.AbortController ? new AbortController() : null;
 	var tm = ac ? setTimeout(function () { ac.abort(); }, 60000) : 0;
 	return fetch('/ubus', {
@@ -23932,7 +24064,8 @@ function showLogin(note, noteKind) {
 				startApp();
 			});
 		}).catch(function (e) {
-			fail(e && e.noUbus ? e.message : ('Роутер не отвечает: ' + ((e && e.message) || e)));
+			if (e && e.rpcCode === -32000 && /Object not found/i.test(e.message || '')) fail('Служба rpcd на роутере ещё запускается — подождите минуту и нажмите «Войти» снова');
+			else fail(e && e.noUbus ? e.message : ('Роутер не отвечает: ' + ((e && e.message) || e)));
 		});
 	});
 
