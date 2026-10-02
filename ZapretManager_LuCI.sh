@@ -676,6 +676,7 @@ zm_watch() {
 	rpcd_watch
 	_zm_net_orphan && _zm_net_restore force >/dev/null 2>&1
 	_fk_watch
+	_st_legacy_check
 	_st_vpn_watch
 	_tg_watch
 	return 0
@@ -4878,6 +4879,7 @@ health() {
 	out=$(hosts_status 2>/dev/null)
 	case "$out" in *'"enabled":true'*|*'"geohide":"'[a-z]*) hs=1 ;; esac
 	local sr=0 w
+	_st_legacy_check
 	if _st_installed; then
 		if [ -f /etc/zm-steer/stopped ] || ! grep -qx 'steer-spec' /etc/zm-steer/owned 2>/dev/null || [ "$(_st_exit)" = none ]; then
 			sr=5
@@ -4956,6 +4958,7 @@ do_versions_refresh() {
 		j="$(tgws_status)"
 		add "$(_ver_item sTGWS "$(_jf "$j" '@.version')" "$(_jf "$j" '@.latest')")"
 	fi
+	_st_legacy_check
 	stl_present && add "$(_ver_item 'Ядро steer' "$(stl_version)" "$(stl_latest)")"
 	_fk_installed && add "$(_ver_item Forkozz "$(_fk_version)" "$(_fk_latest)")"
 	local feeds=0 v
@@ -6962,7 +6965,7 @@ _stl_fetch() {
 }
 
 stl_engine_install() {
-	local ver="$1" arch m p n f mods="" pkgs files="" old="" legacy="" keep="$STL_TMP/spec.keep" was_on="" rc
+	local ver="$1" arch m p n f mods="" pkgs files="" old="" back="" legacy="" keep="$STL_TMP/spec.keep" was_on="" rc
 	shift
 	_stl_ver_ok "$ver" || { echo "ОШИБКА: версия ядра steer $ver — нужна 2.0.0 или новее"; return 1; }
 	arch="$(_rb_arch)"
@@ -6992,17 +6995,33 @@ stl_engine_install() {
 		[ "$rc" = 0 ] && for n in $legacy; do apk del "$n" >/dev/null 2>&1; done
 	else
 		if [ -n "$legacy" ]; then
-			_stl_say "Снимаем прежнее ядро steer $(stl_version) — оно мешает новому"
+			old="$(stl_version)"; back=""
+			for n in $legacy; do
+				f="$STL_TMP/$n-$old-1_$arch.$RAZ"
+				_pkg_is_installed "$n" && case "$n" in steer|steer-extended) _stl_fetch "$old" "$n-$old-1_$arch.$RAZ" "$f" && back="$back $f" ;; esac
+			done
+			if [ -z "$back" ]; then
+				rm -f $files "$keep"
+				echo "ОШИБКА: не скачался пакет прежнего ядра steer $old для возврата — прежнее ядро оставлено"
+				return 1
+			fi
+			_stl_say "Снимаем прежнее ядро steer $old — оно мешает новому"
 			"$STL_INIT" stop >/dev/null 2>&1
 			$DELETE $legacy >&2
 		fi
 		$INSTALL $files >&2; rc=$?
+		if [ "$rc" != 0 ] && [ -n "$legacy" ]; then
+			_stl_say "Новое ядро не встало — возвращаем прежнее ядро steer $old"
+			$INSTALL $back >&2
+		fi
+		[ -n "$legacy" ] && rm -f $back
 	fi
 	rm -f $files
 	[ -s "$keep" ] && [ ! -s "$STL_SPEC" ] && { mkdir -p "$STL_ETC"; cp -f "$keep" "$STL_SPEC"; }
 	rm -f "$keep"
 	if [ "$rc" != 0 ] || ! stl_v2; then
-		[ "$PKG" != apk ] && [ -n "$legacy" ] && ! stl_present && echo "!! Прежнее ядро steer уже снято, а новое не встало — нажмите установку ещё раз, когда появится интернет"
+		[ -n "$legacy" ] && ! stl_present && echo "!! Прежнее ядро steer снято, а новое не встало — нажмите установку ещё раз, когда появится интернет"
+		[ -n "$was_on" ] && stl_present && stl_restart >/dev/null 2>&1
 		echo "ОШИБКА: ядро steer $ver не установилось"
 		return 1
 	fi
@@ -8643,6 +8662,35 @@ _st_apply() {
 	_st_spec_apply $sel
 }
 
+ST_UP2_FAIL="$ST_DIR/engine2.fail"
+_st_legacy_check() {
+	stl_present && ! stl_v2 || return 0
+	_st_installed && _st_owns "engine" || return 0
+	[ -z "$(_st_blocker)" ] || return 0
+	_st_running && return 0
+	[ -f "$ST_UP2_FAIL" ] && [ -z "$(find "$ST_UP2_FAIL" -mmin +10 2>/dev/null)" ] && return 0
+	job_start steer do_steer_engine2 >/dev/null 2>&1
+	return 0
+}
+
+do_steer_engine2() {
+	_st_phase pkgs
+	rm -f "$ST_STOP_FLAG"
+	_rb_say "Ядро steer $(stl_version) устарело — переводим на 2.x"
+	rm -f "$STL_CACHE"
+	if ! _st_install_steer; then
+		mkdir -p "$ST_DIR"; touch "$ST_UP2_FAIL"
+		_rb_warn "Ядро steer 2.x сейчас не поставить — прежнее работает, попробуем позже"
+		return 1
+	fi
+	rm -f "$ST_UP2_FAIL"
+	if _st_owns "steer-spec" && [ ! -f "$ST_OFF" ] && [ -n "$(_st_sel)" ]; then
+		_st_phase rules
+		_st_apply || return 1
+	fi
+	_rb_say "Готово, ядро steer $(stl_version)"
+}
+
 _st_engine_ready() {
 	stl_v2 && { ! _st_use_vpn || stl_has vpn; } && return 0
 	_st_install_steer $(_st_use_vpn && echo vpn)
@@ -9203,6 +9251,7 @@ do_steer_remove() {
 steer_status() {
 	local running=false phase="" blk colo="" warp_up=false installed=false ver="" run=false chans=0 dns=false
 	local host="" port="" hs="" age="" rx=0 tx=0 off=false svc="" sep="" id sel=" " skip w k r
+	_st_legacy_check
 	_st_running && running=true
 	[ -f "$ST_PHASE_FILE" ] && phase=$(cat "$ST_PHASE_FILE")
 	blk="$(_st_blocker)"
@@ -10151,6 +10200,7 @@ steer_action() {
 		cron_restart) _st_cron_restart ;;
 		sync)
 			_st_cron_refresh
+			_st_legacy_check
 			_st_owns "steer-spec" && [ ! -f "$ST_OFF" ] && stl_reload
 			printf '{"ok":true}\n'
 			;;
