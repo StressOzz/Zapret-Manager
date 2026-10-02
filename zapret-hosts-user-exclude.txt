@@ -53,6 +53,7 @@ genesis.com
 carcade.com
 midnight.im
 easy4ip.com
+senkuro.com
 ibyteimg.com
 duolingo.com
 map-care.com
@@ -598,4 +599,14 @@ arenabreakoutinfinite.com
 funplus.com
 guardease.com
 kingsgroupgames.com
+#################################### tp-link
+tp-link.com
+tplinkra.com
+tplinkap.net
+tplinknbu.com
+tplinkdns.com
+tplinkwifi.net
+tplinkcloud.com
+tplinklogin.net
+tplinkrepeater.net
 ####################################
