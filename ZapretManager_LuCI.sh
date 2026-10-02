@@ -1,5 +1,5 @@
 #!/bin/sh
-# Version: 2.05
+# Version: 2.06
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -50,7 +50,7 @@ cat > '/opt/zapret-manager-luci/backend.sh.zm-new' << 'ZM_INSTALLER_EOF'
 umask 022
 
 CONF="/etc/config/zapret"
-ZM_VERSION="2.05"
+ZM_VERSION="2.06"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -10260,8 +10260,16 @@ _awg_mask_name() {
 	esac
 }
 
+_zm_rand32() {
+	local v=""
+	if command -v hexdump >/dev/null 2>&1; then v="$(head -c 4 /dev/urandom 2>/dev/null | hexdump -e '1/4 "%u"' 2>/dev/null)"
+	elif command -v od >/dev/null 2>&1; then v="$(head -c 4 /dev/urandom 2>/dev/null | od -An -tu4 2>/dev/null | tr -d ' \n')"; fi
+	case "$v" in ''|*[!0-9]*) v="$(( $(date +%s) % 100000 * 1000 + $$ % 1000 ))" ;; esac
+	echo "$v"
+}
+
 _awg_rand_hosts() {
-	awk -v n="$1" -v pools="$ST_WARP_POOLS" -v seed="$(head -c 4 /dev/urandom 2>/dev/null | od -An -tu4 | tr -d ' \n')" 'BEGIN {
+	awk -v n="$1" -v pools="$ST_WARP_POOLS" -v seed="$(_zm_rand32)" 'BEGIN {
 		srand(seed + 0); c = split(pools, p, " ")
 		for (i = 1; i <= c; i++) for (k = 0; k < n; k++) printf "%s%d\n", p[i], 2 + int(rand() * 253)
 	}' | awk 'BEGIN { srand() } { print rand() "\t" $0 }' | sort -n | cut -f2
