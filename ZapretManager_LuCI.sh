@@ -4883,7 +4883,7 @@ health() {
 			sr=5
 		else
 			sr=2
-			if /etc/init.d/steer running >/dev/null 2>&1; then
+			if stl_running; then
 				if [ "$(_st_exit)" = vpn ]; then
 					[ -d "/sys/class/net/$ST_VPN_OUT" ] && { _st_vpn_live; [ $? -ne 1 ] && sr=1; }
 				else
@@ -4956,7 +4956,7 @@ do_versions_refresh() {
 		j="$(tgws_status)"
 		add "$(_ver_item sTGWS "$(_jf "$j" '@.version')" "$(_jf "$j" '@.latest')")"
 	fi
-	command -v steer >/dev/null 2>&1 && add "$(_ver_item 'Движок Steer' "$(_st_steer_ver)" "$(_st_latest_ver)")"
+	stl_present && add "$(_ver_item 'Ядро steer' "$(stl_version)" "$(stl_latest)")"
 	_fk_installed && add "$(_ver_item Forkozz "$(_fk_version)" "$(_fk_latest)")"
 	local feeds=0 v
 	[ -n "$(_ver_feed_latest busybox)" ] || [ -n "$(_zm_busy_job)" ] || { $UPDATE >/dev/null 2>&1; }
@@ -6627,7 +6627,7 @@ doh_status() {
 	printf '{"installed":%s,"current":"%s","running":%s,"force_dns":%s,"force_mode":"%s","resolvers":[%s],"steer_active":%s,"steer_installed":%s,"forkozz":%s,"bootstrap_custom":"%s","hosts_extra":%s}\n' \
 		"$installed" "$(esc "$current")" "$running" "$force" "$(_doh_force_mode)" "$list" \
 		"$(_doh_steer_active && echo true || echo false)" \
-		"$(grep -qx 'engine' /etc/zm-steer/owned 2>/dev/null && command -v steer >/dev/null 2>&1 && echo true || echo false)" \
+		"$(grep -qx 'engine' /etc/zm-steer/owned 2>/dev/null && stl_present && echo true || echo false)" \
 		"$(_fk_present && echo true || echo false)" "$(esc "$(cat "$DOH_BOOT_FILE" 2>/dev/null)")" "$(_hosts_extra)"
 }
 
@@ -6821,13 +6821,10 @@ ST_STOP_FLAG="$ST_RUN/stop"
 ST_PHASE_FILE="$ST_RUN/phase"
 ST_WARP_IF="zmwarp"
 ST_WARP_ZONE="zmwarp"
-ST_STEER_VER="1.5.9"
-ST_STEER_SPEC="/etc/steer/spec.json"
-ST_STEER_URLS="https://github.com/xyzmean/steer/releases/download/v@VER@ https://gitlab.com/xyzmean/steer/-/raw/dist https://raw.githubusercontent.com/xyzmean/steer/dist"
 ST_AWG_MIRRORS="${GH_MAIN}/2Grey/awg-openwrt/releases/download ${GH_MAIN}/Slava-Shchipunov/awg-openwrt/releases/download"
 ST_AWG_MIRROR_FLAT="https://gitlab.com/xyzmean/brb/-/raw/main/deps/awg"
 ST_CRON_TAG="# zm-steer"
-ST_CRON_CMD="/etc/init.d/steer enabled && { for i in \$(awk '{print \$1}' /etc/zm-steer/warp.up 2>/dev/null); do ifup \$i; done; sleep 15; /etc/init.d/steer restart; }"
+ST_CRON_CMD="/opt/zapret-manager-luci/backend.sh steer_action cron_restart x >/dev/null 2>&1"
 ST_WARP_N=3
 ST_WARP_MAX=3
 ST_OWN_IF="zmwarp4"
@@ -6850,12 +6847,423 @@ ST_WARP_GEO="$ST_DIR/warp.geo"
 ST_RU_COLOS="DME SVX LED KJA REN OVB KZN AER VVO"
 ST_DEFAULT_SEL=""
 
+# ---- Слой steer -------------------------------------------------------------------------------
+# Единственное место, где Zapret Manager говорит с ядром steer 2.x. Остальной бекенд говорит на
+# своём языке (выход WARP или VPN, сервисы и их списки, подписка), а слой переводит это в спеку v2
+# (/etc/steer/spec.json) и зовёт CLI ядра: клиент steer сам отдаёт команды демону steerd.
+#   ядро и пакеты  stl_present, stl_version, stl_v2, stl_has vpn, stl_busy_by, stl_latest,
+#                  stl_engine_install ВЕРСИЯ [vpn], stl_engine_remove ПАКЕТЫ, stl_leftovers
+#   настройка      stl_apply МОДЕЛЬ, stl_spec_whose, stl_spec_restore, stl_rules
+#   служба         stl_running, stl_enabled, stl_restart, stl_stop, stl_reload
+#   состояние      stl_state warp|vpn, stl_vpn_json, stl_diag, stl_diag_lines, stl_explain ЦЕЛЬ
+#   подписка       stl_sub_fetch, stl_sub_check, stl_nodes, stl_tsv, stl_probe
+# МОДЕЛЬ — файл, строка на запись, поля через табуляцию:
+#   lan  УСТРОЙСТВО...                 откуда клиенты
+#   warp УСТРОЙСТВО...                 выход — туннели WARP, по предпочтению
+#   vpn  ПОДПИСКА УЗЛЫ МАРКЕРЫ         выход — подписка VLESS; УЗЛЫ — номера через запятую или «-»
+#                                      (первый рабочий), МАРКЕРЫ — куски имён через | или «-»
+#   svc  ID ИМЯ                        сервис; за ним его списки:
+#   srs|dom|pfx ФАЙЛ                   набор sing-box, домены, подсети
+STL_TMP="$ST_RUN"
+STL_KEEP="$ST_DIR/spec.before"
+STL_CACHE="$ZM_STATE_DIR/steer.latest"
+STL_ETC="${STL_ETC:-/etc/steer}"
+STL_SPEC="$STL_ETC/spec.json"
+STL_YAML="$STL_ETC/spec.yaml"
+STL_SOCK="$STL_ETC/steer.sock"
+STL_INIT="${STL_INIT:-/etc/init.d/steer}"
+STL_SBIN="${STL_SBIN:-/usr/sbin}"
+STL_STATE="${STL_STATE:-/var/lib/steer}"
+STL_MIN="2.0.0"
+STL_MODS="vless xsteer obfs tgws hysteria2 proxy"
+STL_REL_URLS="${STL_REL_URLS:-https://raw.githubusercontent.com/splify2/releases/main/version.json https://cdn.jsdelivr.net/gh/splify2/releases@main/version.json https://splify2.github.io/releases/version.json}"
+STL_PKG_URLS="${STL_PKG_URLS:-https://github.com/splify2/releases/releases/download/steer-v@V@ https://github.com/splify2/steer/releases/download/v@V@ https://gitlab.com/xyzmean/steer/-/raw/dist}"
+STL_WARP_OUT="zm_warp"
+STL_VPN_OUT="zm_vpn"
+STL_VPN_DEV="zm_vpn"
+
+_stl_say() { echo "==> $*"; }
+_stl_t() { if command -v timeout >/dev/null 2>&1; then timeout "$@"; else shift; "$@"; fi; }
+_stl_out() { case "$1" in vpn) echo "$STL_VPN_OUT" ;; *) echo "$STL_WARP_OUT" ;; esac; }
+_stl_js() { printf '"%s"' "$(esc "$1")"; }
+_stl_ident() {
+	local n
+	n="$(printf '%s' "$1" | tr -c 'A-Za-z0-9_.-' '_')"
+	case "$n" in ''|all|lan|[-.]*) n="z$n" ;; esac
+	[ "${#n}" -le 31 ] || n="$(printf '%s' "$n" | cut -c1-26)-$(printf '%s' "$1" | md5sum | cut -c1-4)"
+	printf '%s' "$n"
+}
+_stl_label() {
+	local n
+	n="$(printf '%s' "$1" | tr -d '"\\\000-\037')"
+	[ -n "$n" ] && [ "$(printf '%s' "$n" | wc -c)" -le 31 ] && { printf '%s' "$n"; return; }
+	_stl_ident "$2"
+}
+_stl_ver_ok() { echo "$1" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' && [ "${1%%.*}" -ge 2 ]; }
+
+stl_present() { command -v steer >/dev/null 2>&1; }
+stl_version() { steer --version 2>/dev/null | awk 'NR == 1 { print $2 }'; }
+stl_v2() { _stl_ver_ok "$(stl_version)"; }
+stl_has() { stl_v2 || return 1; case "$1" in vpn) [ -x "$STL_SBIN/steer-vless" ] ;; *) return 1 ;; esac; }
+stl_busy_by() {
+	local i=/etc/init.d/sing-box b by=""
+	grep -q steer-box-connector "$i" 2>/dev/null || return 1
+	for b in podkop forkop; do [ -e "${i%/*}/$b" ] && by="${by:+$by, }$b"; done
+	echo "${by:-steer-box-connector}"
+}
+_stl_mods_present() { local m; for m in $STL_MODS; do [ -x "$STL_SBIN/steer-$m" ] && printf '%s ' "$m"; done; }
+
+_stl_rel() {
+	local f="$STL_TMP/version.json" u
+	mkdir -p "$STL_TMP"
+	[ -s "$f" ] && [ -z "$(find "$f" -mmin +60 2>/dev/null)" ] && { echo "$f"; return 0; }
+	for u in $STL_REL_URLS; do
+		curl -fsSL --connect-timeout 6 --max-time 20 -o "$f.tmp" "$u" 2>/dev/null || continue
+		[ "$(jsonfilter -i "$f.tmp" -e '@.schema' 2>/dev/null)" = 1 ] || continue
+		mv -f "$f.tmp" "$f"; echo "$f"; return 0
+	done
+	rm -f "$f.tmp"
+	[ -s "$f" ] && { echo "$f"; return 0; }
+	return 1
+}
+
+stl_latest() {
+	local v="" f u
+	if [ -z "$ZM_VER_FORCE" ] && [ -s "$STL_CACHE" ] && [ -z "$(find "$STL_CACHE" -mmin +360 2>/dev/null)" ]; then cat "$STL_CACHE"; return 0; fi
+	f="$(_stl_rel)" && v="$(jsonfilter -i "$f" -e '@.products.steer.stable' 2>/dev/null)"
+	if ! _stl_ver_ok "$v"; then
+		for u in $STL_PKG_URLS; do
+			case "$u" in *@V@*) continue ;; esac
+			v="$(curl -fsSL --connect-timeout 6 --max-time 12 "$u/VERSION" 2>/dev/null | tr -d '[:space:]')"
+			_stl_ver_ok "$v" && break
+			v=""
+		done
+	fi
+	if _stl_ver_ok "$v"; then
+		mkdir -p "$(dirname "$STL_CACHE")"; echo "$v" > "$STL_CACHE"; echo "$v"
+	elif [ -s "$STL_CACHE" ]; then cat "$STL_CACHE"
+	else echo "$STL_MIN"; fi
+}
+
+_stl_fetch() {
+	local ver="$1" file="$2" out="$3" f sum="" u urls=""
+	if f="$(_stl_rel)"; then
+		urls="$(jsonfilter -i "$f" -e "@.products.steer.versions[@.version='$ver'].assets[@.name='$file'].urls[*]" 2>/dev/null | grep -E '^https://[A-Za-z0-9._~:/%+@=-]+$')"
+		sum="$(jsonfilter -i "$f" -e "@.products.steer.versions[@.version='$ver'].assets[@.name='$file'].sha256" 2>/dev/null)"
+	fi
+	for u in $urls $(echo "$STL_PKG_URLS" | sed "s/@V@/$ver/g"); do
+		case "$u" in */"$file") ;; *) u="$u/$file" ;; esac
+		_rb_fetch_pkg "$u" "$out" >&2 || continue
+		[ -z "$sum" ] || [ "$(sha256sum "$out" | cut -d' ' -f1)" = "$sum" ] && return 0
+		echo "   у файла не та контрольная сумма: $u" >&2
+		rm -f "$out"
+	done
+	return 1
+}
+
+stl_engine_install() {
+	local ver="$1" arch m p n f mods="" pkgs files="" old="" legacy="" keep="$STL_TMP/spec.keep" was_on="" rc
+	shift
+	_stl_ver_ok "$ver" || { echo "ОШИБКА: версия ядра steer $ver — нужна 2.0.0 или новее"; return 1; }
+	arch="$(_rb_arch)"
+	[ -n "$arch" ] || { echo "ОШИБКА: не удалось определить архитектуру роутера"; return 1; }
+	for m in "$@"; do case "$m" in vpn) mods="$mods vless" ;; esac; done
+	if stl_present && ! stl_v2; then
+		for n in steer steer-extended libsteer libsteer-wolfssl; do _pkg_is_installed "$n" && legacy="$legacy $n"; done
+		case " $legacy " in *" steer-extended "*) mods="$mods vless" ;; esac
+	fi
+	mods="$(for m in $mods $(_stl_mods_present); do echo "$m"; done | awk '!s[$0]++' | tr '\n' ' ')"
+	pkgs="steer-core$(for m in $mods; do printf ' steer-%s' "$m"; done)"
+	STL_NEW=""; STL_PKGS="$pkgs"
+	for p in $pkgs; do _pkg_is_installed "$p" || STL_NEW="$STL_NEW $p"; done
+	mkdir -p "$STL_TMP"
+	for p in $pkgs; do
+		f="$STL_TMP/$p-$ver-1_$arch.$RAZ"
+		_stl_fetch "$ver" "$p-$ver-1_$arch.$RAZ" "$f" || { rm -f $files; echo "ОШИБКА: не скачался пакет $p $ver для $arch"; return 1; }
+		files="$files $f"
+	done
+	stl_enabled && was_on=1
+	_stl_say "Ставим ядро steer $ver: $(echo $pkgs | sed 's/ /, /g')"
+	$UPDATE >&2
+	[ -s "$STL_SPEC" ] && cp -f "$STL_SPEC" "$keep"
+	if [ "$PKG" = apk ]; then
+		for n in $legacy; do if [ "$n" = steer ]; then apk add steer >/dev/null 2>&1; else old="$old !$n"; fi; done
+		$INSTALL $files $old >&2; rc=$?
+		[ "$rc" = 0 ] && for n in $legacy; do apk del "$n" >/dev/null 2>&1; done
+	else
+		if [ -n "$legacy" ]; then
+			_stl_say "Снимаем прежнее ядро steer $(stl_version) — оно мешает новому"
+			"$STL_INIT" stop >/dev/null 2>&1
+			$DELETE $legacy >&2
+		fi
+		$INSTALL $files >&2; rc=$?
+	fi
+	rm -f $files
+	[ -s "$keep" ] && [ ! -s "$STL_SPEC" ] && { mkdir -p "$STL_ETC"; cp -f "$keep" "$STL_SPEC"; }
+	rm -f "$keep"
+	if [ "$rc" != 0 ] || ! stl_v2; then
+		[ "$PKG" != apk ] && [ -n "$legacy" ] && ! stl_present && echo "!! Прежнее ядро steer уже снято, а новое не встало — нажмите установку ещё раз, когда появится интернет"
+		echo "ОШИБКА: ядро steer $ver не установилось"
+		return 1
+	fi
+	if [ -n "$was_on" ]; then stl_restart >/dev/null 2>&1; else stl_stop; fi
+	_stl_say "Ядро steer $(stl_version) установлено$( [ -n "$mods" ] && printf ', модули: %s' "$(echo $mods | sed 's/ /, /g')")"
+	return 0
+}
+
+stl_engine_remove() {
+	local p mods="" core=""
+	stl_stop
+	for p in "$@"; do case "$p" in steer-core|steer|steer-extended|libsteer|libsteer-wolfssl) core="$core $p" ;; *) mods="$mods $p" ;; esac; done
+	[ -n "$mods$core" ] || return 0
+	_stl_say "Удаляем ядро steer"
+	[ -n "$mods" ] && $DELETE $mods >&2
+	[ -n "$core" ] && $DELETE $core >&2
+	return 0
+}
+
+stl_leftovers() {
+	stl_present && return 0
+	local t m n=0
+	for t in "inet steer" "ip steer" "ip6 steer" "inet steer_obfs"; do nft delete table $t >/dev/null 2>&1 && n=$((n + 1)); done
+	for t in $(awk '{print $3}' "$STL_STATE/registry" 2>/dev/null); do ip route flush table "$t" >/dev/null 2>&1; done
+	for m in $(awk '{print $2}' "$STL_STATE/registry" 2>/dev/null); do
+		while ip rule del fwmark "0x$m/0x0ff00000" >/dev/null 2>&1; do n=$((n + 1)); done
+		while ip rule del fwmark "0x$m" >/dev/null 2>&1; do n=$((n + 1)); done
+	done
+	killall steerd >/dev/null 2>&1
+	rm -rf "$STL_STATE"
+	[ "$n" -gt 0 ] && echo "   ✓ Убраны оставшиеся правила ядра steer: $n"
+	return 0
+}
+
+stl_spec_whose() {
+	[ -s "$STL_YAML" ] && { echo foreign; return; }
+	[ -s "$STL_SPEC" ] || { echo none; return; }
+	grep -q "\"$STL_WARP_OUT\"\|\"$STL_VPN_OUT\"" "$STL_SPEC" && { echo zm; return; }
+	grep -q '"\(channels\|rules\)"[[:space:]]*:[[:space:]]*\[[[:space:]]*{' "$STL_SPEC" && { echo foreign; return; }
+	echo none
+}
+stl_spec_restore() { if [ -s "$STL_KEEP" ]; then mv -f "$STL_KEEP" "$STL_SPEC"; else rm -f "$STL_SPEC"; fi; }
+stl_rules() { grep -o '"out":' "$STL_SPEC" 2>/dev/null | wc -l | tr -d ' '; }
+
+_stl_rule() {
+	[ -n "$lid" ] && [ -n "$srs$dom$pfx" ] || return 0
+	body=""
+	[ -n "$srs" ] && body="\"srs\":[$srs]"
+	[ -n "$dom" ] && body="$body${body:+,}\"domains_file\":[$dom]"
+	[ -n "$pfx" ] && body="$body${body:+,}\"prefixes_file\":[$pfx]"
+	lists="$lists${lists:+,}$(_stl_js "$lid"):{$body}"
+	rules="$rules${rules:+,}{\"name\":$(_stl_js "$lab"),\"to\":$(_stl_js "$lid"),\"out\":\"$out\"}"
+}
+
+_stl_spec() {
+	local tab k a b c lists="" rules="" outs="" lan="" sep="" lid="" lab="" srs="" dom="" pfx="" d m
+	tab="$(printf '\t')"
+	local out="" body
+	while IFS="$tab" read -r k a b c; do
+		case "$k" in warp) out="$STL_WARP_OUT" ;; vpn) out="$STL_VPN_OUT" ;; esac
+	done < "$1"
+	[ -n "$out" ] || return 1
+	while IFS="$tab" read -r k a b c; do
+		case "$k" in
+			lan) lan="$(printf '%s\n' "$a" "$b" "$c" | tr "$tab" '\n' | grep . | while read -r d; do printf ',%s' "$(_stl_js "$d")"; done | sed 's/^,//')" ;;
+			warp)
+				set -- $(printf '%s\t%s\t%s' "$a" "$b" "$c" | tr "$tab" ' ')
+				if [ $# = 1 ]; then
+					outs="\"$STL_WARP_OUT\":{\"kind\":\"interface\",\"device\":$(_stl_js "$1"),\"ipv6\":\"off\",\"on_fail\":\"direct\"}"
+				else
+					m=""; for d; do m="$m${m:+,}$(_stl_js "$d")"; outs="$outs,$(_stl_js "$d"):{\"kind\":\"interface\",\"device\":$(_stl_js "$d"),\"ipv6\":\"off\"}"; done
+					outs="\"$STL_WARP_OUT\":{\"kind\":\"group\",\"pick\":\"latency\",\"members\":[$m],\"ipv6\":\"off\",\"on_fail\":\"direct\"}$outs"
+				fi ;;
+			vpn)
+				outs="\"$STL_VPN_OUT\":{\"kind\":\"tunnel\",\"protocol\":\"vless\",\"device\":\"$STL_VPN_DEV\",\"subscription\":$(_stl_js "$a")"
+				[ -n "$b" ] && [ "$b" != - ] && outs="$outs,\"nodes\":[$(echo "$b" | tr -cd '0-9,' | sed 's/,,*/,/g; s/^,//; s/,$//')]"
+				[ "$c" = - ] && c=""
+				m="$(printf '%s' "$c" | tr '|,' '\n\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep . | awk '!s[$0]++' | while IFS= read -r d; do printf ',%s' "$(_stl_js "$d")"; done | sed 's/^,//')"
+				[ -n "$m" ] && outs="$outs,\"exclude_name\":[$m]"
+				outs="$outs,\"on_fail\":\"direct\"}" ;;
+			svc) _stl_rule; lid="$(_stl_ident "$a")"; lab="$(_stl_label "$b" "$a")"; srs=""; dom=""; pfx="" ;;
+			srs) srs="$srs${srs:+,}$(_stl_js "$a")" ;;
+			dom) dom="$dom${dom:+,}$(_stl_js "$a")" ;;
+			pfx) pfx="$pfx${pfx:+,}$(_stl_js "$a")" ;;
+		esac
+	done < "$1"
+	_stl_rule
+	[ -n "$rules" ] || return 1
+	printf '{"version":2,"lan":{"devices":[%s]},"lists":{%s},"outputs":{%s},"rules":[%s]}\n' "${lan:-\"br-lan\"}" "$lists" "$outs" "$rules"
+}
+
+_stl_check() {
+	local r c
+	if stl_running && [ -S "$STL_SOCK" ]; then
+		r="$(steer ctl check < "$1" 2>/dev/null)"
+		c="$(printf '%s' "$r" | jsonfilter -e '@.code' 2>/dev/null)"
+		case "$c" in
+			0) return 0 ;;
+			[1-9]*) printf '%s' "$r" | jsonfilter -e '@.stderr' 2>/dev/null; return 1 ;;
+		esac
+	fi
+	steer apply --dry-run --spec "$1" 2>&1 >/dev/null
+}
+
+stl_apply() {
+	local new="$STL_SPEC.zm.$$" prev="$STL_TMP/spec.prev" err w=0
+	mkdir -p "$STL_ETC" "$STL_TMP"
+	_stl_spec "$1" > "$new" || { rm -f "$new"; echo "ОШИБКА: в настройке нет ни одного списка"; return 1; }
+	_stl_say "Проверяем правила: $(grep -o '"out":' "$new" | wc -l | tr -d ' ')"
+	if ! err="$(_stl_check "$new")"; then
+		rm -f "$new"
+		echo "ОШИБКА: ядро steer отвергло настройку"
+		printf '%s\n' "$err" | tail -n 5
+		return 1
+	fi
+	[ "$(stl_spec_whose)" = none ] && [ -s "$STL_SPEC" ] && [ ! -f "$STL_KEEP" ] && cp -f "$STL_SPEC" "$STL_KEEP"
+	rm -f "$prev"; [ -s "$STL_SPEC" ] && cp -f "$STL_SPEC" "$prev"
+	mv -f "$new" "$STL_SPEC"
+	"$STL_INIT" enable >/dev/null 2>&1
+	if stl_running; then
+		if ! err="$(steer apply 2>&1 >/dev/null)"; then
+			if [ -s "$prev" ]; then mv -f "$prev" "$STL_SPEC"; else rm -f "$STL_SPEC"; fi
+			echo "ОШИБКА: ядро steer не применило правила — остались прежние"
+			printf '%s\n' "$err" | tail -n 5
+			return 1
+		fi
+		rm -f "$prev"
+		_stl_say "Правила Steer применены — ядро тронуло только изменившееся"
+		return 0
+	fi
+	rm -f "$prev"
+	"$STL_INIT" start >/dev/null 2>&1
+	while [ "$w" -lt 10 ] && ! stl_running; do sleep 1; w=$((w + 1)); done
+	stl_running || { echo "ОШИБКА: служба steer не запустилась — загляните в системный журнал"; return 1; }
+	_stl_say "Правила Steer применены"
+}
+
+stl_running() { [ -x "$STL_INIT" ] && "$STL_INIT" running >/dev/null 2>&1; }
+stl_enabled() { [ -x "$STL_INIT" ] && "$STL_INIT" enabled >/dev/null 2>&1; }
+stl_restart() {
+	[ -x "$STL_INIT" ] || return 1
+	"$STL_INIT" enable >/dev/null 2>&1
+	"$STL_INIT" restart >/dev/null 2>&1
+	sleep 1
+	stl_running
+}
+stl_stop() { [ -x "$STL_INIT" ] || return 0; "$STL_INIT" stop >/dev/null 2>&1; "$STL_INIT" disable >/dev/null 2>&1; return 0; }
+stl_reload() { stl_running || return 0; _stl_t 120 steer reload >/dev/null 2>&1; }
+
+stl_state() {
+	local o j
+	o="$(_stl_out "$1")"
+	STL_UP=false; STL_FAILED=false; STL_DEV=""; STL_PSTATE=""; STL_PNODE=""; STL_PTOTAL=""
+	stl_present || return 1
+	j="$(_stl_t 10 steer status 2>/dev/null)"
+	case "$j" in '{'*) ;; *) return 1 ;; esac
+	eval "$(printf '%s' "$j" | jsonfilter -e "STL_UP=@.outputs.$o.up" -e "STL_FAILED=@.outputs.$o.failed" -e "STL_DEV=@.outputs.$o.device" \
+		-e "STL_PSTATE=@.outputs.$o.probe.state" -e "STL_PNODE=@.outputs.$o.probe.node" -e "STL_PTOTAL=@.outputs.$o.probe.total" 2>/dev/null)"
+	case "$STL_UP" in 1|true) STL_UP=true ;; *) STL_UP=false ;; esac
+	case "$STL_FAILED" in 1|true) STL_FAILED=true ;; *) STL_FAILED=false ;; esac
+	printf '%s' "$STL_DEV" | grep -qE '^[A-Za-z0-9_.-]+$' || STL_DEV=""
+	case "$STL_PSTATE" in probing|failed|no_such_node) ;; *) STL_PSTATE="" ;; esac
+	case "$STL_PNODE" in ''|*[!0-9]*) STL_PNODE=0 ;; esac
+	case "$STL_PTOTAL" in ''|*[!0-9]*) STL_PTOTAL=0 ;; esac
+	return 0
+}
+stl_vpn_json() {
+	stl_state vpn || { echo null; return; }
+	printf '{"up":%s,"failed":%s' "$STL_UP" "$STL_FAILED"
+	[ -n "$STL_PSTATE" ] && printf ',"probe":{"state":"%s","node":%s,"total":%s}' "$STL_PSTATE" "$STL_PNODE" "$STL_PTOTAL"
+	printf '}'
+}
+
+stl_diag() {
+	local d
+	d="$(_stl_t 30 steer diag 2>/dev/null | tr '\n' ' ')"
+	case "$d" in '{'*'}'*) printf '%s' "$d" ;; *) echo null ;; esac
+}
+stl_diag_lines() {
+	local f="$STL_TMP/stl-diag.json" n i=0
+	mkdir -p "$STL_TMP"
+	_stl_t 30 steer diag > "$f" 2>/dev/null
+	n="$(jsonfilter -i "$f" -e '@.checks[*].id' 2>/dev/null | wc -l)"
+	while [ "$i" -lt "$n" ]; do
+		printf '%s\t%s\t%s\n' "$(jsonfilter -i "$f" -e "@.checks[$i].verdict" 2>/dev/null)" \
+			"$(jsonfilter -i "$f" -e "@.checks[$i].what" 2>/dev/null)" "$(jsonfilter -i "$f" -e "@.checks[$i].why" 2>/dev/null)"
+		i=$((i + 1))
+	done
+	rm -f "$f"
+}
+
+stl_explain() {
+	local t line
+	STL_X_VERDICT=unknown; STL_X_OUT=""; STL_X_DEV=""; STL_X_SET=""; STL_X_ADDR=""; STL_X_FAKE=false
+	t="$(_stl_t 20 steer explain "$1" 2>&1)"
+	STL_X_TEXT="$t"
+	line="$(printf '%s\n' "$t" | grep -m1 -- '-> output "')"
+	STL_X_ADDR="$(printf '%s\n' "$t" | head -n1 | sed -n 's/^[^ ]* -> \([0-9a-fA-F.:]*\) (.*/\1/p')"
+	printf '%s\n' "$t" | head -n1 | grep -q 'fake-IP' && STL_X_FAKE=true
+	if [ -n "$line" ]; then
+		STL_X_OUT="$(printf '%s' "$line" | sed -n 's/.*-> output "\([^"]*\)".*/\1/p')"
+		STL_X_SET="$(printf '%s' "$line" | sed -n 's/.*"\([^"]*\)" -> output ".*/\1/p')"
+		STL_X_DEV="$(printf '%s' "$line" | sed -n 's/.*-> dev \([^ ]*\).*/\1/p')"
+		case "$STL_X_OUT" in "$STL_WARP_OUT") STL_X_VERDICT=warp ;; "$STL_VPN_OUT") STL_X_VERDICT=vpn ;; *) STL_X_VERDICT=other ;; esac
+		[ -z "$STL_X_DEV" ] && printf '%s' "$line" | grep -q -- '-> direct' && STL_X_VERDICT=direct
+	elif printf '%s' "$t" | grep -q 'no channel matches'; then STL_X_VERDICT=direct; fi
+}
+
+stl_sub_fetch() {
+	local r
+	STL_SUB_URL=""; STL_SUB_TITLE=""; STL_SUB_WARN=""; STL_SUB_ERR=""
+	rm -f "$2"
+	r="$(steer sub-fetch "$1" --out "$2" --info "$3" 2>/dev/null)"
+	if [ "$(printf '%s' "$r" | jsonfilter -e '@.ok' 2>/dev/null)" != true ] || [ ! -s "$2" ]; then
+		rm -f "$2"
+		STL_SUB_ERR="$(printf '%s' "$r" | jsonfilter -e '@.error' 2>/dev/null)"
+		return 1
+	fi
+	STL_SUB_URL="$(printf '%s' "$r" | jsonfilter -e '@.url' 2>/dev/null)"
+	STL_SUB_TITLE="$(printf '%s' "$r" | jsonfilter -e '@.title' 2>/dev/null)"
+	STL_SUB_WARN="$(printf '%s' "$r" | jsonfilter -e '@.warn' 2>/dev/null)"
+	return 0
+}
+stl_sub_check() {
+	local j
+	j="$(steer vless-nodes "$1" 2>/dev/null)"
+	STL_SUB_USABLE="$(printf '%s' "$j" | jsonfilter -e '@.usable' 2>/dev/null)"
+	STL_SUB_WHY="$(printf '%s' "$j" | jsonfilter -e '@.skipped_reasons[*].reason' 2>/dev/null | head -n 3)"
+	[ "${STL_SUB_USABLE:-0}" -gt 0 ] 2>/dev/null
+}
+stl_nodes() {
+	local j
+	j="$(steer vless-nodes "$1" 2>/dev/null | tr '\n' ' ')"
+	case "$j" in '{'*) printf '%s' "$j" ;; *) return 1 ;; esac
+}
+stl_tsv() {
+	awk '{
+		s = $0
+		while (match(s, /\{"index":[0-9]+,"name":"([^"\\]|\\.)*"/)) {
+			r = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
+			i = r; sub(/^\{"index":/, "", i); sub(/,.*/, "", i)
+			n = r; sub(/^\{"index":[0-9]+,"name":"/, "", n); sub(/"$/, "", n)
+			gsub(/\\"/, "\"", n)
+			c = split(n, q, /\\\\/); n = q[1]; for (k = 2; k <= c; k++) n = n "\\" q[k]
+			print i "\t" n
+		}
+	}'
+}
+stl_probe() {
+	local j
+	j="$(steer vless-probe "$1" --node "$2" --timeout 5 2>/dev/null | tr '\n' ' ')"
+	case "$j" in '{'*) printf '%s' "$j" ;; *) return 1 ;; esac
+}
+
+
 _st_phase() { printf '%s\n' "$1" > "$ST_PHASE_FILE"; }
 _st_stopped() { [ -f "$ST_STOP_FLAG" ]; }
 _st_own() { mkdir -p "$ST_DIR"; grep -qxF "$1" "$ST_OWNED" 2>/dev/null || echo "$1" >> "$ST_OWNED"; }
 _st_owns() { grep -qxF "$1" "$ST_OWNED" 2>/dev/null; }
 _st_running() { _job_alive steer; }
-_st_installed() { command -v steer >/dev/null 2>&1 && { _st_owns "engine" || _st_owns "pkg steer" || _st_owns "net zmwarp" || _st_owns "net $ST_OWN_IF"; }; }
+_st_installed() { stl_present && { _st_owns "engine" || _st_owns "pkg steer" || _st_owns "net zmwarp" || _st_owns "net $ST_OWN_IF"; }; }
 _st_warp_on() { _st_owns "net $ST_WARP_IF" && [ -s "$ST_WARP_CONF" ]; }
 _st_warp_own() { [ "$(cat "$ST_WARP_MODE" 2>/dev/null)" = own ]; }
 _st_sel() { [ -s "$ST_SEL" ] || return 0; local id; for id in $(cat "$ST_SEL"); do _rb_routable "$id" || continue; [ "$id" = custom ] && [ ! -s "$ST_USER_DIR/custom.lst" ] && [ ! -s "$ST_USER_DIR/custom.pfx" ] && continue; echo "$id"; done; }
@@ -6890,16 +7298,19 @@ _st_sel_remap
 mkdir -p "$ST_RUN" 2>/dev/null
 
 _st_blocker() {
+	local b
 	if [ -x /etc/init.d/splify2 ] || ubus list splify2 >/dev/null 2>&1; then echo splify2; return; fi
+	if b="$(stl_busy_by)"; then echo "Ядро steer ведёт $b — Zapret Manager его не трогает."; return; fi
 	if _st_spec_foreign; then echo steer; return; fi
 	echo ""
 }
 
 _st_spec_foreign() {
-	[ -s "$ST_STEER_SPEC" ] || return 1
-	_st_owns "steer-spec" && return 1
-	if grep -q '"zm_warp"\|"zm_vpn"' "$ST_STEER_SPEC"; then _st_own "steer-spec"; return 1; fi
-	grep -q '"channels"[[:space:]]*:[[:space:]]*\[[[:space:]]*{' "$ST_STEER_SPEC"
+	case "$(stl_spec_whose)" in
+		foreign) return 0 ;;
+		zm) _st_owns "steer-spec" || _st_own "steer-spec" ;;
+	esac
+	return 1
 }
 
 _rb_arch() { awk -F\' '/DISTRIB_ARCH/ {print $2}' /etc/openwrt_release; }
@@ -6917,116 +7328,33 @@ _rb_fetch_pkg() {
 	return 0
 }
 
-_st_steer_ver() { steer --version 2>/dev/null | head -n1 | awk '{print $2}'; }
-_st_tun_ensure() {
-	[ -e /dev/net/tun ] && return 0
-	modprobe tun >/dev/null 2>&1
-	[ -e /dev/net/tun ] && return 0
-	_rb_say "Ставим kmod-tun (нужен steer-extended для подписок)"
-	$INSTALL kmod-tun >&2 || _rb_warn "kmod-tun не установился — подписки VPN работать не будут"
-	modprobe tun >/dev/null 2>&1
-	return 0
-}
-_st_is_ext() { steer --version 2>/dev/null | head -n1 | grep -q 'VLESS'; }
-
 _st_ver_lt() {
 	awk -v a="$1" -v b="$2" 'BEGIN { n = split(a, x, "."); m = split(b, y, "."); k = n > m ? n : m
 		for (i = 1; i <= k; i++) { if (x[i] + 0 < y[i] + 0) exit 0; if (x[i] + 0 > y[i] + 0) exit 1 }
 		exit 1 }'
 }
 
-_st_latest_ver() {
-	local c="$ZM_STATE_DIR/steer.latest" v="" m
-	if [ -z "$ZM_VER_FORCE" ] && [ -s "$c" ] && [ -z "$(find "$c" -mmin +360 2>/dev/null)" ]; then cat "$c"; return 0; fi
-	v="$(curl -Ls --connect-timeout 5 --max-time 12 -o /dev/null -w '%{url_effective}' https://github.com/xyzmean/steer/releases/latest 2>/dev/null |
-		grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | tail -n1)"
-	if ! echo "$v" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-		v=""
-		for m in https://gitlab.com/xyzmean/steer/-/raw/dist https://raw.githubusercontent.com/xyzmean/steer/dist; do
-			v="$(curl -fsSL --connect-timeout 6 --max-time 12 "$m/VERSION" 2>/dev/null | tr -d '[:space:]')"
-			echo "$v" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' && break
-			v=""
-		done
-	fi
-	if [ -n "$v" ]; then
-		mkdir -p "$ZM_STATE_DIR"
-		echo "$v" > "$c"
-		echo "$v"
-	elif [ -s "$c" ]; then
-		cat "$c"
-	else
-		echo "$ST_STEER_VER"
-	fi
-}
+_st_vpn_ok() { stl_has vpn || { stl_present && ! stl_v2; }; }
 
 _st_install_steer() {
-	local pkg=steer-extended want
-	want="$(_st_latest_ver)"
-	if command -v steer >/dev/null 2>&1; then
-		if ! _st_is_ext; then
-			_rb_say "Меняем движок Steer $(_st_steer_ver) на steer-extended $want"
-		elif _st_ver_lt "$(_st_steer_ver)" "$want"; then
-			_rb_say "Движок Steer $(_st_steer_ver) — обновляем до $want"
-		else
-			_rb_say "Движок steer-extended уже последней версии: $(_st_steer_ver)"
-			_st_tun_ensure
-			return 0
-		fi
+	local want cur feat="" p
+	want="$(stl_latest)"; cur="$(stl_version)"
+	stl_v2 && _st_ver_lt "$want" "$cur" && want="$cur"
+	{ [ "$1" = vpn ] || [ -s "$ST_SUB" ]; } && feat=vpn
+	if stl_v2 && [ "$cur" = "$want" ] && { [ -z "$feat" ] || stl_has vpn; }; then
+		_rb_say "Ядро steer уже последней версии: $cur"
+		return 0
 	fi
-	local arch tmp base url ver was_on="" old_plain="" dropped=""
-	command -v steer >/dev/null 2>&1 && /etc/init.d/steer enabled 2>/dev/null && was_on=1
-	command -v steer >/dev/null 2>&1 && ! _st_is_ext && _pkg_is_installed steer && old_plain="$(_st_steer_ver)"
-	arch="$(_rb_arch)"
-	[ -n "$arch" ] || { echo "ОШИБКА: не удалось определить архитектуру роутера"; return 1; }
-	tmp="$ST_RUN/steer.$RAZ"
-	_rb_say "Устанавливаем движок steer-extended $want"
-	$UPDATE >&2
-	for base in $ST_STEER_URLS; do
-		ver="$want"
-		url="$(echo "$base" | sed "s/@VER@/$ver/")/${pkg}-${ver}-1_${arch}.${RAZ}"
-		if ! _rb_fetch_pkg "$url" "$tmp"; then
-			case "$base" in *@VER@*) continue ;; esac
-			ver=$(curl -fsSL --connect-timeout 8 --max-time 15 "$base/VERSION" 2>/dev/null | tr -d '[:space:]')
-			echo "$ver" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' || continue
-			_rb_fetch_pkg "$base/${pkg}-${ver}-1_${arch}.${RAZ}" "$tmp" || continue
-		fi
-		if [ -n "$old_plain" ] && [ -z "$dropped" ]; then
-			_rb_say "Удаляем старый пакет steer $old_plain — он мешает установке steer-extended"
-			[ -s "$ST_STEER_SPEC" ] && cp -f "$ST_STEER_SPEC" "$ST_RUN/spec.keep"
-			/etc/init.d/steer stop >/dev/null 2>&1
-			if ! $DELETE steer >&2; then
-				rm -f "$tmp" "$ST_RUN/spec.keep"
-				echo "ОШИБКА: старый пакет steer не удалился — удалите его вручную и повторите"
-				return 1
-			fi
-			dropped=1
-		fi
-		if $INSTALL "$tmp" >&2; then
-			rm -f "$tmp"
-			if [ -s "$ST_RUN/spec.keep" ]; then
-				mkdir -p "$(dirname "$ST_STEER_SPEC")"
-				cp -f "$ST_RUN/spec.keep" "$ST_STEER_SPEC"
-				rm -f "$ST_RUN/spec.keep"
-			fi
-			_st_own "pkg steer"
-			_st_own "pkg steer-extended"
-			_st_tun_ensure
-			if [ -n "$was_on" ]; then
-				/etc/init.d/steer enable >/dev/null 2>&1
-				/etc/init.d/steer restart >/dev/null 2>&1
-			else
-				/etc/init.d/steer stop >/dev/null 2>&1
-				/etc/init.d/steer disable >/dev/null 2>&1
-			fi
-			_rb_rpcd_ensure
-			_rb_say "Движок $pkg $ver установлен"
-			return 0
-		fi
-	done
-	rm -f "$tmp"
-	[ -n "$dropped" ] && _rb_warn "Старый steer $old_plain уже удалён, а новый не поставился — нажмите установку ещё раз, когда появится интернет"
-	echo "ОШИБКА: не удалось установить движок Steer"
-	return 1
+	if stl_present && ! stl_v2; then _rb_say "Ядро steer $cur — переводим на $want"
+	elif stl_present && [ "$cur" != "$want" ]; then _rb_say "Ядро steer $cur — обновляем до $want"; fi
+	stl_engine_install "$want" $feat || return 1
+	if _st_owns "pkg steer" || _st_owns "pkg steer-extended"; then
+		sed -i '/^pkg steer$/d; /^pkg steer-extended$/d' "$ST_OWNED"
+		STL_NEW="$STL_PKGS"
+	fi
+	for p in $STL_NEW; do _st_own "pkg $p"; done
+	_rb_rpcd_ensure
+	return 0
 }
 
 _st_awg_loaded() { grep -q '^amneziawg ' /proc/modules 2>/dev/null || [ -d /sys/module/amneziawg ]; }
@@ -8075,37 +8403,16 @@ _st_srs_get() {
 			fi
 		fi
 		[ -s "$d/$set.srs" ] || return 1
-		if [ "${ST_SRS_NATIVE:-1}" = 1 ]; then touch "$ST_RUN/srs.$set.done"; return 0; fi
-		steer srs-read "$d/$set.srs" --out "$d/$set.dom.tmp" --prefixes-out "$d/$set.pfx.tmp" --meta-out "$d/$set.meta.tmp" >/dev/null 2>&1 || {
-			rm -f "$d/$set".*.tmp; return 1; }
+		touch "$ST_RUN/srs.$set.done"
+		return 0
 	fi
 	for x in dom pfx meta; do touch "$d/$set.$x.tmp"; mv "$d/$set.$x.tmp" "$d/$set.$x"; done
 	rm -f "$f"
 	touch "$ST_RUN/srs.$set.done"
 }
 
-_st_chname() {
-	local n="$2$3" s b
-	[ "$(printf '%s' "$n" | wc -c)" -le 31 ] && { esc "$n"; return; }
-	n="$1$3"
-	[ "$(printf '%s' "$n" | wc -c)" -le 31 ] && { esc "$n"; return; }
-	case "$3" in
-		'') s="" ;;
-		' (список)') s="-list" ;;
-		' (адреса)') s="-ip" ;;
-		' (голос)') s="-voice" ;;
-		*) s="-x" ;;
-	esac
-	n="$1$s"
-	if [ "$(printf '%s' "$n" | wc -c)" -gt 31 ]; then
-		b=$(( 31 - ${#s} - 5 ))
-		n="$(printf '%s' "$1" | head -c "$b")~$(printf '%s' "$1" | md5sum | cut -c1-4)$s"
-	fi
-	esc "$n"
-}
-
-_st_svc_channels() {
-	local id="$1" name sets set dom="" pfx="" srs="" narrow="" f fmt proto ports ch="" sep="" took=""
+_st_svc_lists() {
+	local id="$1" name sets set dom="" pfx="" srs="" f fmt took=""
 	name="$(_rb_svc_field "$id" 2)"
 	sets="$(_rb_svc_field "$id" 8 | tr ',' ' ')"
 	if [ -n "$(echo $sets)" ]; then echo "   → «$name»: скачиваем списки $(echo $sets | sed 's/ /, /g')" >&2
@@ -8117,11 +8424,9 @@ _st_svc_channels() {
 			took="$took $set"
 			f="$ST_DIR/lists/$set"
 			fmt="$(awk -F'|' -v k="$set" '$1 == k { print $2; exit }' "$ST_CAT_IDX" 2>/dev/null)"
-			if [ "$fmt" != lst ] && [ "${ST_SRS_NATIVE:-1}" = 1 ]; then srs="$srs${srs:+,}\"$f.srs\""; continue; fi
-			[ -s "$f.dom" ] && dom="$dom${dom:+,}\"$f.dom\""
-			if [ -s "$f.pfx" ]; then
-				if [ -s "$f.meta" ]; then narrow="$narrow $set"; else pfx="$pfx${pfx:+,}\"$f.pfx\""; fi
-			fi
+			if [ "$fmt" != lst ]; then srs="$srs $f.srs"; continue; fi
+			[ -s "$f.dom" ] && dom="$dom $f.dom"
+			[ -s "$f.pfx" ] && pfx="$pfx $f.pfx"
 		else
 			if [ -n "$(_rb_svc_field "$id" 3)$(_rb_svc_field "$id" 4)" ]; then _rb_warn "Список $set не скачался или не раскрылся — беру резервный список" >&2
 			else _rb_warn "Список «$name» не скачался или не раскрылся — пропускаем его в этот раз" >&2; fi
@@ -8131,140 +8436,64 @@ _st_svc_channels() {
 	done
 	for set in $took; do [ -n "$sets" ] && touch "$ST_RUN/used.$set"; done
 	if [ -z "$sets" ]; then
-		dom="$(_st_json_list "$(_rb_svc_field "$id" 3 | tr ',' ' ')")"
-		pfx="$(_st_json_list "$(_rb_svc_field "$id" 4 | tr ',' ' ')")"
-		narrow=""; srs=""
+		dom="$(_st_pkg_lists "$(_rb_svc_field "$id" 3 | tr ',' ' ')")"
+		pfx="$(_st_pkg_lists "$(_rb_svc_field "$id" 4 | tr ',' ' ')")"
+		srs=""
 		if [ -z "$dom$pfx" ] && [ "$id" != custom ]; then
 			f="$ST_DIR/lists/$id.base.dom"
 			mkdir -p "$ST_DIR/lists"
 			printf '%s,%s\n' "$(_rb_svc_field "$id" 5)" "$(_rb_svc_field "$id" 6)" | tr ',' '\n' | grep -E '^[a-z0-9.-]+\.[a-z]+$' | awk '!s[$0]++' > "$f"
 			if [ -s "$f" ]; then
 				_rb_warn "Списки «$name» не скачались — пока беру только основные домены сервиса ($(wc -l < "$f" | tr -d ' ')), позже нажмите «Применить» ещё раз" >&2
-				dom="\"$f\""
+				dom="$f"
 			else
 				rm -f "$f"
 			fi
 		fi
 	fi
-	[ "$id" = custom ] && [ -s "$ST_USER_DIR/$id.lst" ] && dom="\"$ST_USER_DIR/$id.lst\""
-	[ "$id" = custom ] && [ -s "$ST_USER_DIR/$id.pfx" ] && pfx="\"$ST_USER_DIR/$id.pfx\""
-	[ -n "$srs" ] && { ch="$ch$sep{\"name\":\"$(_st_chname "$id" "$name")\",\"out\":\"$ST_OUT\",\"match\":{\"srs_files\":[$srs]}}"; sep=","; }
-	[ -n "$dom" ] && { ch="$ch$sep{\"name\":\"$(_st_chname "$id" "$name" "$([ -n "$srs" ] && echo ' (список)')")\",\"out\":\"$ST_OUT\",\"match\":{\"domains_files\":[$dom]}}"; sep=","; }
-	[ -n "$pfx" ] && { ch="$ch$sep{\"name\":\"$(_st_chname "$id" "$name" " (адреса)")\",\"out\":\"$ST_OUT\",\"match\":{\"prefixes_files\":[$pfx]}}"; sep=","; }
-	for set in $narrow; do
-		f="$ST_DIR/lists/$set"
-		proto=$(sed -n 's/^proto=//p' "$f.meta" | head -n1)
-		ports=$(sed -n 's/^ports=//p' "$f.meta" | head -n1 | sed 's/,/","/g')
-		ch="$ch$sep{\"name\":\"$(_st_chname "$id" "$name" " (голос)")\",\"out\":\"$ST_OUT\",\"match\":{\"prefixes_files\":[\"$f.pfx\"]${proto:+,\"proto\":\"$proto\"}${ports:+,\"ports\":[\"$ports\"]}}}"
-		sep=","
-	done
-	printf '%s' "$ch"
+	[ "$id" = custom ] && [ -s "$ST_USER_DIR/$id.lst" ] && dom="$ST_USER_DIR/$id.lst"
+	[ "$id" = custom ] && [ -s "$ST_USER_DIR/$id.pfx" ] && pfx="$ST_USER_DIR/$id.pfx"
+	[ -n "$srs$dom$pfx" ] || return 0
+	printf 'svc\t%s\t%s\n' "$id" "$name"
+	for f in $srs; do printf 'srs\t%s\n' "$f"; done
+	for f in $dom; do printf 'dom\t%s\n' "$f"; done
+	for f in $pfx; do printf 'pfx\t%s\n' "$f"; done
 }
 
-_st_json_list() {
-	local f out=""
-	for f in $1; do _rb_list_get "$f" && [ -s "$ZM_LISTS_DIR/$f" ] && out="$out${out:+,}\"$ZM_LISTS_DIR/$f\""; done
-	printf '%s' "$out"
+_st_pkg_lists() {
+	local f
+	for f in $1; do _rb_list_get "$f" && [ -s "$ZM_LISTS_DIR/$f" ] && echo "$ZM_LISTS_DIR/$f"; done
 }
 
-_st_spec_build() {
-	local id c chans="" schema=1 devs lans
+_st_model() {
+	local id
 	rm -f "$ST_RUN"/used.* "$ST_RUN"/srs.*.done
 	mkdir -p "$ST_RUN"
-	ST_OUT=zm_warp
-	_st_use_vpn && ST_OUT="$ST_VPN_OUT"
-	for id in "$@"; do
-		c="$(_st_svc_channels "$id")"
-		[ -n "$c" ] && chans="$chans${chans:+,}$c"
-	done
-	[ -n "$chans" ] || return 1
-	case "$chans" in *'"ports"'*|*'"proto"'*) schema=2 ;; esac
-	lans="$(for c in $(_zm_lan_devs); do printf ',"%s"' "$c"; done | sed 's/^,//')"
-	if [ "$ST_OUT" = "$ST_VPN_OUT" ]; then
-		printf '{"schema":%s,"lan_devices":[%s],"outputs":{"%s":{"kind":"vless","sub_file":"%s","nodes":[%s],"on_fail":"direct"}},"channels":[%s]}\n' \
-			"$schema" "$lans" "$ST_VPN_OUT" "$ST_SUB" "$(_st_sub_node_idx)" "$chans"
-		return 0
+	printf 'lan'; for id in $(_zm_lan_devs); do printf '\t%s' "$id"; done; echo
+	if _st_use_vpn; then
+		printf 'vpn\t%s\t%s\n' "$ST_SUB" "$(_st_sub_filter)"
+	else
+		printf 'warp'
+		if [ -s "$ST_WARP_UP" ]; then awk '{ printf "\t%s", $1 }' "$ST_WARP_UP"; else printf '\t%s' "$ST_WARP_IF"; fi
+		echo
 	fi
-	devs="$(awk '{printf "%s\"%s\"", (NR > 1 ? "," : ""), $1}' "$ST_WARP_UP" 2>/dev/null)"
-	[ -n "$devs" ] || devs="\"$ST_WARP_IF\""
-	printf '{"schema":%s,"lan_devices":[%s],"outputs":{"zm_warp":{"kind":"interface","devices":[%s],"prefer":"latency","on_fail":"direct"}},"channels":[%s]}\n' \
-		"$schema" "$lans" "$devs" "$chans"
+	for id; do _st_svc_lists "$id"; done
 }
 
 _st_spec_apply() {
-	local tmp="$ST_RUN/spec.json" out rc
-	ST_SRS_NATIVE=1
+	local m="$ST_RUN/model"
 	_rb_say "Скачиваем списки выбранных сервисов"
-	_st_spec_build "$@" > "$tmp" || { echo "ОШИБКА: для выбранных сервисов нет ни одного списка"; return 1; }
-	_rb_say "Проверяем правила: каналов $(grep -o '"name":' "$tmp" | wc -l | tr -d ' ')"
-	out=$(steer apply --spec "$tmp" --dry-run 2>&1 >/dev/null); rc=$?
-	if [ "$rc" != 0 ] && grep -q '"srs_files"' "$tmp"; then
-		_rb_warn "Движок не читает .srs напрямую — раскрываем списки в текст"
-		ST_SRS_NATIVE=0
-		_st_spec_build "$@" > "$tmp" || { echo "ОШИБКА: для выбранных сервисов нет ни одного списка"; return 1; }
-		out=$(steer apply --spec "$tmp" --dry-run 2>&1 >/dev/null); rc=$?
-	fi
-	if [ "$rc" != 0 ]; then
-		echo "ОШИБКА: движок Steer отверг настройку"
-		printf '%s\n' "$out" | tail -n 5
-		return 1
-	fi
-	mkdir -p /etc/steer
-	if [ -s "$ST_STEER_SPEC" ] && ! _st_owns "steer-spec" && [ ! -f "$ST_DIR/spec.before" ]; then
-		cp "$ST_STEER_SPEC" "$ST_DIR/spec.before"
-	fi
-	local sum oo no
-	sum="$(_st_spec_sum "$tmp")"
-	oo="$(tr -d '\n' < "$ST_STEER_SPEC" 2>/dev/null | grep -o '"outputs":{.*},"channels"')"
-	no="$(tr -d '\n' < "$tmp" | grep -o '"outputs":{.*},"channels"')"
-	if [ -s "$ST_STEER_SPEC" ] && cmp -s "$tmp" "$ST_STEER_SPEC" && [ "$sum" = "$(cat "$ST_DIR/spec.sum" 2>/dev/null)" ] &&
-		/etc/init.d/steer running >/dev/null 2>&1; then
-		_rb_say "Правила Steer не изменились"
-		return 0
-	fi
-	cp "$tmp" "$ST_STEER_SPEC.tmp" && mv "$ST_STEER_SPEC.tmp" "$ST_STEER_SPEC"
+	_st_model "$@" > "$m"
+	grep -q '^svc	' "$m" || { rm -f "$m"; echo "ОШИБКА: для выбранных сервисов нет ни одного списка"; return 1; }
+	stl_apply "$m" || { rm -f "$m"; return 1; }
+	rm -f "$m"
 	_st_own "steer-spec"
-	/etc/init.d/steer enable >/dev/null 2>&1
-	mkdir -p "$ST_DIR"
-	if [ "$oo" != "$no" ]; then
-		_rb_say "Туннель сменился — перезапускаем движок Steer, чтобы трафик пошёл в новый туннель"
-	elif _st_engine_reload; then
-		printf '%s\n' "$sum" > "$ST_DIR/spec.sum"
-		_rb_say "Правила Steer применены без перезапуска — соединения не рвались"
-		return 0
-	fi
-	/etc/init.d/steer restart >/dev/null 2>&1
-	printf '%s\n' "$sum" > "$ST_DIR/spec.sum"
-	_rb_say "Правила Steer применены"
-}
-
-_st_engine_reload() {
-	/etc/init.d/steer running >/dev/null 2>&1 || return 1
-	command -v steer >/dev/null 2>&1 || return 1
-	if command -v timeout >/dev/null 2>&1; then
-		timeout 90 steer reload --spec "$ST_STEER_SPEC" >/dev/null 2>&1 || return 1
-	else
-		steer reload --spec "$ST_STEER_SPEC" >/dev/null 2>&1 || return 1
-	fi
-	sleep 1
-	/etc/init.d/steer running >/dev/null 2>&1
-}
-
-_st_spec_sum() {
-	local f
-	{
-		cat "$1"
-		for f in $(grep -o '"/[^"]*"' "$1" | tr -d '"'); do
-			[ -f "$f" ] && { echo "$f"; cat "$f"; }
-		done
-	} 2>/dev/null | md5sum | cut -d' ' -f1
 }
 
 _st_spec_clear() {
 	_st_owns "steer-spec" || return 0
-	/etc/init.d/steer stop >/dev/null 2>&1
-	/etc/init.d/steer disable >/dev/null 2>&1
-	if [ -s "$ST_DIR/spec.before" ]; then mv "$ST_DIR/spec.before" "$ST_STEER_SPEC"; else rm -f "$ST_STEER_SPEC"; fi
+	stl_stop
+	stl_spec_restore
 	sed -i '/^steer-spec$/d' "$ST_OWNED"
 	_doh_force_apply
 }
@@ -8272,11 +8501,11 @@ _st_spec_clear() {
 _st_kick() {
 	_st_owns "steer-spec" || return 0
 	[ -f "$ST_OFF" ] && return 0
-	/etc/init.d/steer enabled 2>/dev/null || return 0
+	stl_enabled || return 0
 	local sel
 	sel="$(_st_sel | tr '\n' ' ')"
 	if [ -n "$(echo $sel)" ] && _st_spec_apply $sel; then return 0; fi
-	/etc/init.d/steer restart >/dev/null 2>&1
+	stl_restart
 	_rb_say "Steer перезапущен"
 }
 
@@ -8294,8 +8523,16 @@ _st_dns_conflict() {
 do_steer_dns_fix() {
 	_doh_force_apply
 	[ -f "$ST_OFF" ] && return 0
-	/etc/init.d/steer enabled 2>/dev/null && /etc/init.d/steer restart >/dev/null 2>&1
+	stl_enabled && stl_restart
 	return 0
+}
+
+_st_cron_restart() {
+	local i
+	stl_enabled || return 0
+	for i in $(awk '{print $1}' "$ST_WARP_UP" 2>/dev/null); do ifup "$i"; done
+	sleep 15
+	stl_restart
 }
 
 _st_cron_refresh() {
@@ -8343,8 +8580,7 @@ _st_cron_set() {
 }
 
 _st_down() {
-	/etc/init.d/steer stop >/dev/null 2>&1
-	/etc/init.d/steer disable >/dev/null 2>&1
+	stl_stop
 	local i
 	for i in $(_st_wifs_all); do
 		_st_owns "net $i" || continue
@@ -8403,17 +8639,23 @@ _st_apply() {
 	esac
 	if _st_use_vpn; then _rb_say "Через VPN ($(_st_sub_label)): $(_rb_svc_names "$sel")"
 	else _rb_say "Через WARP: $(_rb_svc_names "$sel")"; fi
+	_st_engine_ready || return 1
 	_st_spec_apply $sel
 }
 
-_st_failopen() { nft list set inet steer failopen 2>/dev/null | grep -q 'elements = {'; }
+_st_engine_ready() {
+	stl_v2 && { ! _st_use_vpn || stl_has vpn; } && return 0
+	_st_install_steer $(_st_use_vpn && echo vpn)
+}
+
+_st_failopen() { stl_state "$(_st_exit)" && [ "$STL_FAILED" = true ]; }
 
 _st_selfcheck() {
 	local f="$ST_RUN/diag.json" n i v what why bad=0 trace
 	_rb_say "Проверяем, что всё работает"
 	if [ "$(_st_sel)" ] && _st_use_vpn; then
 		_st_vpn_check || bad=1
-		/etc/init.d/steer running >/dev/null 2>&1 && echo "[ OK ] Служба Steer запущена" || { echo "[FAIL] Служба Steer не запущена"; bad=1; }
+		stl_running && echo "[ OK ] Служба Steer запущена" || { echo "[FAIL] Служба Steer не запущена"; bad=1; }
 	elif [ "$(_st_sel)" ] && _st_warp_on; then
 		trace="$(curl -s --interface "$(_st_warp_first)" --connect-timeout 5 --max-time 10 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)"
 		case "$trace" in
@@ -8428,40 +8670,32 @@ _st_selfcheck() {
 				else echo "[FAIL] Туннель WARP: трафик идёт мимо Cloudflare WARP"; bad=1; fi ;;
 			*) echo "[FAIL] Туннель WARP: трафик через него не идёт"; bad=1 ;;
 		esac
-		/etc/init.d/steer running >/dev/null 2>&1 && echo "[ OK ] Служба Steer запущена" || { echo "[FAIL] Служба Steer не запущена"; bad=1; }
+		stl_running && echo "[ OK ] Служба Steer запущена" || { echo "[FAIL] Служба Steer не запущена"; bad=1; }
 	fi
-	command -v steer >/dev/null 2>&1 || return $bad
-	[ -s "$ST_STEER_SPEC" ] || return $bad
+	_st_owns "steer-spec" && stl_v2 || return $bad
 	if [ -n "$(_st_sel)" ] && _st_failopen; then
-		_rb_warn "Движок Steer считает туннель нерабочим и пускает выбранные сервисы напрямую — перезапускаем его"
-		/etc/init.d/steer restart >/dev/null 2>&1
+		_rb_warn "Ядро steer считает туннель нерабочим и пускает выбранные сервисы напрямую — ждём, пока его сторож проверит туннель снова"
 		i=0
-		while [ "$i" -lt 20 ] && _st_failopen; do sleep 1; i=$((i + 1)); done
+		while [ "$i" -lt 30 ] && _st_failopen; do sleep 2; i=$((i + 1)); done
 		if _st_failopen; then
-			echo "[FAIL] Туннель ${ST_WARP_IF}: Steer не может пустить через него трафик — сервисы идут напрямую, через провайдера"
-			echo "   Проверка движка: TCP к 1.1.1.1:80 и 8.8.8.8:80 через ${ST_WARP_IF} — сервер из конфига их не пропускает?"
-			logread 2>/dev/null | grep -iE 'steer' | grep -iE 'выход|output|устройств|device' | tail -n 6 | sed 's/^[^]]*\]: /   /'
+			echo "[FAIL] Туннель: ядро steer не может пустить через него трафик — сервисы идут напрямую, через провайдера"
+			logread 2>/dev/null | grep -F 'steer[warn]' | tail -n 6 | sed 's/^[^]]*\]: /   /'
 			bad=1
 		else
-			echo "[ OK ] После перезапуска движок пустил трафик в туннель"
+			echo "[ OK ] Ядро steer снова ведёт трафик в туннель"
 		fi
 	else
-		[ -n "$(_st_sel)" ] && echo "[ OK ] Движок Steer ведёт выбранные сервисы в туннель"
+		[ -n "$(_st_sel)" ] && echo "[ OK ] Ядро steer ведёт выбранные сервисы в туннель"
 	fi
-	steer diag --spec "$ST_STEER_SPEC" > "$f" 2>/dev/null
-	n=$(jsonfilter -i "$f" -e '@.checks[*].id' 2>/dev/null | wc -l)
-	i=0
-	while [ "$i" -lt "$n" ]; do
-		v=$(jsonfilter -i "$f" -e "@.checks[$i].verdict" 2>/dev/null)
-		what=$(jsonfilter -i "$f" -e "@.checks[$i].what" 2>/dev/null)
-		why=$(jsonfilter -i "$f" -e "@.checks[$i].why" 2>/dev/null)
+	stl_diag_lines > "$f"
+	while IFS="$(printf '\t')" read -r v what why; do
 		case "$v" in
 			ok)   echo "[ OK ] $what" ;;
 			warn) echo "!! $what${why:+ — $why}" ;;
 			fail) echo "[FAIL] $what${why:+ — $why}"; bad=1 ;;
 		esac
-		i=$((i + 1))
-	done
+	done < "$f"
+	rm -f "$f"
 	if [ "$bad" = 0 ]; then _rb_say "Проверка пройдена"; else _rb_warn "Проверка нашла поломку — подробности выше"; fi
 	return $bad
 }
@@ -8474,8 +8708,10 @@ do_steer_install() {
 	blk="$(_st_blocker)"
 	_fk_present && { echo "ОШИБКА: стоит Forkozz — он сам направляет сервисы в туннель. Удалите Forkozz, чтобы поставить Steer"; return 1; }
 	case "$blk" in
+		'') ;;
 		splify2) echo "ОШИБКА: установлен splify2 — туннели и списки настраиваются в нём"; return 1 ;;
-		steer)   echo "ОШИБКА: у движка Steer уже есть чужие правила — не перезаписываем их"; return 1 ;;
+		steer)   echo "ОШИБКА: у ядра steer уже есть чужие правила — не перезаписываем их"; return 1 ;;
+		*)       echo "ОШИБКА: $blk"; return 1 ;;
 	esac
 	_ensure_deps
 	mkdir -p "$ST_DIR"
@@ -8493,14 +8729,14 @@ do_steer_install() {
 		sleep 2
 		_st_selfcheck
 	fi
-	_rb_say "Готово: движок steer-extended установлен — подключите WARP или подписку VPN на соседних вкладках"
+	_rb_say "Готово: ядро steer установлено — подключите WARP или подписку VPN на соседних вкладках"
 }
 
 do_steer_warp_setup() {
 	_st_phase awg
 	rm -f "$ST_STOP_FLAG"
 	_st_installed || { echo "ОШИБКА: сначала установите Steer"; return 1; }
-	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: движок Steer сейчас настраивает не Zapret Manager"; return 1; }
+	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: ядро steer сейчас настраивает не Zapret Manager"; return 1; }
 	_ensure_deps
 	_st_install_awg || return 1
 	_st_phase tunnel
@@ -8528,7 +8764,7 @@ do_steer_warp_own() {
 	_st_phase awg
 	rm -f "$ST_STOP_FLAG"
 	_st_installed || { echo "ОШИБКА: сначала установите Steer"; return 1; }
-	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: движок Steer сейчас настраивает не Zapret Manager"; return 1; }
+	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: ядро steer сейчас настраивает не Zapret Manager"; return 1; }
 	if [ -s "$ST_DIR/warp.pending" ]; then mv -f "$ST_DIR/warp.pending" "$ST_WARP_OWN"; fi
 	_st_own_restore
 	[ -s "$ST_WARP_OWN" ] || { echo "ОШИБКА: вставьте конфиг WARP"; return 1; }
@@ -8567,7 +8803,7 @@ do_steer_warp_auto() {
 	_st_phase awg
 	rm -f "$ST_STOP_FLAG"
 	_st_installed || { echo "ОШИБКА: сначала установите Steer"; return 1; }
-	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: движок Steer сейчас настраивает не Zapret Manager"; return 1; }
+	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: ядро steer сейчас настраивает не Zapret Manager"; return 1; }
 	_ensure_deps
 	_st_install_awg || return 1
 	_st_phase tunnel
@@ -8839,7 +9075,7 @@ do_steer_apply() {
 	_st_phase rules
 	rm -f "$ST_STOP_FLAG"
 	_st_installed || { echo "ОШИБКА: Steer ещё не установлен"; return 1; }
-	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: спеку Steer сейчас ведёт не Zapret Manager"; return 1; }
+	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: настройку ядра steer сейчас ведёт не Zapret Manager"; return 1; }
 	rm -f "$ST_OFF"
 	_st_apply || return 1
 	_st_phase check
@@ -8861,7 +9097,7 @@ do_steer_stop() {
 }
 
 _st_need_warp() {
-	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: движок Steer сейчас настраивает не Zapret Manager"; return 1; }
+	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: ядро steer сейчас настраивает не Zapret Manager"; return 1; }
 	_st_warp_on && return 0
 	echo "ОШИБКА: WARP ещё не подключён — подключите его на вкладке WARP"
 	return 1
@@ -8914,34 +9150,18 @@ do_steer_warp_recreate() {
 	_rb_say "Готово, WARP пересоздан"
 }
 
-_st_leftovers_clean() {
-	command -v steer >/dev/null 2>&1 && return 0
-	local t m n=0
-	for t in "inet steer" "ip steer" "ip6 steer" "inet steer_obfs"; do
-		nft delete table $t >/dev/null 2>&1 && n=$((n + 1))
-	done
-	for t in $(awk '{print $3}' /var/lib/steer/registry 2>/dev/null); do ip route flush table "$t" >/dev/null 2>&1; done
-	for m in $(awk '{print $2}' /var/lib/steer/registry 2>/dev/null); do
-		while ip rule del fwmark "0x$m/0x0ff00000" >/dev/null 2>&1; do n=$((n + 1)); done
-		while ip rule del fwmark "0x$m" >/dev/null 2>&1; do n=$((n + 1)); done
-	done
-	killall steerd >/dev/null 2>&1
-	rm -rf /var/lib/steer
-	[ "$n" -gt 0 ] && echo "   ✓ Убраны оставшиеся правила Steer: $n"
-	return 0
-}
-
 do_steer_remove() {
 	_st_phase remove
 	_rb_say "Удаляем Steer и туннель WARP"
-	local foreign=0
-	[ "$(_st_blocker)" = splify2 ] && foreign=1
-	if [ "$foreign" = 1 ]; then
-		sed -i '/^steer-spec$/d; /^pkg steer$/d; /^pkg steer-extended$/d' "$ST_OWNED" 2>/dev/null
-		_rb_warn "Установлен splify2 — движок Steer и его правила оставляем ему"
+	local foreign="" p pkgs=""
+	[ "$(_st_blocker)" = splify2 ] && foreign=splify2
+	[ -z "$foreign" ] && foreign="$(stl_busy_by)"
+	if [ -n "$foreign" ]; then
+		sed -i '/^steer-spec$/d; /^pkg steer/d' "$ST_OWNED" 2>/dev/null
+		_rb_warn "Ядро steer нужно $foreign — оставляем его и его правила"
 	else
 		_st_spec_clear
-		/etc/init.d/steer stop >/dev/null 2>&1
+		stl_stop
 	fi
 	local wi netrl=0
 	for wi in $(_st_wifs_every); do
@@ -8963,10 +9183,8 @@ do_steer_remove() {
 		/etc/init.d/cron restart >/dev/null 2>&1
 	fi
 	_st_vpn_zone off
-	if _st_owns "pkg steer"; then
-		_rb_say "Удаляем движок Steer"
-		if _pkg_is_installed steer-extended; then $DELETE steer-extended >&2; else $DELETE steer >&2; fi
-	fi
+	for p in $(sed -n 's/^pkg \(steer[a-z0-9-]*\)$/\1/p' "$ST_OWNED" 2>/dev/null); do pkgs="$pkgs $p"; done
+	[ -n "$pkgs" ] && stl_engine_remove $pkgs
 	_st_owns "pkg conntrack" && $DELETE conntrack >&2
 	if ! uci show network 2>/dev/null | grep -q "\.proto='amneziawg'"; then
 		local p
@@ -8977,7 +9195,7 @@ do_steer_remove() {
 	_rb_rpcd_ensure
 	rm -rf "$ST_DIR" "$ST_RUN"
 	rm -f "$ST_TGWS_WARP"
-	[ "$foreign" = 1 ] || _st_leftovers_clean
+	[ -n "$foreign" ] || stl_leftovers
 	_rb_say "Steer удалён"
 	_zm_after_remove "Steer"
 }
@@ -9012,10 +9230,10 @@ steer_status() {
 		done
 		[ -n "$hs" ] && [ "$hs" != 0 ] && age=$(( $(date +%s) - hs ))
 	fi
-	if command -v steer >/dev/null 2>&1; then
-		ver="$(_st_steer_ver)"
-		/etc/init.d/steer running >/dev/null 2>&1 && run=true
-		_st_owns "steer-spec" && chans=$(grep -o '"out"' "$ST_STEER_SPEC" 2>/dev/null | wc -l)
+	if stl_present; then
+		ver="$(stl_version)"
+		stl_running && run=true
+		_st_owns "steer-spec" && chans="$(stl_rules)"
 	fi
 	_st_dns_conflict && dns=true
 	local doh="" dohn=0 u
@@ -9039,12 +9257,16 @@ steer_status() {
 			printf "%s{\"id\":\"%s\",\"name\":\"%s\",\"group\":\"%s\",\"on\":%s,\"skip\":%s}", (n++ ? "," : ""), $1, j($2), j($9),
 				(index(sel, " " $1 " ") ? "true" : "false"), (($1 in sk) ? "true" : "false")
 		}')"
-	local vexit vup=false vsub=false latest="" ext=false won=false
+	local vexit vup=false vsub=false latest="" ext=false won=false failed=false active=""
 	vexit="$(_st_exit)"
 	_st_warp_on && won=true
-	_st_is_ext && ext=true
-	if [ -s "$ZM_STATE_DIR/steer.latest" ]; then latest="$(cat "$ZM_STATE_DIR/steer.latest")"
-	elif command -v steer >/dev/null 2>&1; then ( _st_latest_ver >/dev/null 2>&1 & ); fi
+	stl_v2 && { [ ! -s "$ST_SUB" ] || stl_has vpn; } && ext=true
+	if [ -s "$STL_CACHE" ]; then latest="$(cat "$STL_CACHE")"
+	elif stl_present; then ( stl_latest >/dev/null 2>&1 & ); fi
+	if [ "$run" = true ] && _st_owns "steer-spec" && stl_state "$vexit"; then
+		failed="$STL_FAILED"
+		[ "$vexit" = vpn ] || [ "$failed" = true ] || active="$STL_DEV"
+	fi
 	[ -d "/sys/class/net/$ST_VPN_OUT" ] && vup=true
 	[ -s "$ST_SUB" ] && vsub=true
 	local vlive=null
@@ -9052,21 +9274,15 @@ steer_status() {
 		_st_vpn_live; case $? in 0) vlive=true ;; 1) vlive=false ;; esac
 	fi
 	printf '{"running":%s,"phase":"%s","blocker":"%s","installed":%s,"stopped":%s,"version":"%s","steer_running":%s,"channels":%s,"warp_up":%s,"warp_colo":"%s","warp_host":"%s","warp_port":"%s","warp_hs_age":"%s","warp_rx":%s,"warp_tx":%s,"autorestart":"%s","dns_conflict":%s,"doh":"%s","doh_mode":"%s","exit":"%s","vpn_up":%s,"vpn_live":%s,"has_sub":%s,"sub_label":"%s","latest":"%s","ext":%s,"warp_on":%s,"warp_mode":"%s","warp_own_saved":%s,"tunnels":%s,"warp_active":"%s","catalog":%s,"wfix":%s,"lists_via":%s,"failopen":%s,"hosts_extra":%s,"services":[%s]}\n' \
-		"$running" "$(esc "$phase")" "$blk" "$installed" "$off" "$(esc "$ver")" "$run" "${chans:-0}" "$warp_up" "$(esc "$colo")" \
+		"$running" "$(esc "$phase")" "$(esc "$blk")" "$installed" "$off" "$(esc "$ver")" "$run" "${chans:-0}" "$warp_up" "$(esc "$colo")" \
 		"$(esc "$host")" "$(esc "$port")" "$age" "${rx:-0}" "${tx:-0}" "$(_st_cron_get)" "$dns" "$doh" "$(_doh_force_mode)" \
-		"$vexit" "$vup" "$vlive" "$vsub" "$(esc "$(_st_sub_label)")" "$(esc "$latest")" "$ext" "$won" "$(_st_warp_own && echo own || echo auto)" "$(_st_own_saved && echo true || echo false)" "$(_st_tunnels_json)" "$(_st_active_if)" "$(_st_cat_json)" "$(_st_wfix_json)" "$([ -f "$ST_DIR/lists.via" ] && echo true || echo false)" "$(_st_failopen && echo true || echo false)" "$(_hosts_extra)" "$svc"
+		"$vexit" "$vup" "$vlive" "$vsub" "$(esc "$(_st_sub_label)")" "$(esc "$latest")" "$ext" "$won" "$(_st_warp_own && echo own || echo auto)" "$(_st_own_saved && echo true || echo false)" "$(_st_tunnels_json)" "$active" "$(_st_cat_json)" "$(_st_wfix_json)" "$([ -f "$ST_DIR/lists.via" ] && echo true || echo false)" "$failed" "$(_hosts_extra)" "$svc"
 }
 
 _st_active_if() {
 	[ "$(_st_exit)" = vpn ] && return 0
-	command -v steer >/dev/null 2>&1 || return 0
-	/etc/init.d/steer running >/dev/null 2>&1 || return 0
-	local j
-	if command -v timeout >/dev/null 2>&1; then j="$(timeout 5 steer status --spec "$ST_STEER_SPEC" 2>/dev/null)"
-	else j="$(steer status --spec "$ST_STEER_SPEC" 2>/dev/null)"; fi
-	[ -n "$j" ] || return 0
-	[ "$(printf '%s' "$j" | jsonfilter -e '@.outputs.zm_warp.failed' 2>/dev/null)" = true ] && return 0
-	printf '%s' "$j" | jsonfilter -e '@.outputs.zm_warp.device' 2>/dev/null | grep -E '^[A-Za-z0-9_.-]+$' | head -n1
+	_st_owns "steer-spec" && stl_running && stl_state warp || return 0
+	[ "$STL_FAILED" = true ] || printf '%s' "$STL_DEV"
 }
 
 _st_tunnels_json() {
@@ -9192,7 +9408,7 @@ _st_sel_set() {
 	return 0
 }
 
-ST_VPN_OUT="zm_vpn"
+ST_VPN_OUT="$STL_VPN_DEV"
 ST_VPN_ZONE="zmvpn"
 ST_SUB="$ST_DIR/sub.txt"
 ST_SUB_INFO="$ST_DIR/sub.userinfo"
@@ -9206,9 +9422,9 @@ ST_EXIT="$ST_DIR/exit"
 _st_exit() {
 	local e
 	e="$(cat "$ST_EXIT" 2>/dev/null)"
-	if [ "$e" = vpn ] && [ -s "$ST_SUB" ] && _st_is_ext; then echo vpn; return; fi
+	if [ "$e" = vpn ] && [ -s "$ST_SUB" ] && _st_vpn_ok; then echo vpn; return; fi
 	if _st_warp_on; then echo warp; return; fi
-	if [ -s "$ST_SUB" ] && _st_is_ext; then echo vpn; return; fi
+	if [ -s "$ST_SUB" ] && _st_vpn_ok; then echo vpn; return; fi
 	echo none
 }
 _st_use_vpn() { [ "$(_st_exit)" = vpn ]; }
@@ -9250,20 +9466,6 @@ _st_sub_label() {
 		esac
 	elif [ -s "$ST_SUB_URL" ]; then sed -n 's#^[a-z]*://\([^/:?]*\).*#\1#p' "$ST_SUB_URL" | head -n1
 	else echo "свои ссылки"; fi
-}
-
-_zm_nodes_tsv() {
-	awk '{
-		s = $0
-		while (match(s, /\{"index":[0-9]+,"name":"([^"\\]|\\.)*"/)) {
-			r = substr(s, RSTART, RLENGTH); s = substr(s, RSTART + RLENGTH)
-			i = r; sub(/^\{"index":/, "", i); sub(/,.*/, "", i)
-			n = r; sub(/^\{"index":[0-9]+,"name":"/, "", n); sub(/"$/, "", n)
-			gsub(/\\"/, "\"", n)
-			c = split(n, q, /\\\\/); n = q[1]; for (k = 2; k <= c; k++) n = n "\\" q[k]
-			print i "\t" n
-		}
-	}'
 }
 
 ZM_FOLD_AWK='function fold(x,  k) { x = tolower(x); for (k = 1; k <= nU; k++) gsub(U[k], L[k], x); return x }
@@ -9310,25 +9512,26 @@ _zm_excl_save() {
 	printf '%s\n' "$m" > "$f"
 }
 
-_st_sub_node_idx() {
-	local want tsv hid n allowed
-	[ -s "$ST_SUB" ] || return 0
-	tsv="$(steer vless-nodes "$ST_SUB" 2>/dev/null | _zm_nodes_tsv)"
-	hid="$(printf '%s\n' "$tsv" | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | tr '\n' ' ')"
+_st_sub_filter() {
+	local want tsv hid n all mk
+	mk="$(head -n1 "$ST_SUB_EXCL" 2>/dev/null | tr '\t' ' ')"
+	[ -n "$(printf '%s' "$mk" | tr -d ' |,')" ] || mk=-
+	tsv="$(stl_nodes "$ST_SUB" | stl_tsv)"
+	hid=" $(printf '%s\n' "$tsv" | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | tr '\n' ' ')"
+	all="$(printf '%s\n' "$tsv" | grep -c .)"
+	if [ "$all" -gt 0 ] && [ "$(echo $hid | wc -w)" -ge "$all" ]; then
+		echo "!! Фильтр узлов скрыл все узлы подписки — пока используем все, поправьте маркеры" >&2
+		printf -- '-\t-\n'
+		return 0
+	fi
 	want="$(cat "$ST_SUB_NODE" 2>/dev/null)"
 	if [ -n "$want" ]; then
 		n="$(printf '%s\n' "$tsv" | ZM_W="$want" awk -F'\t' '$2 == ENVIRON["ZM_W"] { print $1; exit }')"
-		if [ -n "$n" ]; then
-			case " $hid " in *" $n "*) ;; *) echo "$n"; return 0 ;; esac
-		fi
+		[ -n "$n" ] && case "$hid" in *" $n "*) ;; *) printf '%s\t%s\n' "$n" "$mk"; return 0 ;; esac
 	fi
-	[ -n "${hid% }" ] || return 0
-	allowed="$(printf '%s\n' "$tsv" | awk -F'\t' -v h=" $hid " '$1 != "" && index(h, " " $1 " ") == 0 { print $1 }' | head -n 16 | tr '\n' ',' | sed 's/,$//')"
-	if [ -z "$allowed" ]; then
-		echo "!! Фильтр узлов скрыл все узлы подписки — пока используем все, поправьте маркеры" >&2
-		return 0
-	fi
-	echo "$allowed"
+	n=""
+	[ -s "$ST_SUB_HIDE" ] && n="$(printf '%s\n' "$tsv" | awk -F'\t' -v h="$hid " '$1 != "" && index(h, " " $1 " ") == 0 { print $1 }' | tr '\n' ',' | sed 's/,$//')"
+	printf '%s\t%s\n' "${n:--}" "$mk"
 }
 
 _st_vpn_zone() {
@@ -9377,60 +9580,39 @@ _st_vpn_check() {
 
 _st_need_ext() {
 	_st_installed || { echo "ОШИБКА: сначала установите Steer"; return 1; }
-	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: движок Steer сейчас настраивает не Zapret Manager"; return 1; }
-	if ! _st_is_ext; then
+	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: ядро steer сейчас настраивает не Zapret Manager"; return 1; }
+	if ! stl_has vpn; then
 		_ensure_deps
 		_st_phase pkgs
-		_st_install_steer || return 1
-		_st_is_ext || { echo "ОШИБКА: steer-extended не установился"; return 1; }
-	fi
-	if [ ! -e /dev/net/tun ]; then
-		modprobe tun >/dev/null 2>&1
-		if [ ! -e /dev/net/tun ]; then
-			_rb_say "Ставим kmod-tun"
-			$UPDATE >&2
-			$INSTALL kmod-tun >&2
-			modprobe tun >/dev/null 2>&1
-		fi
-		[ -e /dev/net/tun ] || { echo "ОШИБКА: нет /dev/net/tun — пакет kmod-tun не установился"; return 1; }
+		_st_install_steer vpn || return 1
+		stl_has vpn || { echo "ОШИБКА: модуль VLESS ядра steer не установился"; return 1; }
 	fi
 	_st_phase sub
 }
 
 _st_sub_check() {
-	local j n
-	j="$(steer vless-nodes "$1" 2>/dev/null)"
-	n="$(printf '%s' "$j" | jsonfilter -e '@.usable' 2>/dev/null)"
-	if [ "${n:-0}" -gt 0 ] 2>/dev/null; then
-		_rb_say "Узлов, с которыми умеет работать Steer: $n"
+	if stl_sub_check "$1"; then
+		_rb_say "Узлов, с которыми умеет работать Steer: $STL_SUB_USABLE"
 		return 0
 	fi
-	echo "ОШИБКА: в подписке нет узлов, которые умеет Steer (VLESS Reality: tcp, grpc или xhttp)"
-	printf '%s' "$j" | jsonfilter -e '@.skipped_reasons[*].reason' 2>/dev/null | head -n 3 | sed 's/^/   причина: /'
+	echo "ОШИБКА: в подписке нет узлов VLESS, с которыми умеет работать Steer"
+	[ -n "$STL_SUB_WHY" ] && printf '%s\n' "$STL_SUB_WHY" | sed 's/^/   причина: /'
 	return 1
 }
 
 _st_sub_fetch() {
-	local out ok e u t w
 	rm -f "$ST_SUB.new"
-	out="$(steer sub-fetch "$1" --out "$ST_SUB.new" --info "$ST_SUB_INFO" 2>/dev/null)"
-	ok="$(printf '%s' "$out" | jsonfilter -e '@.ok' 2>/dev/null)"
-	if [ "$ok" != true ] || [ ! -s "$ST_SUB.new" ]; then
-		rm -f "$ST_SUB.new"
-		e="$(printf '%s' "$out" | jsonfilter -e '@.error' 2>/dev/null)"
-		echo "ОШИБКА: подписка не скачалась${e:+ — $e}"
+	if ! stl_sub_fetch "$1" "$ST_SUB.new" "$ST_SUB_INFO"; then
+		echo "ОШИБКА: подписка не скачалась${STL_SUB_ERR:+ — $STL_SUB_ERR}"
 		return 1
 	fi
-	w="$(printf '%s' "$out" | jsonfilter -e '@.warn' 2>/dev/null)"
-	[ -n "$w" ] && _rb_warn "$w"
+	[ -n "$STL_SUB_WARN" ] && _rb_warn "$STL_SUB_WARN"
 	_st_sub_check "$ST_SUB.new" || { rm -f "$ST_SUB.new"; return 1; }
 	mv -f "$ST_SUB.new" "$ST_SUB"
 	chmod 600 "$ST_SUB"
-	u="$(printf '%s' "$out" | jsonfilter -e '@.url' 2>/dev/null)"
-	printf '%s\n' "${u:-$1}" > "$ST_SUB_URL"
+	printf '%s\n' "${STL_SUB_URL:-$1}" > "$ST_SUB_URL"
 	chmod 600 "$ST_SUB_URL"
-	t="$(printf '%s' "$out" | jsonfilter -e '@.title' 2>/dev/null)"
-	if [ -n "$t" ]; then printf '%s\n' "$t" > "$ST_SUB_TITLE"; else rm -f "$ST_SUB_TITLE"; fi
+	if [ -n "$STL_SUB_TITLE" ]; then printf '%s\n' "$STL_SUB_TITLE" > "$ST_SUB_TITLE"; else rm -f "$ST_SUB_TITLE"; fi
 	_rb_say "Подписка «$(_st_sub_label)» скачана"
 }
 
@@ -9494,7 +9676,7 @@ do_steer_sub_links() {
 	chmod 600 "$ST_SUB"
 	rm -f "$ST_SUB_URL" "$ST_SUB_TITLE" "$ST_SUB_INFO"
 	node="$(cat "$ST_SUB_NODE" 2>/dev/null)"
-	if [ -n "$node" ] && ! steer vless-nodes "$ST_SUB" 2>/dev/null | _zm_nodes_tsv | ZM_W="$node" awk -F'\t' '$2 == ENVIRON["ZM_W"] { f = 1 } END { exit !f }'; then
+	if [ -n "$node" ] && ! stl_nodes "$ST_SUB" | stl_tsv | ZM_W="$node" awk -F'\t' '$2 == ENVIRON["ZM_W"] { f = 1 } END { exit !f }'; then
 		rm -f "$ST_SUB_NODE"
 		echo "   · выбранного узла «$node» больше нет в списке — Steer сам выберет рабочий"
 	fi
@@ -9517,7 +9699,7 @@ do_steer_sub_update() {
 	fi
 	now="$(md5sum < "$ST_SUB" 2>/dev/null)"
 	_st_use_vpn || { _rb_say "Готово"; return 0; }
-	if [ "$1" = auto ] && [ "$was" = "$now" ] && [ ! -f "$ST_OFF" ] && /etc/init.d/steer running >/dev/null 2>&1 && _st_vpn_probe; then
+	if [ "$1" = auto ] && [ "$was" = "$now" ] && [ ! -f "$ST_OFF" ] && stl_running && _st_vpn_probe; then
 		_rb_say "Список серверов не изменился, VPN работает — туннель не трогаем"
 		return 0
 	fi
@@ -9534,7 +9716,7 @@ _st_vpn_heal() {
 	local pinned
 	_rb_say "VPN не отвечает — перезапускаем Steer"
 	logger -t zapret-manager "Steer: VPN не отвечает — перезапускаем службу"
-	_zm_run 120 /etc/init.d/steer restart >/dev/null 2>&1
+	_zm_run 120 stl_restart >/dev/null 2>&1
 	sleep 3
 	if _st_vpn_check >/dev/null 2>&1; then
 		_st_vpn_probe >/dev/null 2>&1
@@ -9548,7 +9730,7 @@ _st_vpn_heal() {
 		mkdir -p "$ST_DIR"
 		printf '%s\n' "$pinned" > "$ST_SUB_FELL"
 		rm -f "$ST_SUB_NODE"
-		_st_apply >/dev/null 2>&1 || _zm_run 120 /etc/init.d/steer restart >/dev/null 2>&1
+		_st_apply >/dev/null 2>&1 || _zm_run 120 stl_restart >/dev/null 2>&1
 		sleep 3
 		if _st_vpn_check >/dev/null 2>&1; then
 			_st_vpn_probe >/dev/null 2>&1
@@ -9568,8 +9750,8 @@ do_steer_vpn_heal() {
 
 _st_vpn_watch() {
 	local f="$ST_VPN_WATCH" fails=0 heals=0 last=0 now wait
-	_st_installed && _st_use_vpn && [ ! -f "$ST_OFF" ] && [ -s "$ST_SUB" ] && [ -s "$ST_STEER_SPEC" ] && _st_owns "steer-spec" || { rm -f "$f"; return 0; }
-	/etc/init.d/steer enabled >/dev/null 2>&1 || { rm -f "$f"; return 0; }
+	_st_installed && _st_use_vpn && [ ! -f "$ST_OFF" ] && [ -s "$ST_SUB" ] && _st_owns "steer-spec" || { rm -f "$f"; return 0; }
+	stl_enabled || { rm -f "$f"; return 0; }
 	[ "$(_st_sel)" ] || { rm -f "$f"; return 0; }
 	[ -z "$(_st_blocker)" ] || return 0
 	_zm_busy_job >/dev/null 2>&1 && return 0
@@ -9641,7 +9823,7 @@ steer_sub_action() {
 			echo "$mode" > "$ST_EXIT"
 			[ "$mode" = warp ] && _st_vpn_zone off
 			if _st_installed && [ ! -f "$ST_OFF" ] && [ -z "$(_st_blocker)" ] && [ -n "$(_st_sel)" ]; then
-				if [ "$mode" = vpn ] && ! _st_is_ext; then job_start steer do_steer_sub_exit_vpn
+				if [ "$mode" = vpn ] && ! stl_has vpn; then job_start steer do_steer_sub_exit_vpn
 				else job_start steer do_steer_apply; fi
 			else
 				printf '{"ok":true,"saved":true}\n'
@@ -9650,16 +9832,16 @@ steer_sub_action() {
 		sub_filter)
 			local m err tsv total hid
 			case "$mode" in '{'*) m="$(printf '%s' "$mode" | jsonfilter -e '@.m' 2>/dev/null)" ;; *) m="$mode" ;; esac
-			if [ -s "$ST_SUB" ] && _st_is_ext && [ -n "$(printf '%s' "$m" | tr -d ' |,')" ]; then
+			if [ -s "$ST_SUB" ] && _st_vpn_ok && [ -n "$(printf '%s' "$m" | tr -d ' |,')" ]; then
 				_zm_excl_save "$ST_DIR/sub.exclude.try" "$m" >/dev/null
-				tsv="$(steer vless-nodes "$ST_SUB" 2>/dev/null | _zm_nodes_tsv)"
+				tsv="$(stl_nodes "$ST_SUB" | stl_tsv)"
 				total="$(printf '%s\n' "$tsv" | grep -c .)"
 				hid="$(printf '%s\n' "$tsv" | _zm_excl_hits "$ST_DIR/sub.exclude.try" "$ST_SUB_HIDE" | grep -c .)"
 				rm -f "$ST_DIR/sub.exclude.try"
 				[ "$total" -gt 0 ] && [ "$hid" -ge "$total" ] && { echo '{"error":"под эти маркеры попадают все узлы подписки — тогда VPN работать не сможет. Уберите лишние маркеры"}'; return 1; }
 			fi
 			err="$(_zm_excl_save "$ST_SUB_EXCL" "$m")" || { printf '{"error":"%s"}\n' "$(esc "$err")"; return 1; }
-			if [ -s "$ST_SUB_NODE" ] && steer vless-nodes "$ST_SUB" 2>/dev/null | _zm_nodes_tsv | ZM_W="$(cat "$ST_SUB_NODE")" awk -F'\t' '$2 == ENVIRON["ZM_W"]' | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | grep -q .; then
+			if [ -s "$ST_SUB_NODE" ] && stl_nodes "$ST_SUB" | stl_tsv | ZM_W="$(cat "$ST_SUB_NODE")" awk -F'\t' '$2 == ENVIRON["ZM_W"]' | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | grep -q .; then
 				rm -f "$ST_SUB_NODE"
 			fi
 			if [ -s "$ST_SUB" ] && _st_use_vpn && _st_installed && [ ! -f "$ST_OFF" ] && [ -z "$(_st_blocker)" ] && [ -n "$(_st_sel)" ]; then
@@ -9682,7 +9864,7 @@ steer_sub_action() {
 					;;
 				esac
 				printf '%s' "$mode" | jsonfilter -e '@.names[*]' > "$nf" 2>/dev/null
-				tsv="$(steer vless-nodes "$ST_SUB" 2>/dev/null | _zm_nodes_tsv)"
+				tsv="$(stl_nodes "$ST_SUB" | stl_tsv)"
 				total="$(printf '%s\n' "$tsv" | grep -c .)"
 				hid="$(printf '%s\n' "$tsv" | _zm_excl_hits "$xf" "$nf" | grep -c .)"
 				if [ "$total" -gt 0 ] && [ "$hid" -ge "$total" ]; then rm -f "$nf" "$ST_DIR/sub.exclude.try.$$"; echo '{"error":"нельзя скрыть все узлы — тогда VPN работать не сможет"}'; return 1; fi
@@ -9703,7 +9885,7 @@ steer_sub_action() {
 			;;
 		sub_node)
 			[ -s "$ST_SUB" ] || { echo '{"error":"подписки нет"}'; return 1; }
-			if [ -n "$mode" ] && steer vless-nodes "$ST_SUB" 2>/dev/null | _zm_nodes_tsv | ZM_W="$mode" awk -F'\t' '$2 == ENVIRON["ZM_W"]' | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | grep -q .; then
+			if [ -n "$mode" ] && stl_nodes "$ST_SUB" | stl_tsv | ZM_W="$mode" awk -F'\t' '$2 == ENVIRON["ZM_W"]' | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | grep -q .; then
 				echo '{"error":"этот узел скрыт фильтром — уберите маркер или выберите другой узел"}'; return 1
 			fi
 			mkdir -p "$ST_DIR"
@@ -9749,15 +9931,15 @@ do_steer_engine() {
 	_st_phase pkgs
 	rm -f "$ST_STOP_FLAG"
 	_st_installed || { echo "ОШИБКА: Steer ещё не установлен"; return 1; }
-	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: движок Steer сейчас настраивает не Zapret Manager"; return 1; }
-	rm -f "$ZM_STATE_DIR/steer.latest"
+	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: ядро steer сейчас настраивает не Zapret Manager"; return 1; }
+	rm -f "$STL_CACHE"
 	_ensure_deps
 	_st_install_steer || return 1
 	if [ ! -f "$ST_OFF" ] && [ -n "$(_st_sel)" ]; then
 		_st_phase rules
 		_st_apply || return 1
 	fi
-	_rb_say "Готово, движок: steer-extended $(_st_steer_ver)"
+	_rb_say "Готово, ядро steer $(stl_version)"
 }
 
 do_steer_sub_exit_vpn() {
@@ -9768,7 +9950,7 @@ do_steer_sub_exit_vpn() {
 
 steer_sub_status() {
 	local has=false kind="" url="" title="" ext=false vexit=warp node="" up="" down="" total="" expire="" list=null vpn=null mt=0 hidden=""
-	_st_is_ext && ext=true
+	_st_vpn_ok && ext=true
 	vexit="$(_st_exit)"
 	if [ -s "$ST_SUB" ]; then
 		has=true
@@ -9783,14 +9965,11 @@ steer_sub_status() {
 		fi
 		mt="$(date -r "$ST_SUB" +%s 2>/dev/null)"
 		if [ "$ext" = true ]; then
-			list="$(steer vless-nodes "$ST_SUB" 2>/dev/null | tr '\n' ' ')"
-			case "$list" in '{'*) hidden="$(printf '%s\n' "$list" | _zm_nodes_tsv | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | tr '\n' ',' | sed 's/,$//')" ;; *) list=null ;; esac
+			list="$(stl_nodes "$ST_SUB")"
+			case "$list" in '{'*) hidden="$(printf '%s\n' "$list" | stl_tsv | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | tr '\n' ',' | sed 's/,$//')" ;; *) list=null ;; esac
 		fi
 	fi
-	if _st_use_vpn && [ -s "$ST_STEER_SPEC" ] && _st_owns "steer-spec"; then
-		vpn="$(steer status --spec "$ST_STEER_SPEC" 2>/dev/null | jsonfilter -e "@.outputs.$ST_VPN_OUT" 2>/dev/null | tr '\n' ' ')"
-		case "$vpn" in '{'*) ;; *) vpn=null ;; esac
-	fi
+	_st_use_vpn && _st_owns "steer-spec" && vpn="$(stl_vpn_json)"
 	printf '{"ext":%s,"has":%s,"kind":"%s","url":"%s","title":"%s","exit":"%s","auto":"%s","node":"%s","quota":{"up":"%s","down":"%s","total":"%s","expire":"%s"},"updated":%s,"list":%s,"vpn":%s,"hidden":[%s],"exclude":"%s","hide_names":[%s],"fell":"%s"}\n' \
 		"$ext" "$has" "$kind" "$(esc "$url")" "$(esc "$title")" "$vexit" "$(_st_sub_auto_get)" "$(esc "$node")" \
 		"$(esc "$up")" "$(esc "$down")" "$(esc "$total")" "$(esc "$expire")" "${mt:-0}" "$list" "$vpn" "$hidden" "$(esc "$(cat "$ST_SUB_EXCL" 2>/dev/null)")" "$(_zm_json_lines "$ST_SUB_HIDE")" "$(esc "$(head -n1 "$ST_SUB_FELL" 2>/dev/null)")"
@@ -9799,8 +9978,8 @@ steer_sub_status() {
 steer_sub_probe() {
 	local out
 	case "$1" in ''|*[!0-9]*) echo '{"ok":false,"error":"неверный номер узла"}'; return 1 ;; esac
-	[ -s "$ST_SUB" ] && _st_is_ext || { echo '{"ok":false,"error":"подписки нет"}'; return 1; }
-	out="$(steer vless-probe "$ST_SUB" --node "$1" --timeout 5 2>/dev/null | tr '\n' ' ')"
+	[ -s "$ST_SUB" ] && _st_vpn_ok || { echo '{"ok":false,"error":"подписки нет"}'; return 1; }
+	out="$(stl_probe "$ST_SUB" "$1")"
 	case "$out" in '{'*) printf '%s\n' "$out" ;; *) echo '{"ok":false,"error":"проверка не удалась"}' ;; esac
 }
 
@@ -9907,10 +10086,7 @@ steer_action() {
 		restart)
 			_st_running && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
 			_st_owns "steer-spec" || { echo '{"error":"правил для Steer нет — выберите сервисы"}'; return 1; }
-			/etc/init.d/steer enable >/dev/null 2>&1
-			/etc/init.d/steer restart >/dev/null 2>&1
-			sleep 1
-			/etc/init.d/steer running >/dev/null 2>&1 || { echo '{"error":"Steer не запустился — загляните в системный журнал"}'; return 1; }
+			stl_restart || { echo '{"error":"Steer не запустился — загляните в системный журнал"}'; return 1; }
 			printf '{"ok":true}\n'
 			;;
 		autorestart) _st_cron_set "$mode" ;;
@@ -9965,14 +10141,17 @@ steer_action() {
 				done
 			fi
 			local d=""
-			if command -v steer >/dev/null 2>&1 && [ -s "$ST_STEER_SPEC" ] && _st_owns "steer-spec"; then
-				d="$(steer diag --spec "$ST_STEER_SPEC" 2>/dev/null | tr '\n' ' ')"
-				case "$d" in '{'*'}'*) ;; *) d="" ;; esac
-			fi
+			stl_present && _st_owns "steer-spec" && d="$(stl_diag)"
 			printf '{"warp":"%s","colo":"%s","vpn":"%s","vpn_ip":"%s","vpn_loc":"%s","tunnels":[%s],"diag":%s}\n' "$warp" "$(esc "$colo")" "$vpn" "$(esc "$vip")" "$(esc "$vloc")" "$tun" "${d:-null}"
 			;;
 		dns_fix)
 			do_steer_dns_fix
+			printf '{"ok":true}\n'
+			;;
+		cron_restart) _st_cron_restart ;;
+		sync)
+			_st_cron_refresh
+			_st_owns "steer-spec" && [ ! -f "$ST_OFF" ] && stl_reload
 			printf '{"ok":true}\n'
 			;;
 		*) echo '{"error":"неизвестное действие"}' ;;
@@ -11918,31 +12097,14 @@ _zm_resolve_any() {
 }
 
 steer_explain() {
-	local q t line out dev ch addr="" fake=false verdict
+	local q
 	q="$(_zm_route_target "$1")" || { echo '{"error":"введите домен (например, youtube.com) или IP-адрес"}'; return 1; }
-	command -v steer >/dev/null 2>&1 || { echo '{"error":"Steer не установлен"}'; return 1; }
-	{ [ -s "$ST_STEER_SPEC" ] && _st_owns "steer-spec" && [ ! -f "$ST_OFF" ]; } || { printf '{"target":"%s","verdict":"off","text":""}\n' "$(esc "$q")"; return 0; }
-	if command -v timeout >/dev/null 2>&1; then t="$(timeout 20 steer explain "$q" --spec "$ST_STEER_SPEC" 2>&1)"
-	else t="$(steer explain "$q" --spec "$ST_STEER_SPEC" 2>&1)"; fi
-	line="$(printf '%s\n' "$t" | grep -m1 -- '-> output "')"
-	addr="$(printf '%s\n' "$t" | head -n1 | sed -n 's/^[^ ]* -> \([0-9a-fA-F.:]*\) (.*/\1/p')"
-	printf '%s\n' "$t" | head -n1 | grep -q 'fake-IP' && fake=true
-	out=""; dev=""; ch=""
-	if [ -n "$line" ]; then
-		out="$(printf '%s' "$line" | sed -n 's/.*-> output "\([^"]*\)".*/\1/p')"
-		ch="$(printf '%s' "$line" | sed -n 's/.*"\([^"]*\)" -> output ".*/\1/p')"
-		dev="$(printf '%s' "$line" | sed -n 's/.*-> dev \([^ ]*\).*/\1/p')"
-		case "$out" in
-			zm_warp) verdict=warp ;;
-			"$ST_VPN_OUT") verdict=vpn ;;
-			*) verdict=other ;;
-		esac
-		[ -z "$dev" ] && printf '%s' "$line" | grep -q -- '-> direct' && verdict=direct
-	elif printf '%s' "$t" | grep -q 'no channel matches'; then verdict=direct
-	else verdict=unknown; fi
+	stl_present || { echo '{"error":"Steer не установлен"}'; return 1; }
+	{ _st_owns "steer-spec" && [ ! -f "$ST_OFF" ]; } || { printf '{"target":"%s","verdict":"off","text":""}\n' "$(esc "$q")"; return 0; }
+	stl_explain "$q"
 	printf '{"target":"%s","verdict":"%s","out":"%s","dev":"%s","channel":"%s","addr":"%s","fake":%s,"node":"%s","text":"%s"}\n' \
-		"$(esc "$q")" "$verdict" "$(esc "$out")" "$(esc "$dev")" "$(esc "$ch")" "$(esc "$addr")" "$fake" \
-		"$(esc "$(cat "$ST_SUB_NODE" 2>/dev/null)")" "$(esc_ml "$t")"
+		"$(esc "$q")" "$STL_X_VERDICT" "$(esc "$STL_X_OUT")" "$(esc "$STL_X_DEV")" "$(esc "$STL_X_SET")" "$(esc "$STL_X_ADDR")" "$STL_X_FAKE" \
+		"$(esc "$(cat "$ST_SUB_NODE" 2>/dev/null)")" "$(esc_ml "$STL_X_TEXT")"
 }
 
 fk_route_check() {
@@ -16862,7 +17024,7 @@ return view.extend({
 					])));
 				}
 				var newer = data.latest && data.version && verLt(data.version, data.latest);
-				mainCard.appendChild(row('Версия Steer', E('span', {}, (data.version || '—') + (data.ext ? ' · extended' : '') + (newer ? ' · доступна ' + data.latest : (!data.ext && data.version ? ' · нужен steer-extended' : '')))));
+				mainCard.appendChild(row('Версия Steer', E('span', {}, (data.version || '—') + (newer ? ' · доступна ' + data.latest : (!data.ext && data.version ? ' · ядро нужно обновить' : '')))));
 			}
 
 			if (busy) {
@@ -16883,7 +17045,7 @@ return view.extend({
 						act('install', '', 'Устанавливаем Steer — это займёт пару минут');
 					} }, 'Установить')
 				]));
-				mainCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Ставится только движок steer-extended — около минуты. Потом на вкладке WARP или VPN выберите, через что пускать сервисы.'));
+				mainCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Ставится ядро steer — около минуты. Потом на вкладке WARP или VPN выберите, через что пускать сервисы.'));
 				return;
 			}
 
@@ -17572,7 +17734,7 @@ return view.extend({
 						subInput = '';
 						subAct('sub_set', v, 'Подключаем подписку');
 					} }, 'Добавить'),
-					!subData.ext ? E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'Движок сам заменится на steer-extended') : ''
+					!subData.ext ? E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'Для подписки ядро steer само поставит модуль VLESS') : ''
 				]));
 				return;
 			}
@@ -24579,8 +24741,8 @@ if [ -x /etc/init.d/rpcd ] && command -v ubus >/dev/null 2>&1; then
 		fi
 	fi
 fi
-if grep -qx 'steer-spec' /etc/zm-steer/owned 2>/dev/null && /etc/init.d/steer enabled 2>/dev/null; then
-	/etc/init.d/steer reload >/dev/null 2>&1 || true
+if [ -s /etc/zm-steer/owned ]; then
+	/opt/zapret-manager-luci/backend.sh steer_action sync x >/dev/null 2>&1 || true
 fi
 
 if command -v apk >/dev/null 2>&1; then PM="apk"; INSTALL="apk add"
