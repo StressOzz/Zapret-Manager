@@ -8555,10 +8555,14 @@ _st_cron_restart() {
 	stl_restart
 }
 
+ST_CRON_KEEP="$ST_DIR/autorestart"
 _st_cron_refresh() {
 	local cur
 	cur="$(_st_cron_get)"
-	[ -n "$cur" ] || return 0
+	if [ -z "$cur" ]; then
+		[ -s "$ST_CRON_KEEP" ] && _st_installed && _st_cron_set "$(cat "$ST_CRON_KEEP")" >/dev/null 2>&1
+		return 0
+	fi
 	grep -F "$ST_CRON_TAG" "$CRON_FILE" 2>/dev/null | grep -qF "$ST_CRON_CMD" && return 0
 	_st_cron_set "$cur" >/dev/null 2>&1
 	return 0
@@ -8594,6 +8598,7 @@ _st_cron_set() {
 	touch "$CRON_FILE"
 	sed -i "\\|$ST_CRON_TAG|d" "$CRON_FILE"
 	[ -n "$spec" ] && echo "$spec $ST_CRON_CMD $ST_CRON_TAG" >> "$CRON_FILE"
+	if [ -n "$spec" ] && [ -d "$ST_DIR" ]; then echo "$1" > "$ST_CRON_KEEP"; else rm -f "$ST_CRON_KEEP"; fi
 	/etc/init.d/cron enable >/dev/null 2>&1
 	/etc/init.d/cron restart >/dev/null 2>&1
 	printf '{"ok":true}\n'
