@@ -1,5 +1,5 @@
 #!/bin/sh
-# Version: 2.15
+# Version: 2.16
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -50,7 +50,7 @@ cat > '/opt/zapret-manager-luci/backend.sh.zm-new' << 'ZM_INSTALLER_EOF'
 umask 022
 
 CONF="/etc/config/zapret"
-ZM_VERSION="2.15"
+ZM_VERSION="2.16"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -9625,13 +9625,31 @@ _st_vpn_check() {
 		echo "[FAIL] VPN: ни один узел подписки не поднялся — проверьте задержку узлов на вкладке «Подписка»"
 		return 1
 	fi
-	tr="$(curl -s --interface "$ST_VPN_OUT" --connect-timeout 5 --max-time 10 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)"
-	ip="$(echo "$tr" | sed -n 's/^ip=//p')"; loc="$(echo "$tr" | sed -n 's/^loc=//p')"
-	if [ -n "$ip" ]; then
-		echo "[ OK ] VPN: трафик идёт через узел подписки (выход $ip${loc:+, $loc})"
-		return 0
+	# Устройство туннеля ядро 2.0 создаёт сразу, ещё до выбора узла и рукопожатия, — проверка
+	# трафика в этот момент попадала в «подключаемся» и объявляла рабочий туннель мёртвым. Ждём,
+	# пока ядро само скажет «выход поднят» (перебор узлов подписки — до 90 с), и проверяем трафик
+	# несколькими попытками.
+	w=0
+	while [ "$w" -lt 90 ]; do
+		stl_state vpn >/dev/null 2>&1
+		[ "$STL_UP" = true ] && break
+		sleep 2; w=$((w + 2))
+	done
+	w=0
+	while [ "$w" -lt 3 ]; do
+		tr="$(curl -s --interface "$ST_VPN_OUT" --connect-timeout 5 --max-time 10 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null)"
+		ip="$(echo "$tr" | sed -n 's/^ip=//p')"; loc="$(echo "$tr" | sed -n 's/^loc=//p')"
+		if [ -n "$ip" ]; then
+			echo "[ OK ] VPN: трафик идёт через узел подписки (выход $ip${loc:+, $loc})"
+			return 0
+		fi
+		w=$((w + 1)); [ "$w" -lt 3 ] && sleep 5
+	done
+	if [ "$STL_UP" = true ]; then
+		echo "[FAIL] VPN: туннель поднят, но трафик через него не идёт"
+	else
+		echo "[FAIL] VPN: ни один выбранный узел не ответил за 90 с — проверьте задержку узлов на вкладке «Подписка»"
 	fi
-	echo "[FAIL] VPN: туннель поднят, но трафик через него не идёт"
 	return 1
 }
 
