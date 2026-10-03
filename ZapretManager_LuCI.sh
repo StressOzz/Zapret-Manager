@@ -6977,6 +6977,7 @@ stl_engine_install() {
 	fi
 	mods="$(for m in $mods $(_stl_mods_present); do echo "$m"; done | awk '!s[$0]++' | tr '\n' ' ')"
 	pkgs="steer-core$(for m in $mods; do printf ' steer-%s' "$m"; done)"
+	stl_v2 && _pkg_is_installed steer-extended && pkgs="$pkgs steer-extended"
 	STL_NEW=""; STL_PKGS="$pkgs"
 	for p in $pkgs; do _pkg_is_installed "$p" || STL_NEW="$STL_NEW $p"; done
 	mkdir -p "$STL_TMP"
