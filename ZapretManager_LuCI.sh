@@ -10203,7 +10203,6 @@ steer_action() {
 		cron_restart) _st_cron_restart ;;
 		sync)
 			_st_cron_refresh
-			_st_legacy_check
 			_st_owns "steer-spec" && [ ! -f "$ST_OFF" ] && stl_reload
 			printf '{"ok":true}\n'
 			;;
