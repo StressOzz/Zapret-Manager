@@ -7117,14 +7117,14 @@ _stl_spec() {
 _stl_check() {
 	local r c
 	if stl_running && [ -S "$STL_SOCK" ]; then
-		r="$(steer ctl check < "$1" 2>/dev/null)"
+		r="$(_stl_t 150 steer ctl check < "$1" 2>/dev/null)"
 		c="$(printf '%s' "$r" | jsonfilter -e '@.code' 2>/dev/null)"
 		case "$c" in
 			0) return 0 ;;
 			[1-9]*) printf '%s' "$r" | jsonfilter -e '@.stderr' 2>/dev/null; return 1 ;;
 		esac
 	fi
-	steer apply --dry-run --spec "$1" 2>&1 >/dev/null
+	_stl_t 150 steer apply --dry-run --spec "$1" 2>&1 >/dev/null
 }
 
 stl_apply() {
@@ -7143,7 +7143,7 @@ stl_apply() {
 	mv -f "$new" "$STL_SPEC"
 	"$STL_INIT" enable >/dev/null 2>&1
 	if stl_running; then
-		if ! err="$(steer apply 2>&1 >/dev/null)"; then
+		if ! err="$(_stl_t 300 steer apply 2>&1 >/dev/null)"; then
 			if [ -s "$prev" ]; then mv -f "$prev" "$STL_SPEC"; else rm -f "$STL_SPEC"; fi
 			echo "ОШИБКА: ядро steer не применило правила — остались прежние"
 			printf '%s\n' "$err" | tail -n 5
