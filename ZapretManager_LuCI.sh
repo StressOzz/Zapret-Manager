@@ -8666,8 +8666,10 @@ ST_UP2_FAIL="$ST_DIR/engine2.fail"
 _st_legacy_check() {
 	stl_present && ! stl_v2 || return 0
 	_st_installed && _st_owns "engine" || return 0
+	_st_owns "pkg steer" || _st_owns "pkg steer-extended" || return 0
 	[ -z "$(_st_blocker)" ] || return 0
 	_st_running && return 0
+	_zm_busy_job >/dev/null 2>&1 && return 0
 	[ -f "$ST_UP2_FAIL" ] && [ -z "$(find "$ST_UP2_FAIL" -mmin +10 2>/dev/null)" ] && return 0
 	job_start steer do_steer_engine2 >/dev/null 2>&1
 	return 0
