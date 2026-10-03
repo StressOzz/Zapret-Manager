@@ -7060,7 +7060,7 @@ stl_spec_whose() {
 	[ -s "$STL_YAML" ] && { echo foreign; return; }
 	[ -s "$STL_SPEC" ] || { echo none; return; }
 	grep -q "\"$STL_WARP_OUT\"\|\"$STL_VPN_OUT\"" "$STL_SPEC" && { echo zm; return; }
-	grep -q '"\(channels\|rules\)"[[:space:]]*:[[:space:]]*\[[[:space:]]*{' "$STL_SPEC" && { echo foreign; return; }
+	tr '\n\r' '  ' < "$STL_SPEC" | grep -q '"\(channels\|rules\)"[[:space:]]*:[[:space:]]*\[[[:space:]]*{' && { echo foreign; return; }
 	echo none
 }
 stl_spec_restore() { if [ -s "$STL_KEEP" ]; then mv -f "$STL_KEEP" "$STL_SPEC"; else rm -f "$STL_SPEC"; fi; }
