@@ -1,5 +1,5 @@
 #!/bin/sh
-# Version: 2.20
+# Version: 2.21
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
@@ -7496,7 +7496,7 @@ stl_sub_check() {
 # Проверка узла: ФАЙЛ МОДУЛЬ НОМЕР (номер — как в выводе модуля по файлу)
 stl_probe() {
 	local j
-	j="$(_stl_t 40 steer "$2-probe" "$1" --node "$3" --timeout 5 2>/dev/null | tr '\n' ' ')"
+	j="$(_stl_t 40 steer "$2-probe" "$1" --node "$3" --timeout 8 2>/dev/null | tr '\n' ' ')"
 	case "$j" in '{'*) printf '%s' "$j" ;; *) return 1 ;; esac
 }
 
@@ -10494,14 +10494,57 @@ steer_sub_status() {
 		"$(esc "$up")" "$(esc "$down")" "$(esc "$total")" "$(esc "$expire")" "${mt:-0}" "$list" "$vpn" "$hidden" "$(esc "$(cat "$ST_SUB_EXCL" 2>/dev/null)")" "$(_zm_json_lines "$ST_SUB_HIDE")" "$(esc "$(head -n1 "$ST_SUB_FELL" 2>/dev/null)")"
 }
 
+# TCP-пинг узла (как «TCP» в Happ): время установки соединения с сервером, без туннеля. Хост и порт
+# берём из вывода модуля ядра steer (кэш рядом со списком узлов). UDP-протокол (Hysteria2) так не
+# проверить — для него остаётся проверка ядром.
+_st_hostport() {
+	local m hp="$ST_SUB_NODES.hp"
+	if [ ! -s "$hp" ] || [ "$ST_SUB" -nt "$hp" ]; then
+		mkdir -p "$ST_DIR"
+		{ for m in vless proxy; do
+			[ -x "$STL_SBIN/steer-$m" ] || continue
+			_stl_t 30 steer "$m-nodes" "$ST_SUB" 2>/dev/null | tr '\n\t' '  ' | awk -v M="$m" '{
+				j = $0; p = index(j, "\"nodes\":["); if (!p) next
+				j = substr(j, p + 9); n = split(j, C, /\{"index":/)
+				for (i = 2; i <= n; i++) {
+					ch = C[i]; idx = ch + 0; h = ""; pt = 0
+					if (match(ch, /"host":"[^"]*"/)) h = substr(ch, RSTART + 8, RLENGTH - 9)
+					if (match(ch, /"port":[0-9]+/)) pt = substr(ch, RSTART + 7, RLENGTH - 7) + 0
+					if (h != "" && pt > 0) printf "%s\t%d\t%s\t%d\n", M, idx, h, pt
+				}
+			}'
+		done; } > "$hp.tmp" 2>/dev/null
+		mv -f "$hp.tmp" "$hp" 2>/dev/null
+	fi
+	awk -F'\t' -v m="$1" -v i="$2" '$1 == m && $2 == i { print $3, $4; exit }' "$hp" 2>/dev/null
+}
+_st_tcp_ms() {
+	local h="$1" i out ms best=""
+	case "$h" in *:*) h="[$h]" ;; esac
+	for i in 1 2; do
+		out="$(curl -s -o /dev/null --connect-timeout 3 --max-time 3 -w '%{time_connect} %{time_namelookup}' "http://$h:$2/" 2>/dev/null)"
+		ms="$(printf '%s' "$out" | awk '{ c = $1 + 0; n = $2 + 0; if (c > 0) { if (n > 0 && n < c) c -= n; m = int(c * 1000 + 0.5); print (m < 1 ? 1 : m) } }')"
+		if [ -n "$ms" ]; then best="$ms"; break; fi
+	done
+	[ -n "$best" ] && echo "$best"
+}
+
 steer_sub_probe() {
-	local out t p f
+	local out t p f hp tcp=""
 	case "$1" in ''|*[!0-9]*) echo '{"ok":false,"error":"неверный номер узла"}'; return 1 ;; esac
 	[ -s "$ST_SUB" ] && _st_vpn_ok && t="$(_st_nodes)" || { echo '{"ok":false,"error":"подписки нет"}'; return 1; }
 	set -- $(awk -F'\t' -v g="$1" '$1 == g { print $2, $4; exit }' "$t")
 	[ -n "$1" ] || { echo '{"ok":false,"error":"узла нет в подписке"}'; return 1; }
 	p="$(_stl_mod_of "$1")"; f="$2"
 	stl_has "$p" || { echo '{"ok":false,"error":"модуль ядра steer для этого протокола не установлен"}'; return 1; }
+	if [ "$p" != hysteria2 ] && command -v curl >/dev/null 2>&1; then
+		hp="$(_st_hostport "$p" "$f")"
+		[ -n "$hp" ] && tcp="$(_st_tcp_ms "${hp% *}" "${hp#* }")"
+		if [ -n "$tcp" ]; then
+			printf '{"ok":true,"results":[{"ok":true,"tcp_ms":%s,"ttfb_ms":0,"handshake_ms":%s}]}\n' "$tcp" "$tcp"
+			return 0
+		fi
+	fi
 	out="$(stl_probe "$ST_SUB" "$p" "$f")"
 	case "$out" in '{'*) printf '%s\n' "$out" ;; *) echo '{"ok":false,"error":"проверка не удалась"}' ;; esac
 }
@@ -18508,7 +18551,7 @@ return view.extend({
 				var i = queue.shift();
 				return zm.steerAction('sub_probe', String(i)).then(function(res) {
 					var r = res && res.results && res.results[0];
-					lat[i] = r ? { ok: !!r.ok, ms: r.ttfb_ms > 0 ? r.ttfb_ms : r.handshake_ms, why: r.why } : { ok: false, why: (res && res.error) || '' };
+					lat[i] = r ? { ok: !!r.ok, ms: r.tcp_ms > 0 ? r.tcp_ms : (r.ttfb_ms > 0 ? r.ttfb_ms : r.handshake_ms), why: r.why } : { ok: false, why: (res && res.error) || '' };
 				}).catch(function() { lat[i] = { ok: false }; }).then(function() {
 					probeDone++;
 					renderSub();
