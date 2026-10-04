@@ -400,7 +400,7 @@ sh <(wget -qO - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/
 
 ---
 
-### ✈️ TG WS Proxy
+### 🏹 TG WS Proxy
 
 Четыре прокси для Telegram:
 
