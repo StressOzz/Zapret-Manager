@@ -95,7 +95,7 @@
 Подключитесь к роутеру по SSH и выполните:
 
 ```sh
-sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh)
+sh <(wget -qO - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh)
 ```
 
 Установщик:
@@ -106,7 +106,7 @@ sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/h
 4. Поднимает отдельный экземпляр `uhttpd` на порту **7788** для Web UI.
 5. Добавляет сторожа в cron и команду `zms` для консольной версии Zapret Manager.
 
-В конце в консоли будет адрес Web UI, например `http://192.168.1.1:7788`.
+В конце в консоли будет адрес Web UI, например `http://192.168.1.1:7788`
 
 > [!IMPORTANT]
 >для работы некоторых стратегий, в терминале Windows необходимо один раз выполнить:
