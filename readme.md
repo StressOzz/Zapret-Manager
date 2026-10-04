@@ -114,6 +114,10 @@ sh <(wget -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/h
 > [!TIP]
 > Консольная версия: команда **`zms`** запускает [Zapret-Manager.sh](https://github.com/StressOzz/Zapret-Manager) прямо в терминале.
 
+> [!NOTE]
+> Если Вам нужна версия, только для **SSH** - [**readme_ssh.md**](https://github.com/StressOzz/Zapret-Manager/blob/main/readme_ssh.md)
+
+
 ### Требования
 
 | Что | Зачем |
