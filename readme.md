@@ -127,6 +127,9 @@ sh <(wget -qO - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/
 
 > [!NOTE]
 > Если Вам нужна версия, только для **SSH** - [**readme_ssh.md**](https://github.com/StressOzz/Zapret-Manager/blob/main/readme_ssh.md)
+> ```
+> sh <(wget -qO - 'https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh')
+> ```
 
 
 ### Требования
