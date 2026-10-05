@@ -615,10 +615,39 @@ _fk_heal() {
 	local s first=1
 	for s in $(_fk_uc secnames 2>/dev/null); do
 		case "$s" in *[!A-Za-z0-9_]*|'') continue ;; esac
+		if [ "$(uci -q get netshift."$s".zm_direct_fallback)" = 1 ] || [ "$(uci -q get netshift."$s".zm_sub_priority)" = 1 ]; then
+			_fk_fallback_sec "$s" >/dev/null 2>&1 &
+			continue
+		fi
 		if [ "$first" = 1 ]; then _fk_heal_sec "$s" ""; first=0; else _fk_heal_sec "$s" ".$s"; fi
 	done
 	return 0
 }
+
+# Keep long VPN health checks outside the watcher's main process.
+_fk_fallback_sec() (
+	local sec="$1" lock="/tmp/zm-fk-fallback.$1.lock" at=0 now pid r to priority
+	case "$sec" in *[!A-Za-z0-9_]*|'') exit 1 ;; esac
+	now="$(date +%s)"
+	if [ -d "$lock" ]; then
+		pid="$(cat "$lock/pid" 2>/dev/null)"
+		case "$pid" in ''|*[!0-9]*) ;; *) kill -0 "$pid" 2>/dev/null && exit 0 ;; esac
+		at="$(cat "$lock/at" 2>/dev/null)"
+		case "$at" in ''|*[!0-9]*) at="$(stat -c %Y "$lock" 2>/dev/null)"; at="${at:-$now}" ;; esac
+		[ $((now - at)) -gt 600 ] && rm -rf "$lock"
+	fi
+	mkdir "$lock" 2>/dev/null || exit 0
+	echo "$now" > "$lock/at"
+	trap 'rm -rf "$lock"' EXIT
+	r="$(_fk_uc fallwatch "$sec" 2>/dev/null)"
+	if [ "$(printf '%s' "$r" | jsonfilter -e '@.manual' 2>/dev/null)" = true ]; then _fk_heal_sec "$sec" ".$sec"; exit 0; fi
+	[ "$(printf '%s' "$r" | jsonfilter -e '@.changed' 2>/dev/null)" = true ] || exit 0
+	to="$(printf '%s' "$r" | jsonfilter -e '@.direct' 2>/dev/null)"
+	priority="$(printf '%s' "$r" | jsonfilter -e '@.priority' 2>/dev/null)"
+	if [ "$to" = true ]; then logger -t zapret-manager "Forkozz: VPN секции $sec недоступны — её правила временно идут напрямую"
+	elif [ "$priority" = true ]; then logger -t zapret-manager "Forkozz: секция $sec выбрала первую доступную подписку по заданному порядку"
+	else logger -t zapret-manager "Forkozz: VPN секции $sec снова доступен — возвращаем её правила через VPN"; fi
+)
 
 _fk_heal_sec() {
 	local sec="$1" f="$JOBS_DIR/fk.heal$2" r n=0 name to
@@ -12303,6 +12332,14 @@ _fk_ucj() {
 	return $rc
 }
 
+_fk_device_setup() {
+	local res
+	res="$(_fk_ucj device_setup)" || { echo "$res"; return 1; }
+	if [ "$1" = apply ] && [ "$(printf '%s' "$res" | jsonfilter -e '@.changed')" = true ] && _fk_up; then
+		do_fk_service apply
+	fi
+}
+
 _fk_latest_fetch() {
 	local v
 	v="$(_ver_gh_latest "$FK_REPO")"
@@ -12871,6 +12908,7 @@ do_fk_install() {
 		_fk_legacy_remove
 		rm -rf "$lconf"
 	fi
+	_fk_device_setup || return 1
 	rm -rf /usr/lib/netshift.zm-old
 	echo "$tag" > "$FK_MARK"
 	rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/* /var/luci-indexcache* 2>/dev/null
@@ -13010,6 +13048,7 @@ do_fk_service() {
 			_fk_say "Готово: Forkozz выключен"
 			return 0 ;;
 	esac
+	_fk_device_setup || return 1
 	b="$(_fk_blocker)"
 	[ -n "$b" ] && { echo "ОШИБКА: $(_fk_blocker_text "$b")"; return 1; }
 	[ -n "$(_fk_sb_ver)" ] || _fk_sb_install || return 1
@@ -13050,6 +13089,10 @@ do_fk_service() {
 		_fk_lists_report
 		_fk_lists_errors
 		_fk_ext_auto all "$lx"
+		local ps
+		for ps in $(_fk_uc secnames 2>/dev/null); do
+			[ "$(uci -q get netshift."$ps".zm_sub_priority)" = 1 ] && _fk_fallback_sec "$ps" >/dev/null 2>&1 &
+		done
 		_fk_say "Готово: Forkozz работает"
 		grep -q '^Forkozz не запустился' "$ZM_REBOOT_HINT" 2>/dev/null && rm -f "$ZM_REBOOT_HINT"
 		return 0
@@ -13316,8 +13359,9 @@ steer_explain() {
 }
 
 fk_route_check() {
-	local q addr="" how="" verdict=direct tr rule="" ob="" ac="" sec="" s isip=0 caught=0
-	q="$(_zm_route_target "$1")" || { echo '{"error":"введите домен (например, youtube.com) или IP-адрес"}'; return 1; }
+	local q addr="" how="" verdict=direct tr rule="" ob="" ac="" sec="" s isip=0 caught=0 arg="$1" source="" err
+	case "$arg" in *'|'*) source="${arg#*|}"; arg="${arg%%|*}" ;; esac
+	q="$(_zm_route_target "$arg")" || { echo '{"error":"введите домен (например, youtube.com) или IP-адрес"}'; return 1; }
 	_fk_installed || { echo '{"error":"Forkozz не установлен"}'; return 1; }
 	_fk_up || { printf '{"target":"%s","verdict":"off"}\n' "$(esc "$q")"; return 0; }
 	if printf '%s' "$q" | grep -Eq '^[0-9.]+$|:'; then addr="$q"; isip=1; else addr="$(_zm_resolve_any "$q")"; fi
@@ -13329,10 +13373,12 @@ fk_route_check() {
 			nft get element inet "$FK_NFT" "$s" "{ $addr }" >/dev/null 2>&1 && { caught=1; how=subnet; break; }
 		done ;;
 	esac
-	if command -v timeout >/dev/null 2>&1; then tr="$(timeout 40 ucode "$FK_UC" route "$q" "$addr" 2>/dev/null)"
-	else tr="$(_fk_uc route "$q" "$addr" 2>/dev/null)"; fi
+	if command -v timeout >/dev/null 2>&1; then tr="$(timeout 40 ucode "$FK_UC" route "$q" "$addr" "$source" 2>/dev/null)"
+	else tr="$(_fk_uc route "$q" "$addr" "$source" 2>/dev/null)"; fi
 	case "$tr" in
 		'{'*)
+			err="$(printf '%s' "$tr" | jsonfilter -e '@.error' 2>/dev/null)"
+			[ -z "$err" ] || { printf '%s\n' "$tr"; return 1; }
 			rule="$(printf '%s' "$tr" | jsonfilter -e '@.rule' 2>/dev/null)"
 			ob="$(printf '%s' "$tr" | jsonfilter -e '@.outbound' 2>/dev/null)"
 			ac="$(printf '%s' "$tr" | jsonfilter -e '@.action' 2>/dev/null)"
@@ -13340,14 +13386,17 @@ fk_route_check() {
 			;;
 	esac
 	case "$ac" in
+		source_required) verdict=unknown ;;
+		fallback_direct) verdict=direct ;;
 		bypass) verdict=bypass ;;
 		block) verdict=block ;;
 		connection|outbound) [ "$caught" = 1 ] && verdict=proxy || verdict=direct ;;
 		*) if [ -z "$addr" ]; then verdict=unknown; else verdict=direct; fi ;;
 	esac
 	[ -z "$addr" ] && [ "$isip" = 0 ] && { [ "$verdict" = proxy ] || [ "$ac" = connection ] || [ "$ac" = outbound ]; } && verdict=unknown
-	printf '{"target":"%s","verdict":"%s","how":"%s","addr":"%s","ip":%s,"rule":"%s","outbound":"%s","action":"%s","section":"%s"}\n' \
-		"$(esc "$q")" "$verdict" "$how" "$(esc "$addr")" "$([ "$isip" = 1 ] && echo true || echo false)" "$(esc "$rule")" "$(esc "$ob")" "$(esc "$ac")" "$(esc "$sec")"
+	printf '{"target":"%s","verdict":"%s","how":"%s","addr":"%s","ip":%s,"rule":"%s","outbound":"%s","action":"%s","section":"%s","source":"%s"}\n' \
+		"$(esc "$q")" "$verdict" "$how" "$(esc "$addr")" "$([ "$isip" = 1 ] && echo true || echo false)" "$(esc "$rule")" "$(esc "$ob")" "$(esc "$ac")" "$(esc "$sec")" \
+		"$(esc "$source")"
 }
 
 forkop_action() {
@@ -13715,6 +13764,8 @@ case "$cmd" in
 	forkop_status)                        forkop_status ;;
 	forkop_config_get)                    forkop_config_get ;;
 	forkop_config_set)                    forkop_config_set "$1" ;;
+	forkop_device_setup)                  _fk_device_setup "$1" ;;
+	forkop_priority_watch)                _fk_fallback_sec "$1" ;;
 	forkop_action)                        forkop_action "$1" "$2" ;;
 	lan_ip)                               _zm_lan_ip ;;
 	jobs_cancel)                          jobs_cancel "$1" ;;
@@ -14087,6 +14138,10 @@ function subnet_lines(m) {
 	return [];
 }
 
+function device_ips(m) {
+	return uniq([ ...words(m.zm_rule_source_ips), ...words(m.fully_routed_ips) ]);
+}
+
 function url_ext(u) {
 	let m = match(lc(replace(s(u), /[?#].*$/, "")), /\.([a-z0-9]+)$/);
 	return m ? m[1] : "";
@@ -14134,7 +14189,8 @@ function sec_summary(c, sec, main) {
 		name: sec, main, label: sec_label(m, main), enabled: main || s(m.disabled) != "1", mode,
 		iface: s(m.interface), links: length(sec_links(m)),
 		refs: { c: rf.c, s: rf.s, r: rf.r }, lists: rf.l,
-		domains: length(domain_lines(m)), subnets: length(subnet_lines(m))
+		domains: length(domain_lines(m)), subnets: length(subnet_lines(m)),
+		full: device_ips(m)
 	};
 }
 
@@ -14200,6 +14256,34 @@ function valid_ip(v) {
 	return m[6] == null || int(m[6]) <= 32;
 }
 
+function ip4n(a) {
+	let m = match(s(a), /^([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$/);
+	return m ? ((int(m[1]) * 256 + int(m[2])) * 256 + int(m[3])) * 256 + int(m[4]) : null;
+}
+
+function cidr_hit(ip, cidrs) {
+	let n = ip4n(ip);
+	if (n == null) return false;
+	for (let c in (type(cidrs) == "array" ? cidrs : [ cidrs ])) {
+		let p = split(s(c), "/"), b = ip4n(p[0]), bits = length(p) > 1 ? int(p[1]) : 32;
+		if (b == null || bits < 0 || bits > 32) continue;
+		let div = 1;
+		for (let i = bits; i < 32; i++) div *= 2;
+		if (int(n / div) == int(b / div)) return true;
+	}
+	return false;
+}
+
+function device_ip_overlap(a, b) {
+	return cidr_hit(split(a, "/")[0], [ b ]) || cidr_hit(split(b, "/")[0], [ a ]);
+}
+
+function device_scopes_overlap(a, b) {
+	if (!length(a) || !length(b)) return true;
+	for (let x in a) for (let y in b) if (device_ip_overlap(x, y)) return true;
+	return false;
+}
+
 function dns_value_ok(t, v) {
 	if (v == "" || match(v, /[ \t@|,;'"<>]/)) return false;
 	if (t == "udp") return valid_ip(replace(v, /:[0-9]+$/, "")) && index(v, "/") < 0;
@@ -14243,6 +14327,108 @@ function valid_url(v) { return !!match(v, /^https?:\/\/[^ \t\/]+(\/[^ \t]*)?$/i)
 function set_list(c, sec, key, list) {
 	if (length(list)) c.set(CFG, sec, key, list);
 	else c.delete(CFG, sec, key);
+}
+
+function write_device_lists(c, sec, full, excl) {
+	set_list(c, sec, "zm_rule_source_ips", full);
+	c.delete(CFG, sec, "fully_routed_ips");
+	if (!c.get(CFG, "settings")) c.set(CFG, "settings", "settings");
+	set_list(c, "settings", "routing_excluded_ips", excl);
+}
+
+/* Persist the source condition in the engine so reloads and reboots keep it. */
+function patch_device_engine() {
+	let script = s(fs.readfile(BIN)), marker = "# ZM_SECTION_DEVICE_RULES";
+	let original = script;
+	let start = index(script, "configure_routing_for_section_lists() {\n");
+	let end = start >= 0 ? index(substr(script, start), "\n}\n") : -1;
+	if (start < 0 || end < 0) fail("эта версия движка не поддерживает фильтр устройств — настройки не изменены");
+	let body = substr(script, start, end + 2);
+	let anchor = '    if [ -n "$community_lists" ]; then\n';
+	if (length(split(body, anchor)) != 2) fail("не удалось найти правило секции в движке — настройки не изменены");
+	let patch = '    # ZM_SECTION_DEVICE_RULES\n' +
+		'    local zm_rule_source_ips\n' +
+		'    config_get zm_rule_source_ips "$section" "zm_rule_source_ips"\n' +
+		'    if [ -n "$zm_rule_source_ips" ]; then\n' +
+		'        config_list_foreach "$section" "zm_rule_source_ips" include_source_ip_in_routing_handler "$route_rule_tag"\n' +
+		'    fi\n';
+	let updated = index(body, marker) >= 0 ? body : replace(body, anchor, patch + anchor);
+	if (index(updated, "# ZM_SECTION_DIRECT_FALLBACK") < 0) {
+		let unavailable = '            if subscription_outbound_is_unavailable "$section"; then\n';
+		let route = '                outbound_tag=$(get_outbound_tag_by_section "$section")\n';
+		if (length(split(updated, unavailable)) != 2 || length(split(updated, route)) != 2)
+			fail("эта версия движка не поддерживает резервный прямой выход — настройки не изменены");
+		updated = replace(updated, '    local section="$1"\n', '    local section="$1"\n' +
+			'    # ZM_SECTION_DIRECT_FALLBACK\n' +
+			'    local zm_direct_fallback\n' +
+			'    config_get_bool zm_direct_fallback "$section" "zm_direct_fallback" 0\n');
+		updated = replace(updated, unavailable, '            if subscription_outbound_is_unavailable "$section" && [ "$zm_direct_fallback" -ne 1 ]; then\n');
+		updated = replace(updated, route, route + '                [ "$zm_direct_fallback" -eq 1 ] && [ "$section_connection_type" = proxy ] && outbound_tag="$section-zm-fallback-out"\n');
+	}
+	script = substr(script, 0, start) + updated + substr(script, start + length(body));
+	if (index(script, "# ZM_DIRECT_FALLBACK_CONFIG") < 0) {
+		let save = "sing_box_save_config() {\n";
+		if (length(split(script, save)) != 2) fail("не удалось найти сборку конфига движка — настройки не изменены");
+		let uc = "/opt/zapret-manager-luci/netshift.uc";
+		script = replace(script, save, save + '    # ZM_DIRECT_FALLBACK_CONFIG\n' +
+			'    if uci -q show netshift | grep -q "\\.zm_direct_fallback=\'1\'$"; then\n' +
+			'        config="$(printf \'%s\' "$config" | jq -c --argjson feeds "${ZM_PRIORITY_FEEDS_JSON:-null}" \'._zm_priority_feeds = $feeds\' | ucode ' + q(uc) + ' fallback_config)" || {\n' +
+			'            log "Failed to configure section fallback. Aborted." "fatal"\n' +
+			'            exit 1\n' +
+			'        }\n' +
+		'    fi\n');
+	}
+	/* Upgrade the existing hook when the local panel already added direct fallback. */
+	let old_guard = '    if uci -q show netshift | grep -q "\\.zm_direct_fallback=\'1\'$"; then\n';
+	let new_guard = '    if uci -q show netshift | grep -qE "\\.(zm_direct_fallback|zm_sub_priority)=\'1\'$"; then\n';
+	script = replace(script, old_guard, new_guard);
+	let old_call = '        config="$(printf \'%s\' "$config" | ucode \'/opt/zapret-manager-luci/netshift.uc\' fallback_config)" || {\n';
+	let new_call = '        config="$(printf \'%s\' "$config" | jq -c --argjson feeds "${ZM_PRIORITY_FEEDS_JSON:-null}" \'._zm_priority_feeds = $feeds\' | ucode \'/opt/zapret-manager-luci/netshift.uc\' fallback_config)" || {\n';
+	script = replace(script, old_call, new_call);
+	if (index(script, "# ZM_SUBSCRIPTION_PRIORITY_FEEDS") < 0) {
+		let feed_anchor = '                subscription_outbound_feeds_json="$SUBSCRIPTION_OUTBOUND_FEEDS_JSON"\n';
+		let reset_anchor = "sing_box_configure_outbounds() {\n";
+		if (length(split(script, feed_anchor)) != 2 || length(split(script, reset_anchor)) != 2) fail("эта версия движка не поддерживает порядок подписок — настройки не изменены");
+		script = replace(script, reset_anchor, reset_anchor + '    ZM_PRIORITY_FEEDS_JSON="{}"\n');
+		script = replace(script, feed_anchor, feed_anchor +
+			'                # ZM_SUBSCRIPTION_PRIORITY_FEEDS\n' +
+			'                local zm_sub_priority zm_priority_feeds\n' +
+			'                config_get_bool zm_sub_priority "$section" "zm_sub_priority" 0\n' +
+			'                if [ "$zm_sub_priority" -eq 1 ]; then\n' +
+			'                    zm_priority_feeds="$(sing_box_build_subscription_feed_groups "$subscription_outbound_tags_json" "${subscription_outbound_feeds_json:-[]}" "${subscription_feed_names_json:-[]}")"\n' +
+			'                    ZM_PRIORITY_FEEDS_JSON="$(printf \'%s\' "$ZM_PRIORITY_FEEDS_JSON" | jq -c --arg sec "$section" --argjson feeds "$zm_priority_feeds" \' .[$sec] = $feeds\')" || exit 1\n' +
+			'                fi\n');
+	}
+	if (script == original) return false;
+	let tmp = BIN + ".zm-devices";
+	if (fs.writefile(tmp, script) == null) fail("не удалось записать правила секций в движок");
+	if (system("sh -n " + q(tmp) + " && chmod 0755 " + q(tmp)) != 0) {
+		fs.unlink(tmp);
+		fail("правка движка не прошла проверку синтаксиса — настройки не изменены");
+	}
+	if (!fs.rename(tmp, BIN)) fail("не удалось заменить файл движка");
+	return true;
+}
+
+function cmd_device_setup() {
+	let patched = patch_device_engine(), c = cursor(), migrated = false;
+	let legacy = filter(sections(c, "section"), (x) => is_conn(x) && length(words(x.fully_routed_ips)));
+	if (length(legacy)) {
+		let backup = STATE + "/netshift.before-device-rules.conf";
+		if (!fs.access(backup)) {
+			let original = fs.readfile("/etc/config/" + CFG);
+			if (original == null || fs.writefile(backup, original) == null || system("chmod 0600 " + q(backup)) != 0)
+				fail("не удалось сохранить настройки перед переносом устройств");
+		}
+		for (let x in legacy) {
+			set_list(c, x[".name"], "zm_rule_source_ips", device_ips(x));
+			c.delete(CFG, x[".name"], "fully_routed_ips");
+		}
+		c.save(CFG);
+		c.commit(CFG);
+		migrated = true;
+	}
+	out({ ok: true, changed: patched || migrated, migrated });
 }
 
 function set_text(c, sec, key, list) {
@@ -14340,6 +14526,7 @@ function kw_list(v) {
 function sec_ext(m) {
 	return {
 		sub_fmt: index(SUB_FMTS, s(m.subscription_format_preference)) >= 0 ? s(m.subscription_format_preference) : "auto",
+		sub_priority: flag(m.zm_sub_priority),
 		sub_group: index(SUB_GROUPS, s(m.subscription_group_mode)) >= 0 ? s(m.subscription_group_mode) : (flag(m.group_by_countries) ? "country" : "off"),
 		sub_plen: s(num_in(m.subscription_group_prefix_len, 1, 16) || 2),
 		sub_incl: join(" | ", kw_list(m.subscription_filter_include_keywords)),
@@ -14348,6 +14535,7 @@ function sec_ext(m) {
 		ut_iv: index(UT_IVS, s(m.urltest_check_interval)) >= 0 ? s(m.urltest_check_interval) : "3m",
 		ut_tol: s(num_in(m.urltest_tolerance, 0, 10000) ?? 50),
 		ut_url: s(m.urltest_testing_url) || UT_URL_DEF,
+		direct_fallback: flag(m.zm_direct_fallback),
 		uot: flag(m.enable_udp_over_tcp),
 		mixed: flag(m.mixed_proxy_enabled),
 		mixed_port: s(num_in(m.mixed_proxy_port, 1, 65535) || 2080),
@@ -14441,7 +14629,7 @@ function set_flag(c, sec, key, on) {
 
 /* Дополнительные опции секции. x — объект из панели (d.x), mode — способ подключения. */
 function write_sec_ext(c, sec, mode, x) {
-	const SUB_KEYS = [ "subscription_format_preference", "subscription_insecure", "subscription_user_agent", "subscription_group_mode", "subscription_group_prefix_len", "group_by_countries", "subscription_filter_include_keywords" ];
+	const SUB_KEYS = [ "subscription_format_preference", "subscription_insecure", "subscription_user_agent", "subscription_group_mode", "subscription_group_prefix_len", "group_by_countries", "subscription_filter_include_keywords", "zm_sub_priority" ];
 	const UT_KEYS = [ "urltest_check_interval", "urltest_tolerance", "urltest_testing_url" ];
 	const DRES_KEYS = [ "domain_resolver_dns_type", "domain_resolver_dns_server" ];
 	let cur = sec_ext(c.get_all(CFG, sec) || {});
@@ -14456,6 +14644,7 @@ function write_sec_ext(c, sec, mode, x) {
 		let plen = num_in(x.sub_plen, 1, 16);
 		if (grp == "prefix" && plen == null) fail("длина префикса для групп — число от 1 до 16");
 		set_opt(c, sec, "subscription_format_preference", fmt, "auto");
+		set_flag(c, sec, "zm_sub_priority", !!x.sub_priority);
 		set_flag(c, sec, "subscription_insecure", !!x.sub_insecure);
 		set_opt(c, sec, "subscription_user_agent", ua, "");
 		c.delete(CFG, sec, "group_by_countries");
@@ -14475,9 +14664,10 @@ function write_sec_ext(c, sec, mode, x) {
 		set_opt(c, sec, "urltest_tolerance", s(tol), "50");
 		set_opt(c, sec, "urltest_testing_url", url, UT_URL_DEF);
 		c.set(CFG, sec, "enable_udp_over_tcp", x.uot ? "1" : "0");
+		set_flag(c, sec, "zm_direct_fallback", !!x.direct_fallback);
 		del_keys(c, sec, [ "domain_resolver_enabled", ...DRES_KEYS ]);
 	} else {
-		del_keys(c, sec, [ ...UT_KEYS, "enable_udp_over_tcp" ]);
+		del_keys(c, sec, [ ...UT_KEYS, "enable_udp_over_tcp", "zm_direct_fallback" ]);
 		if (x.dres_on) {
 			let t = s(x.dres_type), v = trim(s(x.dres_server));
 			if (index([ "udp", "dot", "doh" ], t) < 0) fail("неизвестный тип DNS для туннеля");
@@ -14606,7 +14796,7 @@ function cmd_get(want) {
 		domains: domain_lines(m),
 		subnets: subnet_lines(m),
 		lists: rf.l,
-		full: uniq(words(mm.fully_routed_ips)),
+		full: device_ips(m),
 		excl: uniq(words(st.routing_excluded_ips)),
 		extra: p.extra,
 		dns: dns_info(st),
@@ -14685,15 +14875,16 @@ function cmd_set() {
 	let lists = uniq(tokens(d.lists));
 	for (let x in lists) if (!valid_url(x)) fail("внешний список должен быть ссылкой https://…: " + x);
 	lists = uniq([ ...lists, ...rplain ]);
-	let full = uniq(tokens(d.full)), excl = uniq(tokens(d.excl));
+	let full = d.full == null ? device_ips(c.get_all(CFG, sec) || {}) : uniq(tokens(d.full));
+	let excl = d.excl == null ? uniq(words(c.get(CFG, "settings", "routing_excluded_ips"))) : uniq(tokens(d.excl));
 	for (let x in [ ...full, ...excl ]) if (!valid_ip(x)) fail("неверный адрес устройства: " + x);
-	excl = filter(excl, (x) => index(full, x) < 0);
-	if (!length(services) && !length(rsets) && !length(rsubs) && !length(domains) && !length(subnets) && !length(lists) && !(is_main && length(full)))
-		fail(is_main ? "выберите хотя бы один сервис, домен или устройство" : "выберите для секции хотя бы один сервис или домен");
+	if (!length(services) && !length(rsets) && !length(rsubs) && !length(domains) && !length(subnets) && !length(lists) && (length(full) || created || !sec_configured(c.get_all(CFG, sec) || {})))
+		fail("выберите для секции хотя бы один сервис, домен или адрес — устройства только ограничивают её правила");
 
 	for (let x in sections(c, "section")) {
 		let n = x[".name"];
 		if (n == sec || !is_conn(x) || (n != p0.sec && index(p0.conns, n) < 0)) continue;
+		if (!device_scopes_overlap(full, device_ips(x))) continue;
 		let other = sec_label(x, n == p0.sec), orf = sec_refs(x);
 		for (let v in services) if (index(words(x.community_lists), v) >= 0) fail("список «" + v + "» уже идёт через секцию «" + other + "» — один список можно включить только в одной секции");
 		for (let v in [ ...rsets, ...rsubs ]) if (index([ ...orf.s, ...orf.r ], v) >= 0) fail("набор правил уже идёт через секцию «" + other + "»: " + substr(v, 0, 60));
@@ -14756,12 +14947,7 @@ function cmd_set() {
 	write_sec_ext(c, sec, mode, d.x);
 
 	set_lists(c, sec, { s: rsets, r: rsubs, l: lists }, services, domains, subnets);
-	if (is_main || d.full != null) {
-		set_list(c, mainsec, "fully_routed_ips", full);
-		if (!c.get(CFG, "settings")) c.set(CFG, "settings", "settings");
-		set_list(c, "settings", "routing_excluded_ips", excl);
-	}
-	if (!is_main) c.delete(CFG, sec, "fully_routed_ips");
+	write_device_lists(c, sec, full, excl);
 
 	if (bp) {
 		if (length(bdom) || length(bsub)) {
@@ -14835,6 +15021,96 @@ function cmd_set() {
 /* ---------- servers ---------- */
 
 function group_tag(sec) { return sec + "-out"; }
+function fallback_tag(sec) { return sec + "-zm-fallback-out"; }
+function priority_tag(sec) { return sec + "-zm-priority-out"; }
+function priority_manual_file(sec) { return "/tmp/zm-fk-priority-manual." + sec; }
+
+/* Only list routes use this selector; direct never competes in a URLTest. */
+function cmd_fallback_config() {
+	let conf = null;
+	try { conf = json(s(fs.stdin.read("all"))); } catch (e) {}
+	if (type(conf) != "object" || type(conf.outbounds) != "array") fail("не удалось прочитать конфиг sing-box");
+	let c = cursor(), obs = {};
+	for (let ob in conf.outbounds) obs[s(ob.tag)] = ob;
+	let meta = conf._zm_priority_feeds || {};
+	delete conf._zm_priority_feeds;
+	for (let m in sections(c, "section")) {
+		if (!flag(m.zm_sub_priority) || sec_mode(m) != "sub" || flag(m.disabled)) continue;
+		let sec = m[".name"], original = obs[group_tag(sec)], feeds = meta[sec], groups = [];
+		if (!original) continue;
+		if (s(original.type) != "selector" || type(feeds) != "array" || !length(feeds)) fail("не удалось определить принадлежность серверов к подпискам секции " + sec);
+		for (let i = 0; i < length(feeds); i++) {
+			let feed = feeds[i], tags = uniq(arr(feed.tags));
+			if (!length(tags)) continue;
+			for (let t in tags) if (!obs[t] || type(obs[t].outbounds) == "array") fail("не найден сервер подписки: " + t);
+			let tag = sec + "-zm-priority-feed-" + (i + 1) + ": " + s(feed.name);
+			if (obs[tag]) fail("имя группы подписки уже занято: " + tag);
+			let ob = { type: "selector", tag, outbounds: tags, default: tags[0], interrupt_exist_connections: true };
+			push(conf.outbounds, ob); obs[tag] = ob; push(groups, tag);
+		}
+		let tag = priority_tag(sec);
+		if (!length(groups) || obs[tag]) fail("не удалось собрать порядок подписок секции " + sec);
+		let ob = { type: "selector", tag, outbounds: groups, default: groups[0], interrupt_exist_connections: true };
+		push(conf.outbounds, ob); obs[tag] = ob;
+		original.outbounds = [ tag, ...original.outbounds ];
+		original.default = tag;
+	}
+	for (let m in sections(c, "section")) {
+		if (!flag(m.zm_direct_fallback) || s(m.connection_type) != "proxy" || flag(m.disabled)) continue;
+		let sec = m[".name"], original = group_tag(sec), tag = fallback_tag(sec);
+		if (!obs["direct-out"] || s(obs["direct-out"].type) != "direct") fail("в конфиге нет прямого выхода");
+		if (obs[tag]) fail("имя резервного выхода уже занято: " + tag);
+		let todo = obs[original] ? [ original ] : [], seen = {}, leaves = [];
+		for (let i = 0; i < length(todo); i++) {
+			let t = todo[i], ob = obs[t];
+			if (seen[t] || !ob) continue;
+			seen[t] = true;
+			if (type(ob.outbounds) == "array") { for (let child in ob.outbounds) push(todo, child); }
+			else if (index([ "direct", "reject", "block", "dns" ], s(ob.type)) < 0) push(leaves, t);
+		}
+		/* Leaf choices let recovery use a live node before nested URLTests refresh. */
+		push(conf.outbounds, { type: "selector", tag, outbounds: obs[original] ? uniq([ original, ...leaves, "direct-out" ]) : [ "direct-out" ],
+			default: obs[original] ? original : "direct-out", interrupt_exist_connections: true });
+		/* Keep DNS resolution available if its chosen section falls back. */
+		for (let dns in (conf.dns && type(conf.dns.servers) == "array" ? conf.dns.servers : []))
+			if (s(dns.detour) == original) dns.detour = tag;
+	}
+	out(conf);
+}
+
+function fallback_info(sec, px) {
+	let g = px ? px[fallback_tag(sec)] : null;
+	let now = g ? s(g.now) : "";
+	return { enabled: !!g, direct: now == "direct-out", override: now != "" && now != "direct-out" && now != group_tag(sec) ? now : "" };
+}
+
+/* Prefer the section-wide URLTest over per-subscription groups. */
+function auto_tag(sec, px, g) {
+	let tags = g && type(g.all) == "array" ? g.all : [];
+	let priority = priority_tag(sec);
+	if (index(tags, priority) >= 0 && px[priority] && lc(s(px[priority].type)) == "selector") return priority;
+	let tag = sec + "-urltest-out";
+	let valid = (t) => index(tags, t) >= 0 && px[t] && lc(s(px[t].type)) == "urltest";
+	if (valid(tag)) return tag;
+	/* Grouped subscriptions use the selector's configured default. */
+	let conf = null;
+	try { conf = json(s(fs.readfile(SB_CONF))); } catch (e) {}
+	for (let ob in (conf && type(conf.outbounds) == "array" ? conf.outbounds : []))
+		if (ob.tag == group_tag(sec) && valid(s(ob.default))) return s(ob.default);
+	for (let t in tags) if (valid(t)) return t;
+	return null;
+}
+
+function proxy_now(px, tag) {
+	let seen = {};
+	while (px[tag] && index([ "urltest", "selector" ], lc(s(px[tag].type))) >= 0 && !seen[tag]) {
+		seen[tag] = true;
+		let next = s(px[tag].now);
+		if (next == "") break;
+		tag = next;
+	}
+	return tag;
+}
 
 function sec_names(c, sec) {
 	let m = c.get_all(CFG, sec) || {}, names = {};
@@ -14846,13 +15122,15 @@ function sec_names(c, sec) {
 		}
 	}
 	names[sec + "-urltest-out"] = "Авто";
+	names[priority_tag(sec)] = "Авто · порядок подписок";
 	return names;
 }
 
 function node_info(px, names, t) {
 	let p = px[t] || {}, h = type(p.history) == "array" && length(p.history) ? p.history[length(p.history) - 1] : null;
-	return { name: s(names[t] || t), country: "", type: s(p.type), now: s(p.now || ""), delay: h ? int(h.delay || 0) : -1,
-		members: lc(s(p.type)) == "urltest" && type(p.all) == "array" ? p.all : null };
+	let feed = match(t, /-zm-priority-feed-[0-9]+: (.*)$/);
+	return { name: s(names[t] || (feed ? "Подписка: " + feed[1] : t)), country: "", type: s(p.type), now: s(p.now || ""), delay: h ? int(h.delay || 0) : -1,
+		members: (lc(s(p.type)) == "urltest" || index(t, "-zm-priority-") >= 0) && type(p.all) == "array" ? p.all : null };
 }
 
 function b64any(v) {
@@ -14931,13 +15209,17 @@ function cmd_servers(sec) {
 	let px = proxies();
 	if (!px) fail("sing-box не отвечает — Forkozz выключен или ещё запускается");
 	let g = px[group_tag(sec)];
-	if (!g || type(g.all) != "array") fail("список серверов ещё не готов — примените настройки");
+	let fallback = fallback_info(sec, px);
+	if ((!g || type(g.all) != "array") && !fallback.direct) fail("список серверов ещё не готов — примените настройки");
+	if (!g || type(g.all) != "array") g = { all: [], now: "" };
 	let c = cursor(), xm = c.get_all(CFG, sec) || {}, xv = excl_vars(xm), names = sec_names(c, sec);
 	let nodes = {};
-	for (let t in g.all) {
+	let pending = slice(g.all, 0);
+	for (let i = 0; i < length(pending); i++) {
+		let t = pending[i];
+		if (nodes[t]) continue;
 		nodes[t] = node_info(px, names, t);
-		for (let m in (nodes[t].members || []))
-			if (!nodes[m]) nodes[m] = node_info(px, names, m);
+		for (let m in (nodes[t].members || [])) if (!nodes[m]) push(pending, m);
 	}
 	let fell = "";
 	try { fell = trim(s(fs.readfile(fell_file(sec)))); } catch (e) { fell = ""; }
@@ -14948,8 +15230,8 @@ function cmd_servers(sec) {
 		for (let t in (type(lat.tested) == "array" ? lat.tested : [])) if (nodes[t]) nodes[t].delay = int(dl[t] || 0);
 		if (lrun) for (let t in (type(lat.pending) == "array" ? lat.pending : [])) if (nodes[t]) nodes[t].delay = -2;
 	}
-	out({ group: group_tag(sec), now: s(g.now), list: g.all, nodes, sub: sec_mode(xm) == "sub" ? sub_info(sec) : null,
-		hidden: length(xv.h), exclude: s(xm.zm_exclude), hide_names: xv.h, fell, lat: lat ? { running: lrun, at: int(lat.at || 0), error: s(lat.error) } : null });
+	out({ group: group_tag(sec), auto_tag: auto_tag(sec, px, g), now: fallback.override || s(g.now), list: g.all, nodes, sub: sec_mode(xm) == "sub" ? sub_info(sec) : null,
+		hidden: length(xv.h), exclude: s(xm.zm_exclude), hide_names: xv.h, fell, fallback, priority: flag(xm.zm_sub_priority), lat: lat ? { running: lrun, at: int(lat.at || 0), error: s(lat.error) } : null });
 }
 
 /* ---------- точная проверка сервера (как делают клиенты вроде Happ) ----------
@@ -14959,6 +15241,7 @@ function cmd_servers(sec) {
 const LAT_URLS = [ "https://www.gstatic.com/generate_204", "http://cp.cloudflare.com/generate_204",
 	"https://www.google.com/generate_204", "http://connectivitycheck.gstatic.com/generate_204" ];
 const LAT_PAR = 4;
+let LAT_SEQ = 0;
 
 function clash_ep() {
 	let j = null;
@@ -14996,9 +15279,8 @@ function lat_parse(raw) {
 /* пачка серверов параллельно (не больше LAT_PAR за раз — слабый роутер иначе сам даёт ложные таймауты) */
 function lat_batch(ep, tags, url, ms) {
 	let res = {};
-	let dir = STATE + "/lat.tmp." + time();
-	try { fs.mkdir(STATE); } catch (e) {}
-	try { fs.mkdir(dir); } catch (e) {}
+	let dir = "/tmp/zm-fk-lat." + s(fs.readlink("/proc/self")) + "." + (++LAT_SEQ);
+	if (fs.mkdir(dir) == null) fail("не удалось создать временную папку для проверки серверов");
 	for (let i = 0; i < length(tags); i += LAT_PAR) {
 		let part = slice(tags, i, i + LAT_PAR), cmd = "";
 		for (let k = 0; k < length(part); k++)
@@ -15085,6 +15367,135 @@ function proxy_alive(tag) {
 	return probe_ms(tag, 6000, 3) > 0;
 }
 
+/* Flatten every subscription/country group, including nodes outside the current choice. */
+function vpn_members(px, tag) {
+	let todo = [ tag ], seen = {}, leaves = [];
+	for (let i = 0; i < length(todo); i++) {
+		let t = todo[i], p = px[t];
+		if (seen[t] || !p) continue;
+		seen[t] = true;
+		if (type(p.all) == "array") { for (let child in p.all) push(todo, child); }
+		else if (index([ "direct", "reject", "block", "dns" ], lc(s(p.type))) < 0) push(leaves, t);
+	}
+	return leaves;
+}
+
+function select_proxy(group, tag) {
+	let r = jcmd(BIN + " clash_api set_group_proxy " + q(group) + " " + q(tag));
+	if (type(r) != "object" || r.error || r.success === false) return false;
+	let px = proxies();
+	return !!(px && px[group] && s(px[group].now) == tag);
+}
+
+function priority_active(sec, m, px) {
+	let g = px ? px[group_tag(sec)] : null;
+	if (!flag(m.zm_sub_priority) || sec_mode(m) != "sub" || !g || !px[priority_tag(sec)]) return false;
+	let manual = trim(s(fs.readfile(priority_manual_file(sec))));
+	return s(g.now) == priority_tag(sec) || manual == "" || manual != s(g.now);
+}
+
+/* Exhaust higher-priority feeds before probing a lower-priority feed. */
+function priority_probe(sec, px, ep, urls, snapshot, tolerance) {
+	let p = px[priority_tag(sec)];
+	if (!p || type(p.all) != "array") return null;
+	for (let feed in p.all) {
+		let group = px[feed];
+		if (!group || type(group.all) != "array" || !length(group.all)) return null;
+		let delays = {};
+		for (let url in urls) {
+			for (let i = 0; i < length(group.all); i += LAT_PAR) {
+				if (snapshot != s(fs.readfile(SB_CONF))) return null;
+				let r = lat_batch(ep, slice(group.all, i, i + LAT_PAR), url, 5000);
+				for (let t in keys(r)) delays[t] = r[t];
+			}
+			if (length(keys(delays))) break;
+		}
+		let best = "";
+		for (let t in group.all) if (delays[t] > 0 && (best == "" || delays[t] < delays[best])) best = t;
+		if (best == "") continue;
+		let current = s(group.now);
+		if (delays[current] > 0 && delays[current] <= delays[best] + tolerance) best = current;
+		return { feed, node: best };
+	}
+	return { feed: "", node: "" };
+}
+
+/* Probe actual tunnel requests, not TCP reachability or stale latency history. */
+function cmd_fallwatch(sec) {
+	let lock = "/tmp/zm-fk-fallback." + sec + ".lock";
+	if (fs.access(lock)) fs.writefile(lock + "/pid", s(fs.readlink("/proc/self")));
+	let c = cursor(), m = c.get_all(CFG, sec) || {};
+	let allow_direct = flag(m.zm_direct_fallback);
+	if ((!allow_direct && !flag(m.zm_sub_priority)) || flag(m.disabled) || s(m.connection_type) != "proxy") { out({ ok: true }); return; }
+	let snapshot = s(fs.readfile(SB_CONF)), px = proxies(), wrapper = px ? px[fallback_tag(sec)] : null;
+	let g = px ? px[group_tag(sec)] : null;
+	let priority = priority_active(sec, m, px);
+	if (!priority && !allow_direct) { out({ ok: true, manual: !!g }); return; }
+	if (priority && s(g.now) != priority_tag(sec)) {
+		if (!select_proxy(group_tag(sec), priority_tag(sec))) { out({ ok: false }); return; }
+		px = proxies(); g = px ? px[group_tag(sec)] : null;
+		if (!g) { out({ ok: false }); return; }
+	}
+	if (allow_direct && (!wrapper || type(wrapper.all) != "array")) { out({ ok: false }); return; }
+	let tags = vpn_members(px, group_tag(sec)), ep = clash_ep();
+	if (!ep || sh("command -v curl") == "") { out({ ok: false }); return; }
+	if (!length(tags)) { out({ ok: true, direct: !!(wrapper && s(wrapper.now) == "direct-out"), empty: true }); return; }
+	let current = fallback_info(sec, px).override || proxy_now(px, s(g.now)), order = index(tags, current) >= 0 ? uniq([ current, ...tags ]) : tags;
+	let urls = uniq([ sec_ext(m).ut_url, "https://www.cloudflare.com/cdn-cgi/trace" ]), healthy = "";
+	if (priority) {
+		let chosen = priority_probe(sec, px, ep, urls, snapshot, int(sec_ext(m).ut_tol));
+		c = cursor(); m = c.get_all(CFG, sec) || {}; px = proxies();
+		if (!chosen || flag(m.disabled) || flag(m.zm_direct_fallback) != allow_direct || snapshot != s(fs.readfile(SB_CONF)) || !priority_active(sec, m, px)) { out({ ok: false }); return; }
+		let before = proxy_now(px, group_tag(sec)), direct = fallback_info(sec, px).direct;
+		let ensure = (group, tag) => s(px[group] && px[group].now) == tag || select_proxy(group, tag);
+		if (chosen.feed != "") {
+			if (!ensure(chosen.feed, chosen.node) || !ensure(priority_tag(sec), chosen.feed) || !ensure(group_tag(sec), priority_tag(sec))) { out({ ok: false }); return; }
+			if (allow_direct && !ensure(fallback_tag(sec), group_tag(sec))) { out({ ok: false }); return; }
+			out({ ok: true, priority: true, direct: false, changed: direct || before != chosen.node });
+		} else {
+			if (!ensure(group_tag(sec), priority_tag(sec))) { out({ ok: false }); return; }
+			let changed = allow_direct && !direct && select_proxy(fallback_tag(sec), "direct-out");
+			out({ ok: !allow_direct || direct || changed, priority: true, direct: allow_direct, changed });
+		}
+		return;
+	}
+	for (let url in urls) {
+		for (let i = 0; i < length(order); i += LAT_PAR) {
+			if (snapshot != s(fs.readfile(SB_CONF))) { out({ ok: false }); return; }
+			let part = slice(order, i, i + LAT_PAR), delays = lat_batch(ep, part, url, 5000);
+			for (let t in part) if (delays[t] > 0) { healthy = t; break; }
+			if (healthy != "") break;
+		}
+		if (healthy != "") break;
+	}
+	/* Do not apply results to a reloaded engine or a section edited during probing. */
+	c = cursor();
+	m = c.get_all(CFG, sec) || {};
+	px = proxies();
+	wrapper = px ? px[fallback_tag(sec)] : null;
+	g = px ? px[group_tag(sec)] : null;
+	if (!flag(m.zm_direct_fallback) || flag(m.disabled) || snapshot != s(fs.readfile(SB_CONF)) || !wrapper || !g || priority_active(sec, m, px)) { out({ ok: false }); return; }
+	if (healthy == "") {
+		if (s(wrapper.now) == "direct-out") { out({ ok: true, direct: true }); return; }
+		let changed = select_proxy(fallback_tag(sec), "direct-out");
+		out({ ok: changed, changed, direct: true });
+		return;
+	}
+	/* Preserve the selected server or Auto when it works; otherwise pick a live VPN. */
+	let selected = s(g.now), target = group_tag(sec), was_direct = s(wrapper.now) == "direct-out";
+	if (proxy_now(px, selected) != healthy && !proxy_alive(selected)) {
+		let auto = auto_tag(sec, px, g);
+		let pickt = auto && proxy_alive(auto) ? auto : index(g.all, healthy) >= 0 ? healthy : "";
+		if (pickt != "") {
+			if (!select_proxy(group_tag(sec), pickt)) { out({ ok: false }); return; }
+		} else target = healthy;
+	}
+	if (s(wrapper.now) == target) { out({ ok: true, direct: false }); return; }
+	if (snapshot != s(fs.readfile(SB_CONF))) { out({ ok: false }); return; }
+	let changed = select_proxy(fallback_tag(sec), target);
+	out({ ok: changed, changed: changed && was_direct, direct: false });
+}
+
 function cmd_heal(sec, act) {
 	let hc = cursor(), hm = hc.get_all(CFG, sec) || {};
 	if (s(hm.connection_type) != "proxy" || s(hm.disabled) == "1") { out({ ok: true, manual: false, dead: false }); return; }
@@ -15095,8 +15506,7 @@ function cmd_heal(sec, act) {
 	if (proxy_alive(now)) { out({ ok: true, manual: true, dead: false }); return; }
 	let nm = (t) => s(names[t] || t);
 	if (act != "switch") { out({ ok: true, manual: true, dead: true, name: nm(now) }); return; }
-	let pickt = null;
-	for (let t in g.all) if (px[t] && lc(s(px[t].type)) == "urltest") { pickt = t; break; }
+	let pickt = auto_tag(sec, px, g);
 	if (!pickt)
 		for (let t in g.all) {
 			if (t == now) continue;
@@ -15131,13 +15541,16 @@ function cmd_latency(sec) {
  * автовыбор подписки) получает лучшую задержку своих серверов. */
 function latwork(sec) {
 	let px = proxies(), g = px ? px[group_tag(sec)] : null, seen = {}, order = [], groups = [];
-	let add = (t) => { if (!seen[t]) { seen[t] = true; push(order, t); } };
-	if (g && type(g.all) == "array")
-		for (let t in g.all) {
-			let p = px[t];
-			if (p && type(p.all) == "array") { push(groups, t); for (let m in p.all) add(m); }
-			else add(t);
-		}
+	function add(t) {
+		if (seen[t]) return;
+		seen[t] = true;
+		let p = px[t];
+		if (p && type(p.all) == "array") {
+			for (let m in p.all) add(m);
+			push(groups, t);
+		} else push(order, t);
+	}
+	if (g && type(g.all) == "array") for (let t in g.all) add(t);
 	let delays = {}, done = {}, err = g ? "" : "группа серверов секции ещё не готова — примените настройки";
 	let save = (running) => {
 		for (let t in groups) {
@@ -15186,8 +15599,19 @@ function cmd_latwork(sec) {
 
 function cmd_select(sec, tag) {
 	if (s(tag) == "") fail("не выбран сервер");
+	let priority = flag((cursor().get_all(CFG, sec) || {}).zm_sub_priority);
+	if (priority) {
+		let px = proxies(), g = px ? px[group_tag(sec)] : null;
+		if (!g || type(g.all) != "array" || index(g.all, tag) < 0) fail("этого сервера нет в секции");
+		if (tag == priority_tag(sec)) fs.unlink(priority_manual_file(sec));
+		else if (fs.writefile(priority_manual_file(sec), s(tag)) == null) fail("не удалось сохранить ручной выбор сервера");
+	}
 	let j = jcmd(BIN + " clash_api set_group_proxy " + q(group_tag(sec)) + " " + q(tag));
 	if (type(j) != "object" || j.error || j.success === false) fail(s((j && (j.message || j.error)) || "сервер не переключился"));
+	let px = proxies();
+	let fallback = fallback_info(sec, px);
+	if ((fallback.direct || fallback.override != "") && !select_proxy(fallback_tag(sec), group_tag(sec))) fail("сервер выбран, но резервный выход секции не переключился");
+	if (priority && tag == priority_tag(sec)) system("(sh /opt/zapret-manager-luci/backend.sh forkop_priority_watch " + q(sec) + " >/dev/null 2>&1 &)");
 	try { fs.unlink(fell_file(sec)); } catch (e) {}
 	out({ ok: true });
 }
@@ -15230,7 +15654,7 @@ function cmd_hide(sec) {
 		} else {
 			let px = proxies(), g = px ? px[group_tag(sec)] : null;
 			if (g && type(g.all) == "array") {
-				let real = filter(g.all, (t) => !(px[t] && lc(s(px[t].type)) == "urltest"));
+				let real = vpn_members(px, group_tag(sec));
 				if (length(real) && !length(filter(real, (t) => !excl_hit(t, f)))) fail("нельзя скрыть все серверы — тогда Forkozz работать не сможет");
 			}
 		}
@@ -15328,20 +15752,21 @@ function cmd_secstate(probe) {
 			let g = px[group_tag(x.name)];
 			if (!g || type(g.all) != "array") e.state = "wait";
 			else {
-				let names = sec_names(c, x.name), now = s(g.now), cur = now;
-				if (px[now] && lc(s(px[now].type)) == "urltest") { e.auto = true; cur = s(px[now].now); }
-				e.count = length(filter(g.all, (t) => !(px[t] && lc(s(px[t].type)) == "urltest")));
+				let names = sec_names(c, x.name), now = fallback_info(x.name, px).override || s(g.now), cur = now;
+				if (px[now] && (lc(s(px[now].type)) == "urltest" || now == priority_tag(x.name))) { e.auto = true; cur = proxy_now(px, now); }
+				e.count = length(vpn_members(px, group_tag(x.name)));
 				let ni = node_info(px, names, cur);
 				e.server = cur != "" ? ni.name : "";
 				e.delay = ni.delay;
 				e.state = ni.delay > 0 ? "ok" : "unknown";
 				if (x.mode == "sub") { let si = sub_info(x.name); e.sub = si ? s(si.title) : ""; }
 			}
+			if (fallback_info(x.name, px).direct) { e.state = "direct"; e.server = "Напрямую"; e.delay = -1; e.fallback_direct = true; }
 		}
 		if (probe && px && e.state != "off" && e.state != "wait") {
-			let ms = probe_ms(group_tag(x.name), 4000, 2);
+			let ms = probe_ms(fallback_info(x.name, px).enabled ? fallback_tag(x.name) : group_tag(x.name), 4000, 2);
 			e.probed = true;
-			e.state = ms > 0 ? "ok" : "bad";
+			e.state = e.fallback_direct ? "direct" : ms > 0 ? "ok" : "bad";
 			if (ms > 0) e.delay = ms;
 		}
 		push(r, e);
@@ -15350,24 +15775,6 @@ function cmd_secstate(probe) {
 }
 
 /* ---------- route check: replays sing-box route rules for a domain or an IP ---------- */
-
-function ip4n(a) {
-	let m = match(s(a), /^([0-9]+)\.([0-9]+)\.([0-9]+)\.([0-9]+)$/);
-	return m ? ((int(m[1]) * 256 + int(m[2])) * 256 + int(m[3])) * 256 + int(m[4]) : null;
-}
-
-function cidr_hit(ip, cidrs) {
-	let n = ip4n(ip);
-	if (n == null) return false;
-	for (let c in (type(cidrs) == "array" ? cidrs : [ cidrs ])) {
-		let p = split(s(c), "/"), b = ip4n(p[0]), bits = length(p) > 1 ? int(p[1]) : 32;
-		if (b == null || bits < 0 || bits > 32) continue;
-		let div = 1;
-		for (let i = bits; i < 32; i++) div *= 2;
-		if (int(n / div) == int(b / div)) return true;
-	}
-	return false;
-}
 
 function as_arr(v) { return v == null ? [] : type(v) == "array" ? v : [ v ]; }
 
@@ -15404,9 +15811,10 @@ function rs_hit(tag, target, sets) {
 	return !!match(r, /(^|\n)[^\n]*match rules/);
 }
 
-function rule_hit(r, host, ip, sets) {
-	if (r.source_ip_cidr != null || r.protocol != null || r.port != null || r.inbound == null && r.outbound == null) return false;
+function rule_hit(r, host, ip, sets, source) {
+	if (r.protocol != null || r.port != null || r.inbound == null && r.outbound == null) return false;
 	if (r.type == "logical") return false;
+	if (r.source_ip_cidr != null && source != "" && !cidr_hit(source, as_arr(r.source_ip_cidr))) return false;
 	let has = false;
 	if (host != "" && (r.domain != null || r.domain_suffix != null || r.domain_keyword != null || r.domain_regex != null)) {
 		has = true;
@@ -15418,10 +15826,12 @@ function rule_hit(r, host, ip, sets) {
 		if (host != "" && rs_hit(t, host, sets)) return true;
 		if (ip != "" && rs_hit(t, ip, sets)) return true;
 	}
-	return false;
+	return !has && r.source_ip_cidr != null;
 }
 
-function cmd_route(target, addr) {
+function cmd_route(target, addr, source) {
+	source = trim(s(source));
+	if (source != "" && ip4n(source) == null) fail("укажите IPv4-адрес устройства, например 192.168.1.100");
 	let cfgj = null;
 	try { cfgj = json(s(fs.readfile(SB_CONF))); } catch (e) { cfgj = null; }
 	if (type(cfgj) != "object" || type(cfgj.route) != "object") { out({ action: "", outbound: "", section: "", rule: "" }); return; }
@@ -15431,11 +15841,16 @@ function cmd_route(target, addr) {
 	let sets = {};
 	for (let rs in as_arr(cfgj.route.rule_set)) sets[s(rs.tag)] = rs;
 	let c = cursor(), p = pick(c), labels = {};
-	for (let x in sec_list(c, p)) labels[group_tag(x.name)] = x;
+	for (let x in sec_list(c, p)) { labels[group_tag(x.name)] = x; labels[fallback_tag(x.name)] = x; }
+	let px = proxies();
 	for (let r in as_arr(cfgj.route.rules)) {
 		if (type(r) != "object" || index([ "route", "reject" ], s(r.action || "route")) < 0) continue;
 		if (r.domain == "ip.podkop.fyi" || r.domain == "fakeip.podkop.fyi") continue;
-		if (!rule_hit(r, host, ip, sets)) continue;
+		if (!rule_hit(r, host, ip, sets, source)) continue;
+		if (r.source_ip_cidr != null && source == "") {
+			out({ action: "source_required", outbound: "", section: "", rule: "" });
+			return;
+		}
 		if (s(r.action) == "reject") {
 			let bs = null;
 			for (let rt in as_arr(r.rule_set))
@@ -15449,6 +15864,10 @@ function cmd_route(target, addr) {
 		let ob = s(r.outbound);
 		if (ob == "direct-out") { out({ action: "bypass", outbound: ob, section: BYPASS, rule: "Исключения" }); return; }
 		let x = labels[ob];
+		if (x && ob == fallback_tag(x.name) && fallback_info(x.name, px).direct) {
+			out({ action: "fallback_direct", outbound: "direct-out", section: x.name, rule: x.label });
+			return;
+		}
 		out({ action: x ? "connection" : "outbound", outbound: ob, section: x ? x.name : "", rule: x ? x.label : ob });
 		return;
 	}
@@ -15599,9 +16018,12 @@ function cmd_stats() {
 let mode = ARGV[0] || "";
 let sec = ARGV[1] || "";
 if (mode != "import" && mode != "route" && sec != "" && !match(sec, /^[A-Za-z0-9_]+$/)) fail("неверное имя секции");
-if (sec == "" && index([ "get", "set", "secdel", "import", "route", "diag", "secnames", "secstate", "stats" ], mode) < 0) sec = pick(cursor()).sec;
+if (sec == "" && index([ "get", "set", "secdel", "import", "route", "diag", "secnames", "secstate", "stats", "fallback_config" ], mode) < 0) sec = pick(cursor()).sec;
 
-if (mode == "get") cmd_get(sec);
+if (mode == "device_setup") cmd_device_setup();
+else if (mode == "fallback_config") cmd_fallback_config();
+else if (mode == "fallwatch") cmd_fallwatch(sec);
+else if (mode == "get") cmd_get(sec);
 else if (mode == "set") cmd_set();
 else if (mode == "secdel") cmd_secdel(sec);
 else if (mode == "secnames") cmd_secnames();
@@ -15616,7 +16038,7 @@ else if (mode == "diag") cmd_diag();
 else if (mode == "secstate") cmd_secstate(sec == "probe");
 else if (mode == "subinfo") cmd_subinfo(sec);
 else if (mode == "stats") cmd_stats();
-else if (mode == "route") cmd_route(ARGV[1], ARGV[2]);
+else if (mode == "route") cmd_route(ARGV[1], ARGV[2], ARGV[3]);
 else if (mode == "import") cmd_import(sec);
 else fail("неизвестная команда");
 ZM_INSTALLER_EOF
@@ -24036,8 +24458,8 @@ function dnsBoots(t, servers) {
 	return out.slice(0, 4);
 }
 
-var TABS = [ { id: 'conn', label: 'Подключение' }, { id: 'svc', label: 'Сервисы' }, { id: 'byp', label: 'Исключения', common: true }, { id: 'dev', label: 'Устройства', common: true }, { id: 'set', label: 'Настройки', common: true } ];
-function isSecTab(id) { return id === 'conn' || id === 'svc'; }
+var TABS = [ { id: 'conn', label: 'Подключение' }, { id: 'svc', label: 'Сервисы' }, { id: 'dev', label: 'Устройства' }, { id: 'byp', label: 'Исключения', common: true }, { id: 'set', label: 'Настройки', common: true } ];
+function isSecTab(id) { return id === 'conn' || id === 'svc' || id === 'dev'; }
 var SEC_MAX = 9;
 var MODES = [ { id: 'links', label: 'Серверы' }, { id: 'sub', label: 'Подписка' }, { id: 'iface', label: 'Туннель' } ];
 var SUB_FMT = [ { id: 'auto', label: 'Авто' }, { id: 'xray', label: 'Xray JSON (Happ)' }, { id: 'singbox', label: 'sing-box' } ];
@@ -24048,7 +24470,7 @@ var UT_URL_DEF = 'https://www.gstatic.com/generate_204';
 var UT_URLS = [ { id: UT_URL_DEF, label: 'Google' }, { id: 'https://cp.cloudflare.com/generate_204', label: 'Cloudflare' }, { id: 'https://captive.apple.com', label: 'Apple' } ];
 var LOG_LV = [ { id: 'panic', label: 'Выключен' }, { id: 'error', label: 'Только ошибки' }, { id: 'warn', label: 'Обычный' }, { id: 'info', label: 'Подробный' }, { id: 'debug', label: 'Отладка' } ];
 var DRES_DEF = { udp: '1.1.1.1', dot: 'one.one.one.one', doh: 'https://cloudflare-dns.com/dns-query' };
-var SEC_EXT = { sub_fmt: 'auto', sub_group: 'off', sub_plen: '2', sub_incl: '', sub_insecure: false, sub_ua: '', ut_iv: '3m', ut_tol: '50', ut_url: UT_URL_DEF,
+var SEC_EXT = { sub_fmt: 'auto', sub_priority: false, sub_group: 'off', sub_plen: '2', sub_incl: '', sub_insecure: false, sub_ua: '', ut_iv: '3m', ut_tol: '50', ut_url: UT_URL_DEF, direct_fallback: false,
 	uot: false, mixed: false, mixed_port: '2080', real_ip: false, dres_on: false, dres_type: 'udp', dres_server: '' };
 var SET_EXT = { dns_ttl: '60', dns_ecs: '', src_ifs: [ 'br-lan' ], out_if: '', badwan: false, badwan_ifs: [], badwan_delay: '2000', ipv6: false, no_dhcp: false,
 	excl_ntp: false, excl_bt: false, block_doh: false, log_level: 'panic', yacd: false, yacd_wan: false, yacd_secret: '' };
@@ -24210,13 +24632,13 @@ function sig(d) {
 		String(d.label || '').trim(), d.isMain || d.enabled, tl(d.byDomains), tl(d.bySubnets) ]);
 }
 
-var GLOBAL_KEYS = [ 'byDomains', 'bySubnets', 'full', 'excl', 'dns', 'quic_off', 'list_interval', 'lists_via' ].concat(Object.keys(SET_EXT));
+var GLOBAL_KEYS = [ 'byDomains', 'bySubnets', 'excl', 'dns', 'quic_off', 'list_interval', 'lists_via' ].concat(Object.keys(SET_EXT));
 
 function secSig(d) {
 	var x = {}, k;
 	for (k in d) if (GLOBAL_KEYS.indexOf(k) < 0) x[k] = d[k];
 	x.dns = { type: 'udp', servers: [], bootstraps: [], detour: false };
-	x.byDomains = x.bySubnets = ''; x.full = []; x.excl = []; x.quic_off = true; x.list_interval = '1d'; x.lists_via = false;
+	x.byDomains = x.bySubnets = ''; x.excl = []; x.quic_off = true; x.list_interval = '1d'; x.lists_via = false;
 	return sig(x);
 }
 
@@ -24247,6 +24669,23 @@ function secSel(c, s) {
 	return selCount(secPick(c, s));
 }
 
+function deviceScopesOverlap(a, b) {
+	if (!a.length || !b.length) return true;
+	function range(v) {
+		var p = String(v).split('/'), octets = p[0].split('.').map(Number);
+		if (octets.length !== 4 || octets.some(function(n) { return !isFinite(n) || n < 0 || n > 255; })) return null;
+		var bits = p.length > 1 ? Number(p[1]) : 32;
+		if (!isFinite(bits) || bits < 0 || bits > 32) return null;
+		var size = Math.pow(2, 32 - bits), ip = octets.reduce(function(n, x) { return n * 256 + x; }, 0);
+		var start = Math.floor(ip / size) * size;
+		return [ start, start + size - 1 ];
+	}
+	return a.some(function(x) { return b.some(function(y) {
+		var ra = range(x), rb = range(y);
+		return !ra || !rb || ra[0] <= rb[1] && rb[0] <= ra[1];
+	}); });
+}
+
 function savedSec() {
 	try { return localStorage.getItem('zm.forkozz.sec') || ''; } catch (e) { return ''; }
 }
@@ -24259,6 +24698,7 @@ function newCfg(c) {
 	x.sec = 'new'; x.is_main = false; x.exists = false; x.enabled = true; x.label = warp && /^zmwarp/.test(warp.name) && !((c && c.sections) || []).some(function(s) { return s.label === 'WARP'; }) ? 'WARP' : 'Секция ' + n;
 	x.mode = 'iface'; x.iface = warp ? warp.name : ''; x.links = []; x.sub = ''; x.sub_interval = '12h'; x.exclude = ''; x.hide_names = [];
 	x.refs = { c: [], s: [], r: [] }; x.domains = []; x.subnets = []; x.lists = []; x.subs = []; x.x = {};
+	x.full = [];
 	return x;
 }
 
@@ -24301,7 +24741,7 @@ return view.extend({
 		var connCard = E('div', { 'class': 'zm-card zm-kv' });
 		var srvCard = E('div', { 'class': 'zm-card zm-kv' });
 		var checkCard = E('div', { 'class': 'zm-card zm-kv' });
-		var routeCard = E('div', { 'class': 'zm-card' }), routeBox = null;
+		var routeCard = E('div', { 'class': 'zm-card' }), routeBox = null, routeSource = '';
 		var svcCard = E('div', { 'class': 'zm-card' });
 		var ownCard = E('div', { 'class': 'zm-card' });
 		var fullCard = E('div', { 'class': 'zm-card' });
@@ -24508,8 +24948,8 @@ return view.extend({
 				if (secs().some(function(s) { return s.name !== draft.sec && s.label.toLowerCase() === ln.toLowerCase(); })) return [ 'conn', 'Секция «' + ln + '» уже есть — выберите другое название' ];
 			}
 			var rf = refsOf(draft);
-			if (!rf.c.length && !rf.s.length && !rf.r.length && !rf.l.length && !textLines(draft.domains).length && !textLines(draft.subnets).length && !textLines(draft.lists).length && !(draft.isMain && draft.full.length))
-				return [ 'svc', draft.isMain ? 'Выберите хотя бы один сервис' : 'Выберите, что пускать через секцию «' + secName() + '»' ];
+			if (!rf.c.length && !rf.s.length && !rf.r.length && !rf.l.length && !textLines(draft.domains).length && !textLines(draft.subnets).length && !textLines(draft.lists).length && (draft.full.length || !secExists()))
+				return [ 'svc', 'Выберите хотя бы один сервис, домен или адрес для секции «' + secName() + '» — устройства только ограничивают её правила' ];
 			var badOwn = tokLines(draft.domains).map(domainProblem).filter(Boolean)[0];
 			if (badOwn) return [ 'svc', 'Свои домены: ' + badOwn ];
 			var badSub = tokLines(draft.subnets).filter(function(v) { return !/^\d{1,3}(\.\d{1,3}){3}(\/\d{1,2})?$/.test(v); })[0];
@@ -24593,7 +25033,7 @@ return view.extend({
 				dirty = sig(draft) !== savedSig;
 				servers = null; srvErr = ''; srvRetry = 0; hideMode = false;
 				syncAreas();
-				if (tab !== 'conn' && tab !== 'svc') tabTo('conn');
+				if (!isSecTab(tab)) tabTo('conn');
 				renderAll();
 				if (st.running && secLive()) loadServers();
 			}).catch(function() { secBusy = false; renderSections(); zm.toast('Роутер не ответил', 'error'); });
@@ -24601,7 +25041,7 @@ return view.extend({
 
 		function deleteSec() {
 			if (busy || saving) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
-			if (!confirm('Удалить секцию «' + secName() + '»?\n\nЕё сервисы пойдут через другие секции, если они там выбраны, иначе — напрямую.')) return;
+			if (!confirm('Удалить секцию «' + secName() + '»?\n\nЕё правила перестанут действовать. Правила остальных секций и их выбор устройств сохранятся.')) return;
 			zm.forkopAction('secdel', draft.sec).then(function(res) {
 				if (res.error) { zm.toast(res.error, 'error'); return; }
 				rememberSec(cfg.main || '');
@@ -24625,19 +25065,20 @@ return view.extend({
 			function open(name) { if (common) tabTo('conn'); switchSec(name); }
 			secCard.appendChild(E('h3', {}, [ 'Секции ', badge(list.length > 1 || isNew ? 'zm-ok' : 'zm-off', nn(list.length + (isNew ? 1 : 0), 'секция', 'секции', 'секций')) ]));
 			secCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:-6px' }, common
-				? 'Исключения, устройства и настройки действуют для всех секций сразу. Нажмите на секцию, чтобы вернуться к её подключению и сервисам.'
-				: 'Каждая секция ведёт свои сервисы через своё подключение: например, YouTube — через сервер, а ChatGPT — через WARP. Нажмите на секцию, чтобы настроить её на вкладках «Подключение» и «Сервисы».'));
+				? 'Исключения, список «Мимо Forkozz» и настройки действуют для всех секций сразу. Нажмите на секцию, чтобы настроить её подключение, сервисы и устройства.'
+				: 'Каждая секция ведёт свои сервисы через своё подключение. На вкладке «Устройства» можно ограничить её правила выбранными устройствами.'));
 			var tiles = list.map(function(s) {
-				var on = s.name === draft.sec, n = secSel(cfg, s), extra = (s.domains || 0) + (s.subnets || 0);
+				var on = s.name === draft.sec, n = secSel(cfg, s), extra = (s.domains || 0) + (s.subnets || 0), f = (s.full || []).length;
 				var what = n ? nn(n, 'список', 'списка', 'списков') : extra ? nn(extra, 'адрес', 'адреса', 'адресов') : 'пусто';
+				if (f) what = (n || extra ? what + ' · ' : '') + nn(f, 'устройство', 'устройства', 'устройств');
 				return node(s.label, secConn(s), on, function() { open(s.name); },
-					E('span', { 'class': 'zm-lat ' + (!s.enabled ? 'zm-lat-bad' : n || extra ? 'zm-lat-good' : 'zm-lat-none') }, s.enabled ? what : 'выключена'),
+					E('span', { 'class': 'zm-lat ' + (!s.enabled ? 'zm-lat-bad' : n || extra || f ? 'zm-lat-good' : 'zm-lat-none') }, s.enabled ? what : 'выключена'),
 					'zm-sec' + (s.enabled ? '' : ' zm-node-dead'));
 			});
 			if (isNew) tiles.push(node(secName(), 'ещё не сохранена', true, function() {}, E('span', { 'class': 'zm-lat zm-lat-mid' }, 'черновик'), 'zm-sec'));
 			else if (list.length < SEC_MAX) tiles.push(E('div', { 'class': 'zm-node zm-sec zm-sec-add', 'title': 'Свои списки через другой VPN', 'click': function() { open('new'); } }, [ E('span', { 'class': 'zm-sec-add-text' }, 'Создать новую секцию') ]));
 			secCard.appendChild(E('div', { 'class': 'zm-nodes' }, tiles));
-			if (list.length > 1 && !common) secCard.appendChild(E('p', { 'class': 'zm-hint' }, (mainName() === 'Основная' ? 'Основная секция' : 'Основная секция — «' + mainName() + '»') + ': через неё идут устройства «Всё через Forkozz», DNS и скачивание списков. Секции проверяются по порядку слева направо: если сайт попал в две, сработает левая. Один сервис можно включить только в одной секции. Исключения действуют на все секции сразу.'));
+			if (list.length > 1 && !common) secCard.appendChild(E('p', { 'class': 'zm-hint' }, (mainName() === 'Основная' ? 'Основная секция' : 'Основная секция — «' + mainName() + '»') + ': через неё идут DNS и скачивание списков. Каждая секция проверяет свои сервисы, домены и адреса только для выбранных устройств; пустой список устройств означает все устройства. Если запрос подходит нескольким секциям, сработает левая. Один сервис можно использовать в разных секциях для непересекающихся устройств. Исключения действуют на все секции сразу.'));
 		}
 
 		function tabTo(id) {
@@ -24650,10 +25091,29 @@ return view.extend({
 		function srvState() {
 			if (!servers) return null;
 			var ns = servers.nodes || {}, list = servers.list || [];
-			var autoTag = list.filter(function(t) { return ns[t] && ns[t].members; })[0], auto = autoTag ? ns[autoTag] : null;
+			var autoTag = servers.auto_tag || String(servers.group || '').replace(/-out$/, '-urltest-out');
+			if (list.indexOf(autoTag) < 0 || !ns[autoTag] || !ns[autoTag].members)
+				autoTag = list.filter(function(t) { return ns[t] && ns[t].members; })[0];
+			var auto = autoTag ? ns[autoTag] : null;
 			var isAuto = !!(autoTag && servers.now === autoTag);
-			var curTag = isAuto ? auto.now : servers.now;
+			var curTag = servers.now, seen = {};
+			while (ns[curTag] && ns[curTag].members && ns[curTag].now && !seen[curTag]) {
+				seen[curTag] = true;
+				curTag = ns[curTag].now;
+			}
 			return { ns: ns, list: list, autoTag: autoTag, auto: auto, isAuto: isAuto, curTag: curTag, cur: ns[curTag] || {} };
+		}
+
+		function serverMembers(tags, ns) {
+			var seen = {}, result = [];
+			function add(t) {
+				if (seen[t]) return;
+				seen[t] = true;
+				if (ns[t] && ns[t].members) ns[t].members.forEach(add);
+				else result.push(t);
+			}
+			tags.forEach(add);
+			return result;
 		}
 
 		function connNow() {
@@ -24677,8 +25137,8 @@ return view.extend({
 
 		function routeValue(c) {
 			if (!c || !c.main_exists) return [ '—', 'ничего не выбрано' ];
-			var n = 0, d = 0, f = (c.full || []).length, extra = [], bp = c.bypass || {}, bn = (bp.domains || []).length + (bp.subnets || []).length;
-			(c.sections || []).forEach(function(s) { if (s.enabled) { n += secSel(c, s); d += s.domains || 0; } });
+			var n = 0, d = 0, f = 0, extra = [], bp = c.bypass || {}, bn = (bp.domains || []).length + (bp.subnets || []).length;
+			(c.sections || []).forEach(function(s) { if (s.enabled) { n += secSel(c, s); d += s.domains || 0; f += (s.full || []).length; } });
 			if (d) extra.push(nn(d, 'домен', 'домена', 'доменов'));
 			if (f) extra.push(nn(f, 'устройство', 'устройства', 'устройств'));
 			if (bn) extra.push('исключений: ' + bn);
@@ -24742,10 +25202,12 @@ return view.extend({
 			if ((p.lists || []).length) parts.push(nn(p.lists.length, 'свой список', 'своих списка', 'своих списков'));
 			if (s.domains) parts.push(nn(s.domains, 'домен', 'домена', 'доменов'));
 			if (s.subnets) parts.push(nn(s.subnets, 'подсеть', 'подсети', 'подсетей'));
+			if ((s.full || []).length) parts.push('только для ' + nn(s.full.length, 'устройства', 'устройств', 'устройств'));
 			return parts.join(' · ') || 'ничего не выбрано';
 		}
 
 		function secConnText(s, x) {
+			if (x && x.fallback_direct) return [ 'Напрямую', 'VPN недоступны · проверяем раз в 2 минуты' ];
 			if (s.mode === 'iface') {
 				var warp = /^zmwarp/.test(s.iface || ''), v = (warp ? 'WARP · ' : 'Туннель · ') + (s.iface || '—');
 				if (x && x.probed && x.delay > 0) v += ' · ' + x.delay + ' мс';
@@ -24761,6 +25223,7 @@ return view.extend({
 			if (!s.enabled) return badge('zm-off', 'выключена');
 			if (!st.enabled) return badge('zm-off', 'Forkozz выключен');
 			if (!x) return badge('zm-off', st.running ? 'проверяем…' : 'не работает');
+			if (x.fallback_direct) return badge('zm-warn', 'напрямую');
 			if (x.state === 'ok') return badge('zm-ok', 'работает');
 			if (x.state === 'bad') return badge('zm-bad', s.mode === 'iface' ? 'туннель не отвечает' : 'сервер не отвечает');
 			if (x.state === 'stopped') return badge('zm-bad', 'не работает');
@@ -24783,8 +25246,8 @@ return view.extend({
 		}
 
 		function commonBox() {
-			var bp = cfg.bypass || {}, bn = (bp.domains || []).length + (bp.subnets || []).length, f = (cfg.full || []).length, e = (cfg.excl || []).length;
-			var dev = [ f ? 'всё через Forkozz: ' + f : '', e ? 'мимо Forkozz: ' + e : '' ].filter(Boolean).join(' · ') || 'устройства по спискам';
+			var bp = cfg.bypass || {}, bn = (bp.domains || []).length + (bp.subnets || []).length, e = (cfg.excl || []).length;
+			var dev = e ? 'мимо Forkozz: ' + e : 'без исключённых устройств';
 			var sb = st.singbox ? 'sing-box ' + st.singbox.replace(/-extended.*$/, '') : 'sing-box не установлен';
 			var dn = cfg.dns ? dnsLabel(cfg.dns) : '—', dt = cfg.dns ? (DNS_TYPES[cfg.dns.type] || '') + (cfg.dns.detour ? ' · через VPN' : '') : '';
 			return E('div', { 'class': 'zm-st-stat zm-fk-common' }, [
@@ -24932,7 +25395,7 @@ return view.extend({
 			btns.push(E('button', { 'class': 'cbi-button cbi-button-positive', 'disabled': saving || busy ? '' : null, 'click': function() { save(true); } },
 				saving ? 'Сохраняем…' : st.enabled ? 'Сохранить и применить' : 'Сохранить и включить'));
 			saveBar.appendChild(E('span', { 'class': 'zm-savebar-dot' }));
-			saveBar.appendChild(E('span', { 'class': 'zm-savebar-text' }, busy ? 'Дождитесь окончания операции' : isNew ? 'Новая секция «' + secName() + '»: выберите подключение и сервисы, затем сохраните' : dirty ? 'Есть несохранённые изменения' + (secs().length > 1 && secSig(draft) !== secSig(withBootMode(fromCfg(cfg))) ? ' в секции «' + secName() + '»' : '') : 'Настройте подключение и сервисы, затем сохраните'));
+			saveBar.appendChild(E('span', { 'class': 'zm-savebar-text' }, busy ? 'Дождитесь окончания операции' : isNew ? 'Новая секция «' + secName() + '»: выберите подключение и сервисы или свои адреса, затем сохраните' : dirty ? 'Есть несохранённые изменения' + (secs().length > 1 && secSig(draft) !== secSig(withBootMode(fromCfg(cfg))) ? ' в секции «' + secName() + '»' : '') : 'Настройте подключение и сервисы или свои адреса, затем сохраните'));
 			saveBar.appendChild(E('div', { 'class': 'zm-savebar-btns' }, btns));
 		}
 
@@ -25008,6 +25471,7 @@ return view.extend({
 			var p = [];
 			if (draft.mode === 'sub') {
 				if (textLines(draft.sub).length > 1) p.push('подписок: ' + textLines(draft.sub).length);
+				if (draft.sub_priority) p.push('по порядку подписок');
 				if (draft.sub_fmt !== 'auto') p.push(draft.sub_fmt === 'xray' ? 'формат Happ' : 'формат sing-box');
 				if (draft.sub_group !== 'off') p.push(draft.sub_group === 'country' ? 'группы по странам' : 'группы по имени');
 				if (inclWords(draft.sub_incl).length) p.push('отбор по словам');
@@ -25015,6 +25479,7 @@ return view.extend({
 			}
 			if (draft.mode !== 'iface') {
 				if (draft.ut_iv !== '3m' || draft.ut_tol.trim() !== '50' || (draft.ut_url.trim() || UT_URL_DEF) !== UT_URL_DEF) p.push('свой автовыбор');
+				if (draft.direct_fallback) p.push('напрямую при отказе VPN');
 				if (draft.uot) p.push('UDP поверх TCP');
 			} else if (draft.dres_on) p.push('DNS ' + dnsName(draft.dres_type, draft.dres_server.trim()));
 			if (draft.mixed) p.push('прокси :' + draft.mixed_port.trim());
@@ -25026,6 +25491,8 @@ return view.extend({
 			var many = secs().length > 1 || draft.sec === 'new';
 			if (draft.mode === 'sub') {
 				box.appendChild(E('h4', {}, 'Подписка'));
+				box.appendChild(row('Авто', seg([ { id: 'latency', label: 'По задержке' }, { id: 'priority', label: 'По порядку подписок' } ], draft.sub_priority ? 'priority' : 'latency', function(v) { set('sub_priority', v === 'priority'); })));
+				box.appendChild(hint(draft.sub_priority ? 'Порядок ссылок сверху вниз задаёт приоритет. Пока в первой подписке есть рабочий сервер, используется только она. Следующая включается после отказа всех серверов предыдущей. Проверка раз в 2 минуты; после восстановления более приоритетной подписки Forkozz автоматически возвращается к ней. Внутри подписки выбирается рабочий сервер по задержке. Ручной выбор отменяет этот порядок до возврата в «Авто».' : 'Сервер выбирается по доступности и задержке среди всех подписок. Порядок ссылок не задаёт приоритет.', 0));
 				box.appendChild(row('Формат', seg(SUB_FMT, draft.sub_fmt, function(v) { set('sub_fmt', v); })));
 				box.appendChild(hint('Какой формат просить у сервиса первым. «Авто» подходит почти всем. Xray JSON (Happ) — если часть серверов (например, с XHTTP) сервис отдаёт только приложению Happ; sing-box — если сервис умеет отдавать его напрямую.'));
 				box.appendChild(row('Группы', seg(SUB_GROUP, draft.sub_group, function(v) { set('sub_group', v); })));
@@ -25039,8 +25506,8 @@ return view.extend({
 			}
 			if (draft.mode !== 'iface') {
 				box.appendChild(E('h4', {}, 'Автовыбор сервера'));
-				box.appendChild(hint('Работает, когда серверов несколько и в карточке «Серверы» выбран автовыбор: Forkozz сам проверяет серверы и держит самый быстрый.', 0));
-				box.appendChild(row('Проверять', seg(UT_IV, draft.ut_iv, function(v) { set('ut_iv', v); })));
+				box.appendChild(hint(draft.mode === 'sub' && draft.sub_priority ? 'В режиме порядка подписок проверка выполняется раз в 2 минуты. Допуск действует только при выборе между серверами одной подписки; при восстановлении более приоритетной подписки возврат обязателен.' : 'Работает, когда серверов несколько и в карточке «Серверы» выбран автовыбор: Forkozz сам проверяет серверы и держит самый быстрый.', 0));
+				if (!(draft.mode === 'sub' && draft.sub_priority)) box.appendChild(row('Проверять', seg(UT_IV, draft.ut_iv, function(v) { set('ut_iv', v); })));
 				box.appendChild(row('Допуск', inp('ut_tol', '50', 80, 'мс — на сервер быстрее меньше чем на столько Forkozz не переходит')));
 				var url = draft.ut_url.trim() || UT_URL_DEF, preset = UT_URLS.some(function(u) { return u.id === url; }) && !ownUtUrl;
 				box.appendChild(row('Проверка через', seg(UT_URLS.concat([ { id: 'own', label: 'Свой адрес' } ]), preset ? url : 'own', function(v) {
@@ -25048,6 +25515,7 @@ return view.extend({
 					if (!ownUtUrl) set('ut_url', v); else renderPanes();
 				})));
 				if (!preset) box.appendChild(row('Адрес', inp('ut_url', 'https://…/generate_204', 340)));
+				box.appendChild(sw(draft.direct_fallback, 'Напрямую при отказе всех VPN', 'Если ни один сервер секции не проходит проверку доступности, её сервисы, домены и адреса временно идут напрямую. Проверка повторяется раз в 2 минуты; после восстановления VPN секция возвращается к рабочему серверу. Фильтр устройств сохраняется. По умолчанию выключено.', function() { set('direct_fallback', !draft.direct_fallback); }));
 				box.appendChild(sw(draft.uot, 'UDP поверх TCP', 'Для серверов Shadowsocks и SOCKS: UDP (звонки, игры, QUIC) пойдёт внутри TCP. Включайте, если сервер не пропускает UDP.', function() { set('uot', !draft.uot); }));
 			} else {
 				box.appendChild(E('h4', {}, 'DNS туннеля'));
@@ -25178,9 +25646,11 @@ return view.extend({
 				zm.toast('Выбрано: ' + name, 'info');
 				if (servers && cfg && (cfg.sec || '') === forSec) {
 					servers.now = tag; servers.fell = '';
+					if (servers.fallback) servers.fallback.direct = false;
 					var nt = servers.nodes && servers.nodes[tag];
 					var se = secState && (secState.sections || []).filter(function(e) { return e.name === forSec; })[0];
 					if (se) {
+						se.fallback_direct = false;
 						se.auto = !!(nt && nt.members);
 						if (nt && nt.members) { var an = servers.nodes[nt.now]; se.server = an ? an.name || nt.now : ''; se.delay = an ? an.delay : -1; }
 						else { se.server = nt ? nt.name || tag : name; se.delay = nt ? nt.delay : -1; }
@@ -25216,12 +25686,14 @@ return view.extend({
 			var manual = S.list.filter(function(t) { return t !== autoTag && !(ns[t] && ns[t].hidden); });
 
 			var sub = servers.sub;
+			var direct = !!(servers.fallback && servers.fallback.direct);
+			if (direct) srvCard.appendChild(E('p', { 'class': 'zm-hint' }, 'VPN секции недоступны — её сервисы, домены и адреса временно идут напрямую. Forkozz проверяет серверы раз в 2 минуты и вернёт VPN после восстановления.'));
 			if (sub && (sub.title || sub.used != null || sub.expire)) {
 				if (sub.title) srvCard.appendChild(row('Подписка', E('b', {}, [ subName(sub.title) ])));
 				if (sub.used != null) srvCard.appendChild(row('Трафик', E('span', {}, fmtBytes(sub.used) + (sub.total ? ' из ' + fmtBytes(sub.total) : sub.unlimited ? ' · без лимита' : ''))));
 				if (sub.expire) srvCard.appendChild(row('Действует до', E('span', {}, fmtDate(sub.expire))));
 			}
-			if (servers.fell && (isAuto || nodeName(cur) !== servers.fell)) srvCard.appendChild(E('div', { 'class': 'zm-refresh-banner zm-show', 'role': 'note' }, [
+			if (!direct && servers.fell && (isAuto || nodeName(cur) !== servers.fell)) srvCard.appendChild(E('div', { 'class': 'zm-refresh-banner zm-show', 'role': 'note' }, [
 				E('span', {}, [ 'Сервер «', String(servers.fell), '» перестал отвечать — Forkozz сам переключился на ' + (isAuto ? 'автовыбор. Чтобы вернуть его, переключите режим на «Вручную» и выберите его в списке.' : 'другой рабочий сервер. Чтобы вернуть его, нажмите на него в списке.') ])
 			]));
 			if (auto) srvCard.appendChild(row('Режим', seg([ { id: 'auto', label: 'Авто' }, { id: 'manual', label: 'Вручную' } ], isAuto ? 'auto' : 'manual', function(m) {
@@ -25229,12 +25701,12 @@ return view.extend({
 				else if (curTag) pickServer(curTag, nodeName(cur));
 			})));
 			srvCard.appendChild(row('Сейчас', E('span', { 'style': 'display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap' }, [
-				E('b', {}, [ curTag ? nodeName(cur) : '—' ]),
-				cur.type ? E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, [ String(cur.type).toLowerCase() ]) : E([]),
-				cur.delay >= 0 ? E('span', { 'class': 'zm-lat ' + (cur.delay === 0 ? 'zm-lat-bad' : latClass(cur.delay)) }, latText(cur.delay)) : E([])
+				E('b', {}, [ direct ? 'Напрямую' : curTag ? nodeName(cur) : '—' ]),
+				!direct && cur.type ? E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, [ String(cur.type).toLowerCase() ]) : E([]),
+				!direct && cur.delay >= 0 ? E('span', { 'class': 'zm-lat ' + (cur.delay === 0 ? 'zm-lat-bad' : latClass(cur.delay)) }, latText(cur.delay)) : E([])
 			])));
 
-			var tags = (isAuto ? (auto.members || []) : manual).filter(function(t) { return !(ns[t] && ns[t].hidden); });
+			var tags = (isAuto ? serverMembers(auto.members || [], ns) : manual).filter(function(t) { return !(ns[t] && ns[t].hidden); });
 			var hn = servers.hide_names || [], shown = {};
 			var hpItems = S.list.filter(function(t) { return t !== autoTag && ns[t] && !ns[t].members; }).map(function(t) {
 				var n = ns[t], nm = n.name || t, byName = hn.indexOf(nm) >= 0;
@@ -25264,7 +25736,7 @@ return view.extend({
 				renderServers();
 				if (sortPing && !tested && !latBusy) testLatency();
 			}));
-			srvCard.appendChild(E('p', { 'class': 'zm-hint' }, isAuto ? 'Авто: Forkozz сам выбирает лучший из этих серверов. Нажмите на сервер, чтобы закрепить его.' : 'Нажмите на сервер, чтобы переключиться. Выбор держится до перезагрузки роутера.'));
+			srvCard.appendChild(E('p', { 'class': 'zm-hint' }, isAuto ? servers.priority ? 'Авто: используется первая доступная подписка в порядке ссылок. После её восстановления Forkozz возвращается к ней, даже если резервная быстрее. Нажатие на сервер включает ручной выбор.' : 'Авто: Forkozz сам выбирает лучший из этих серверов. Нажмите на сервер, чтобы закрепить его.' : servers.priority ? 'Нажмите на сервер, чтобы переключиться. Чтобы снова использовать автоматический порядок подписок, выберите «Авто».' : 'Нажмите на сервер, чтобы переключиться. Выбор держится до перезагрузки роутера.'));
 			srvCard.appendChild(hidePick);
 		}
 
@@ -25316,13 +25788,14 @@ return view.extend({
 
 		var takenMemo = null;
 		function takenMap() {
-			var key = cfg ? JSON.stringify([ draft.sec, secs() ]) : '';
+			var key = cfg ? JSON.stringify([ draft.sec, draft.full, secs() ]) : '';
 			if (takenMemo && takenMemo.key === key) return takenMemo.map;
 			var map = {}, ri = {}, shadow = [], list = secs(), cur = -1;
 			list.forEach(function(s, i) { if (s.name === draft.sec) cur = i; });
 			if (cur < 0) cur = list.length;
 			list.forEach(function(s, i) {
 				if (s.name === draft.sec) return;
+				if (!deviceScopesOverlap(draft.full, s.full || [])) return;
 				var p = secPick(cfg, s);
 				Object.keys(p.sel).forEach(function(id) { if (p.sel[id] && id.indexOf('old:') !== 0 && !map[id]) map[id] = s.label; });
 				if (!s.enabled) return;
@@ -25440,33 +25913,44 @@ return view.extend({
 			bypCard.appendChild(E('p', { 'class': 'zm-hint' }, 'После сохранения устройства могут ещё пару минут помнить старый адрес сайта — если сайт всё ещё идёт через VPN, очистите DNS-кэш или перезапустите браузер. Проверить, куда пойдёт сайт, можно в «Куда пойдёт запрос» на вкладке «Подключение».'));
 		}
 
-		function devCard(card, key, other, title, hint) {
+		function devCard(card, key, title, hint) {
 			card.innerHTML = '';
-			var list = draft[key], devs = (cfg && cfg.devices) || [], known = {};
+			var list = draft[key], devs = (cfg && cfg.devices) || [], known = {}, assigned = {};
+			secs().forEach(function(s) {
+				(s.name === draft.sec ? draft.full : s.full || []).forEach(function(ip) {
+					if (!assigned[ip]) assigned[ip] = [];
+					assigned[ip].push(s.label);
+				});
+			});
 			card.appendChild(E('h3', {}, [ title + ' ', list.length ? badge(key === 'full' ? 'zm-ok' : 'zm-warn', nn(list.length, 'устройство', 'устройства', 'устройств')) : E([]) ]));
 			card.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:-6px' }, hint));
 			function toggle(ip) {
 				var l = draft[key].slice(), i = l.indexOf(ip);
 				if (i >= 0) l.splice(i, 1);
-				else {
-					l.push(ip);
-					var o = draft[other].indexOf(ip);
-					if (o >= 0) { draft[other] = draft[other].slice(); draft[other].splice(o, 1); }
-				}
+				else l.push(ip);
 				set(key, l);
 			}
 			var grid = E('div', { 'class': 'zm-nodes' });
+			function foot(ip, base) {
+				var labels = assigned[ip] || [];
+				return base + (labels.length ? ' · ' + labels.join(', ') : '') + (draft.excl.indexOf(ip) >= 0 && key === 'full' ? ' · мимо Forkozz' : '');
+			}
 			devs.forEach(function(d) {
 				known[d.ip] = true;
-				grid.appendChild(node(d.name || d.ip, d.name ? d.ip : 'без имени', list.indexOf(d.ip) >= 0, function() { toggle(d.ip); }));
+				grid.appendChild(node(d.name || d.ip, foot(d.ip, d.name ? d.ip : 'без имени'), list.indexOf(d.ip) >= 0, function() { toggle(d.ip); }));
 			});
-			list.forEach(function(ip) { if (!known[ip]) grid.appendChild(node(ip, 'добавлен вручную', true, function() { toggle(ip); })); });
-			if (!devs.length && !list.length) grid.appendChild(E('p', { 'class': 'zm-hint', 'style': 'grid-column: 1 / -1; margin: 0' }, 'Устройства не найдены — добавьте адрес вручную.'));
+			list.concat(Object.keys(assigned)).forEach(function(ip) {
+				if (known[ip]) return;
+				known[ip] = true;
+				grid.appendChild(node(ip, foot(ip, 'добавлен вручную'), list.indexOf(ip) >= 0, function() { toggle(ip); }));
+			});
+			if (!grid.childNodes.length) grid.appendChild(E('p', { 'class': 'zm-hint', 'style': 'grid-column: 1 / -1; margin: 0' }, 'Устройства не найдены — добавьте адрес вручную.'));
 			card.appendChild(grid);
 			var inp = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'placeholder': '192.168.1.100', 'style': 'flex:1; min-width:180px' });
 			function add() {
 				var v = inp.value.trim();
-				if (!/^\d{1,3}(\.\d{1,3}){3}(\/\d{1,2})?$/.test(v)) { zm.toast('Введите IP-адрес, например 192.168.1.100', 'warning'); return; }
+				var m = v.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\/(\d{1,2}))?$/);
+				if (!m || m.slice(1, 5).some(function(x) { return +x > 255; }) || m[5] != null && +m[5] > 32) { zm.toast('Введите IP-адрес или подсеть, например 192.168.1.100 или 192.168.1.0/24', 'warning'); return; }
 				if (draft[key].indexOf(v) < 0) toggle(v);
 			}
 			inp.addEventListener('keydown', function(ev) { if (ev.key === 'Enter') { ev.preventDefault(); add(); } });
@@ -25474,8 +25958,9 @@ return view.extend({
 		}
 
 		function renderDev() {
-			devCard(fullCard, 'full', 'excl', 'Всё через Forkozz', 'Весь интернет устройства идёт через подключение' + (secs().length > 1 ? ' секции «' + mainName() + '»' : '') + '. Удобно для ТВ и приставок. Исключения действуют и здесь.');
-			devCard(exclCard, 'excl', 'full', 'Мимо Forkozz', 'Устройство всегда ходит напрямую.');
+			devCard(fullCard, 'full', 'Устройства для правил секции «' + secName() + '»', 'Через подключение этой секции идут только её сервисы, свои домены и адреса с выбранных устройств. Остальной трафик проверяется по другим секциям, затем идёт напрямую. Если ничего не выбрано, правила секции действуют для всех устройств. Одно устройство можно выбрать в нескольких секциях. «Мимо Forkozz» и исключения имеют приоритет. Для устройства закрепите IP в DHCP.');
+			if (!draft.isMain && !draft.enabled) fullCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Секция выключена: её правила не действуют. Выбор устройств в остальных секциях сохраняется.'));
+			devCard(exclCard, 'excl', 'Мимо Forkozz', 'Общий список для всех секций: устройство всегда ходит напрямую. Этот выбор имеет приоритет над правилами секций и не меняет их списки устройств.');
 		}
 
 		function dnsUniq(t, list) {
@@ -25712,7 +26197,7 @@ return view.extend({
 			miscCard.innerHTML = '';
 			miscCard.appendChild(E('h3', {}, 'Прочее'));
 			miscCard.appendChild(sw(draft.quic_off, 'Отключить QUIC для выбранных сервисов', 'Приложения перейдут на обычный HTTPS — через сервер так стабильнее.', function() { set('quic_off', !draft.quic_off); }));
-			miscCard.appendChild(sw(draft.excl_bt, 'Торренты — напрямую', 'Трафик BitTorrent пойдёт мимо VPN, даже с устройств «Всё через Forkozz». Некоторые сервисы блокируют подписку, заметив торренты.', function() { set('excl_bt', !draft.excl_bt); }));
+			miscCard.appendChild(sw(draft.excl_bt, 'Торренты — напрямую', 'Трафик BitTorrent пойдёт мимо VPN, даже если устройство выбрано в секции. Некоторые сервисы блокируют подписку, заметив торренты.', function() { set('excl_bt', !draft.excl_bt); }));
 			miscCard.appendChild(sw(draft.excl_ntp, 'Синхронизация времени — напрямую', 'Запросы NTP не пойдут через VPN: часы устройств сверяются с ближайшим сервером времени.', function() { set('excl_ntp', !draft.excl_ntp); }));
 			miscCard.appendChild(E('h4', { 'style': 'margin:18px 0 4px' }, 'Списки сервисов'));
 			miscCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:0' }, 'Домены и адреса выбранных сервисов (YouTube, Discord и другие) — по ним Forkozz понимает, что вести через VPN.'));
@@ -25779,15 +26264,19 @@ return view.extend({
 		function routeVerdict(r) {
 			var sl = secs(), rs = sl.filter(function(s) { return s.name === r.section; })[0] || (sl.length === 1 ? sl[0] : null);
 			var lines = [], via = rs ? (rs.mode === 'iface' ? 'интерфейс ' + (rs.iface || '') : 'VPN') : 'VPN';
+			if (r.action === 'source_required') return { tone: 'warn', cls: 'zm-warn', label: 'нужен IP устройства', title: 'маршрут зависит от устройства', note: 'Укажите IP устройства над полем сайта и повторите проверку.' };
+			if (r.source) lines.push([ 'Устройство', r.source ]);
 			if (r.verdict === 'bypass') {
 				return { tone: 'warn', cls: 'zm-warn', label: 'напрямую · исключение', title: 'адрес в исключениях — идёт мимо VPN', lines: lines,
-					note: 'Он есть на вкладке «Исключения». Чтобы он снова шёл через VPN, уберите его оттуда и сохраните.' };
+					note: 'Проверьте вкладки «Исключения» и «Устройства → Мимо Forkozz». Чтобы запрос снова шёл через VPN, уберите соответствующее исключение и сохраните.' };
 			}
 			if (r.verdict === 'off') return { tone: 'off', cls: 'zm-off', label: 'Forkozz не работает', title: 'запрос пойдёт напрямую', note: 'Запустите Forkozz и проверьте ещё раз.' };
 			if (r.addr && !r.ip) lines.push([ 'Адрес', r.how === 'fakeip' ? [ r.addr, ' (подменный — домен есть в списках Forkozz)' ] : r.addr ]);
 			if (r.how === 'subnet') lines.push([ 'Совпадение', 'адрес входит в подсети Forkozz' ]);
 			if (sl.length > 1 && rs) lines.push([ 'Секция', rs.label ]);
 			else if (r.rule) lines.push([ 'Правило', r.rule ]);
+			if (r.action === 'fallback_direct') return { tone: 'warn', cls: 'zm-warn', label: 'напрямую · VPN недоступны', title: 'сработал резервный прямой выход секции', lines: lines,
+				note: 'Forkozz продолжает проверять VPN раз в 2 минуты и вернёт секцию через рабочий сервер после восстановления.' };
 			if (r.verdict === 'proxy') {
 				if (rs) lines.push([ 'Выход', secConn(rs) ]);
 				else if (r.outbound) lines.push([ 'Выход', r.outbound ]);
@@ -25815,13 +26304,16 @@ return view.extend({
 			routeCard.style.display = show ? '' : 'none';
 			if (!show) return;
 			if (!routeBox) routeBox = zm.routeCheck({
-				call: function(v) { return zm.forkopAction('route', v); },
+				call: function(v) { return zm.forkopAction('route', v + '|' + routeSource.trim()); },
 				verdict: routeVerdict
 			});
 			if (routeBox.parentNode === routeCard) return;
 			routeCard.innerHTML = '';
 			routeCard.appendChild(E('h3', {}, 'Куда пойдёт запрос'));
-			routeCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Введите сайт или IP-адрес — Forkozz покажет, пойдёт он через VPN или напрямую.'));
+			routeCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Введите сайт или IP-адрес назначения. Если правила ограничены устройствами, укажите также IP устройства, с которого идёт запрос.'));
+			var sourceInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'placeholder': '192.168.1.100', 'value': routeSource });
+			sourceInput.addEventListener('input', function() { routeSource = sourceInput.value; routeBox.reset(); });
+			routeCard.appendChild(row('IP устройства', sourceInput));
 			routeCard.appendChild(routeBox);
 		}
 
@@ -30011,6 +30503,10 @@ if ! uci -q get uhttpd.zmweb >/dev/null; then
 	ZMW_RESTART=1
 fi
 [ "$ZMW_RESTART" = "1" ] && { /etc/init.d/uhttpd restart >/dev/null 2>&1 || true; }
+
+if [ -x /usr/bin/netshift ] && [ -f /usr/lib/netshift/constants.sh ]; then
+	/opt/zapret-manager-luci/backend.sh forkop_device_setup apply
+fi
 
 ZMW_PORT="$(uci -q get uhttpd.zmweb.listen_http | tr ' ' '\n' | head -n1 | sed 's/.*://')"
 ZMW_IP="$(/opt/zapret-manager-luci/backend.sh lan_ip 2>/dev/null || true)"
