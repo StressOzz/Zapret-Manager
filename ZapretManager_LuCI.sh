@@ -1,10 +1,10 @@
 #!/bin/sh
-# Version: 2.43
+# Version: 2.47
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
-ZM_NEW_VER="2.43"
+ZM_NEW_VER="2.47"
 _zmi_say() { echo -e "${CYAN}==>${NC} $*"; }
 _zmi_ok() { echo -e "   ${GREEN}✓${NC} $*"; }
 _zmi_step() { echo -e "   → $*"; }
@@ -79,7 +79,7 @@ cat > '/opt/zapret-manager-luci/backend.sh.zm-new' << 'ZM_INSTALLER_EOF'
 umask 022
 
 CONF="/etc/config/zapret"
-ZM_VERSION="2.43"
+ZM_VERSION="2.47"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -799,6 +799,7 @@ zm_watch() {
 	rpcd_watch
 	_zm_net_orphan && _zm_net_restore force >/dev/null 2>&1
 	_fk_watch
+	_fk_fast_patch
 	_st_legacy_check
 	_st_vpn_watch
 	_tg_watch
@@ -2582,6 +2583,19 @@ _zm_junk() {
 	[ "$1" = install ] || { [ -e /tmp/zm_update_install.log ] && echo /tmp/zm_update_install.log; }
 	[ -e "$ZM_UP_FILE" ] && echo "$ZM_UP_FILE"
 	for f in /tmp/zm-rpc.*; do _zm_aged "$f" 10 && echo "$f"; done
+	if ! _job_running strategy_test; then
+		for f in "$JOBS_DIR"/strategy_test/results_*.txt "$JOBS_DIR"/strategy_test/detail_*.txt "$JOBS_DIR"/strategy_test/log_*.txt "$JOBS_DIR"/strategy_test/urls.txt \
+			"$JOBS_DIR"/strategy_test/candidates.txt "$JOBS_DIR"/strategy_test/block.txt "$JOBS_DIR"/strategy_test/sort.* "$JOBS_DIR"/strategy_test/ok.* "$JOBS_DIR"/strategy_test/pids.*; do
+			[ -e "$f" ] && echo "$f"
+		done
+	fi
+	n="$(cat /tmp/bytetube-test/job.pid 2>/dev/null)"
+	case "$n" in ''|*[!0-9]*) n="" ;; esac
+	if [ -z "$n" ] || ! kill -0 "$n" 2>/dev/null; then
+		for f in /tmp/bytetube-test/results.txt /tmp/bytetube-test/results.raw /tmp/bytetube-test/job.log /tmp/bytetube-test/job.pid /tmp/bytetube-test/stop; do
+			[ -e "$f" ] && echo "$f"
+		done
+	fi
 	for f in "$JOBS_DIR"/*.pid; do
 		[ -f "$f" ] || continue
 		n="$(basename "$f" .pid)"
@@ -2670,7 +2684,7 @@ zm_cleanup() {
 	while IFS= read -r f; do
 		case "$f" in
 			/tmp/zm_update_install.sh) continue ;;
-			/tmp/zm[-_]*|/tmp/ytb-*|/tmp/netshift-sbext.*|/tmp/mihomo.gz|/tmp/zashboard|/tmp/zashboard.zip|/tmp/metacubexd|/tmp/metacubexd.tgz|/tmp/tg-ws-proxy.ipk|/tmp/tg-ws-proxy.apk) ;;
+			/tmp/zm[-_]*|/tmp/ytb-*|/tmp/bytetube-test/?*|/tmp/netshift-sbext.*|/tmp/mihomo.gz|/tmp/zashboard|/tmp/zashboard.zip|/tmp/metacubexd|/tmp/metacubexd.tgz|/tmp/tg-ws-proxy.ipk|/tmp/tg-ws-proxy.apk) ;;
 			/tmp/zapret-manager-luci/?*|/opt/zapret-manager-luci/?*|/etc/zm-steer/?*|/etc/hosts.zmtmp|/etc/hosts.zmdrop) ;;
 			/usr/lib/zapret-manager*|/etc/zapret_manager_expert_mode*|/usr/share/zm-redbtn/lists|/www/luci-static/resources/zapret-manager/?*|/www/luci-static/resources/view/zapret-manager/?*) ;;
 			*) continue ;;
@@ -13229,6 +13243,132 @@ _fk_ip_clean() {
 	return 0
 }
 
+_fk_fast_patch() {
+	local f=/usr/lib/netshift/rulesets.sh n
+	[ -f "$f" ] && [ -f /usr/lib/netshift/nft.sh ] && [ -f /usr/lib/netshift/helpers.sh ] || return 0
+	grep -q '^# zm-fast-begin 1$' "$f" && return 0
+	for n in patch_source_ruleset_rules import_plain_domain_list_to_local_source_ruleset_chunked import_plain_subnet_list_to_local_source_ruleset_chunked extract_ip_cidr_from_json_ruleset_to_file; do
+		grep -q "^$n() {" "$f" || return 0
+	done
+	grep -q '^nft_add_set_elements() {' /usr/lib/netshift/nft.sh && grep -q '^nft_add_set_elements_from_file_chunked() {' /usr/lib/netshift/nft.sh || return 0
+	grep -q '^comma_string_to_json_array() {' /usr/lib/netshift/helpers.sh || return 0
+	grep -q '^# zm-fast-begin' "$f" && sed -i '/^# zm-fast-begin/,/^# zm-fast-end$/d' "$f"
+	cat >> "$f" << 'ZM_FK_FAST_EOF'
+# zm-fast-begin 1
+_zm_fast_subnets() {
+	awk -v n="$2" '{ gsub(/\r/, ""); sub(/^[ \t]+/, ""); sub(/[ \t]+$/, ""); if ($0 == "") next
+		m = split($0, p, "/"); if (m > 2) next
+		if (m == 2 && (p[2] !~ /^[0-9]+$/ || length(p[2]) > 2 || p[2] + 0 > 32)) next
+		if (split(p[1], o, ".") != 4) next
+		ok = 1; for (i = 1; i <= 4; i++) if (o[i] !~ /^(0|[1-9][0-9]?[0-9]?)$/ || o[i] + 0 > 255) ok = 0
+		if (!ok || ($0 in seen)) next
+		seen[$0] = 1; buf = buf (c ? "," : "") $0
+		if (++c == n) { print buf; buf = ""; c = 0 } }
+		END { if (c) print buf }' "$1"
+}
+
+_zm_fast_domains() {
+	awk -v n="$2" '{ gsub(/\r/, ""); sub(/^[ \t]+/, ""); sub(/[ \t]+$/, ""); if ($0 == "") next
+		d = tolower($0); t = d; sub(/^\./, "", t)
+		if (t !~ /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/) next
+		if (t ~ /^[0-9.]+$/ || (d in seen)) next
+		seen[d] = 1; buf = buf (c ? "," : "") d
+		if (++c == n) { print buf; buf = ""; c = 0 } }
+		END { if (c) print buf }' "$1"
+}
+
+import_plain_domain_list_to_local_source_ruleset_chunked() {
+	local plain_list_filepath="$1" ruleset_filepath="$2" chunk_size="${3:-1000}" zm_tmp zm_line
+	zm_tmp="$(mktemp)"
+	_zm_fast_domains "$plain_list_filepath" "$chunk_size" > "$zm_tmp"
+	while IFS= read -r zm_line; do
+		[ -n "$zm_line" ] || continue
+		patch_source_ruleset_rules "$ruleset_filepath" "domain_suffix" "$(comma_string_to_json_array "$zm_line")"
+	done < "$zm_tmp"
+	rm -f "$zm_tmp"
+}
+
+import_plain_subnet_list_to_local_source_ruleset_chunked() {
+	local plain_list_filepath="$1" ruleset_filepath="$2" chunk_size="${3:-1000}" zm_tmp zm_line
+	zm_tmp="$(mktemp)"
+	_zm_fast_subnets "$plain_list_filepath" "$chunk_size" > "$zm_tmp"
+	while IFS= read -r zm_line; do
+		[ -n "$zm_line" ] || continue
+		patch_source_ruleset_rules "$ruleset_filepath" "ip_cidr" "$(comma_string_to_json_array "$zm_line")"
+	done < "$zm_tmp"
+	rm -f "$zm_tmp"
+}
+
+nft_add_set_elements_from_file_chunked() {
+	local filepath="$1" nft_table_name="$2" nft_set_name="$3" chunk_size="${4:-5000}" zm_tmp zm_line
+	zm_tmp="$(mktemp)"
+	_zm_fast_subnets "$filepath" "$chunk_size" > "$zm_tmp"
+	while IFS= read -r zm_line; do
+		[ -n "$zm_line" ] || continue
+		nft_add_set_elements "$nft_table_name" "$nft_set_name" "$zm_line"
+	done < "$zm_tmp"
+	rm -f "$zm_tmp"
+}
+
+extract_ip_cidr_from_json_ruleset_to_file() {
+	jq -r '.rules[]? | .ip_cidr? // empty | if type == "array" then .[] else . end' "$1" > "$2" 2>/dev/null
+}
+# zm-fast-end
+ZM_FK_FAST_EOF
+	return 0
+}
+
+_fk_log_mark() {
+	FK_LOGMARK="zm-lists-$$-$(date +%s)"
+	logger -t netshift "[info] $FK_LOGMARK" 2>/dev/null
+	FK_LOGSEEN=0
+}
+
+_fk_lists_progress() {
+	local all tot
+	[ -n "$FK_LOGMARK" ] || return 0
+	all="$(logread 2>/dev/null | awk -v m="$FK_LOGMARK" 'f && /netshift/ { print } index($0, m) { f = 1 }')"
+	tot="$(printf '%s\n' "$all" | grep -c .)"
+	[ "$tot" -gt "${FK_LOGSEEN:-0}" ] 2>/dev/null || return 0
+	printf '%s\n' "$all" | awk -v skip="${FK_LOGSEEN:-0}" '
+		function base(u) { sub(/[?#].*$/, "", u); sub(/^.*\//, "", u); return u }
+		NR <= skip { next }
+		{ sub(/^.*netshift[^:]*: /, ""); sub(/^\[[a-z]+\] /, "") }
+		/Starting lists update/ { print "   → Начинаем загрузку списков"; next }
+		/DNS check passed/ { print "   ✓ DNS отвечает"; next }
+		/DNS check failed/ { print "   ✗ DNS не ответил — списки не скачаны"; next }
+		/DNS is unavailable/ { print "   · DNS пока не отвечает — пробуем ещё раз"; next }
+		/GitHub connection check passed/ { print "   ✓ GitHub доступен"; next }
+		/GitHub connection check failed/ { print "   ✗ GitHub недоступен — списки не скачаны"; next }
+		/GitHub is unavailable/ { print "   · GitHub пока не отвечает — пробуем ещё раз"; next }
+		/Downloading and processing lists/ { print "   → Скачиваем и разбираем списки"; next }
+		/Importing community subnet lists for/ { print "   → Адреса встроенных сервисов — заносим в файрвол"; next }
+		/Importing domains from URL: / { u = $0; sub(/^.*URL: /, "", u); print "   → Домены из списка " base(u); next }
+		/Importing subnets from URL: / { u = $0; sub(/^.*URL: /, "", u); print "   → Адреса из списка " base(u) " — заносим в файрвол"; next }
+		/^Download .* list failed/ { u = $2; print "   ✗ Не скачался список " base(u); next }
+		/Failed to decompile binary rule set/ { print "   ✗ Набор правил не раскрылся — его адреса пропущены"; next }
+		/Lists update completed successfully/ { print "   ✓ Все списки загружены"; next }
+		/Lists update failed/ { print "   ✗ Часть списков не загрузилась — работают остальные"; next }'
+	FK_LOGSEEN="$tot"
+	return 0
+}
+
+_fk_lists_wait() {
+	local p i=0 max="${1:-240}"
+	p="${2:-$(cat /var/run/netshift_list_update.pid 2>/dev/null)}"
+	case "$p" in ''|*[!0-9]*) return 0 ;; esac
+	kill -0 "$p" 2>/dev/null || { _fk_lists_progress; return 0; }
+	_fk_say "Forkozz скачивает списки и заносит адреса в файрвол"
+	while [ "$i" -lt "$max" ]; do
+		_fk_lists_progress
+		kill -0 "$p" 2>/dev/null || { _fk_lists_progress; return 0; }
+		sleep 2
+		i=$((i + 2))
+	done
+	_fk_lists_progress
+	return 1
+}
+
 _fk_lists_report() {
 	local c=/etc/sing-box/config.json n=0 i=0 t ty u pth sz lines tbl sets set cnt shown=0
 	if [ -s "$c" ]; then
@@ -13263,7 +13403,10 @@ _fk_lists_report() {
 			cnt="$(nft list set inet "$FK_NFT" "$set" 2>/dev/null | sed -n '/elements = {/,/}/p' | tr ',' '\n' | grep -c '[0-9a-f]')"
 			[ "$cnt" -gt 0 ] 2>/dev/null || continue
 			[ "$shown" = 0 ] && { _fk_say "Адреса в правилах файрвола (nftables):"; shown=1; }
-			echo "   · $set — $cnt"
+			case "$set" in
+				netshift_subnets|netshift_subnets_v6) echo "   · $set — $cnt (адреса и подсети из списков)" ;;
+				*) echo "   · $set — $cnt" ;;
+			esac
 		done
 	fi
 	return 0
@@ -13440,6 +13583,7 @@ do_fk_install() {
 	fi
 	chmod 0755 /usr/bin/netshift /etc/init.d/netshift
 	chmod -R a+rX /usr/lib/netshift
+	_fk_fast_patch
 	rm -rf "$tmp"
 
 	if [ ! -s /etc/config/netshift ]; then
@@ -13731,6 +13875,8 @@ do_fk_service() {
 	_fk_log_default
 	local lx; lx="$(_fk_log_ext)"
 	/etc/init.d/netshift enable >/dev/null 2>&1
+	_fk_fast_patch
+	_fk_log_mark
 	: > "$JOBS_DIR/forkop-svc.out"
 	if [ "$a" = apply ] && _fk_up; then
 		_fk_say "Применяем настройки: Forkozz пересобирает конфиг sing-box и подхватывает списки"
@@ -13761,6 +13907,7 @@ do_fk_service() {
 	if _fk_up; then
 		_fk_say "Проверяем, что всё работает"
 		_fk_check_live
+		_fk_lists_wait 240 || _rb_warn "Списки ещё скачиваются — числа ниже могут быть неполными. Они догрузятся сами; позже нажмите «Обновить списки сейчас», чтобы увидеть итог"
 		_fk_lists_report
 		_fk_lists_errors
 		_fk_ext_auto all "$lx"
@@ -13786,9 +13933,18 @@ do_fk_lists() {
 	local rc=0 out="$JOBS_DIR/forkop-lists.out"
 	_fk_installed || { echo "ОШИБКА: Forkozz не установлен"; return 1; }
 	_fk_up || { echo "ОШИБКА: Forkozz выключен — включите его, и списки скачаются сами"; return 1; }
-	_fk_say "Скачиваем свежие списки сервисов и обновляем адреса в файрволе"
-	_zm_run 300 /usr/bin/netshift list_update > "$out" 2>&1 || rc=1
-	sed 's/\x1b\[[0-9;]*m//g' "$out" 2>/dev/null | grep -v '^[[:space:]]*$' | tail -n 15 | sed 's/^/   /'
+	local lp
+	_fk_fast_patch
+	_fk_log_mark
+	/usr/bin/netshift list_update > "$out" 2>&1 &
+	lp=$!
+	if ! _fk_lists_wait 300 "$lp"; then
+		_zm_kill_tree "$lp"
+		_rb_warn "Загрузка списков не завершилась за 5 минут — прерываем её"
+		rc=1
+	fi
+	wait "$lp" 2>/dev/null || rc=1
+	sed 's/\x1b\[[0-9;]*m//g' "$out" 2>/dev/null | grep -v '^[[:space:]]*$' | grep -iE 'error|fail|ошиб' | grep -v '^jq: ' | tail -n 8 | sed 's/^/   /'
 	rm -f "$out"
 	if [ "$rc" != 0 ]; then
 		echo "!! Скачивание списков завершилось с ошибкой — работают прежние"
@@ -17825,7 +17981,9 @@ function dockSync() {
 	});
 	_dockEl.classList.toggle('zm-dock-on', shown.length > 0);
 	var pad = shown.length ? (_dockEl.offsetHeight + 28) + 'px' : '';
-	if (document.body.style.paddingBottom !== pad) document.body.style.paddingBottom = pad;
+	var padEl = document.querySelector('.zmw-main') || document.body;
+	if (padEl !== document.body && document.body.style.paddingBottom) document.body.style.paddingBottom = '';
+	if (padEl.style.paddingBottom !== pad) padEl.style.paddingBottom = pad;
 	toastFit();
 }
 
@@ -18069,7 +18227,7 @@ var SVC_BRANDS = [
 	[ /steam/i, '#1b2838', 'ST' ], [ /cloudflare/i, '#f38020', 'CF' ], [ /amazon|aws|cloudfront/i, '#ff9900', 'AW' ],
 	[ /linkedin/i, '#0a66c2', 'IN' ], [ /soundcloud/i, '#ff5500', 'SC' ], [ /reddit/i, '#ff4500', 'RD' ], [ /nalog/i, '#1f4e8c', 'НЛ' ],
 	[ /rutor|rutracker|torrent/i, '#6b7280', 'RT' ], [ /hetzner/i, '#d50c2d', 'HZ' ], [ /ovh/i, '#123f6d', 'OV' ], [ /digitalocean/i, '#0080ff', 'DO' ],
-	[ /hodca|хостинг/i, '#0f766e', 'HC' ]
+	[ /hodca|h\.o\.d\.c\.a|хостинг/i, '#0f766e', 'HC' ]
 ];
 var SVC_PALETTE = [ '#6366f1', '#0ea5e9', '#14b8a6', '#10b981', '#84cc16', '#f59e0b', '#f97316', '#ef4444', '#ec4899', '#8b5cf6', '#64748b', '#0891b2' ];
 
@@ -21372,7 +21530,7 @@ block|Заблокированные сайты||||||block
 news|Новости||||||news
 anime|Аниме||||||anime
 porn|Сайты 18+||||||porn
-hodca|Хостинги и CDN||||||hodca
+hodca|H.O.D.C.A.||||||hodca
 russia_inside|Всё сразу (Russia inside)||||||russia_inside
 russia_outside|Сайты РФ из-за рубежа||||||russia_outside
 ukraine_inside|Блокировки Украины||||||ukraine_inside
@@ -25081,7 +25239,7 @@ return view.extend({
 		}
 		var cleanCard = E('div', { 'class': 'zm-card' }, [
 			E('h3', {}, 'Очистка Zapret Manager'),
-			E('p', { 'class': 'zm-hint' }, 'Удаляет с роутера временные файлы и мусор панели. Настройки и установленные программы не трогает.'),
+			E('p', { 'class': 'zm-hint' }, 'Удаляет с роутера временные файлы и мусор панели: журналы операций, результаты тестов стратегий Zapret и ByeTube, недокачанные архивы, кэш списков невыбранных сервисов, сведения о новых версиях, собранную системную информацию и остатки прошлых версий. Настройки и установленные программы не трогает.'),
 			E('div', { 'class': 'zm-actions' }, [
 				E('button', {
 					'class': 'cbi-button cbi-button-action',
@@ -25592,7 +25750,7 @@ var OLD_GROUP = 'Выбрано раньше (нет в каталоге)';
 var OLD_NAMES = { supercell: 'Supercell', ads_hagezi_pro: 'Реклама (HaGeZi Pro)', github: 'GitHub', youtube: 'YouTube', discord: 'Discord',
 	telegram: 'Telegram', meta: 'Meta', twitter: 'X (Twitter)', tiktok: 'TikTok', hdrezka: 'HDRezka', roblox: 'Roblox', google_ai: 'Google AI (Gemini)',
 	google_play: 'Google Play', cloudflare: 'Cloudflare', cloudfront: 'Amazon CloudFront', digitalocean: 'DigitalOcean', hetzner: 'Hetzner', ovh: 'OVH',
-	hodca: 'Хостинги и CDN', russia_outside: 'Сайты РФ из-за рубежа', ukraine_inside: 'Блокировки Украины' };
+	hodca: 'H.O.D.C.A.', russia_outside: 'Сайты РФ из-за рубежа', ukraine_inside: 'Блокировки Украины' };
 
 function refNorm(t) {
 	t = String(t || '');
@@ -31934,6 +32092,7 @@ ZMW_IP="$(/opt/zapret-manager-luci/backend.sh lan_ip 2>/dev/null || true)"
 [ -n "$ZMW_IP" ] || ZMW_IP="192.168.1.1"
 
 echo "sh <(wget -q -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)" > /usr/bin/zms; chmod +x /usr/bin/zms
+echo "sh <(wget -q -O - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/main/ZapretManager_LuCI.sh)" > /usr/bin/zmw; chmod +x /usr/bin/zmw
 if [ "$ZMW_OK" = 1 ]; then _zmi_ok "Web UI включён на порту ${ZMW_PORT:-7788}"
 else _zmi_warn "Web UI не включён: на роутере нет веб-сервера uhttpd или не установился uhttpd-mod-ubus"; fi
 echo -e "\n${GREEN}Готово: Zapret Manager $ZM_NEW_VER установлен${NC}\n"
