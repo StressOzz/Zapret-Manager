@@ -1,10 +1,10 @@
 #!/bin/sh
-# Version: 2.47
+# Version: 2.48
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
-ZM_NEW_VER="2.47"
+ZM_NEW_VER="2.48"
 _zmi_say() { echo -e "${CYAN}==>${NC} $*"; }
 _zmi_ok() { echo -e "   ${GREEN}✓${NC} $*"; }
 _zmi_step() { echo -e "   → $*"; }
@@ -79,7 +79,7 @@ cat > '/opt/zapret-manager-luci/backend.sh.zm-new' << 'ZM_INSTALLER_EOF'
 umask 022
 
 CONF="/etc/config/zapret"
-ZM_VERSION="2.47"
+ZM_VERSION="2.48"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -14996,7 +14996,11 @@ function own_view(m, typed) {
 }
 
 function device_ips(m) {
-	return uniq([ ...words(m.zm_rule_source_ips), ...words(m.fully_routed_ips) ]);
+	return uniq(words(m.zm_rule_source_ips));
+}
+
+function all_ips(m) {
+	return uniq(words(m.fully_routed_ips));
 }
 
 function url_ext(u) {
@@ -15047,7 +15051,7 @@ function sec_summary(c, sec, main) {
 		iface: s(m.interface), links: length(sec_links(m)),
 		refs: { c: rf.c, s: rf.s, r: rf.r }, lists: rf.l,
 		domains: length(domain_lines(m)), subnets: length(subnet_lines(m)), own_off: own_off(m),
-		full: device_ips(m)
+		full: device_ips(m), all: all_ips(m)
 	};
 }
 
@@ -15186,10 +15190,11 @@ function set_list(c, sec, key, list) {
 	else c.delete(CFG, sec, key);
 }
 
-function write_device_lists(c, sec, full, excl) {
+function write_device_lists(c, sec, full, excl, all) {
 	set_list(c, sec, "zm_rule_source_ips", full);
-	c.delete(CFG, sec, "fully_routed_ips");
+	set_list(c, sec, "fully_routed_ips", all || []);
 	if (!c.get(CFG, "settings")) c.set(CFG, "settings", "settings");
+	c.set(CFG, "settings", "zm_dev_v2", "1");
 	set_list(c, "settings", "routing_excluded_ips", excl);
 }
 
@@ -15271,7 +15276,8 @@ function patch_device_engine() {
 
 function cmd_device_setup() {
 	let patched = patch_device_engine(), c = cursor(), migrated = false;
-	let legacy = filter(sections(c, "section"), (x) => is_conn(x) && length(words(x.fully_routed_ips)));
+	let v2 = s(c.get(CFG, "settings", "zm_dev_v2")) == "1";
+	let legacy = v2 ? [] : filter(sections(c, "section"), (x) => is_conn(x) && length(words(x.fully_routed_ips)));
 	if (length(legacy)) {
 		let backup = STATE + "/netshift.before-device-rules.conf";
 		if (!fs.access(backup)) {
@@ -15280,12 +15286,16 @@ function cmd_device_setup() {
 				fail("не удалось сохранить настройки перед переносом устройств");
 		}
 		for (let x in legacy) {
-			set_list(c, x[".name"], "zm_rule_source_ips", device_ips(x));
+			set_list(c, x[".name"], "zm_rule_source_ips", uniq([ ...device_ips(x), ...all_ips(x) ]));
 			c.delete(CFG, x[".name"], "fully_routed_ips");
 		}
+		migrated = true;
+	}
+	if (!v2) {
+		if (!c.get(CFG, "settings")) c.set(CFG, "settings", "settings");
+		c.set(CFG, "settings", "zm_dev_v2", "1");
 		c.save(CFG);
 		c.commit(CFG);
-		migrated = true;
 	}
 	out({ ok: true, changed: patched || migrated, migrated });
 }
@@ -15663,6 +15673,7 @@ function cmd_get(want) {
 		subnets: own_view(m, rf.l).subnets,
 		lists: own_view(m, rf.l).lists,
 		full: device_ips(m),
+		all: all_ips(m),
 		excl: uniq(words(st.routing_excluded_ips)),
 		extra: p.extra,
 		dns: dns_info(st),
@@ -15746,8 +15757,10 @@ function cmd_set() {
 	lists = uniq([ ...lists, ...rplain ]);
 	let full = d.full == null ? device_ips(c.get_all(CFG, sec) || {}) : uniq(tokens(d.full));
 	let excl = d.excl == null ? uniq(words(c.get(CFG, "settings", "routing_excluded_ips"))) : uniq(tokens(d.excl));
-	for (let x in [ ...full, ...excl ]) if (!valid_ip(x)) fail("неверный адрес устройства: " + x);
-	if (!length(services) && !length(rsets) && !length(rsubs) && !length(domains) && !length(subnets) && !length(lists) && (length(full) || created || !sec_configured(c.get_all(CFG, sec) || {})))
+	let all = d.all == null ? all_ips(c.get_all(CFG, sec) || {}) : uniq(tokens(d.all));
+	for (let x in [ ...full, ...excl, ...all ]) if (!valid_ip(x)) fail("неверный адрес устройства: " + x);
+	if (length(all) > 64) fail("устройств с полным трафиком через VPN можно выбрать не больше 64");
+	if (!length(all) && !length(services) && !length(rsets) && !length(rsubs) && !length(domains) && !length(subnets) && !length(lists) && (length(full) || created || !sec_configured(c.get_all(CFG, sec) || {})))
 		fail(!own_on && (length(keep.domains) || length(keep.subnets) || length(keep.lists))
 			? "«Свой список» выключен, а других сервисов в секции нет — включите его или выберите сервис"
 			: "выберите для секции хотя бы один сервис, домен или адрес — устройства только ограничивают её правила");
@@ -15755,6 +15768,8 @@ function cmd_set() {
 	for (let x in sections(c, "section")) {
 		let n = x[".name"];
 		if (n == sec || !is_conn(x) || (n != p0.sec && index(p0.conns, n) < 0)) continue;
+		for (let v in all) for (let w in all_ips(x)) if (device_ip_overlap(v, w))
+			fail("устройство " + v + " уже целиком идёт через секцию «" + sec_label(x, n == p0.sec) + "» — весь трафик устройства можно отдать только одной секции");
 		if (!device_scopes_overlap(full, device_ips(x))) continue;
 		let other = sec_label(x, n == p0.sec), orf = sec_refs(x);
 		for (let v in services) if (index(words(x.community_lists), v) >= 0) fail("список «" + v + "» уже идёт через секцию «" + other + "» — один список можно включить только в одной секции");
@@ -15826,7 +15841,7 @@ function cmd_set() {
 		if (length(keep.subnets)) c.set(CFG, sec, "zm_own_subnets", join("\n", keep.subnets)); else c.delete(CFG, sec, "zm_own_subnets");
 		set_list(c, sec, "zm_own_lists", keep.lists);
 	}
-	write_device_lists(c, sec, full, excl);
+	write_device_lists(c, sec, full, excl, all);
 
 	if (bp) {
 		if (length(bdom) || length(bsub)) {
@@ -26028,7 +26043,7 @@ function fromCfg(c) {
 		mode: c.mode || 'links', links: (c.links || []).join('\n'), sub: (c.subs && c.subs.length ? c.subs : c.sub ? [ c.sub ] : []).join('\n'),
 		sub_interval: c.sub_interval || '12h', iface: c.iface || '', fastest: true, exclude: c.exclude || '',
 		items: pick.items, sel: pick.sel, own_on: c.own_on !== false && ((c.domains || []).length + (c.subnets || []).length + pick.lists.length) > 0, domains: (c.domains || []).join('\n'), subnets: (c.subnets || []).join('\n'),
-		lists: pick.lists.join('\n'), full: (c.full || []).slice(), excl: (c.excl || []).slice(),
+		lists: pick.lists.join('\n'), full: (c.full || []).slice(), all: (c.all || []).slice(), excl: (c.excl || []).slice(),
 		dns: { type: dns.type || (dns.server ? 'udp' : 'dot'), servers: (dns.servers && dns.servers.length ? dns.servers : [ dns.server || '9.9.9.9' ]).slice(),
 			bootstraps: (dns.bootstraps && dns.bootstraps.length ? dns.bootstraps : [ dns.bootstrap || '9.9.9.9' ]).slice(), detour: !!dns.detour },
 		quic_off: c.quic_off !== false, list_interval: c.list_interval || '1d', lists_via: !!c.lists_via
@@ -26052,7 +26067,7 @@ function sig(d) {
 	var srt = function(a) { return (a || []).slice().sort(); };
 	var tl = function(v) { return String(v || '').split(/\n/).map(function(x) { return x.trim(); }).filter(Boolean).join('\n'); };
 	return JSON.stringify([ extSig(d, SEC_EXT), extSig(d, SET_EXT), d.sec, d.mode, tl(d.links), tl(d.sub), d.sub_interval, d.iface, d.fastest, (function(r) { return [ srt(r.c), srt(r.s), srt(r.r), srt(r.l) ]; })(refsOf(d)), tl(d.domains), d.own_on !== false,
-		tl(d.subnets), tl(d.lists), srt(d.full), srt(d.excl), d.mode === 'iface' ? '' : String(d.exclude || ''), d.dns.type, d.dns.servers, d.dns.bootstraps, d.dns.detour, d.quic_off, d.list_interval, d.lists_via,
+		tl(d.subnets), tl(d.lists), srt(d.full), srt(d.all || []), srt(d.excl), d.mode === 'iface' ? '' : String(d.exclude || ''), d.dns.type, d.dns.servers, d.dns.bootstraps, d.dns.detour, d.quic_off, d.list_interval, d.lists_via,
 		String(d.label || '').trim(), d.isMain || d.enabled, tl(d.byDomains), tl(d.bySubnets) ]);
 }
 
@@ -26123,6 +26138,7 @@ function newCfg(c) {
 	x.mode = 'iface'; x.iface = warp ? warp.name : ''; x.links = []; x.sub = ''; x.sub_interval = '12h'; x.exclude = ''; x.hide_names = [];
 	x.refs = { c: [], s: [], r: [] }; x.own_on = false; x.domains = []; x.subnets = []; x.lists = []; x.subs = []; x.x = {};
 	x.full = [];
+	x.all = [];
 	return x;
 }
 
@@ -26169,6 +26185,7 @@ return view.extend({
 		var svcCard = E('div', { 'class': 'zm-card' });
 		var ownCard = E('div', { 'class': 'zm-card' });
 		var fullCard = E('div', { 'class': 'zm-card' });
+		var allCard = E('div', { 'class': 'zm-card' });
 		var exclCard = E('div', { 'class': 'zm-card' });
 		var dnsCard = E('div', { 'class': 'zm-card zm-kv' });
 		var miscCard = E('div', { 'class': 'zm-card zm-kv' });
@@ -26332,7 +26349,7 @@ return view.extend({
 				x: extPick(draft, SEC_EXT), g: extPick(draft, SET_EXT),
 				iface: draft.iface, fastest: true, refs: refsOf(draft), own_on: draft.own_on !== false, domains: draft.domains,
 				exclude: draft.mode === 'iface' ? '' : draft.exclude,
-				subnets: draft.subnets, lists: draft.lists, full: draft.full, excl: draft.excl,
+				subnets: draft.subnets, lists: draft.lists, full: draft.full, all: draft.all, excl: draft.excl,
 				dns: { type: draft.dns.type, servers: draft.dns.servers, bootstraps: draft.dns.bootstraps, server: draft.dns.servers[0], bootstrap: draft.dns.bootstraps[0], detour: draft.dns.detour }, quic_off: draft.quic_off, list_interval: draft.list_interval, lists_via: draft.lists_via
 			});
 		}
@@ -26373,7 +26390,7 @@ return view.extend({
 			}
 			var rf = refsOf(draft);
 			var ownN = textLines(draft.domains).length + textLines(draft.subnets).length + textLines(draft.lists).length;
-			if (!rf.c.length && !rf.s.length && !rf.r.length && !rf.l.length && (!ownN || draft.own_on === false) && (draft.full.length || !secExists()))
+			if (!rf.c.length && !rf.s.length && !rf.r.length && !rf.l.length && (!ownN || draft.own_on === false) && !draft.all.length && (draft.full.length || !secExists()))
 				return [ 'svc', ownN ? '«Свой список» выключен, а других сервисов в секции «' + secName() + '» нет — включите его или выберите сервис'
 					: 'Выберите хотя бы один сервис, домен или адрес для секции «' + secName() + '» — устройства только ограничивают её правила' ];
 			var badOwn = tokLines(draft.domains).map(domainProblem).filter(Boolean)[0];
@@ -26497,8 +26514,10 @@ return view.extend({
 				var on = s.name === draft.sec, n = secSel(cfg, s), extra = (s.domains || 0) + (s.subnets || 0), f = (s.full || []).length;
 				var what = n ? nn(n, 'список', 'списка', 'списков') : extra ? nn(extra, 'адрес', 'адреса', 'адресов') : 'пусто';
 				if (f) what = (n || extra ? what + ' · ' : '') + nn(f, 'устройство', 'устройства', 'устройств');
+				var fa = (s.all || []).length;
+				if (fa) what = (n || extra || f ? what + ' · ' : '') + 'весь трафик: ' + fa;
 				return node(s.label, secConn(s), on, function() { open(s.name); },
-					E('span', { 'class': 'zm-lat ' + (!s.enabled ? 'zm-lat-bad' : n || extra || f ? 'zm-lat-good' : 'zm-lat-none') }, s.enabled ? what : 'выключена'),
+					E('span', { 'class': 'zm-lat ' + (!s.enabled ? 'zm-lat-bad' : n || extra || f || fa ? 'zm-lat-good' : 'zm-lat-none') }, s.enabled ? what : 'выключена'),
 					'zm-sec' + (s.enabled ? '' : ' zm-node-dead'));
 			});
 			if (isNew) tiles.push(node(secName(), 'ещё не сохранена', true, function() {}, E('span', { 'class': 'zm-lat zm-lat-mid' }, 'черновик'), 'zm-sec'));
@@ -26632,6 +26651,7 @@ return view.extend({
 			if (s.subnets) parts.push(nn(s.subnets, 'подсеть', 'подсети', 'подсетей'));
 			if (s.own_off) parts.push('свой список выключен');
 			if ((s.full || []).length) parts.push('только для ' + nn(s.full.length, 'устройства', 'устройств', 'устройств'));
+			if ((s.all || []).length) parts.push('весь трафик: ' + nn(s.all.length, 'устройство', 'устройства', 'устройств'));
 			return parts.join(' · ') || 'ничего не выбрано';
 		}
 
@@ -27413,17 +27433,19 @@ return view.extend({
 
 		function devCard(card, key, title, hint) {
 			card.innerHTML = '';
-			var list = draft[key], devs = (cfg && cfg.devices) || [], known = {}, assigned = {};
+			var list = draft[key], devs = (cfg && cfg.devices) || [], known = {}, assigned = {}, akey = key === 'all' ? 'all' : 'full', taken = {};
 			secs().forEach(function(s) {
-				(s.name === draft.sec ? draft.full : s.full || []).forEach(function(ip) {
+				if (key === 'all' && s.name !== draft.sec) (s.all || []).forEach(function(ip) { taken[ip] = s.label; });
+				(s.name === draft.sec ? draft[akey] : s[akey] || []).forEach(function(ip) {
 					if (!assigned[ip]) assigned[ip] = [];
 					assigned[ip].push(s.label);
 				});
 			});
-			card.appendChild(E('h3', {}, [ title + ' ', list.length ? badge(key === 'full' ? 'zm-ok' : 'zm-warn', nn(list.length, 'устройство', 'устройства', 'устройств')) : E([]) ]));
+			card.appendChild(E('h3', {}, [ title + ' ', list.length ? badge(key === 'excl' ? 'zm-warn' : 'zm-ok', nn(list.length, 'устройство', 'устройства', 'устройств')) : E([]) ]));
 			card.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:-6px' }, hint));
 			function toggle(ip) {
 				var l = draft[key].slice(), i = l.indexOf(ip);
+				if (i < 0 && taken[ip]) { zm.toast('Это устройство уже целиком идёт через секцию «' + taken[ip] + '». Сначала уберите его там — весь трафик устройства можно отдать только одной секции.', 'warning'); return; }
 				if (i >= 0) l.splice(i, 1);
 				else l.push(ip);
 				set(key, l);
@@ -27431,7 +27453,7 @@ return view.extend({
 			var grid = E('div', { 'class': 'zm-nodes' });
 			function foot(ip, base) {
 				var labels = assigned[ip] || [];
-				return base + (labels.length ? ' · ' + labels.join(', ') : '') + (draft.excl.indexOf(ip) >= 0 && key === 'full' ? ' · мимо Forkozz' : '');
+				return base + (labels.length ? ' · ' + labels.join(', ') : '') + (draft.excl.indexOf(ip) >= 0 && key !== 'excl' ? ' · мимо Forkozz' : '');
 			}
 			devs.forEach(function(d) {
 				known[d.ip] = true;
@@ -27456,9 +27478,11 @@ return view.extend({
 		}
 
 		function renderDev() {
-			devCard(fullCard, 'full', 'Устройства для правил секции «' + secName() + '»', 'Через подключение этой секции идут только её сервисы, домены и адреса — и только с выбранных устройств. Всё остальное проверяется по другим секциям, а потом идёт напрямую. Ничего не выбрано — правила действуют для всех устройств. Одно устройство можно выбрать в нескольких секциях. «Мимо Forkozz» и исключения важнее правил секции. Чтобы устройство не потерялось, закрепите за ним IP-адрес в DHCP.');
+			devCard(allCard, 'all', 'Весь трафик устройства через VPN · «' + secName() + '»', 'Выбранные устройства целиком ходят через подключение этой секции — любые сайты и приложения, а не только выбранные сервисы. Подходит для телевизора, приставки или телефона, которым VPN нужен всегда. Если подключение секции недоступно, такое устройство остаётся без интернета, а не идёт напрямую. Одно устройство можно отдать только одной секции. Чтобы устройство не потерялось, закрепите за ним IP-адрес в DHCP.');
+			if (!draft.isMain && !draft.enabled) allCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Секция выключена: устройства из этого списка ходят как обычно.'));
+			devCard(fullCard, 'full', 'Только для этих устройств · «' + secName() + '»', 'Ограничение для сервисов секции: если выбрать устройства, её сервисы, домены и адреса пойдут через VPN только с них, остальные устройства — напрямую. Ничего не выбрано — сервисы секции идут через VPN со всех устройств. На список «Весь трафик» выше это не влияет.');
 			if (!draft.isMain && !draft.enabled) fullCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Секция выключена: её правила не действуют. Выбор устройств в остальных секциях сохраняется.'));
-			devCard(exclCard, 'excl', 'Мимо Forkozz', 'Общий список для всех секций: устройство всегда ходит напрямую. Этот выбор имеет приоритет над правилами секций и не меняет их списки устройств.');
+			devCard(exclCard, 'excl', 'Мимо Forkozz', 'Общий список для всех секций: устройство всегда ходит напрямую. Этот выбор важнее двух списков выше и не меняет их.');
 		}
 
 		function dnsUniq(t, list) {
@@ -27845,6 +27869,7 @@ return view.extend({
 		panes.conn.appendChild(routeCard);
 		panes.svc.appendChild(svcCard);
 		panes.svc.appendChild(ownCard);
+		panes.dev.appendChild(allCard);
 		panes.dev.appendChild(fullCard);
 		panes.dev.appendChild(exclCard);
 		panes.set.appendChild(dnsCard);
