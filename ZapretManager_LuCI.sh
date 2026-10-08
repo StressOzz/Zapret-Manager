@@ -1,10 +1,10 @@
 #!/bin/sh
-# Version: 2.56
+# Version: 2.57
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
-ZM_NEW_VER="2.56"
+ZM_NEW_VER="2.57"
 _zmi_say() { echo -e "${CYAN}==>${NC} $*"; }
 _zmi_ok() { echo -e "   ${GREEN}✓${NC} $*"; }
 _zmi_step() { echo -e "   → $*"; }
@@ -83,7 +83,7 @@ cat > '/opt/zapret-manager-luci/backend.sh.zm-new' << 'ZM_INSTALLER_EOF'
 umask 022
 
 CONF="/etc/config/zapret"
-ZM_VERSION="2.56"
+ZM_VERSION="2.57"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -2566,13 +2566,55 @@ system_status() {
 		"$(_quic_blocked)" "$(_ipv6_enabled_in_zapret)" "$(_flow_offloading_fix_applied)" "$(_expert_mode)" "$PKG" "$(_zt_json)"
 }
 
+# IPv6 проверяем в двух местах одинаково. Пинг по имени зависит от DNS: если DNS роутера не отдаёт
+# IPv6-адреса сайтов (так настроен, например, Mihomo в Mixomo), он не проходит и при рабочем IPv6.
+# Поэтому связь проверяем по адресу, а DNS — отдельно.
+ZM_V6_ADDRS="2001:4860:4860::8888 2606:4700:4700::1111"
+ZM_V6_STATE="$JOBS_DIR/v6.state"
+_zm_v6_ms() {
+	local a t
+	for a in "$@"; do
+		t="$(ping -6 -c1 -W2 "$a" 2>/dev/null | sed -n 's/.*time=\([0-9.]*\).*/\1/p' | head -n1)"
+		[ -n "$t" ] && { echo "$t"; return 0; }
+	done
+	return 1
+}
+# Отдаёт ли DNS роутера IPv6-адреса сайтов (без них устройства ходят на сайты по IPv4)
+_zm_v6_dns() {
+	nslookup google.com 127.0.0.1 2>/dev/null | awk '/^Name:/ { f = 1 } f && /^Address/ && /:[0-9A-Fa-f]*:/ { ok = 1 } END { exit !ok }'
+}
+# live — IPv6 работает и DNS отдаёт IPv6-адреса; nodns — работает, но адресов DNS не отдаёт; dead — не работает
+_zm_v6_probe() {
+	ip -6 route show default 2>/dev/null | grep -q . || { echo dead; return; }
+	_zm_v6_ms $ZM_V6_ADDRS >/dev/null || { echo dead; return; }
+	if _zm_v6_dns; then echo live; else echo nodns; fi
+}
+# Для плашки на каждой странице: ответ из памяти, обновление раз в 10 минут в фоне — страницу не держим
+_zm_v6_cached() {
+	local f="$ZM_V6_STATE"
+	if [ ! -s "$f" ] || [ -n "$(find "$f" -mmin +10 2>/dev/null)" ]; then
+		if mkdir "$f.lock" 2>/dev/null; then
+			( _zm_v6_probe > "$f.new" 2>/dev/null; [ -s "$f.new" ] && mv -f "$f.new" "$f"; rmdir "$f.lock" ) >/dev/null 2>&1 </dev/null &
+		elif [ -n "$(find "$f.lock" -mmin +2 2>/dev/null)" ]; then
+			rmdir "$f.lock" 2>/dev/null
+		fi
+	fi
+	cat "$f" 2>/dev/null
+}
+
 system_check_connectivity() {
-	local t4 t6
+	local t4 t6 dns=true st=dead
 	t4=$(ping -4 -c1 -W2 google.com 2>/dev/null | grep 'time=' | sed -E 's/.*time=([0-9.]+).*/\1/')
-	t6=$(ping -6 -c1 -W2 google.com 2>/dev/null | grep 'time=' | sed -E 's/.*time=([0-9.]+).*/\1/')
-	printf '{"ipv4_ok":%s,"ipv4_ms":"%s","ipv6_ok":%s,"ipv6_ms":"%s"}\n' \
+	t6="$(_zm_v6_ms google.com)"
+	if [ -z "$t6" ]; then
+		t6="$(_zm_v6_ms $ZM_V6_ADDRS)"
+		[ -n "$t6" ] && ! _zm_v6_dns && dns=false
+	fi
+	if [ -n "$t6" ]; then st=live; [ "$dns" = false ] && st=nodns; fi
+	mkdir -p "$JOBS_DIR"; echo "$st" > "$ZM_V6_STATE"
+	printf '{"ipv4_ok":%s,"ipv4_ms":"%s","ipv6_ok":%s,"ipv6_ms":"%s","ipv6_dns":%s}\n' \
 		"$([ -n "$t4" ] && echo true || echo false)" "$(esc "$t4")" \
-		"$([ -n "$t6" ] && echo true || echo false)" "$(esc "$t6")"
+		"$([ -n "$t6" ] && echo true || echo false)" "$(esc "$t6")" "$dns"
 }
 
 system_toggle_quic() {
@@ -2619,9 +2661,7 @@ system_toggle_ipv6() {
 		printf '{"ok":true,"ipv6_enabled":false}\n'
 		return
 	fi
-	local t6
-	t6=$(ping -6 -c1 -W2 google.com 2>/dev/null | grep 'time=')
-	if [ -z "$t6" ]; then
+	if ! _zm_v6_ms $ZM_V6_ADDRS >/dev/null; then
 		echo '{"error":"IPv6 недоступен на роутере — включение не рекомендуется"}'
 		return 1
 	fi
@@ -5007,7 +5047,7 @@ _zm_job_label() {
 		mixomo*) echo "Mixomo" ;; bytetube*) echo "ByeTube" ;;
 		install_zapret2|remove_zapret2) echo "Zapret2" ;; install_zapret|remove_zapret) echo "Zapret" ;;
 		strategy_test) echo "тест стратегий" ;; tg*) echo "TG WS Proxy" ;; doh*) echo "DNS over HTTPS" ;;
-		mirror_set) echo "смена зеркала" ;; *) echo "$1" ;;
+		mirror_set) echo "смена зеркала" ;; zm_update) echo "обновление панели" ;; *) echo "$1" ;;
 	esac
 }
 
@@ -5023,21 +5063,32 @@ _zm_busy_job() {
 }
 
 zm_update_action() {
-	local tmp="/tmp/zm_update_install.sh" why v j
+	local j
 	if j="$(_zm_busy_job)"; then
 		printf '{"error":"%s"}\n' "$(esc "идёт операция «$j» — дождитесь её окончания и обновите панель")"
 		return 1
 	fi
+	job_start zm_update do_zm_update
+}
+
+# Установщик качается фоновой задачей: с медленного GitHub это дольше, чем служба rpcd ждёт ответа,
+# и кнопка «Обновить панель» получала от роутера пустой ответ («нет данных»).
+do_zm_update() {
+	local tmp="/tmp/zm_update_install.sh" why v
+	echo "==> Скачиваем новую версию панели с GitHub"
 	if ! why="$(_zm_update_fetch "$tmp")"; then
 		rm -f "$tmp"
-		printf '{"error":"%s"}\n' "$(esc "$why")"
+		echo "ОШИБКА: $why"
 		return 1
 	fi
 	v="$(grep -m1 '^# Version:' "$tmp" | sed 's/^# Version:[[:space:]]*//' | tr -d '\r ')"
+	echo "   ✓ Установщик скачан и проверен: версия $v"
 	chmod +x "$tmp"
 	rm -f "$ZM_STATE_DIR/latest.panel"
-	( sh "$tmp" >/tmp/zm_update_install.log 2>&1; rm -f "$tmp" ) >/dev/null 2>&1 </dev/null &
-	printf '{"ok":true,"version":"%s"}\n' "$(esc "$v")"
+	echo "==> Запускаем установку — панель на полминуты пропадёт"
+	# установщик стартует чуть позже: эта задача должна успеть завершиться, иначе он сочтёт панель занятой
+	( sleep 5; sh "$tmp" >/tmp/zm_update_install.log 2>&1; rm -f "$tmp" ) >/dev/null 2>&1 </dev/null &
+	return 0
 }
 
 _mixomo_lan_ip() { _zm_lan_ip; }
@@ -6150,7 +6201,8 @@ health() {
 	if _st_installed; then sx="$(_st_exit)"; [ "$sx" = warp ] && _st_warp_own && sx=own; fi
 	local fw=false v6=false
 	[ "$(uci -q get firewall.@defaults[0].flow_offloading)" = 1 ] && [ -f /usr/share/firewall4/templates/ruleset.uc ] && [ "$(_flow_offloading_fix_applied)" = false ] && fw=true
-	[ -f "$CONF" ] && [ "$(_ipv6_enabled_in_zapret)" = false ] && ip -6 route show default 2>/dev/null | grep -q . && v6=true
+	# плашка нужна, только если по IPv6 действительно ходят: он работает и DNS роутера отдаёт IPv6-адреса сайтов
+	[ -f "$CONF" ] && [ "$(_ipv6_enabled_in_zapret)" = false ] && [ "$(_zm_v6_cached)" = live ] && v6=true
 	local d_zr="$zr" d_zr2="$zr2" d_bt="$bt" d_tg="$tg" d_mx="$mx" d_doh="$doh" d_sr="$sr" d_fk d_awg d_term=0 awgj
 	[ "$zr" = 2 ] && d_zr=4
 	[ "$zr2" = 2 ] && d_zr2=4
@@ -15651,6 +15703,10 @@ _si_row() {
 _si_ping() {
 	local t
 	t="$(ping "$1" -c 1 -W 2 google.com 2>/dev/null | sed -n 's/.*time=\([0-9.]*\).*/\1/p' | head -n1)"
+	if [ -z "$t" ] && [ "$1" = -6 ] && t="$(_zm_v6_ms $ZM_V6_ADDRS)"; then
+		_si_row "$2" "работает, $t мс; DNS роутера IPv6-адреса сайтов не отдаёт" ok
+		return
+	fi
 	[ -n "$t" ] && _si_row "$2" "работает, $t мс" ok || _si_row "$2" "нет связи" bad
 }
 
@@ -19426,7 +19482,7 @@ setInterval(dockSync, 600);
 window.addEventListener('hashchange', function() { setTimeout(dockSync, 50); });
 
 var _activePolls = {};
-var JOB_NAMES = { steer: 'Steer', forkop: 'Forkozz', awg: 'AmneziaWG', strategy_test: 'тест стратегий', mirror_set: 'смена зеркала' };
+var JOB_NAMES = { steer: 'Steer', forkop: 'Forkozz', awg: 'AmneziaWG', strategy_test: 'тест стратегий', mirror_set: 'смена зеркала', zm_update: 'обновление панели' };
 var _stuck = {}, _stopEl = null, _stopBusy = false;
 
 function jobName(j) {
@@ -20793,7 +20849,9 @@ return view.extend({
 		overviewEl.appendChild(renderOverview(data, dohData, hostsData, sysData, healthData));
 		renderCards();
 		var updateEl = E('div', {});
+		var updateLog = E('pre', { 'class': 'zm-log' });
 		wrap.appendChild(updateEl);
+		wrap.appendChild(updateLog);
 		if (!document.body.classList.contains('zmw-body')) wrap.appendChild(zm.alertBanners(healthData, function() { location.reload(); }));
 		wrap.appendChild(E('div', { 'class': 'zm-header' }, [
 			E('h2', {}, 'Zapret Manager для LuCI и Web'),
@@ -20845,10 +20903,20 @@ return view.extend({
 						zmUpdateBusy = true;
 						zm.toast('Скачиваем и проверяем новую версию…', 'info', 4000);
 						zm.zmUpdateAction().then(function(res) {
-							zmUpdateBusy = false;
-							if (res.error) { zm.toast('Обновление не началось: ' + res.error, 'error', 8000); return; }
-							zm.toast('Устанавливаем версию ' + (res.version || zmUpdate.latest) + ' — через 4 секунды вы будете выведены из LuCI. Подождите полминуты и зайдите заново', 'warning', 8000);
-							waitForServerAndReload();
+							if (res.error) { zmUpdateBusy = false; zm.toast('Обновление не началось: ' + res.error, 'error', 8000); return; }
+							var go = function(v) {
+								zm.toast('Устанавливаем версию ' + (v || zmUpdate.latest) + ' — через 4 секунды вы будете выведены из LuCI. Подождите полминуты и зайдите заново', 'warning', 8000);
+								waitForServerAndReload();
+							};
+							if (!res.started) { zmUpdateBusy = false; go(res.version); return; }
+							/* установщик качается фоновой задачей — ход и причину отказа видно в журнале */
+							try { updateLog.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+							zm.pollJob('zm_update', updateLog, function(ok) {
+								zmUpdateBusy = false;
+								if (ok) { go(''); return; }
+								var m = /ОШИБКА:\s*([^\n]+)/.exec(updateLog.textContent || '');
+								zm.toast('Обновление не началось: ' + (m ? m[1] : 'причина — в журнале на странице'), 'error', 8000);
+							});
 						}).catch(function() { zmUpdateBusy = false; });
 					}
 				}, 'Обновить панель')
@@ -27142,10 +27210,12 @@ return view.extend({
 								E('span', { 'class': 'zm-label' }, 'IPv4 (google.com)'),
 								zm.badge(res.ipv4_ok === true, 'доступен, ' + res.ipv4_ms + ' мс', 'недоступен')
 							]));
+							var noDns = res.ipv6_ok === true && res.ipv6_dns === false;
 							netEl.appendChild(E('div', { 'class': 'zm-row' }, [
-								E('span', { 'class': 'zm-label' }, 'IPv6 (google.com)'),
+								E('span', { 'class': 'zm-label' }, noDns ? 'IPv6 (по адресу)' : 'IPv6 (google.com)'),
 								zm.badge(res.ipv6_ok === true, 'доступен, ' + res.ipv6_ms + ' мс', 'недоступен')
 							]));
+							if (noDns) netEl.appendChild(E('p', { 'class': 'zm-hint' }, 'IPv6 на роутере работает, но DNS роутера не отдаёт IPv6-адреса сайтов — устройства ходят на сайты по IPv4. Включать IPv6 в Zapret не нужно.'));
 						}).catch(function() { netBusy = false; });
 					}
 				}, 'Проверить IPv4 / IPv6')
