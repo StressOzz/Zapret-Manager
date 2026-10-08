@@ -620,4 +620,7 @@ nintendo.com.hk
 nintendo.com.tw
 nintendo.com.cn
 nintendo-europe.com
+#################################### Хmeye
+xmeye.net
+xiongmaitech.com
 ####################################
