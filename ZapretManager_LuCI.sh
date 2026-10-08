@@ -1,10 +1,10 @@
 #!/bin/sh
-# Version: 2.57
+# Version: 2.58
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
-ZM_NEW_VER="2.57"
+ZM_NEW_VER="2.58"
 _zmi_say() { echo -e "${CYAN}==>${NC} $*"; }
 _zmi_ok() { echo -e "   ${GREEN}✓${NC} $*"; }
 _zmi_step() { echo -e "   → $*"; }
@@ -83,7 +83,7 @@ cat > '/opt/zapret-manager-luci/backend.sh.zm-new' << 'ZM_INSTALLER_EOF'
 umask 022
 
 CONF="/etc/config/zapret"
-ZM_VERSION="2.57"
+ZM_VERSION="2.58"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -9150,11 +9150,15 @@ _st_migrate
 _st_sel_remap
 mkdir -p "$ST_RUN" 2>/dev/null
 
-_st_splify2() { [ -x /usr/libexec/rpcd/splify2 ] || [ -d /usr/lib/splify2 ] || [ -x /etc/init.d/splify2 ] || ubus list splify2 >/dev/null 2>&1; }
+_st_splify2_pkg() { grep -qx 'P:luci-app-splify2' /lib/apk/db/installed 2>/dev/null || [ -f /usr/lib/opkg/info/luci-app-splify2.control ]; }
+_st_splify2() {
+	[ -x /usr/libexec/rpcd/splify2 ] || return 1
+	_st_splify2_pkg || [ -f /www/luci-static/resources/view/splify2/home.js ]
+}
 
 _st_blocker() {
 	local b
-	if _st_splify2; then echo splify2; return; fi
+	if _st_splify2 && [ "$(stl_spec_whose)" != zm ]; then echo splify2; return; fi
 	if b="$(stl_busy_by)"; then echo "Ядро steer ведёт $b — Zapret Manager его не трогает."; return; fi
 	if _st_spec_foreign; then echo steer; return; fi
 	echo ""
