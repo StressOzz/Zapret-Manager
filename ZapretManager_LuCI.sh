@@ -1,10 +1,10 @@
 #!/bin/sh
-# Version: 2.55
+# Version: 2.56
 set -e
-clear
+
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
-ZM_NEW_VER="2.55"
+ZM_NEW_VER="2.56"
 _zmi_say() { echo -e "${CYAN}==>${NC} $*"; }
 _zmi_ok() { echo -e "   ${GREEN}✓${NC} $*"; }
 _zmi_step() { echo -e "   → $*"; }
@@ -44,7 +44,7 @@ fi
 for _zm_pid in /tmp/zapret-manager-luci/*.pid; do
 	[ -f "$_zm_pid" ] || continue
 	_zm_job="$(basename "$_zm_pid" .pid)"
-	case "$_zm_job" in versions|sysinfo|*_download|redbtn_deep) continue ;; esac
+	case "$_zm_job" in versions|sysinfo|*_download|redbtn_deep|fk-guard) continue ;; esac
 	if kill -0 "$(cat "$_zm_pid" 2>/dev/null)" 2>/dev/null && ! grep -q '^__DONE__' "/tmp/zapret-manager-luci/$_zm_job.log" 2>/dev/null; then
 		echo -e "${YELLOW}Сейчас в панели идёт операция ($_zm_job) — дождитесь её окончания и запустите установку снова${NC}"
 		exit 1
@@ -83,7 +83,7 @@ cat > '/opt/zapret-manager-luci/backend.sh.zm-new' << 'ZM_INSTALLER_EOF'
 umask 022
 
 CONF="/etc/config/zapret"
-ZM_VERSION="2.55"
+ZM_VERSION="2.56"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -854,7 +854,9 @@ zm_watch() {
 	return 0
 }
 
-_zm_job_skip() { case "$1" in versions|sysinfo|*_download|redbtn_deep) return 0 ;; esac; return 1; }
+# Фоновые сторожа и служебные задачи: это не операции пользователя — они не должны ни блокировать
+# обновление, установку и перезагрузку, ни попадать под «Остановить все операции».
+_zm_job_skip() { case "$1" in versions|sysinfo|*_download|redbtn_deep|fk-guard) return 0 ;; esac; return 1; }
 
 _zm_cancel_one() {
 	local j="$1" pid log="$JOBS_DIR/$1.log"
@@ -5014,7 +5016,7 @@ _zm_busy_job() {
 	for f in "$JOBS_DIR"/*.pid; do
 		[ -f "$f" ] || continue
 		j="$(basename "$f" .pid)"
-		case "$j" in versions|sysinfo|*_download|redbtn_deep) continue ;; esac
+		case "$j" in versions|sysinfo|*_download|redbtn_deep|fk-guard) continue ;; esac
 		_job_running "$j" && { _zm_job_label "$j"; return 0; }
 	done
 	return 1
@@ -8497,6 +8499,14 @@ stl_engine_remove() {
 	return $rc
 }
 
+# Пакеты ядра steer, которые сейчас стоят на роутере: ядро, его модули и прежние имена
+stl_pkgs_installed() {
+	local p m
+	for p in $(for m in $STL_MODS; do echo "steer-$m"; done) steer-extended steer-core steer libsteer libsteer-wolfssl; do
+		_pkg_is_installed "$p" && printf '%s ' "$p"
+	done
+}
+
 stl_leftovers() {
 	stl_present && return 0
 	local t m n=0
@@ -8508,6 +8518,8 @@ stl_leftovers() {
 	done
 	killall steerd >/dev/null 2>&1
 	rm -rf "$STL_STATE"
+	rm -f "$STL_SOCK"
+	rmdir "$STL_ETC" 2>/dev/null
 	[ "$n" -gt 0 ] && echo "   ✓ Убраны оставшиеся правила ядра steer: $n"
 	return 0
 }
@@ -11342,7 +11354,7 @@ do_steer_warp_recreate() {
 do_steer_remove() {
 	_st_phase remove
 	_rb_say "Удаляем Steer и туннель WARP"
-	local foreign="" p pkgs="" rc=0 keepf="$JOBS_DIR/steer.keep.$$" keptif="" kept=0
+	local foreign="" p pkgs="" rc=0 keepf="$JOBS_DIR/steer.keep.$$" keptif="" kept=0 alien="" ownpk=""
 	case "$(_st_blocker)" in
 		splify2) foreign=splify2 ;;
 		steer) foreign="чужой настройке (правила в $STL_ETC писала не панель)" ;;
@@ -11354,6 +11366,8 @@ do_steer_remove() {
 	else
 		_st_spec_clear
 		stl_stop
+		# на место вернулись правила, которые были у ядра до панели, — такое ядро не наше
+		[ "$(stl_spec_whose)" = foreign ] && alien=1
 	fi
 	local wi netrl=0
 	: > "$keepf"
@@ -11380,6 +11394,11 @@ do_steer_remove() {
 	fi
 	if [ -n "$foreign" ] && grep -qsw -- "$STL_VPN_DEV" "$STL_SPEC" "$STL_YAML"; then :; else _st_vpn_zone off; fi
 	for p in $(sed -n 's/^pkg \(steer[a-z0-9-]*\)$/\1/p' "$ST_OWNED" 2>/dev/null); do pkgs="$pkgs $p"; done
+	# Ядром больше никто не пользуется — убираем его целиком, даже если оно уже стояло до «Установить»
+	# или запись о том, что его ставила панель, потерялась. Иначе Steer «удалён», а ядро остаётся на роутере.
+	if [ -z "$foreign" ] && [ -z "$alien" ]; then
+		for p in $(stl_pkgs_installed); do case " $pkgs " in *" $p "*) ;; *) pkgs="$pkgs $p" ;; esac; done
+	fi
 	[ -n "$pkgs" ] && { stl_engine_remove $pkgs || rc=1; }
 	_st_owns "pkg conntrack" && { _zm_pkg_purge conntrack || rc=1; }
 	if ! uci show network 2>/dev/null | grep -q "\.proto='amneziawg'"; then
@@ -11389,6 +11408,8 @@ do_steer_remove() {
 		done
 	fi
 	_rb_rpcd_ensure
+	# что-то не удалилось — запоминаем, какие пакеты ставила панель: иначе повторное «Удалить» их уже не найдёт
+	[ "$rc" = 0 ] || ownpk="$(grep '^pkg ' "$ST_OWNED" 2>/dev/null)"
 	if [ -n "$foreign" ] && grep -q "^$ST_DIR/" "$keepf" 2>/dev/null; then
 		find "$ST_DIR" \( -type f -o -type l \) 2>/dev/null | while IFS= read -r p; do grep -qxF "$p" "$keepf" || rm -f "$p"; done
 		find "$ST_DIR" -depth -type d -exec rmdir {} \; 2>/dev/null
@@ -11399,7 +11420,29 @@ do_steer_remove() {
 	fi
 	rm -f "$keepf"
 	[ -n "$foreign" ] || stl_leftovers
+	if [ "$rc" != 0 ]; then
+		# страница должна по-прежнему показывать Steer с кнопкой «Удалить», а не «не установлен»
+		[ -n "$ownpk" ] && { mkdir -p "$ST_DIR"; printf '%s\n' "$ownpk" > "$ST_OWNED"; }
+		stl_present && _st_own "engine"
+	fi
 	_zm_after_remove "Steer"
+	if [ "$rc" = 0 ] && [ -n "$alien" ] && stl_present; then
+		_rb_warn "Ядро steer оставлено: в нём правила, которые писала не панель ($STL_ETC)"
+		echo "==> Готово: Steer панели удалён. Ядро steer осталось на роутере — им пользуется чужая настройка"
+		_zm_rb_note
+		return 0
+	fi
+	if [ "$rc" = 0 ] && [ -z "$foreign" ] && stl_present; then
+		_rb_warn "Команда steer всё ещё есть на роутере: $(command -v steer). Она стоит не из пакета — панель её не удаляет"
+		echo "==> Готово: Steer панели удалён, но само ядро steer осталось — см. строку выше"
+		_zm_rb_note
+		return 0
+	fi
+	if [ "$rc" = 0 ] && [ -n "$foreign" ] && [ "${kept:-0}" = 0 ] && [ -z "$keptif" ]; then
+		echo "==> Готово: Steer панели удалён. Ядро steer оставлено — оно нужно $foreign"
+		_zm_rb_note
+		return 0
+	fi
 	if [ "$rc" = 0 ] && { [ "${kept:-0}" -gt 0 ] || [ -n "$keptif" ]; }; then
 		[ "${kept:-0}" -gt 0 ] && _rb_warn "В $ST_DIR оставлено файлов: $kept — на них ссылаются правила ядра steer, которые ведёт $foreign. Без них ядро не запустится"
 		echo "==> Готово: Steer панели удалён. Оставлено только то, чем пользуется $foreign"
