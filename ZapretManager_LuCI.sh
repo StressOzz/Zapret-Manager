@@ -28,8 +28,8 @@ _zmi_pkg() {
 	_zmi_warn "Пакет $1 не установился — проверьте интернет на роутере. $2"
 	return 1
 }
-
-echo -e "\n${MAGENTA}Zapret Manager для LuCI и Web $ZM_NEW_VER — установка${NC}\n"
+clear
+echo -e "${MAGENTA}Zapret Manager для LuCI и Web $ZM_NEW_VER — установка${NC}\n"
 _zmi_say "Проверяем, что панель сейчас ничем не занята"
 
 if [ -f /tmp/zapret-manager-luci/redbtn_deep.pid ]; then
