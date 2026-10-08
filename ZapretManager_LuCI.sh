@@ -1,10 +1,10 @@
 #!/bin/sh
-# Version: 2.58
+# Version: 2.59
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
-ZM_NEW_VER="2.58"
+ZM_NEW_VER="2.59"
 _zmi_say() { echo -e "${CYAN}==>${NC} $*"; }
 _zmi_ok() { echo -e "   ${GREEN}✓${NC} $*"; }
 _zmi_step() { echo -e "   → $*"; }
@@ -83,7 +83,7 @@ cat > '/opt/zapret-manager-luci/backend.sh.zm-new' << 'ZM_INSTALLER_EOF'
 umask 022
 
 CONF="/etc/config/zapret"
-ZM_VERSION="2.58"
+ZM_VERSION="2.59"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -10657,36 +10657,49 @@ _st_cron_refresh() {
 }
 
 _st_cron_get() {
-	local line hour
+	local line hour min
 	line=$(grep -F "$ST_CRON_TAG" "$CRON_FILE" 2>/dev/null | head -n1)
 	[ -n "$line" ] || return 0
+	min=$(echo "$line" | awk '{print $1}')
 	hour=$(echo "$line" | awk '{print $2}')
+	case "$min" in */*) echo "everym:${min#*/}"; return 0 ;; esac
 	case "$hour" in
 		*/*) echo "every:${hour#*/}" ;;
-		*) echo "daily:$hour" ;;
+		*)
+			case "$min" in ''|0|00|*[!0-9]*) echo "daily:$hour" ;; ?) echo "daily:$hour:0$min" ;; *) echo "daily:$hour:$min" ;; esac ;;
 	esac
 }
 
 _st_cron_set() {
-	local mode="${1%%:*}" value="${1#*:}" spec
+	local mode="${1%%:*}" value="${1#*:}" spec keep="$1" h m
 	case "$mode" in
 		off) spec="" ;;
 		every)
-			case "$value" in
-				2|4|6|8|12) spec="0 */$value * * *" ;;
-				*) echo '{"error":"допустимо каждые 2, 4, 6, 8 или 12 часов"}'; return 1 ;;
-			esac ;;
+			case "$value" in ''|*[!0-9]*|???*) echo '{"error":"введите интервал от 1 до 23 часов"}'; return 1 ;; esac
+			value="${value#0}"
+			[ "${value:-0}" -ge 1 ] && [ "$value" -le 23 ] || { echo '{"error":"введите интервал от 1 до 23 часов"}'; return 1; }
+			spec="0 */$value * * *"; keep="every:$value" ;;
+		everym)
+			case "$value" in ''|*[!0-9]*|???*) echo '{"error":"введите интервал от 10 до 59 минут"}'; return 1 ;; esac
+			[ "$value" -ge 10 ] && [ "$value" -le 59 ] || { echo '{"error":"введите интервал от 10 до 59 минут"}'; return 1; }
+			spec="*/$value * * * *" ;;
 		daily)
-			case "$value" in ''|*[!0-9]*) echo '{"error":"введите час от 0 до 23"}'; return 1 ;; esac
-			[ "$value" -ge 0 ] && [ "$value" -le 23 ] || { echo '{"error":"допустимый диапазон 0-23"}'; return 1; }
-			spec="0 $value * * *" ;;
+			h="${value%%:*}"; m=0
+			case "$value" in *:*) m="${value#*:}" ;; esac
+			case "$h" in ''|*[!0-9]*|???*) echo '{"error":"введите время от 00:00 до 23:59"}'; return 1 ;; esac
+			case "$m" in ''|*[!0-9]*|???*) echo '{"error":"введите время от 00:00 до 23:59"}'; return 1 ;; esac
+			case "$h" in 0?) h="${h#0}" ;; esac
+			case "$m" in 0?) m="${m#0}" ;; esac
+			[ "$h" -le 23 ] && [ "$m" -le 59 ] || { echo '{"error":"введите время от 00:00 до 23:59"}'; return 1; }
+			spec="$m $h * * *"
+			if [ "$m" = 0 ]; then keep="daily:$h"; elif [ "$m" -lt 10 ]; then keep="daily:$h:0$m"; else keep="daily:$h:$m"; fi ;;
 		*) echo '{"error":"неизвестный режим"}'; return 1 ;;
 	esac
 	mkdir -p "$(dirname "$CRON_FILE")"
 	touch "$CRON_FILE"
 	sed -i "\\|$ST_CRON_TAG|d" "$CRON_FILE"
 	[ -n "$spec" ] && echo "$spec $ST_CRON_CMD $ST_CRON_TAG" >> "$CRON_FILE"
-	if [ -n "$spec" ] && [ -d "$ST_DIR" ]; then echo "$1" > "$ST_CRON_KEEP"; else rm -f "$ST_CRON_KEEP"; fi
+	if [ -n "$spec" ] && [ -d "$ST_DIR" ]; then echo "$keep" > "$ST_CRON_KEEP"; else rm -f "$ST_CRON_KEEP"; fi
 	/etc/init.d/cron enable >/dev/null 2>&1
 	/etc/init.d/cron restart >/dev/null 2>&1
 	printf '{"ok":true}\n'
@@ -22087,8 +22100,6 @@ function verLt(a, b) {
 	return false;
 }
 
-function hh(h) { return (h < 10 ? '0' : '') + h + ':00'; }
-
 return view.extend({
 	load: function() {
 		zm.injectCss();
@@ -22971,18 +22982,49 @@ return view.extend({
 			if (!data.installed || data.blocker || !(data.warp_on || data.has_sub)) return;
 			autoCard.appendChild(E('h3', {}, 'Автоперезапуск'));
 			autoCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Туннели и Steer перезапускаются по расписанию — помогает, если обход со временем «подвисает».'));
-			var cur = data.autorestart || '';
-			var am = cur === '' ? 'off' : (cur.indexOf('every:') === 0 ? 'every' + cur.split(':')[1] : 'daily');
-			var curHour = am === 'daily' ? parseInt(cur.split(':')[1], 10) : 4;
+			var cur = data.autorestart || '', cp = cur.split(':');
+			var cn = parseInt(cp[1], 10);
+			var am = 'off';
+			if (isNaN(cn)) am = 'off';
+			else if (cp[0] === 'every') am = (cn === 2 || cn === 6 || cn === 12) ? 'every' + cn : 'custom';
+			else if (cp[0] === 'everym') am = 'custom';
+			else if (cp[0] === 'daily') am = 'daily';
+			var curHour = am === 'daily' ? cn : 4, curMin = am === 'daily' ? parseInt(cp[2] || '0', 10) : 0;
 			if (isNaN(curHour) || curHour < 0 || curHour > 23) curHour = 4;
-			var opts = [];
-			for (var h = 0; h < 24; h++) opts.push(E('option', { 'value': String(h), 'selected': h === curHour ? 'selected' : null }, hh(h)));
-			var hourSel = E('select', { 'class': 'cbi-input-select zm-hour-select' }, opts);
+			if (isNaN(curMin) || curMin < 0 || curMin > 59) curMin = 0;
+			var p2 = function(n) { return (n < 10 ? '0' : '') + n; };
+			var curTime = p2(curHour) + ':' + p2(curMin);
+			var isMin = am === 'custom' && cp[0] === 'everym';
+			var timeInp = E('input', { 'type': 'time', 'lang': 'ru', 'class': 'cbi-input-text zm-ab-time', 'value': curTime });
 			var dailyRow = E('div', { 'class': 'zm-actions', 'style': am === 'daily' ? '' : 'display:none' }, [
 				E('span', { 'class': 'zm-label' }, 'Время перезапуска'),
-				hourSel,
-				E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() { doAuto('daily:' + hourSel.value); } },
-					am === 'daily' ? 'Сохранить время' : 'Включить')
+				timeInp,
+				E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() {
+					var m = /^(\d{1,2}):(\d{2})/.exec(timeInp.value || '');
+					if (!m || +m[1] > 23 || +m[2] > 59) { zm.toast('Введите время от 00:00 до 23:59', 'warning'); return; }
+					doAuto('daily:' + (+m[1]) + ':' + m[2]);
+				} }, am === 'daily' ? 'Сохранить время' : 'Включить')
+			]);
+			var numInp = E('input', { 'type': 'number', 'class': 'cbi-input-text zm-auto-num', 'min': '1', 'max': '59', 'step': '1', 'inputmode': 'numeric',
+				'value': am === 'custom' && !isNaN(cn) ? String(cn) : '3' });
+			var unitSel = E('select', { 'class': 'cbi-input-select zm-hour-select' }, [
+				E('option', { 'value': 'h', 'selected': isMin ? null : 'selected' }, 'часов'),
+				E('option', { 'value': 'm', 'selected': isMin ? 'selected' : null }, 'минут')
+			]);
+			var customRow = E('div', { 'class': 'zm-actions', 'style': am === 'custom' ? '' : 'display:none' }, [
+				E('span', { 'class': 'zm-label' }, 'Каждые'),
+				numInp,
+				unitSel,
+				E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() {
+					var n = parseInt(numInp.value, 10);
+					if (unitSel.value === 'm') {
+						if (isNaN(n) || n < 10 || n > 59) { zm.toast('Введите интервал от 10 до 59 минут', 'warning'); return; }
+						doAuto('everym:' + n);
+					} else {
+						if (isNaN(n) || n < 1 || n > 23) { zm.toast('Введите интервал от 1 до 23 часов', 'warning'); return; }
+						doAuto('every:' + n);
+					}
+				} }, am === 'custom' ? 'Сохранить интервал' : 'Включить')
 			]);
 			function tile(id, label, onclick) {
 				return E('div', { 'class': 'zm-tile' + (am === id ? ' zm-active' : ''), 'click': onclick }, label);
@@ -22992,11 +23034,18 @@ return view.extend({
 				tile('every2', 'Каждые 2 часа', function() { if (am !== 'every2') doAuto('every:2'); }),
 				tile('every6', 'Каждые 6 часов', function() { if (am !== 'every6') doAuto('every:6'); }),
 				tile('every12', 'Каждые 12 часов', function() { if (am !== 'every12') doAuto('every:12'); }),
-				tile('daily', am === 'daily' ? 'Ежедневно в ' + hh(curHour) : 'Ежедневно в заданное время', function() {
+				tile('custom', am === 'custom' ? 'Каждые ' + cn + (isMin ? ' мин' : ' ч') : 'Свой интервал', function() {
+					dailyRow.style.display = 'none';
+					customRow.style.display = '';
+					numInp.focus();
+				}),
+				tile('daily', am === 'daily' ? 'Ежедневно в ' + curTime : 'Ежедневно в заданное время', function() {
+					customRow.style.display = 'none';
 					dailyRow.style.display = '';
-					hourSel.focus();
+					timeInp.focus();
 				})
 			]));
+			autoCard.appendChild(customRow);
 			autoCard.appendChild(dailyRow);
 		}
 
@@ -24672,6 +24721,7 @@ return view.extend({
 			var fGrid = E('div', { 'class': 'zm-grid' });
 			var fCard = E('div', { 'class': 'zm-card' }, [
 				E('h3', {}, 'Стратегии Flowseal'),
+				E('p', { 'class': 'zm-hint' }, 'Стратегия Flowseal полностью заменяет текущую. В ней уже есть основной блок, игровой, блоки для YouTube и Discord — включать их отдельно не нужно.'),
 				E('div', { 'class': 'zm-actions' }, [
 					E('button', {
 						'class': 'cbi-button',
@@ -26689,6 +26739,7 @@ html.zm-theme-dark .zm-tt-tile { border-color: rgba(255,255,255,.12); background
 .zm-ab-row .zm-label { min-width: 120px; }
 .zm-ab-ctl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .zm-ab-time { width: auto !important; min-width: 110px; }
+.zm-auto-num { width: 84px !important; min-width: 0 !important; }
 .zm-ab-last { margin: 12px 0 4px; padding: 10px 12px; border-radius: 10px; background: rgba(127,127,127,.08); font-size: 13px; line-height: 1.5; }
 .zm-ab-last .zm-label { opacity: .7; }
 .zm-ab-ok { color: #1a7f37; }
