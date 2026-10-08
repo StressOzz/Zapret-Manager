@@ -64,6 +64,7 @@ ipstream.one
 godville.net
 voidboost.cc
 hcaptcha.com
+fanatical.com
 mchose.com.cn
 voidboost.one
 kaspersky.com
