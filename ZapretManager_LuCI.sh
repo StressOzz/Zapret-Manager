@@ -1564,7 +1564,8 @@ _add_gp_domains() {
 			"play.googleapis.com" "play-fe.googleapis.com" "lh3.googleusercontent.com" \
 			"android.clients.google.com" "connectivitycheck.gstatic.com" \
 			"play-lh.googleusercontent.com" "play-games.googleusercontent.com" \
-			"prod-lt-playstoregatewayadapter-pa.googleapis.com" "youtubei.youtube.com"
+			"prod-lt-playstoregatewayadapter-pa.googleapis.com" "youtubei.youtube.com" \
+			"cloudfunctions.net"
 	} | sort -u > "$tmp"
 	mv "$tmp" "$f"
 }
