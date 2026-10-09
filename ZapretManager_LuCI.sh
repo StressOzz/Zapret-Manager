@@ -1,10 +1,10 @@
 #!/bin/sh
-# Version: 2.59
+# Version: 2.66
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
-ZM_NEW_VER="2.59"
+ZM_NEW_VER="2.66"
 _zmi_say() { echo -e "${CYAN}==>${NC} $*"; }
 _zmi_ok() { echo -e "   ${GREEN}✓${NC} $*"; }
 _zmi_step() { echo -e "   → $*"; }
@@ -81,9 +81,55 @@ chmod 0755 /opt/zapret-manager-luci
 cat > '/opt/zapret-manager-luci/backend.sh.zm-new' << 'ZM_INSTALLER_EOF'
 #!/bin/sh
 umask 022
+# Сторож из cron (zm_watch, раз в 2 минуты). Оболочка читает скрипт по одной команде, поэтому выход
+# здесь не разбирает остальные ~16 тысяч строк. Выходим, только если ни одной проверке zm_watch нечего
+# делать, — те же условия, что у самих проверок. Любое сомнение — полный проход ниже, как раньше.
+if [ "$1" = zm_watch ]; then
+	_zw_idle() {
+		local d=/tmp/zapret-manager-luci s=/opt/zapret-manager-luci/state e=/etc/zm-steer
+		local pl=/usr/libexec/rpcd/zapret-manager want have t v st=0
+		# rpcd_watch — исправный путь: rpcd жив, сессии отвечают, панель видна в ubus со всеми методами
+		pidof rpcd >/dev/null 2>&1 || return 1
+		ubus -t 5 list session >/dev/null 2>&1 || return 1
+		ubus -t 15 call session access '{"ubus_rpc_session":"00000000000000000000000000000000","scope":"ubus","object":"session","function":"access"}' >/dev/null 2>&1
+		[ "$?" = 7 ] && return 1
+		if [ -x "$pl" ]; then
+			ubus -t 5 list zapret-manager >/dev/null 2>&1 || return 1
+			want="$(grep -c 'json_add_object' "$pl" 2>/dev/null)"
+			have="$(ubus -v list zapret-manager 2>/dev/null | grep -c '^[[:space:]]*"')"
+			if [ "${want:-0}" -gt 0 ] 2>/dev/null && [ "${have:-0}" -gt 0 ] 2>/dev/null && [ "$have" != "$want" ]; then return 1; fi
+		fi
+		# _test_recover, восстановление DNS после прерванной операции, TG-прокси
+		[ -s "$s/strategy_test.backup" ] && return 1
+		[ -f "$d/resolv.conf.zm-bak" ] && return 1
+		[ -f "$s/tg.watch" ] && return 1
+		# Forkozz: сторож и правки движка нужны, только если он стоит
+		{ [ -e /usr/bin/netshift ] || [ -e /usr/lib/netshift ]; } && return 1
+		# Steer: панель им управляет?
+		if command -v steer >/dev/null 2>&1 && grep -qxF -e engine -e 'pkg steer' -e 'net zmwarp' -e 'net zmwarp4' "$e/owned" 2>/dev/null; then
+			# _st_vpn_watch: VPN по подписке
+			[ ! -f "$e/stopped" ] && [ -s "$e/sub.txt" ] && grep -qxF steer-spec "$e/owned" 2>/dev/null && return 1
+			# _st_colo_guard: туннели WARP — не чаще раза в 5 минут
+			if [ ! -f "$e/stopped" ] && [ -s "$e/warp.up" ]; then
+				[ -f "$d/steer/colo.last" ] || return 1
+				t="$(date -r "$d/steer/colo.last" +%s 2>/dev/null || echo 0)"
+				[ $(( $(date +%s) - t )) -lt 300 ] || return 1
+			fi
+			# _st_legacy_check: ядро steer старше 2.0
+			if grep -qxF engine "$e/owned" 2>/dev/null; then
+				v="$(steer --version 2>/dev/null | awk 'NR == 1 { print $2 }')"
+				printf '%s\n' "$v" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' && [ "${v%%.*}" -ge 2 ] 2>/dev/null || return 1
+			fi
+		fi
+		# делать нечего — убираем то же, что убрали бы сами проверки на этом пути
+		rm -f /tmp/zm-rpcd-slow /tmp/zm-rpcd-plugin.stamp "$s/fk.watch" "$d/steer.vpnwatch"
+		return 0
+	}
+	_zw_idle && exit 0
+fi
 
 CONF="/etc/config/zapret"
-ZM_VERSION="2.59"
+ZM_VERSION="2.66"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -110,14 +156,19 @@ mkdir -p "$JOBS_DIR" "$ZM_STATE_DIR" 2>/dev/null
 
 if command -v opkg >/dev/null 2>&1; then
 	PKG="opkg"; PKG_ADD="opkg install"; PKG_DEL="opkg remove"; PKG_UPD="opkg update"
-	TG_ARCH="$(opkg print-architecture 2>/dev/null | awk '{print $2}' | tail -n1)"
 	RAZ="ipk"
 else
 	PKG="apk"; PKG_ADD="apk add --allow-untrusted"; PKG_DEL="apk del"; PKG_UPD="apk update"
-	TG_ARCH="$(apk --print-arch 2>/dev/null)"
 	RAZ="apk"
 fi
 INSTALL="_zm_pkg_add"; DELETE="_zm_pkg_del"; UPDATE="_zm_pkg_update"
+# Архитектура нужна только установке TG WS Proxy — узнаём её тогда, а не при каждом вызове панели.
+TG_ARCH=""
+_tg_arch_init() {
+	[ -n "$TG_ARCH" ] && return 0
+	if [ "$PKG" = "opkg" ]; then TG_ARCH="$(opkg print-architecture 2>/dev/null | awk '{print $2}' | tail -n1)"
+	else TG_ARCH="$(apk --print-arch 2>/dev/null)"; fi
+}
 
 ZM_NL='
 '
@@ -844,8 +895,11 @@ zm_watch() {
 	_test_recover >/dev/null 2>&1
 	_zm_net_orphan && _zm_net_restore force >/dev/null 2>&1
 	if ! _fk_installed || [ -f "$FK_MARK" ] || ! _fk_foreign; then
+		# без папки /etc/sing-box движок собирает конфиг, но не может его положить — sing-box падает без конфига
+		_fk_installed && [ ! -d /etc/sing-box ] && mkdir -p /etc/sing-box
 		_fk_watch
 		_fk_fast_patch
+		_fk_mlkem_patch
 	fi
 	_st_colo_guard
 	_st_legacy_check
@@ -1129,6 +1183,8 @@ status() {
 		zr="installed"
 		if [ "$PKG" = "opkg" ]; then
 			zr_ver=$(opkg list-installed zapret 2>/dev/null | awk '{sub(/-r[0-9]+$/,"",$3); print $3}')
+		elif [ -f /lib/apk/db/installed ]; then
+			zr_ver=$(awk '$0 == "P:zapret" { f = 1; next } /^$/ { f = 0 } f && /^V:/ { print substr($0, 3); exit }' /lib/apk/db/installed | sed 's/-r[0-9]\+$//')
 		else
 			zr_ver=$(apk info -v 2>/dev/null | grep '^zapret-' | head -n1 | cut -d- -f2 | sed 's/-r[0-9]\+$//')
 		fi
@@ -1274,20 +1330,6 @@ do_install_zapret_full() {
 		echo "==> Применяем базовую стратегию v7"
 		strategy_set_v v7 >/dev/null
 	fi
-
-	echo "==> Добавляем домены в hosts"
-	local b blocks="ai instagram ntc librusec telegram twitch scell spotify rutor"
-	for b in $blocks; do
-		local content line
-		content="$(_hosts_block "$b")"
-		while IFS= read -r line; do
-			[ -z "$line" ] && continue
-			_hosts_has_line "$line" || _hosts_append "$line"
-		done <<-HOSTBLOCK
-		$content
-		HOSTBLOCK
-	done
-	/etc/init.d/dnsmasq restart >/dev/null 2>&1
 
 	if ! _nochange_strategy; then
 		echo "==> Настраиваем игровую стратегию Gv1"
@@ -2109,43 +2151,54 @@ _hosts_block() {
 		librusec) printf '%s\n' \
 			"#lib.rus.ec" \
 			"185.39.18.98 lib.rus.ec www.lib.rus.ec" ;;
-		ai) printf '%s\n' \
-			"#Gemini" \
-			"45.155.204.190 gemini.google.com" \
-			"#Grok" \
-			"45.155.204.190 grok.com accounts.x.ai assets.grok.com" \
+		ai_openai) printf '%s\n' \
 			"#OpenAI" \
 			"45.155.204.190 chatgpt.com ab.chatgpt.com auth.openai.com auth0.openai.com platform.openai.com cdn.oaistatic.com" \
 			"45.155.204.190 tcr9i.chat.openai.com webrtc.chatgpt.com android.chat.openai.com api.openai.com operator.chatgpt.com" \
-			"45.155.204.190 sora.chatgpt.com sora.com videos.openai.com ios.chat.openai.com cdn.auth0.com files.oaiusercontent.com" \
+			"45.155.204.190 sora.chatgpt.com sora.com videos.openai.com ios.chat.openai.com cdn.auth0.com files.oaiusercontent.com" ;;
+		ai_claude) printf '%s\n' \
+			"#Claude" \
+			"45.155.204.190 claude.ai console.anthropic.com api.anthropic.com" ;;
+		ai_gemini) printf '%s\n' \
+			"#Gemini" \
+			"45.155.204.190 gemini.google.com" ;;
+		ai_aistudio) printf '%s\n' \
+			"#AIStudio" \
+			"45.155.204.190 aistudio.google.com generativelanguage.googleapis.com aitestkitchen.withgoogle.com aisandbox-pa.googleapis.com" \
+			"45.155.204.190 webchannel-alkalimakersuite-pa.clients6.google.com alkalimakersuite-pa.clients6.google.com assistant-s3-pa.googleapis.com" \
+			"45.155.204.190 proactivebackend-pa.googleapis.com robinfrontend-pa.googleapis.com o.pki.goog labs.google labs.google.com notebooklm.google" \
+			"45.155.204.190 notebooklm.google.com jules.google.com stitch.withgoogle.com" ;;
+		ai_grok) printf '%s\n' \
+			"#Grok" \
+			"45.155.204.190 grok.com accounts.x.ai assets.grok.com" ;;
+		ai_copilot) printf '%s\n' \
 			"#Microsoft" \
 			"45.155.204.190 copilot.microsoft.com sydney.bing.com edgeservices.bing.com rewards.bing.com" \
 			"45.155.204.190 xsts.auth.xboxlive.com xgpuwebf2p.gssv-play-prod.xboxlive.com xgpuweb.gssv-play-prod.xboxlive.com" \
-			"#ElevenLabs" \
-			"45.155.204.190 elevenlabs.io api.us.elevenlabs.io elevenreader.io api.elevenlabs.io help.elevenlabs.io" \
+			"45.155.204.190 xboxdesignlab.xbox.com" ;;
+		ai_deepl) printf '%s\n' \
 			"#DeepL" \
 			"45.155.204.190 deepl.com www.deepl.com www2.deepl.com login-wall.deepl.com w.deepl.com dict.deepl.com ita-free.www.deepl.com" \
 			"45.155.204.190 write-free.www.deepl.com experimentation.deepl.com experimentation-grpc.deepl.com ita-free.app.deepl.com" \
 			"45.155.204.190 ott.deepl.com api-free.deepl.com backend.deepl.com clearance.deepl.com errortracking.deepl.com" \
-			"45.155.204.190 oneshot-free.www.deepl.com checkout.www.deepl.com gtm.deepl.com auth.deepl.com shield.deepl.com" \
-			"#Claude" \
-			"45.155.204.190 claude.ai console.anthropic.com api.anthropic.com" \
-			"#Trae.ai" \
-			"45.155.204.190 trae-api-sg.mchost.guru api.trae.ai api-sg-central.trae.ai api16-normal-alisg.mchost.guru" \
+			"45.155.204.190 oneshot-free.www.deepl.com checkout.www.deepl.com gtm.deepl.com auth.deepl.com shield.deepl.com" ;;
+		ai_elevenlabs) printf '%s\n' \
+			"#ElevenLabs" \
+			"45.155.204.190 elevenlabs.io api.us.elevenlabs.io elevenreader.io api.elevenlabs.io help.elevenlabs.io" ;;
+		ai_windsurf) printf '%s\n' \
 			"#Windsurf" \
 			"45.155.204.190 windsurf.com codeium.com server.codeium.com web-backend.codeium.com marketplace.windsurf.com" \
 			"45.155.204.190 unleash.codeium.com inference.codeium.com windsurf-stable.codeium.com" \
-			"144.31.14.104 windsurf-telemetry.codeium.com" \
+			"144.31.14.104 windsurf-telemetry.codeium.com" ;;
+		ai_trae) printf '%s\n' \
+			"#Trae.ai" \
+			"45.155.204.190 trae-api-sg.mchost.guru api.trae.ai api-sg-central.trae.ai api16-normal-alisg.mchost.guru" ;;
+		ai_manus) printf '%s\n' \
 			"#Manus" \
-			"45.155.204.190 manus.im api.manus.im" \
+			"45.155.204.190 manus.im api.manus.im" ;;
+		ai_notion) printf '%s\n' \
 			"#Notion" \
-			"45.155.204.190 www.notion.so calendar.notion.so" \
-			"#AIStudio" \
-			"45.155.204.190 aistudio.google.com generativelanguage.googleapis.com aitestkitchen.withgoogle.com aisandbox-pa.googleapis.com xsts.auth.xboxlive.com" \
-			"45.155.204.190 webchannel-alkalimakersuite-pa.clients6.google.com alkalimakersuite-pa.clients6.google.com assistant-s3-pa.googleapis.com" \
-			"45.155.204.190 proactivebackend-pa.googleapis.com robinfrontend-pa.googleapis.com o.pki.goog labs.google labs.google.com notebooklm.google" \
-			"45.155.204.190 notebooklm.google.com jules.google.com stitch.withgoogle.com gemini.google.com copilot.microsoft.com edgeservices.bing.com" \
-			"45.155.204.190 rewards.bing.com sydney.bing.com xboxdesignlab.xbox.com xgpuweb.gssv-play-prod.xboxlive.com xgpuwebf2p.gssv-play-prod.xboxlive.com" ;;
+			"45.155.204.190 www.notion.so calendar.notion.so" ;;
 		twitch) printf '%s\n' \
 			"#Twitch" \
 			"45.155.204.190 usher.ttvnw.net gql.twitch.tv" ;;
@@ -2257,8 +2310,43 @@ _hosts_has_line() {
 		BEGIN { want = n(want) } n($0) == want { f = 1; exit } END { exit !f }' "$HOSTS_FILE" 2>/dev/null
 }
 
+# Раньше все AI-сервисы были одним блоком, и в части AI Studio повторялись адреса Gemini и Copilot.
+# Теперь у каждого сервиса свой блок: старые строки AI Studio меняем на новые на том же месте — набор адресов не меняется.
+_hosts_ai_migrate() {
+	[ -s "$HOSTS_FILE" ] || return 1
+	grep -qF -e 'aisandbox-pa.googleapis.com xsts.auth.xboxlive.com' -e 'stitch.withgoogle.com gemini.google.com' -e 'xboxdesignlab.xbox.com xgpuweb.gssv-play-prod.xboxlive.com' "$HOSTS_FILE" || return 1
+	local tmp="$HOSTS_FILE.zmtmp"
+	awk 'function n(s) { gsub(/\r/, "", s); gsub(/[ \t]+/, " ", s); sub(/^ /, "", s); sub(/ $/, "", s); return s }
+		BEGIN {
+			r["45.155.204.190 aistudio.google.com generativelanguage.googleapis.com aitestkitchen.withgoogle.com aisandbox-pa.googleapis.com xsts.auth.xboxlive.com"] = "45.155.204.190 aistudio.google.com generativelanguage.googleapis.com aitestkitchen.withgoogle.com aisandbox-pa.googleapis.com"
+			r["45.155.204.190 notebooklm.google.com jules.google.com stitch.withgoogle.com gemini.google.com copilot.microsoft.com edgeservices.bing.com"] = "45.155.204.190 notebooklm.google.com jules.google.com stitch.withgoogle.com"
+			r["45.155.204.190 rewards.bing.com sydney.bing.com xboxdesignlab.xbox.com xgpuweb.gssv-play-prod.xboxlive.com xgpuwebf2p.gssv-play-prod.xboxlive.com"] = "45.155.204.190 xboxdesignlab.xbox.com"
+		}
+		function has(ip, h) { return ((ip " " h) in got) }
+		NR == FNR { k = n($0); if (k ~ /^#/ || (k in r)) next; m = split(k, a, " "); for (i = 2; i <= m; i++) got[a[1] " " a[i]] = 1; next }
+		{
+			k = n($0)
+			if (!(k in r)) { print; next }
+			if (!(r[k] in done)) {
+				done[r[k]] = 1; m = split(r[k], a, " "); need = 0
+				for (i = 2; i <= m; i++) if (!has(a[1], a[i])) { need = 1; got[a[1] " " a[i]] = 1 }
+				if (need) print r[k]
+			}
+			m = split(k, a, " "); rest = ""
+			for (i = 2; i <= m; i++) if (!has(a[1], a[i])) { rest = rest " " a[i]; got[a[1] " " a[i]] = 1 }
+			if (rest != "") print a[1] rest
+		}' "$HOSTS_FILE" "$HOSTS_FILE" > "$tmp" && cat "$tmp" > "$HOSTS_FILE"
+	rm -f "$tmp"
+	return 0
+}
+
+hosts_ai_migrate() {
+	_hosts_ai_migrate && /etc/init.d/dnsmasq restart >/dev/null 2>&1
+	return 0
+}
+
 hosts_status() {
-	local blocks="nalog ntc instagram librusec ai twitch telegram spotify spotifyext rutor rutracker scell roblox githubraw github tapeop finland" b first=1
+	local blocks="nalog ntc instagram librusec ai_openai ai_claude ai_gemini ai_aistudio ai_grok ai_copilot ai_deepl ai_elevenlabs ai_windsurf ai_trae ai_manus ai_notion twitch telegram spotify spotifyext rutor rutracker scell roblox githubraw github tapeop finland" b
 	local geohide=""
 	if grep -q '^### geohide.ru: hosts file' "$HOSTS_FILE" 2>/dev/null; then
 		if grep -q '^# Регион серверов: US$' "$HOSTS_FILE" 2>/dev/null; then geohide="us"
@@ -2267,11 +2355,13 @@ hosts_status() {
 		else geohide="unknown"; fi
 	fi
 	printf '{"geohide":"%s","items":[' "$(esc "$geohide")"
-	for b in $blocks; do
-		[ "$first" -eq 1 ] || printf ','
-		first=0
-		printf '{"id":"%s","enabled":%s}' "$b" "$(_hosts_block_status "$b")"
-	done
+	# Все блоки сверяем с hosts за один проход awk — то же, что _hosts_block_status по каждому блоку, но без десятков процессов.
+	for b in $blocks; do echo "@@ZMB $b"; _hosts_block "$b"; done | awk -v hf="$HOSTS_FILE" 'function n(s) { gsub(/\r/, "", s); gsub(/[ \t]+/, " ", s); sub(/^ /, "", s); sub(/ $/, "", s); return s }
+		function flush() { if (id == "") return; printf "%s{\"id\":\"%s\",\"enabled\":%s}", (cnt++ ? "," : ""), id, (total > 0 && found == total) ? "true" : "false" }
+		BEGIN { while ((getline l < hf) > 0) have[n(l)] = 1; close(hf) }
+		/^@@ZMB / { flush(); id = substr($0, 7); total = 0; found = 0; split("", seen); next }
+		{ k = n($0); if (k == "" || (k in seen)) next; seen[k] = 1; total++; if (k in have) found++ }
+		END { flush() }'
 	printf ']}\n'
 }
 
@@ -3230,7 +3320,7 @@ exclusions_status() {
 	local lan_dev arp_tmp
 	lan_dev=" $(_zm_lan_devs) "
 	arp_tmp="$JOBS_DIR/excl_arp_tmp"
-	rm -f "$arp_tmp"
+	rm -f "$arp_tmp" "$arp_tmp.log"
 	if [ -f /proc/net/arp ]; then
 		tail -n +2 /proc/net/arp | while read -r aip ahw aflags amac amask adev; do
 			[ -z "$aip" ] && continue
@@ -3241,12 +3331,15 @@ exclusions_status() {
 			aname=""
 			[ -f /tmp/dhcp.leases ] && aname=$(awk -v mac="$amac" 'tolower($2)==tolower(mac){print $4; exit}' /tmp/dhcp.leases)
 			if [ -z "$aname" ] || [ "$aname" = "*" ]; then
-				aname=$(logread 2>/dev/null | grep -i "DHCPACK" | grep -i "$aip" | grep -i "$amac" | tail -n1 | awk '{print $NF}')
+				# Журнал читаем один раз на всю проверку, а не заново для каждого устройства
+				[ -f "$arp_tmp.log" ] || logread 2>/dev/null | grep -i "DHCPACK" > "$arp_tmp.log"
+				aname=$(grep -i "$aip" "$arp_tmp.log" | grep -i "$amac" | tail -n1 | awk '{print $NF}')
 			fi
 			[ "$aname" = "$amac" ] && aname=""
 			[ -n "$aname" ] || aname="Неизвестное устройство"
 			printf '%s|%s\n' "$aip" "$aname" >> "$arp_tmp"
 		done
+		rm -f "$arp_tmp.log"
 	fi
 	if [ -f "$arp_tmp" ]; then
 		while IFS='|' read -r aip aname; do
@@ -3660,6 +3753,7 @@ _zm_reinstall() {
 }
 
 _tg_arch_rs() {
+	_tg_arch_init
 	case "$TG_ARCH" in
 		aarch64*) echo "tg-ws-proxy-aarch64-unknown-linux-musl" ;;
 		x86_64) echo "tg-ws-proxy-x86_64-unknown-linux-musl" ;;
@@ -3672,6 +3766,7 @@ _tg_arch_rs() {
 }
 
 _tg_arch_go() {
+	_tg_arch_init
 	case "$TG_ARCH" in
 		aarch64*) echo "tg-ws-proxy-openwrt-aarch64" ;;
 		arm*) echo "tg-ws-proxy-openwrt-armv7" ;;
@@ -3934,6 +4029,7 @@ do_tg_install_socks5() {
 	_ensure_deps
 	echo "==> Устанавливаем TG WS Proxy SOCKS5"
 	local file url tag tmp="$TG_BIN_GO.new"
+	_tg_arch_init
 	file="$(_tg_arch_go)" || { echo "ОШИБКА: архитектура не поддерживается ($TG_ARCH)"; return 1; }
 	echo "==> Узнаём последнюю версию на GitHub ($TG_REPO_GO)"
 	tag="$(_tg_fresh_tag go)"
@@ -3976,6 +4072,7 @@ do_tg_install_rust() {
 	_ensure_deps
 	echo "==> Устанавливаем TG WS Proxy Rust"
 	local file url tmp_archive tmp_dir secret tag
+	_tg_arch_init
 	file="$(_tg_arch_rs)" || { echo "ОШИБКА: архитектура не поддерживается ($TG_ARCH)"; return 1; }
 	echo "==> Узнаём последнюю версию на GitHub ($TG_REPO_RS)"
 	tag="$(_tg_fresh_tag rs)"
@@ -5825,7 +5922,7 @@ mixomo_subscription_set() {
 	[ -s "$MIHOMO_CONF" ] && cp -f "$MIHOMO_CONF" "$MIHOMO_CONF.bak" 2>/dev/null
 	printf '%s\n' \
 		'mixed-port: 7890' 'allow-lan: false' 'tcp-concurrent: true' 'mode: rule' \
-		'log-level: info' 'ipv6: false' 'external-controller: 0.0.0.0:9090' \
+		'log-level: error' 'ipv6: false' 'external-controller: 0.0.0.0:9090' \
 		'external-ui: ui' 'secret:' 'unified-delay: true' \
 		'profile:' '  store-selected: true' '  store-fake-ip: true' '' \
 		'proxy-groups:' '  - name: GLOBAL' '    type: select' '    proxies:' \
@@ -6203,7 +6300,7 @@ health() {
 	[ "$(uci -q get firewall.@defaults[0].flow_offloading)" = 1 ] && [ -f /usr/share/firewall4/templates/ruleset.uc ] && [ "$(_flow_offloading_fix_applied)" = false ] && fw=true
 	# плашка нужна, только если по IPv6 действительно ходят: он работает и DNS роутера отдаёт IPv6-адреса сайтов
 	[ -f "$CONF" ] && [ "$(_ipv6_enabled_in_zapret)" = false ] && [ "$(_zm_v6_cached)" = live ] && v6=true
-	local d_zr="$zr" d_zr2="$zr2" d_bt="$bt" d_tg="$tg" d_mx="$mx" d_doh="$doh" d_sr="$sr" d_fk d_awg d_term=0 awgj
+	local d_zr="$zr" d_zr2="$zr2" d_bt="$bt" d_tg="$tg" d_mx="$mx" d_doh="$doh" d_sr="$sr" d_fk d_awg d_term=0 awgj fkh
 	[ "$zr" = 2 ] && d_zr=4
 	[ "$zr2" = 2 ] && d_zr2=4
 	if [ "$bt" = 2 ]; then case "$(/usr/bin/bytetube status 2>/dev/null)" in *'"enabled":true'*) ;; *) d_bt=4 ;; esac; fi
@@ -6211,7 +6308,7 @@ health() {
 	[ "$mx" = 2 ] && ! ls /etc/rc.d/S*mihomo >/dev/null 2>&1 && d_mx=4
 	if [ "$doh" = 2 ]; then { [ -f "$DOH_OFF_FLAG" ] || ! ls /etc/rc.d/S*https-dns-proxy >/dev/null 2>&1; } && d_doh=4; fi
 	[ "$sr" = 5 ] && d_sr=4
-	d_fk="$(_fk_health)"; [ "$d_fk" = 5 ] && d_fk=4
+	fkh="$(_fk_health)"; d_fk="$fkh"; [ "$d_fk" = 5 ] && d_fk=4
 	awgj="$(_awg_health)"; d_awg="${awgj%%,*}"
 	case "$awgj" in *'"awg_total":0') [ "$d_awg" = 1 ] && d_awg=4; [ "$d_awg" = 3 ] && d_awg=2 ;; esac
 	if _term_installed; then
@@ -6221,7 +6318,7 @@ health() {
 		"$d_zr" "$d_zr2" "$d_bt" "$d_tg" "$d_mx" "$d_doh" "$hs" "$d_sr" "${d_fk:-0}" "${d_awg:-0}" "$d_term"
 	printf '"zapret":%s,"zapret2":%s,"bytetube":%s,"tg":%s,"mixomo":%s,"doh":%s,"hosts":%s,"steer":%s,"steer_off":%s,"steer_exit":"%s","awg":%s,"forkop":%s,"flow_warn":%s,"ipv6_warn":%s,"reboot_hint":"%s"}\n' \
 		"$zr" "$zr2" "$bt" "$tg" "$mx" "$doh" "$hs" "$sr" \
-		"$([ -f /etc/zm-steer/stopped ] && echo true || echo false)" "$sx" "$(_awg_health)" "$(_fk_health)" "$fw" "$v6" "$(esc "$(_zm_reboot_hint_get)")"
+		"$([ -f /etc/zm-steer/stopped ] && echo true || echo false)" "$sx" "$awgj" "$fkh" "$fw" "$v6" "$(esc "$(_zm_reboot_hint_get)")"
 }
 
 VERSIONS_CACHE="$ZM_STATE_DIR/versions.json"
@@ -6508,7 +6605,7 @@ write_hev_conf() {
 		echo "  address: 127.0.0.1"
 		echo "  udp: 'udp'"
 		echo "misc:"
-		echo "  log-level: warn"
+		echo "  log-level: error"
 	} > "$f"
 }
 
@@ -8645,7 +8742,10 @@ _stl_spec() {
 					outs="\"$STL_WARP_OUT\":{\"kind\":\"interface\",\"device\":$(_stl_js "$1"),\"ipv6\":\"off\",\"on_fail\":\"$(_st_onfail)\"}"
 				else
 					m=""; for d; do m="$m${m:+,}$(_stl_js "$d")"; outs="$outs,$(_stl_js "$d"):{\"kind\":\"interface\",\"device\":$(_stl_js "$d"),\"ipv6\":\"off\"}"; done
-					outs="\"$STL_WARP_OUT\":{\"kind\":\"group\",\"pick\":\"$wp\",\"members\":[$m],\"ipv6\":\"off\",\"on_fail\":\"$(_st_onfail)\"}$outs"
+					# «самый быстрый»: смена члена группы рвёт все соединения WARP (ядро снимает их записи conntrack),
+					# поэтому уходим с живого туннеля только за явный выигрыш и меряем реже — без прыжков под нагрузкой
+					d=""; [ "$wp" = latency ] && d=',"tolerance":200,"interval":600'
+					outs="\"$STL_WARP_OUT\":{\"kind\":\"group\",\"pick\":\"$wp\"$d,\"members\":[$m],\"ipv6\":\"off\",\"on_fail\":\"$(_st_onfail)\"}$outs"
 				fi ;;
 			vpn) outs="$(_stl_vpn_outs "$1" "$a")" ;;
 			svc) _stl_rule; lid="$(_stl_ident "$a")"; lab="$(_stl_label "$b" "$a")"; srs=""; dom=""; pfx="" ;;
@@ -9146,8 +9246,21 @@ _st_sel_remap() {
 		rm -f "$f.$$.tmp"
 	done
 }
+# Instagram и WhatsApp объединены в один пункт Meta (у них и так был общий список meta) — переносим старый выбор.
+_st_sel_meta() {
+	local f moved=""
+	for f in "$ST_SEL" "$ST_SKIP"; do
+		grep -qxE 'instagram|whatsapp' "$f" 2>/dev/null || continue
+		awk '{ k = ($0 == "instagram" || $0 == "whatsapp") ? "meta" : $0; if (k != "" && !(k in s)) { s[k] = 1; print k } }' "$f" > "$f.$$.tmp" && mv -f "$f.$$.tmp" "$f"
+		rm -f "$f.$$.tmp"
+		moved=1
+	done
+	[ -n "$moved" ] && _rb_in meta "$ST_SEL" && [ -f "$ST_SKIP" ] && { sed -i '/^meta$/d' "$ST_SKIP"; [ -s "$ST_SKIP" ] || rm -f "$ST_SKIP"; }
+	return 0
+}
 _st_migrate
 _st_sel_remap
+_st_sel_meta
 mkdir -p "$ST_RUN" 2>/dev/null
 
 _st_splify2_pkg() { grep -qx 'P:luci-app-splify2' /lib/apk/db/installed 2>/dev/null || [ -f /usr/lib/opkg/info/luci-app-splify2.control ]; }
@@ -9951,7 +10064,7 @@ _st_colo_guard() {
 		[ $(( $(date +%s) - t )) -lt 300 ] && return 0
 	fi
 	: > "$f"
-	: > "$ST_WARP_UP.chk"
+	: > "$ST_RUN/warp.up.chk"
 	while read -r i c; do
 		[ -n "$i" ] || continue
 		n="$c"
@@ -9960,30 +10073,30 @@ _st_colo_guard() {
 			changed=1
 			_st_warp_is_ru "$n" && ! _st_warp_is_ru "$c" && moved="$moved $i:$n"
 		fi
-		echo "$i $n" >> "$ST_WARP_UP.chk"
+		echo "$i $n" >> "$ST_RUN/warp.up.chk"
 	done < "$ST_WARP_UP"
 	if [ "$changed" != 1 ]; then
-		rm -f "$ST_WARP_UP.chk"
+		rm -f "$ST_RUN/warp.up.chk"
 		for i in $(awk '{ print $1 }' "$ST_WARP_UP"); do
 			_st_warp_use | grep -qx "$i" && continue
 			grep -q "\"$i\"" "$STL_SPEC" 2>/dev/null && { job_start steer do_steer_warp_pick keep >/dev/null; break; }
 		done
 		return 0
 	fi
-	_st_running && { rm -f "$ST_WARP_UP.chk"; return 0; }
-	_st_warp_use > "$ST_WARP_UP.was"
-	mv -f "$ST_WARP_UP.chk" "$ST_WARP_UP"
+	_st_running && { rm -f "$ST_RUN/warp.up.chk"; return 0; }
+	_st_warp_use > "$ST_RUN/warp.up.was"
+	mv -f "$ST_RUN/warp.up.chk" "$ST_WARP_UP"
 	_st_warp_reorder
 	_st_warp_geo $(awk '{ print $1 }' "$ST_WARP_UP")
 	for t in $moved; do
 		i="${t%%:*}"; case "$i" in zmwarp) n=1 ;; *) n="${i#zmwarp}" ;; esac
 		_st_wfix_say "WARP $n переключился на российский узел ${t##*:} — выведен из работы, трафик идёт через остальные туннели"
 	done
-	if [ "$(_st_warp_use | tr '\n' ' ')" != "$(tr '\n' ' ' < "$ST_WARP_UP.was")" ]; then
-		rm -f "$ST_WARP_UP.was"
+	if [ "$(_st_warp_use | tr '\n' ' ')" != "$(tr '\n' ' ' < "$ST_RUN/warp.up.was")" ]; then
+		rm -f "$ST_RUN/warp.up.was"
 		job_start steer do_steer_warp_pick keep >/dev/null
 	else
-		rm -f "$ST_WARP_UP.was"
+		rm -f "$ST_RUN/warp.up.was"
 	fi
 	return 0
 }
@@ -11111,7 +11224,7 @@ _st_wfix_min() { local m; m="$(cat "$ST_WFIX" 2>/dev/null)"; case "$m" in 30|60|
 
 _st_wfix_set() {
 	case "$1" in
-		off) rm -f "$ST_WFIX" "$ST_WFIX_STATE" "$ST_DIR/wfix.last" ;;
+		off) rm -f "$ST_WFIX" "$ST_WFIX_STATE" "$ST_RUN/wfix.last" "$ST_DIR/wfix.last" ;;
 		30|60|180) mkdir -p "$ST_DIR"; echo "$1" > "$ST_WFIX" ;;
 		*) echo '{"error":"допустимо: выкл, 30, 60 или 180 минут"}'; return 1 ;;
 	esac
@@ -11149,8 +11262,8 @@ _st_wfix_tick() {
 	_st_running && return 0
 	_st_work || return 0
 	now="$(date +%s)"
-	mkdir -p "$ST_DIR"
-	echo "$now" > "$ST_DIR/wfix.last"
+	mkdir -p "$ST_RUN"
+	echo "$now" > "$ST_RUN/wfix.last"
 	n=1
 	while [ "$n" -le "$ST_WARP_MAX" ]; do
 		i="$(_st_wif "$n")"
@@ -11232,7 +11345,7 @@ _st_wfix_json() {
 	fi
 	_st_running && [ -s "$ST_RUN/wfix.busy" ] && fixing="$(cat "$ST_RUN/wfix.busy")"
 	printf '{"mode":"%s","max":%s,"now":%s,"last_check":%s,"fixing":"%s","dead":[%s],"log":[' "${m:-off}" "$ST_WFIX_TRIES" "$(date +%s)" \
-		"$(awk '{ print $1 + 0; exit }' "$ST_DIR/wfix.last" 2>/dev/null | grep . || echo 0)" "$fixing" "$out"
+		"$(awk '{ print $1 + 0; exit }' "$ST_RUN/wfix.last" 2>/dev/null | grep . || echo 0)" "$fixing" "$out"
 	sep=""
 	[ -s "$ST_WFIX_LOG" ] && tail -n 5 "$ST_WFIX_LOG" | while IFS='|' read -r t txt; do
 		printf '%s{"t":%s,"text":"%s"}' "$sep" "${t:-0}" "$(esc "$txt")"; sep=","
@@ -14437,6 +14550,8 @@ _fk_sb_drop_pkgs() {
 	mv -f /usr/bin/.sing-box.zm-keep /usr/bin/sing-box
 	[ -e /etc/init.d/sing-box ] || { cp -p "$k/init" /etc/init.d/sing-box 2>/dev/null; chmod 0755 /etc/init.d/sing-box 2>/dev/null; }
 	[ -e /etc/config/sing-box ] || cp -p "$k/config" /etc/config/sing-box 2>/dev/null
+	# удаление пакета забирает и папку /etc/sing-box, а движок кладёт конфиг туда, не создавая её
+	mkdir -p /etc/sing-box
 	rm -rf "$k"
 	_fk_sb_leftovers
 	echo "   ✓ Прежний sing-box удалён полностью (пакет$(echo "$had" | sed 's/^ / /; s/ \([^ ]\)/, \1/g; s/^,//')) — остался только расширенный"
@@ -14656,6 +14771,104 @@ ZM_FK_FAST_EOF
 	return 0
 }
 
+# Серверы REALITY на Xray 26.9.8+ (в ссылке support-x25519mlkem768=true) пускают только клиента с ключом
+# X25519MLKEM768. Он есть лишь в отпечатке chrome, и оставить его умеет только расширенный sing-box 2.7.2+
+# (поле support_x25519mlkem768). Сам движок делает это флагом reality_mlkem на всю секцию и только для
+# fp=chrome — а старым серверам ключ может мешать. Поэтому дописываем в движок поштучно: ссылке с этим
+# параметром — chrome и ключ; узлу подписки — то же, а при сборке подписки ключ остаётся только у таких
+# узлов и только на подходящем ядре. Остальные ссылки и узлы не меняются.
+_fk_mlkem_patch() {
+	local f=/usr/lib/netshift/sing_box_config_facade.sh tmp
+	[ -f "$f" ] || return 0
+	grep -q '^        # ZM_REALITY_MLKEM 1$' "$f" && return 0
+	grep -q '^_add_outbound_security() {$' "$f" && grep -q '^        local reality_mlkem=""$' "$f" || return 0
+	grep -q '^is_sing_box_extended_at_least() {' /usr/lib/netshift/helpers.sh 2>/dev/null || return 0
+	grep -q '^SB_EXTENDED_REALITY_MLKEM_MIN=' /usr/lib/netshift/constants.sh 2>/dev/null || return 0
+	# место вставки — единственный вызов сборки TLS внутри _add_outbound_security
+	[ "$(awk '/^_add_outbound_security\(\) \{$/ { f = 1 } f && /^}$/ { f = 0 } f && $0 == "        config=$(" { n++ } END { print n + 0 }' "$f")" = 1 ] || return 0
+	tmp="$f.zm-mlkem"
+	cat > "$tmp.blk" << 'ZM_FK_MLKEM_EOF'
+        # ZM_REALITY_MLKEM 1
+        # Zapret Manager: ссылка с support-x25519mlkem768=true — сервер REALITY на Xray 26.9.8+, он пускает только
+        # клиента с ключом X25519MLKEM768. Ключ есть лишь в отпечатке chrome, поле — только у расширенного sing-box
+        # 2.7.2+. Разбор подписки (тег <секция>-fbN-out) идёт в кэш, поле там потом оставляет или убирает сборка
+        # подписки по ядру — поэтому в подписке помечаем всегда, в ссылках из настроек — только на нужном ядре.
+        if [ "$security" = "reality" ] && [ -z "$reality_mlkem" ]; then
+            case "$(url_get_query_param "$url" "support-x25519mlkem768")" in
+            true | 1)
+                case "$outbound_tag" in
+                *-fb[0-9]*-out)
+                    fingerprint="chrome"
+                    reality_mlkem="true"
+                    ;;
+                *)
+                    if is_sing_box_extended_at_least "$SB_EXTENDED_REALITY_MLKEM_MIN"; then
+                        [ "$fingerprint" = "chrome" ] || log "Link for '$outbound_tag' has support-x25519mlkem768: using fingerprint chrome instead of '${fingerprint:-none}', only it sends the X25519MLKEM768 key share" "info"
+                        fingerprint="chrome"
+                        reality_mlkem="true"
+                    else
+                        log "Link for '$outbound_tag' has support-x25519mlkem768: the X25519MLKEM768 key share requires sing-box-extended $SB_EXTENDED_REALITY_MLKEM_MIN or newer, the server will reject this connection" "warn"
+                    fi
+                    ;;
+                esac
+                ;;
+            esac
+        fi
+        # ZM_REALITY_MLKEM_END
+
+ZM_FK_MLKEM_EOF
+	awk -v bf="$tmp.blk" '
+		/^_add_outbound_security\(\) \{$/ { f = 1 }
+		f && /^}$/ { f = 0 }
+		/^        # ZM_REALITY_MLKEM / { skip = 1 }
+		skip { if ($0 == "        # ZM_REALITY_MLKEM_END") { skip = 0; drop = 1 } next }
+		drop { drop = 0; if ($0 == "") next }
+		f && !done && $0 == "        config=$(" { while ((getline l < bf) > 0) print l; done = 1 }
+		{ print }
+		END { exit done ? 0 : 1 }' "$f" > "$tmp" || { rm -f "$tmp" "$tmp.blk"; return 0; }
+	# Сборка подписки: ключ остаётся и у узлов, помеченных при разборе (их ссылка просила ключ), если ядро его знает.
+	# Без этих двух мест подписке всё равно работают флаг секции и ссылки из настроек — правим, только если оба на месте.
+	if [ "$(grep -c -- '^        --argjson reality_mlkem "$reality_mlkem" \\$' "$tmp")" = 1 ] &&
+	   [ "$(grep -c '^                      then (if \$reality_mlkem$' "$tmp")" = 1 ]; then
+		awk '
+			$0 == "        --argjson reality_mlkem \"$reality_mlkem\" \\" {
+				print
+				print "        --argjson zm_mlkem \"$(is_sing_box_extended_at_least \"$SB_EXTENDED_REALITY_MLKEM_MIN\" && echo true || echo false)\" \\"
+				next
+			}
+			$0 == "                      then (if $reality_mlkem" {
+				print "                      # ZM_REALITY_MLKEM_SUB: ключ и у узлов, чья ссылка его просила (support-x25519mlkem768)"
+				print "                      then (if ($reality_mlkem or ($zm_mlkem and ((.tls.reality.support_x25519mlkem768 // false) == true)))"
+				next
+			}
+			{ print }' "$tmp" > "$tmp.2" && mv -f "$tmp.2" "$tmp"
+	fi
+	sh -n "$tmp" && cat "$tmp" > "$f"
+	rm -f "$tmp" "$tmp.2" "$tmp.blk"
+	return 0
+}
+
+# Признак ссылки или подписки, которой нужен ключ X25519MLKEM768, и годится ли под неё нынешний sing-box.
+_fk_mlkem_why() {
+	local f
+	grep -Ei "security=reality" /etc/config/netshift 2>/dev/null | grep -Eqi '[?&]support-x25519mlkem768=(true|1)([&#'"'"' ]|$)' && { echo "среди серверов есть REALITY для Xray 26.9.8+ (ключ X25519MLKEM768)"; return 0; }
+	[ "$1" = config ] && return 1
+	for f in /etc/netshift/subscriptions/*.json; do
+		[ -s "$f" ] || continue
+		grep -Eq '"support_x25519mlkem768"[[:space:]]*:[[:space:]]*true' "$f" && { echo "в подписке есть серверы REALITY для Xray 26.9.8+ (ключ X25519MLKEM768)"; return 0; }
+	done
+	return 1
+}
+_fk_mlkem_core_ok() {
+	local v
+	v="$(sing-box version 2>/dev/null | head -n1 | awk '{ for (i = 1; i < NF; i++) if ($i == "version") { print $(i + 1); exit } print $NF }')"
+	case "$v" in *-extended-*) ;; *) return 1 ;; esac
+	v="${v##*-extended-}"; v="${v%%-*}"
+	case "$v" in ''|*[!0-9.]*) return 1 ;; esac
+	! _st_ver_lt "$v" 2.7.2
+}
+
+
 _fk_log_mark() {
 	FK_LOGMARK="zm-lists-$$-$(date +%s)"
 	logger -t netshift "[info] $FK_LOGMARK" 2>/dev/null
@@ -14815,7 +15028,7 @@ _fk_check_live() {
 _fk_resume() {
 	[ -x /etc/init.d/netshift ] || return 0
 	[ "$1" = 1 ] && /etc/init.d/netshift enable >/dev/null 2>&1
-	[ "$2" = 1 ] && { _fk_say "Запускаем Forkozz обратно"; /etc/init.d/netshift start >/dev/null 2>&1; }
+	[ "$2" = 1 ] && { _fk_say "Запускаем Forkozz обратно"; mkdir -p /etc/sing-box; /etc/init.d/netshift start >/dev/null 2>&1; }
 	return 0
 }
 
@@ -14968,6 +15181,7 @@ do_fk_install() {
 	chmod 0755 /usr/bin/netshift /etc/init.d/netshift
 	chmod -R a+rX /usr/lib/netshift
 	_fk_fast_patch
+	_fk_mlkem_patch
 	rm -rf "$tmp"
 
 	if [ ! -s /etc/config/netshift ]; then
@@ -15026,6 +15240,7 @@ do_fk_install() {
 	[ "$was_en" = 1 ] && /etc/init.d/netshift enable >/dev/null 2>&1
 	if [ "$was_run" = 1 ]; then
 		_fk_say "Запускаем Forkozz"
+		mkdir -p /etc/sing-box
 		_zm_quiet "" /etc/init.d/netshift start || true
 		_fk_wait_up 90 || echo "!! Forkozz не запустился — нажмите «Проверить»"
 	fi
@@ -15205,6 +15420,7 @@ do_fk_sb_remove() {
 }
 
 _fk_start_once() {
+	mkdir -p /etc/sing-box
 	_zm_run 60 /etc/init.d/netshift start >> "$JOBS_DIR/forkop-svc.out" 2>&1
 }
 
@@ -15280,6 +15496,8 @@ do_fk_service() {
 	local lx; lx="$(_fk_log_ext)"
 	/etc/init.d/netshift enable >/dev/null 2>&1
 	_fk_fast_patch
+	_fk_mlkem_patch
+	mkdir -p /etc/sing-box
 	_fk_log_mark
 	: > "$JOBS_DIR/forkop-svc.out"
 	if [ "$a" = apply ] && _fk_up; then
@@ -15339,6 +15557,7 @@ do_fk_lists() {
 	_fk_up || { echo "ОШИБКА: Forkozz выключен — включите его, и списки скачаются сами"; return 1; }
 	local lp
 	_fk_fast_patch
+	_fk_mlkem_patch
 	_fk_log_mark
 	/usr/bin/netshift list_update > "$out" 2>&1 &
 	lp=$!
@@ -15368,6 +15587,7 @@ do_fk_subs() {
 	_fk_installed || { echo "ОШИБКА: Forkozz не установлен"; return 1; }
 	_fk_say "Обновляем подписки"
 	local lx; lx="$(_fk_log_ext)"
+	_fk_mlkem_patch
 	_zm_quiet "" /usr/bin/netshift subscription_update all || { echo "ОШИБКА: подписка не обновилась — проверьте ссылку"; return 1; }
 	_fk_ext_auto all "$lx"
 	_fk_say "Готово: подписки обновлены"
@@ -15394,6 +15614,7 @@ _fk_log_default() {
 _fk_ext_why() {
 	local f var="${3:-$(_fk_sb_var)}"
 	grep -Eqi "[?&](type|transport)=(xhttp|splithttp)|'vmess://" /etc/config/netshift 2>/dev/null && { echo "среди серверов есть XHTTP или VMess"; return 0; }
+	_fk_mlkem_why "$1" && return 0
 	[ "$1" = config ] && return 1
 	for f in /etc/netshift/subscriptions/*.json; do
 		[ -s "$f" ] || continue
@@ -15405,7 +15626,12 @@ _fk_ext_why() {
 	return 1
 }
 _fk_ext_need() {
-	[ -n "$(_fk_sb_ver)" ] && _fk_sb_is_ext && return 1
+	if [ -n "$(_fk_sb_ver)" ] && _fk_sb_is_ext; then
+		# расширенный уже стоит; обновлять его нужно, только если он старше 2.7.2, а серверам нужен ключ X25519MLKEM768
+		_fk_mlkem_core_ok && return 1
+		_fk_mlkem_why "$1"
+		return
+	fi
 	_fk_ext_why "$1" "$2"
 }
 # ПОРА [ДО] [restart|norestart]: config — только ссылки в настройках (до запуска), all — ещё подписки и журнал
@@ -15900,6 +16126,7 @@ redbtn_panel_gone() {
 			[ -n "$line" ] || continue
 			_hosts_has_line "$line" || { _hosts_append "$line"; r=1; }
 		done < "$dir/hosts.ai"
+		_hosts_ai_migrate && r=1
 	fi
 	if grep -qx 'pkg https-dns-proxy' "$dir/owned" 2>/dev/null; then
 		if [ -f "$DOH_OFF_FLAG" ] || ! /etc/init.d/https-dns-proxy enabled 2>/dev/null; then
@@ -15989,6 +16216,7 @@ case "$cmd" in
 	tgws_action)                                                     tgws_action "$1" ;;
 	hosts_status)                      hosts_status ;;
 	hosts_toggle)                       hosts_toggle "$1" ;;
+	hosts_ai_migrate)                   hosts_ai_migrate ;;
 	hosts_replace_geohide)              hosts_replace_geohide "$1" ;;
 	hosts_reset)                        hosts_reset ;;
 	hosts_file_get)                     hosts_file_get ;;
@@ -18171,6 +18399,18 @@ function cmd_secnames() {
 	print(join("\n", [ p.sec, ...p.conns ]), "\n");
 }
 
+/* Ссылка на сервер REALITY с Xray 26.9.8+: такой сервер пускает только клиента с ключом X25519MLKEM768 */
+function mlkem_link(l) {
+	return !!match(s(l), /[?&]security=reality([&#]|$)/) && !!match(s(l), /[?&]support-x25519mlkem768=(true|1)([&#]|$)/);
+}
+/* ключ X25519MLKEM768 отправляет только расширенный sing-box 2.7.2 и новее */
+function mlkem_core_ok() {
+	let m = match(sh("sing-box version 2>/dev/null"), /-extended-([0-9]+)\.([0-9]+)\.([0-9]+)/);
+	if (!m) return false;
+	let a = int(m[1]), b = int(m[2]), d = int(m[3]);
+	return a > 2 || (a == 2 && (b > 7 || (b == 7 && d >= 2)));
+}
+
 function cmd_diag() {
 	let checks = [];
 	function add(v, what, why) { push(checks, { verdict: v, what, why: why || "" }); }
@@ -18188,6 +18428,8 @@ function cmd_diag() {
 		for (let x in list) {
 			let ms = probe_ms(group_tag(x.name), 5000, 3), what = many ? "Секция «" + x.label + "»" : "Подключение к серверу";
 			let dead = x.mode == "iface" ? "туннель " + x.iface + " не отвечает — проверьте его на вкладке AmneziaWG" : "сервер не отвечает — проверьте ссылку или выберите другой сервер";
+			if (ms <= 0 && x.mode == "links" && length(filter(sec_links(c.get_all(CFG, x.name) || {}), mlkem_link)) && !mlkem_core_ok())
+				dead = "сервер на Xray 26.9.8+ пускает только с ключом X25519MLKEM768, а его отправляет лишь расширенный sing-box 2.7.2 или новее";
 			add(ms > 0 ? (ms < 1500 ? "ok" : "warn") : "fail", what, ms > 0 ? "отвечает за " + ms + " мс" : dead);
 		}
 		let bp = bypass_info(c), bn = length(bp.domains) + length(bp.subnets);
@@ -19761,7 +20003,7 @@ function notifyStrategyResult(res, okLabel) {
 
 var SVC_BRANDS = [
 	[ /youtube/i, '#ff0033', 'YT' ], [ /discord/i, '#5865f2', 'DC' ], [ /telegram/i, '#229ed9', 'TG' ],
-	[ /whatsapp/i, '#25d366', 'WA' ], [ /instagram|facebook|\bmeta\b/i, '#e1306c', 'IG' ], [ /twitter|^x\b/i, '#16181c', 'X' ],
+	[ /^meta$/i, '#0866ff', 'M' ], [ /whatsapp/i, '#25d366', 'WA' ], [ /instagram|facebook|\bmeta\b/i, '#e1306c', 'IG' ], [ /twitter|^x\b/i, '#16181c', 'X' ],
 	[ /tiktok/i, '#fe2c55', 'TT' ], [ /google play/i, '#01875f', 'GP' ], [ /gemini|google ai/i, '#4285f4', 'AI' ],
 	[ /chatgpt|openai|claude|\bai\b|(^|[^а-яё])ии([^а-яё]|$)/i, '#10a37f', 'AI' ], [ /githubusercontent|github raw/i, '#57606a', 'GR' ], [ /github/i, '#24292f', 'GH' ],
 	[ /google/i, '#4285f4', 'G' ], [ /roblox/i, '#e2231a', 'RB' ], [ /supercell|brawl|clash/i, '#f59e0b', 'SC' ],
@@ -20677,8 +20919,10 @@ return view.extend({
 		}
 
 		function renderOverview(d, doh, hosts, sys, h) {
-			var hostsEnabled = (hosts.items || []).filter(function(it) { return it.enabled; }).length;
-			var hostsTotal = (hosts.items || []).length;
+			var hostsAi = (hosts.items || []).filter(function(it) { return /^ai_/.test(it.id); });
+			var hostsOther = (hosts.items || []).filter(function(it) { return !/^ai_/.test(it.id); });
+			var hostsEnabled = hostsOther.filter(function(it) { return it.enabled; }).length + (hostsAi.some(function(it) { return it.enabled; }) ? 1 : 0);
+			var hostsTotal = hostsOther.length + (hostsAi.length ? 1 : 0);
 
 			var sysFlags = [];
 			if (sys.quic_blocked) sysFlags.push('QUIC заблокирован');
@@ -21256,8 +21500,13 @@ return view.extend({
 
 			card.appendChild(E('div', { 'class': 'zm-actions' }, data.installed
 				? [ E('button', { 'class': 'cbi-button cbi-button-remove', 'click': function() {
-					if (!confirm('Удалить DNS over HTTPS полностью?\n\nБудут удалены пакеты, настройки и правила перехвата DNS — роутер вернётся к обычному DNS.')) return;
-					job(zm.dohRemove, 'doh_remove', 'Удаляем DNS over HTTPS', 'DNS over HTTPS удалён', 'Ошибка удаления');
+					zm.dialog({ title: 'Удалить DNS over HTTPS?', danger: true, okText: 'Удалить DNS over HTTPS',
+						blocks: [ { type: 'list', title: 'Что произойдёт', items: [
+							'DNS over HTTPS удалится вместе с пакетами и настройками',
+							'Правила перехвата DNS устройств уберутся',
+							'DNS роутера вернётся к обычному — без шифрования'
+						] } ]
+					}).then(function(v) { if (v) job(zm.dohRemove, 'doh_remove', 'Удаляем DNS over HTTPS', 'DNS over HTTPS удалён', 'Ошибка удаления'); });
 				} }, 'Удалить') ]
 				: [ E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() {
 					job(zm.dohInstall, 'doh_install', 'Устанавливаем DNS over HTTPS', 'DNS over HTTPS установлен — выберите сервер', 'Ошибка установки');
@@ -21517,10 +21766,10 @@ return view.extend({
 					var list = (data.ifaces || []).filter(function(f) { return f.owner !== 'steer'; });
 					var foreign = list.filter(function(f) { return !f.owned; }).map(function(f) { return f.name; });
 					var fk = list.filter(function(f) { return f.forkozz; }).map(function(f) { return f.name; });
-					var blocks = [ { type: 'list', title: 'Что будет удалено', items: [
-						'Пакеты AmneziaWG и модуль ядра',
-						'Сохранённые конфиги туннелей'
-					].concat(list.map(function(f) { return 'Туннель ' + f.name + (f.owned ? '' : ' (создан не панелью)') + ' — с ключами и зоной файрвола'; })) } ];
+					var blocks = [ { type: 'list', title: 'Что произойдёт', items: [
+						'Пакеты AmneziaWG и модуль ядра удалятся',
+						'Сохранённые конфиги туннелей удалятся'
+					].concat(list.map(function(f) { return 'Туннель ' + f.name + (f.owned ? '' : ' (создан не панелью)') + ' удалится — с ключами и зоной файрвола'; })) } ];
 					if (fk.length) blocks.push({ type: 'note', kind: 'warn', text: 'Через ' + fk.join(', ') + ' сейчас работает Forkozz. Он будет выключен, трафик пойдёт напрямую. Его настройки останутся — потом выберите в нём другое подключение.' });
 					if (foreign.length) blocks.push({ type: 'switch', id: 'all', value: false,
 						label: 'Удалить и туннели, созданные не панелью: ' + foreign.join(', '),
@@ -21623,7 +21872,7 @@ return view.extend({
 					return;
 				}
 				zm.dialog({ title: 'Удалить туннель ' + f.name + '?', danger: true, okText: 'Удалить туннель',
-					blocks: [ { type: 'list', title: 'Что будет удалено', items: [ 'Туннель ' + f.name + ' и его ключи', 'Его зона файрвола, если её создала панель' ] },
+					blocks: [ { type: 'list', title: 'Что произойдёт', items: [ 'Туннель ' + f.name + ' удалится вместе с ключами', 'Его зона файрвола уберётся, если её создала панель' ] },
 						f.route_all && f.up ? { type: 'note', text: 'Сейчас через него идёт весь интернет роутера. После удаления он пойдёт напрямую через провайдера.' } : null ]
 				}).then(function(v) { if (v) quick('delete', f.name, f.name + ' удалён'); });
 			} }, 'Удалить'));
@@ -21986,8 +22235,12 @@ return view.extend({
 			if (data.running) b.push(E('a', { 'class': 'cbi-button cbi-button-positive', 'href': addr(), 'target': '_blank', 'rel': 'noopener' }, 'Открыть в новой вкладке'));
 			b.push(btn('', 'Перезапустить', function() { quick('restart', 'Терминал перезапущен'); }));
 			b.push(btn('cbi-button-remove', 'Удалить', function() {
-				if (!confirm('Удалить терминал?\n\nБудет остановлен и удалён пакет ttyd вместе с его настройками.')) return;
-				job('remove', 'Удаляем терминал — ход работы виден в окне вывода');
+				zm.dialog({ title: 'Удалить терминал?', danger: true, okText: 'Удалить терминал',
+					blocks: [ { type: 'list', title: 'Что произойдёт', items: [
+						'Терминал остановится',
+						'Пакет ttyd удалится вместе с настройками'
+					] } ]
+				}).then(function(v) { if (v) job('remove', 'Удаляем терминал — ход работы виден в окне вывода'); });
 			}));
 			actEl.appendChild(E('div', { 'class': 'zm-actions' }, b));
 			if (data.running && !canEmbed) actEl.appendChild(E('p', { 'class': 'zm-hint' }, 'Панель открыта по https, а терминал работает по http — встроить его сюда нельзя, он откроется в отдельной вкладке.'));
@@ -22387,8 +22640,12 @@ return view.extend({
 					mainCard.appendChild(E('p', { 'class': 'zm-hint' }, 'На роутере остались настройки Steer панели: туннели WARP, списки и выбор сервисов. «Удалить Steer панели» уберёт только то, чем сейчас никто не пользуется: само ядро steer, а также туннели и списки, записанные в его нынешних правилах, останутся на месте.'));
 					mainCard.appendChild(E('div', { 'class': 'zm-actions' }, [
 						E('button', { 'class': 'cbi-button cbi-button-remove', 'click': function() {
-							if (!confirm('Удалить Steer панели?\n\nЯдро steer и всё, на что ссылаются его нынешние правила, останется на месте.')) return;
-							act('remove', '', 'Удаляем Steer панели');
+							zm.dialog({ title: 'Удалить Steer панели?', danger: true, okText: 'Удалить Steer панели',
+								blocks: [ { type: 'list', title: 'Что произойдёт', items: [
+									'Туннели WARP, списки и выбор сервисов панели удалятся',
+									'Ядро steer и всё, на что ссылаются его нынешние правила, останется на месте'
+								] } ]
+							}).then(function(v) { if (v) act('remove', '', 'Удаляем Steer панели'); });
 						} }, 'Удалить Steer панели')
 					]));
 				}
@@ -22467,8 +22724,13 @@ return view.extend({
 			if ((data.latest && data.version && verLt(data.version, data.latest)) || (data.version && !data.ext))
 				actions.push(E('button', { 'class': 'cbi-button cbi-button-action', 'click': function() { act('engine', '', 'Обновляем движок Steer'); } }, 'Обновить движок'));
 			actions.push(E('button', { 'class': 'cbi-button cbi-button-remove', 'click': function() {
-				if (!confirm('Удалить Steer?\n\nБудут удалены Steer, туннели WARP и всё, что для них ставилось. Сервисы, которые шли через WARP, пойдут напрямую.')) return;
-				act('remove', '', 'Удаляем Steer');
+				zm.dialog({ title: 'Удалить Steer?', danger: true, okText: 'Удалить Steer',
+					blocks: [ { type: 'list', title: 'Что произойдёт', items: [
+						'Steer удалится со всеми настройками: подписка, выбор сервисов, списки',
+						'Туннели WARP и всё, что для них ставилось, удалятся',
+						'Сервисы, которые шли через туннель, пойдут напрямую'
+					] } ]
+				}).then(function(v) { if (v) act('remove', '', 'Удаляем Steer'); });
 			} }, 'Удалить'));
 			mainCard.appendChild(E('div', { 'class': 'zm-actions' }, actions));
 			mainCard.appendChild(E('p', { 'class': 'zm-hint' }, '«Выключить» — всё пойдёт напрямую, настройки и выбор сервисов сохранятся.'));
@@ -23342,8 +23604,12 @@ return view.extend({
 			acts.push(E('button', { 'class': 'cbi-button cbi-button-action', 'disabled': (probing || busy || !nodes.length) ? '' : null, 'click': probeAll },
 				probing ? 'Проверяем ' + probeDone + ' из ' + probeTotal : 'Проверить задержку'));
 			acts.push(E('button', { 'class': 'cbi-button cbi-button-remove', 'disabled': busy ? '' : null, 'click': function() {
-				if (!confirm('Удалить подписку?' + (data.warp_on ? '\n\nВыбранные сервисы пойдут через WARP.' : '\n\nТуннеля не останется — сервисы пойдут напрямую.'))) return;
-				subAct('sub_remove', '', 'Удаляем подписку');
+				zm.dialog({ title: 'Удалить подписку?', danger: true, okText: 'Удалить подписку',
+					blocks: [ { type: 'list', title: 'Что произойдёт', items: [
+						'Подписка и её серверы удалятся',
+						data.warp_on ? 'Выбранные сервисы пойдут через WARP' : 'Туннеля не останется — сервисы пойдут напрямую'
+					] } ]
+				}).then(function(v) { if (v) subAct('sub_remove', '', 'Удаляем подписку'); });
 			} }, 'Удалить'));
 			if (!hideMode) subCard.appendChild(E('div', { 'class': 'zm-actions' }, acts));
 			if (!hideMode && !(linksOpen && subData.kind === 'links') && nodes.length > 1) subCard.appendChild(zm.swRow(sortPing, 'Сортировать по пингу', 'Серверы идут от быстрых к медленным, неотвечающие — в конце.', function() {
@@ -23555,8 +23821,7 @@ mkdir -p /usr/share/zm-redbtn
 cat > '/usr/share/zm-redbtn/services.conf' << 'ZM_INSTALLER_EOF'
 youtube|YouTube|svc_youtube.lst||www.youtube.com,youtubei.googleapis.com,manifest.googlevideo.com|youtu.be,i.ytimg.com,i9.ytimg.com,yt3.ggpht.com,yt4.ggpht.com,jnn-pa.googleapis.com,signaler-pa.youtube.com,yt3.googleusercontent.com,rr4---sn-4g5e6nze.googlevideo.com,rr4---sn-5go7yner.googlevideo.com,rr5---sn-n8v7knez.googlevideo.com,rr2---sn-q4fl6ndl.googlevideo.com,rr1---sn-q4fl6n6y.googlevideo.com,rr14---sn-n8v7kn7r.googlevideo.com,rr4---sn-jvhnu5g-c35d.googlevideo.com,rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com,rr12---sn-gvnuxaxjvh-bvwz.googlevideo.com,rr1---sn-ug5onuxaxjvh-n8v6.googlevideo.com||youtube
 discord|Discord|svc_discord.lst|discord.lst|discord.com,gateway.discord.gg,updates.discord.com|cdn.discordapp.com,media.discordapp.net||discord
-instagram|Instagram|svc_meta.lst|meta.lst|www.instagram.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com||meta
-whatsapp|WhatsApp|svc_meta.lst|whatsapp.lst|web.whatsapp.com|static.whatsapp.net,mmg.whatsapp.net||meta
+meta|Meta|svc_meta.lst|meta.lst|www.instagram.com,web.whatsapp.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com,static.whatsapp.net,mmg.whatsapp.net||meta
 x|X (Twitter)|svc_twitter.lst|twitter_x.lst|x.com|twitter.com,abs.twimg.com,video.twimg.com||twitter
 github|GitHub|own_github.lst||github.com,raw.githubusercontent.com,objects.githubusercontent.com|codeload.github.com,api.github.com,ghcr.io||
 telegram|Telegram|svc_telegram.lst|telegram.lst|web.telegram.org|t.me,core.telegram.org,telegra.ph||telegram
@@ -23612,7 +23877,18 @@ var LABELS = {
 	ntc: [ 'ntc.party', 'Форум про обход блокировок' ],
 	instagram: [ 'Instagram', 'Instagram и Facebook' ],
 	librusec: [ 'lib.rus.ec', 'Библиотека' ],
-	ai: [ 'AI-сервисы', 'ChatGPT, Claude, Gemini' ],
+	ai_openai: [ 'ChatGPT', 'OpenAI, Sora' ],
+	ai_claude: [ 'Claude', 'Anthropic' ],
+	ai_gemini: [ 'Gemini', 'Google' ],
+	ai_aistudio: [ 'Google AI Studio', 'AI Studio, NotebookLM, Labs' ],
+	ai_grok: [ 'Grok', 'xAI' ],
+	ai_copilot: [ 'Copilot', 'Microsoft, Bing' ],
+	ai_deepl: [ 'DeepL', 'Переводчик' ],
+	ai_elevenlabs: [ 'ElevenLabs', 'Озвучка' ],
+	ai_windsurf: [ 'Windsurf', 'Codeium' ],
+	ai_trae: [ 'Trae.ai', 'Редактор кода' ],
+	ai_manus: [ 'Manus', 'AI-агент' ],
+	ai_notion: [ 'Notion', 'Заметки' ],
 	twitch: [ 'Twitch', 'Стримы' ],
 	telegram: [ 'Telegram Web', 'Веб-версия' ],
 	spotify: [ 'Spotify', 'Музыка' ],
@@ -23628,6 +23904,7 @@ var LABELS = {
 };
 
 function lbl(id) { return (LABELS[id] || [ id ])[0]; }
+function isAi(id) { return /^ai_/.test(id); }
 
 return view.extend({
 	load: function() {
@@ -23637,7 +23914,7 @@ return view.extend({
 
 	render: function(data) {
 		var wrap = E('div', { 'class': 'zm-wrap' });
-		var grid = E('div', { 'class': 'zm-svc-grid' });
+		var grid = E('div');
 		var busy = false, pick = null, lastItems = data.items || [];
 		var hostsLog = E('pre', { 'class': 'zm-log' });
 
@@ -23659,20 +23936,51 @@ return view.extend({
 			onSave: applyPick
 		});
 
+		var aiOpen = false;
+
 		function renderGrid(items) {
 			lastItems = items || [];
 			grid.innerHTML = '';
 			var sel = pick || curOn(lastItems);
-			lastItems.forEach(function(it) {
+			function edit(fn) {
+				if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+				var p = {};
+				for (var k in sel) if (sel[k]) p[k] = true;
+				fn(p);
+				pick = p;
+				renderGrid(lastItems);
+			}
+			function tile(it) {
 				var l = LABELS[it.id] || [ it.id, '' ];
-				grid.appendChild(zm.svcCard({ name: l[0], key: it.id, on: !!sel[it.id], title: l[1] ? l[0] + ' — ' + l[1] : l[0], click: function() {
-					if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-					pick = {};
-					for (var k in sel) if (sel[k]) pick[k] = true;
-					if (pick[it.id]) delete pick[it.id]; else pick[it.id] = true;
-					renderGrid(lastItems);
-				} }));
-			});
+				return zm.svcCard({ name: l[0], key: it.id, on: !!sel[it.id], title: l[1] ? l[0] + ' — ' + l[1] : l[0], click: function() {
+					edit(function(p) { if (p[it.id]) delete p[it.id]; else p[it.id] = true; });
+				} });
+			}
+			function aiGroup(ai) {
+				var on = ai.filter(function(it) { return sel[it.id]; }).length, all = on === ai.length;
+				function setAll(v) { edit(function(p) { ai.forEach(function(it) { if (v) p[it.id] = true; else delete p[it.id]; }); }); }
+				var sw = E('div', { 'class': 'zm-switch' + (on ? ' zm-switch-on' : '') + (on && !all ? ' zm-switch-inc' : ''), 'title': all ? 'Снять все' : 'Выбрать все', 'click': function(ev) {
+					ev.stopPropagation();
+					setAll(!all);
+				} }, [ E('span') ]);
+				return zm.svcGroup({
+					name: 'AI-сервисы', sub: 'ChatGPT, Claude, Gemini', key: 'ai', open: aiOpen,
+					badge: E('span', { 'style': 'display:inline-flex; align-items:center; gap:10px' }, [
+						E('span', { 'class': 'zm-badge ' + (on ? 'zm-ok' : 'zm-off') }, on + ' из ' + ai.length),
+						sw
+					]),
+					body: zm.svcGrid(ai.map(tile)),
+					toggle: function(o) { aiOpen = o; }
+				});
+			}
+			/* AI-сервисы — отдельным разделом под остальными, как «Дополнительные списки» в Steer */
+			var ai = lastItems.filter(function(it) { return isAi(it.id); });
+			grid.appendChild(E('h4', { 'style': 'margin:0' }, 'Сервисы'));
+			grid.appendChild(zm.svcGrid(lastItems.filter(function(it) { return !isAi(it.id); }).map(tile)));
+			if (ai.length) {
+				grid.appendChild(E('h4', { 'style': 'margin:18px 0 0' }, 'AI-сервисы'));
+				grid.appendChild(aiGroup(ai));
+			}
 			var n = changes().length;
 			bar.set(n > 0 || busy, busy, n ? 'Есть несохранённые изменения: ' + n : '');
 		}
@@ -23971,8 +24279,14 @@ return view.extend({
 				actions.push(E('button', {
 					'class': 'cbi-button cbi-button-remove',
 					'click': function() {
-						if (!confirm('Удалить Mixomo полностью?\n\nБудут удалены Mihomo, MagiTrickle, hev-socks5-tunnel, их настройки, подписка, WARP.conf, интерфейс, зона файрвола и задания cron.')) return;
-						doAction('remove');
+						zm.dialog({ title: 'Удалить Mixomo?', danger: true, okText: 'Удалить Mixomo',
+							blocks: [ { type: 'list', title: 'Что произойдёт', items: [
+								'Mihomo, MagiTrickle и hev-socks5-tunnel удалятся',
+								'Их настройки, подписка и WARP.conf удалятся',
+								'Интерфейс, зона файрвола и задания расписания уберутся',
+								'Сервисы, которые шли через Mixomo, пойдут напрямую'
+							] } ]
+						}).then(function(v) { if (v) doAction('remove'); });
 					}
 				}, 'Удалить'));
 				actions.push(E('button', {
@@ -24623,7 +24937,15 @@ return view.extend({
 				if (d.zapret === 'installed') {
 					zActions.push(E('button', {
 						'class': 'cbi-button cbi-button-remove',
-						'click': function() { doZapretAction('remove'); }
+						'click': function() {
+							zm.dialog({ title: 'Удалить Zapret?', danger: true, okText: 'Удалить Zapret',
+								blocks: [ { type: 'list', title: 'Что произойдёт', items: [
+									'Zapret остановится, его правила файрвола снимутся',
+									'Пакеты, стратегии и списки удалятся',
+									'Задания Zapret уберутся из расписания'
+								] }, { type: 'note', kind: 'warn', text: 'Сайты, которые открывались благодаря Zapret, перестанут открываться.' } ]
+							}).then(function(v) { if (v) doZapretAction('remove'); });
+						}
 					}, 'Удалить'));
 					if (/^[0-9]+\.[0-9]+$/.test(latestVersion) && d.zapret_version && latestVersion !== d.zapret_version) {
 						zActions.push(E('button', {
@@ -25320,13 +25642,17 @@ return view.extend({
 						return E('div', { 'class': 'zm-seg-item' + (m === resMode ? ' zm-active' : ''), 'click': function() { if (m !== resMode) loadResults(m); } }, TEST_MODE_LABELS[m] || m);
 					})),
 					E('button', { 'class': 'cbi-button', 'click': function() {
-						if (!confirm('Удалить результаты «' + (TEST_MODE_LABELS[resMode] || resMode) + '»?')) return;
-						zm.testAction('clear', resMode).then(function() {
+						zm.dialog({ title: 'Удалить результаты «' + (TEST_MODE_LABELS[resMode] || resMode) + '»?', danger: true, okText: 'Удалить результаты',
+							blocks: [ { type: 'list', title: 'Что произойдёт', items: [
+								'Результаты этого теста удалятся',
+								'Результаты других тестов останутся'
+							] } ]
+						}).then(function(ok) { if (ok) zm.testAction('clear', resMode).then(function() {
 							status['has_results_' + resMode] = false;
 							delete resData[resMode];
 							renderLaunch();
 							loadResults(null);
-						});
+						}); });
 					} }, 'Удалить')
 				]));
 				var d = resData[resMode];
@@ -26076,7 +26402,15 @@ return view.extend({
 			if (d.zapret2 === 'installed') {
 				z2Actions.push(E('button', {
 					'class': 'cbi-button cbi-button-remove',
-					'click': function() { view.doAction2('remove'); }
+					'click': function() {
+						zm.dialog({ title: 'Удалить Zapret2?', danger: true, okText: 'Удалить Zapret2',
+							blocks: [ { type: 'list', title: 'Что произойдёт', items: [
+								'Zapret2 остановится, его правила файрвола снимутся',
+								'Пакеты и настройки удалятся',
+								'Задания Zapret2 уберутся из расписания'
+							] }, { type: 'note', kind: 'warn', text: 'Сайты, которые открывались благодаря Zapret2, перестанут открываться.' } ]
+						}).then(function(v) { if (v) view.doAction2('remove'); });
+					}
 				}, 'Удалить'));
 				z2Actions.push(E('button', {
 					'class': 'cbi-button',
@@ -26701,7 +27035,36 @@ html.zm-theme-dark .zm-seg { background: #22272e; border-color: rgba(255,255,255
 .zm-fk-sec-head > .zm-st-stat-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .zm-fk-sec-head > .zm-badge { flex-shrink: 0; padding: 2px 9px; font-size: 11px; }
 .zm-fk-sec-head > .zm-st-stat-sub { flex-shrink: 0; }
-.zm-fk-common { border-style: dashed; }
+.zm-st-stat.zm-fk-top { margin-top: 16px; padding: 16px 18px; gap: 6px; border-width: 1.5px; border-color: rgba(26,163,255,.45); }
+.zm-fk-top > .zm-fk-sec-head { flex-wrap: wrap; }
+.zm-fk-top > .zm-fk-sec-head > .zm-st-stat-label { white-space: normal; }
+.zm-fk-top-badges { display: inline-flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; flex-shrink: 0; }
+.zm-fk-top-badges > .zm-badge { padding: 2px 9px; font-size: 11px; }
+.zm-fk-top + .zm-st-stats.zm-fk-secs { margin-top: 10px; }
+.zm-st-stats.zm-fk-secs.zm-fk-cols-1 { grid-template-columns: minmax(0, 1fr); }
+.zm-st-stats.zm-fk-secs.zm-fk-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.zm-st-stats.zm-fk-secs.zm-fk-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+@media (max-width: 1000px) { .zm-st-stats.zm-fk-secs.zm-fk-cols-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .zm-st-stats.zm-fk-secs.zm-fk-cols-2, .zm-st-stats.zm-fk-secs.zm-fk-cols-3 { grid-template-columns: minmax(0, 1fr); } }
+.zm-fk-traffic { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 6px; }
+.zm-fk-tile { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 12px; border-radius: 10px; background: rgba(0,0,0,.04); }
+html.zm-theme-dark .zm-fk-tile { background: rgba(255,255,255,.06); }
+.zm-fk-tile > b { font-size: 17px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.zm-fk-tile > span { font-size: 11.5px; opacity: .6; }
+.zm-fk-info { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(125px, 100%), 1fr)); gap: 8px 20px; margin-top: 8px; padding-top: 10px; border-top: 1px solid rgba(0,0,0,.08); }
+html.zm-theme-dark .zm-fk-info { border-top-color: rgba(255,255,255,.1); }
+.zm-fk-info > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.zm-fk-info > div > span { font-size: 11.5px; opacity: .6; }
+.zm-fk-info > div > b { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.zm-fk-sec.zm-fk-sec-main { border-width: 1.5px; border-color: rgba(26,163,255,.45); }
+.zm-fk-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.zm-fk-chip { font-size: 11.5px; line-height: 1.5; padding: 2px 9px; border-radius: 999px; background: rgba(0,0,0,.05); border: 1px solid transparent; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+html.zm-theme-dark .zm-fk-chip { background: rgba(255,255,255,.08); }
+.zm-fk-chip.zm-fk-chip-x { background: transparent; border: 1px dashed rgba(0,0,0,.22); opacity: .8; }
+html.zm-theme-dark .zm-fk-chip.zm-fk-chip-x { border-color: rgba(255,255,255,.25); }
+.zm-fk-chip.zm-fk-chip-more { background: rgba(26,163,255,.12); color: #1a7fd0; font-weight: 600; cursor: pointer; }
+.zm-fk-chip.zm-fk-chip-more:hover { background: rgba(26,163,255,.2); }
+@media (max-width: 600px) { .zm-fk-traffic, .zm-fk-info { grid-template-columns: repeat(2, minmax(0, 1fr)); } .zm-fk-info { gap: 8px 12px; } .zm-fk-top-badges { justify-content: flex-start; } }
 .zm-st-stat-sub { font-size: 11.5px; opacity: .6; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 1000px) { .zm-st-stats.zm-st-stats-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .zm-st-stat-sub { white-space: normal; } }
@@ -27382,9 +27745,14 @@ return view.extend({
 				E('button', {
 					'class': 'cbi-button cbi-button-remove',
 					'click': function() {
-						if (!confirm('Удалить панель Zapret Manager?\n\nСам Zapret и остальные установленные через панель компоненты не пострадают. Действие необратимо — панель придётся ставить заново.')) {
-							return;
-						}
+						zm.dialog({ title: 'Удалить Zapret Manager?', danger: true, okText: 'Удалить панель',
+							blocks: [ { type: 'list', title: 'Что произойдёт', items: [
+								'Удалится только панель — приложение в LuCI и Web UI',
+								'Zapret, Steer, Forkozz, Mixomo и остальное останутся и продолжат работать',
+								'Автоподбор WARP и автообновление подписки Steer остановятся'
+							] }, { type: 'note', kind: 'warn', text: 'Действие необратимо — панель придётся ставить заново. Эта страница сразу станет недоступна.' } ]
+						}).then(function(v) {
+						if (!v) return;
 						uninstallLog.classList.add('zm-show');
 						zm.renderLog(uninstallLog, '==> Удаляем панель Zapret Manager');
 						zm.toast('Удаляем панель Zapret Manager', 'warning');
@@ -27396,6 +27764,7 @@ return view.extend({
 						}).catch(function() {
 							zm.renderLog(uninstallLog, '==> Готово (соединение прервано — это ожидаемо, панель уже удалена). Выходим из панели');
 							setTimeout(function() { location.href = L.url('admin/logout'); }, 2500);
+						});
 						});
 					}
 				}, 'Удалить панель')
@@ -27612,8 +27981,13 @@ return view.extend({
 					actions.push(E('button', {
 						'class': 'cbi-button cbi-button-remove',
 						'click': function() {
-							if (!confirm('Удалить ' + v.title + '?\n\nУдаление принудительное: пакет и все файлы будут стёрты, даже если менеджер пакетов откажется.')) return;
-							doAction(v.id, 'remove');
+							zm.dialog({ title: 'Удалить ' + v.title + '?', danger: true, okText: 'Удалить',
+								blocks: [ { type: 'list', title: 'Что произойдёт', items: [
+									v.title + ' остановится',
+									'Пакет и все файлы удалятся — даже если менеджер пакетов откажется',
+									'Telegram через этот прокси перестанет подключаться'
+								] } ]
+							}).then(function(r) { if (r) doAction(v.id, 'remove'); });
 						}
 					}, 'Удалить'));
 					actions.push(E('button', {
@@ -27685,8 +28059,13 @@ return view.extend({
 				actions.push(E('button', {
 					'class': 'cbi-button cbi-button-remove',
 					'click': function() {
-						if (!confirm('Удалить sTGWS?\n\nУдаление принудительное: пакет и все файлы будут стёрты, даже если менеджер пакетов откажется.')) return;
-						doTgwsAction('remove');
+						zm.dialog({ title: 'Удалить sTGWS?', danger: true, okText: 'Удалить sTGWS',
+							blocks: [ { type: 'list', title: 'Что произойдёт', items: [
+								'sTGWS остановится',
+								'Пакет и все файлы удалятся — даже если менеджер пакетов откажется',
+								'Telegram через этот прокси перестанет подключаться'
+							] } ]
+						}).then(function(v) { if (v) doTgwsAction('remove'); });
 					}
 				}, 'Удалить'));
 				actions.push(E('button', {
@@ -28280,7 +28659,14 @@ return view.extend({
 		var netCard = E('div', { 'class': 'zm-card zm-kv' });
 		var panelCard = E('div', { 'class': 'zm-card zm-kv' });
 		var openFold = {}, ownUtUrl = false;
-		var trafficEl = E('span', { 'class': 'zm-fk-traffic' }, '—'), trafficLast = null, trafficTimer = null;
+		var tDown = E('b', {}, '—'), tUp = E('b', {}, '—'), tAll = E('b', {}, '—'), tConn = E('b', {}, '—'), tConnLbl = E('span', {}, 'соединений');
+		var sbMem = E('b', {}, '—'), trafficNote = E('span', { 'class': 'zm-st-stat-sub', 'style': 'display:none' }, 'нет данных — sing-box ещё запускается');
+		var trafficEl = E('div', { 'class': 'zm-fk-traffic' }, [
+			E('div', { 'class': 'zm-fk-tile' }, [ tDown, E('span', {}, 'загрузка') ]),
+			E('div', { 'class': 'zm-fk-tile' }, [ tUp, E('span', {}, 'отдача') ]),
+			E('div', { 'class': 'zm-fk-tile' }, [ tAll, E('span', {}, 'всего') ]),
+			E('div', { 'class': 'zm-fk-tile' }, [ tConn, tConnLbl ])
+		]), trafficLast = null, trafficTimer = null;
 
 		function area(key, placeholder, minh) {
 			var ta = E('textarea', { 'class': 'zm-config-editor', 'spellcheck': 'false', 'autocapitalize': 'off', 'placeholder': placeholder, 'style': 'min-height:' + (minh || 120) + 'px' });
@@ -28571,8 +28957,12 @@ return view.extend({
 
 		function deleteSec() {
 			if (busy || saving) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
-			if (!confirm('Удалить секцию «' + secName() + '»?\n\nЕё правила перестанут действовать. Правила остальных секций и их выбор устройств сохранятся.')) return;
-			zm.forkopAction('secdel', draft.sec).then(function(res) {
+			zm.dialog({ title: 'Удалить секцию «' + secName() + '»?', danger: true, okText: 'Удалить секцию',
+				blocks: [ { type: 'list', title: 'Что произойдёт', items: [
+					'Её правила перестанут действовать',
+					'Остальные секции и их выбор устройств сохранятся'
+				] } ]
+			}).then(function(v) { if (v) zm.forkopAction('secdel', draft.sec).then(function(res) {
 				if (res.error) { zm.toast(res.error, 'error'); return; }
 				rememberSec(cfg.main || '');
 				dirty = false;
@@ -28582,7 +28972,7 @@ return view.extend({
 					switchSec(cfg.main || '', true);
 					follow();
 				} else { zm.toast('Секция удалена', 'info'); switchSec(cfg.main || '', true); }
-			}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
+			}).catch(function() { zm.toast('Роутер не ответил', 'error'); }); });
 		}
 
 		function renderSections() {
@@ -28710,7 +29100,7 @@ return view.extend({
 				E('button', { 'class': 'cbi-button cbi-button-remove', 'click': function() {
 					zm.dialog({ title: 'Удалить sing-box?', danger: true, okText: 'Удалить sing-box',
 						intro: 'sing-box ' + st.singbox + ' (' + sbn + ') остался после Forkozz. Сам по себе он ничего не делает.',
-						blocks: [ { type: 'list', title: 'Что будет удалено', items: [ 'Программа sing-box и её пакет', 'Её настройки и кэш' ] } ]
+						blocks: [ { type: 'list', title: 'Что произойдёт', items: [ 'Программа sing-box и её пакет удалятся', 'Её настройки и кэш удалятся' ] } ]
 					}).then(function(v) { if (v) act('singbox_remove'); });
 				} }, 'Удалить sing-box')
 			]);
@@ -28730,17 +29120,18 @@ return view.extend({
 			return sec < 60 ? sec + ' с назад' : sec < 3600 ? Math.floor(sec / 60) + ' мин назад' : Math.floor(sec / 3600) + ' ч назад';
 		}
 
-		function secListsText(s) {
+		/* Что выбрано в секции: сервисы по отдельности (для меток) и прочее — свои списки, домены, устройства */
+		function secLists(s) {
 			var p = secPick(cfg, s), names = p.items.filter(function(it) { return p.sel[it.id]; }).map(function(it) { return it.name; }), parts = [];
-			if (names.length) parts.push(names.slice(0, 2).join(', ') + (names.length > 2 ? ' +' + (names.length - 2) : ''));
 			if ((p.lists || []).length) parts.push(nn(p.lists.length, 'свой список', 'своих списка', 'своих списков'));
 			if (s.domains) parts.push(nn(s.domains, 'домен', 'домена', 'доменов'));
 			if (s.subnets) parts.push(nn(s.subnets, 'подсеть', 'подсети', 'подсетей'));
 			if (s.own_off) parts.push('свой список выключен');
 			if ((s.full || []).length) parts.push('только для ' + nn(s.full.length, 'устройства', 'устройств', 'устройств'));
 			if ((s.all || []).length) parts.push('весь трафик: ' + nn(s.all.length, 'устройство', 'устройства', 'устройств'));
-			return parts.join(' · ') || 'ничего не выбрано';
+			return { names: names, extra: parts };
 		}
+
 
 		function secConnText(s, x) {
 			if (x && x.fallback_direct) return [ 'Напрямую', 'VPN недоступны · проверяем раз в 2 минуты' ];
@@ -28767,30 +29158,59 @@ return view.extend({
 			return badge('zm-off', secProbe ? 'проверяем…' : 'нет данных');
 		}
 
+		/* Метки сервисов: до SVC_SHOW штук, остальные — под «ещё N», раскрываются прямо в карточке */
+		var SVC_SHOW = 6, secOpen = {};
+		function secChips(s) {
+			var l = secLists(s), box = E('div', { 'class': 'zm-fk-chips' }), names = l.names;
+			var cut = !secOpen[s.name] && names.length > SVC_SHOW ? SVC_SHOW - 1 : names.length;
+			names.slice(0, cut).forEach(function(n) { box.appendChild(E('span', { 'class': 'zm-fk-chip', 'title': n }, n)); });
+			if (cut < names.length) box.appendChild(E('span', { 'class': 'zm-fk-chip zm-fk-chip-more', 'title': names.slice(cut).join(', '), 'click': function(ev) {
+				ev.stopPropagation();
+				secOpen[s.name] = true;
+				box.parentNode.replaceChild(secChips(s), box);
+			} }, 'ещё ' + (names.length - cut)));
+			l.extra.forEach(function(t) { box.appendChild(E('span', { 'class': 'zm-fk-chip zm-fk-chip-x', 'title': t }, t)); });
+			if (!names.length && !l.extra.length) box.appendChild(E('span', { 'class': 'zm-fk-chip zm-fk-chip-x' }, 'ничего не выбрано'));
+			return box;
+		}
+
 		function secBox(s) {
 			var x = secState && (secState.sections || []).filter(function(e) { return e.name === s.name; })[0];
-			var c = secConnText(s, x), l = secListsText(s);
-			return E('div', { 'class': 'zm-st-stat zm-fk-sec' + (s.name === draft.sec ? ' zm-fk-sec-cur' : ''), 'title': 'Открыть секцию «' + s.label + '»', 'click': function() {
+			var c = secConnText(s, x);
+			var val = s.mode !== 'iface' && x && x.server && x.delay > 0 && !x.fallback_direct
+				? [ x.server, ' · ', E('span', { 'class': 'zm-lat ' + latClass(x.delay) }, x.delay + ' мс') ] : [ c[0] ];
+			return E('div', { 'class': 'zm-st-stat zm-fk-sec' + (s.main ? ' zm-fk-sec-main' : '') + (s.name === draft.sec ? ' zm-fk-sec-cur' : ''), 'title': 'Открыть секцию «' + s.label + '»', 'click': function() {
 				if (!isSecTab(tab)) tabTo('conn');
 				if (s.name !== draft.sec) switchSec(s.name);
 			} }, [
-				E('span', { 'class': 'zm-fk-sec-head' }, [ E('span', { 'class': 'zm-st-stat-label' }, [ s.label ]), secStateBadge(s, x) ]),
-				E('span', { 'class': 'zm-st-stat-value', 'title': c[0] }, [ c[0] ]),
+				E('span', { 'class': 'zm-fk-sec-head' }, [ E('span', { 'class': 'zm-st-stat-label', 'title': s.label }, [ s.label ]), secStateBadge(s, x) ]),
+				E('span', { 'class': 'zm-st-stat-value', 'title': c[0] }, val),
 				E('span', { 'class': 'zm-st-stat-sub', 'title': c[1] }, [ c[1] ]),
-				E('span', { 'class': 'zm-st-stat-sub', 'title': l }, [ l ])
+				secChips(s)
 			]);
 		}
 
-		function commonBox() {
+		/* «Общее» — наверху на всю ширину: состояние, трафик всего Forkozz и всё, что действует для всех секций */
+		function topBox() {
 			var bp = cfg.bypass || {}, bn = (bp.domains || []).length + (bp.subnets || []).length, e = (cfg.excl || []).length;
-			var dev = e ? 'мимо Forkozz: ' + e : 'без исключённых устройств';
 			var sb = st.singbox ? 'sing-box ' + st.singbox.replace(/-extended.*$/, '') : 'sing-box не установлен';
 			var dn = cfg.dns ? dnsLabel(cfg.dns) : '—', dt = cfg.dns ? (DNS_TYPES[cfg.dns.type] || '') + (cfg.dns.detour ? ' · через VPN' : '') : '';
-			return E('div', { 'class': 'zm-st-stat zm-fk-common' }, [
-				E('span', { 'class': 'zm-fk-sec-head' }, [ E('span', { 'class': 'zm-st-stat-label' }, 'Общее'), E('span', { 'class': 'zm-st-stat-sub' }, 'для всех секций') ]),
-				E('span', { 'class': 'zm-st-stat-value', 'title': 'DNS ' + dn }, [ 'DNS ' + dn + (dt ? ' · ' + dt : '') ]),
-				E('span', { 'class': 'zm-st-stat-sub' }, [ (bn ? 'исключений: ' + bn : 'без исключений') + ' · ' + dev ]),
-				E('span', { 'class': 'zm-st-stat-sub', 'title': sb }, [ 'Движок ' + (st.version || '—') + ' · ' + sb ])
+			var live = st.running && !busy;
+			function info(k, v) { return E('div', {}, [ E('span', {}, k), typeof v === 'string' ? E('b', { 'title': v }, v) : v ]); }
+			return E('div', { 'class': 'zm-st-stat zm-fk-top' }, [
+				E('span', { 'class': 'zm-fk-sec-head' }, [
+					E('span', { 'class': 'zm-st-stat-label' }, [ 'Общее · для всех секций' ]),
+					E('span', { 'class': 'zm-fk-top-badges' }, [ statusBadge(), st.newer && !busy ? badge('zm-warn', 'есть версия ' + st.latest) : E([]) ])
+				]),
+				live ? trafficEl : E([]),
+				live ? trafficNote : E([]),
+				E('div', { 'class': 'zm-fk-info' }, [
+					info('DNS', dn + (dt ? ' · ' + dt : '')),
+					info('Исключения', bn ? nn(bn, 'строка', 'строки', 'строк') : 'нет'),
+					info('Мимо Forkozz', e ? nn(e, 'устройство', 'устройства', 'устройств') : 'нет устройств'),
+					info('Движок', (st.version || '—') + ' · ' + sb),
+					live ? info('Память sing-box', sbMem) : E([])
+				])
 			]);
 		}
 
@@ -28803,16 +29223,19 @@ return view.extend({
 			if (document.hidden || busy) { trafficTimer = setTimeout(trafficTick, 3000); return; }
 			zm.forkopAction('stats', '').then(function(r) {
 				if (r && r.ok) {
-					var now = Date.now(), parts = [];
+					var now = Date.now();
 					if (trafficLast && r.down >= trafficLast.down && r.up >= trafficLast.up) {
 						var dt = Math.max(1, (now - trafficLast.t) / 1000);
-						parts.push('↓ ' + rate((r.down - trafficLast.down) / dt), '↑ ' + rate((r.up - trafficLast.up) / dt));
+						tDown.textContent = '↓ ' + rate((r.down - trafficLast.down) / dt);
+						tUp.textContent = '↑ ' + rate((r.up - trafficLast.up) / dt);
 					}
 					trafficLast = { t: now, down: r.down, up: r.up };
-					parts.push('всего ' + fmtBytes(r.down + r.up), nn(r.conns, 'соединение', 'соединения', 'соединений'));
-					if (r.mem > 0) parts.push('sing-box ' + fmtBytes(r.mem));
-					trafficEl.textContent = parts.join(' · ');
-				} else trafficEl.textContent = 'нет данных — sing-box ещё запускается';
+					tAll.textContent = fmtBytes(r.down + r.up);
+					tConn.textContent = String(r.conns || 0);
+					tConnLbl.textContent = nn(r.conns || 0, 'соединение', 'соединения', 'соединений').replace(/^\d+\s+/, '');
+					sbMem.textContent = r.mem > 0 ? fmtBytes(r.mem) : '—';
+					trafficNote.style.display = 'none';
+				} else trafficNote.style.display = '';
 			}).catch(function() {}).then(function() {
 				if (!trafficTimer && document.body.contains(trafficEl)) trafficTimer = setTimeout(trafficTick, 3000);
 			});
@@ -28834,13 +29257,18 @@ return view.extend({
 			if (st.installed && st.enabled) (st.warn || []).forEach(function(w) {
 				if (WARN[w]) mainCard.appendChild(E('p', { 'class': 'zm-hint' }, '⚠ ' + WARN[w]));
 			});
-			mainCard.appendChild(row('Состояние', E('span', { 'style': 'display:inline-flex; gap:8px; flex-wrap:wrap' }, [
+			var withSecs = st.installed && configured() && secs().length;
+			if (!withSecs) mainCard.appendChild(row('Состояние', E('span', { 'style': 'display:inline-flex; gap:8px; flex-wrap:wrap' }, [
 				statusBadge(), st.installed && st.newer && !busy ? badge('zm-warn', 'есть версия ' + st.latest) : E([])
 			])));
 
-			if (st.installed && configured() && secs().length) {
-				mainCard.appendChild(E('div', { 'class': 'zm-st-stats zm-fk-secs' }, secs().map(secBox).concat([ commonBox() ])));
-				if (st.running && !busy) { mainCard.appendChild(row('Трафик', trafficEl)); trafficStart(); }
+			if (withSecs) {
+				var allSecs = secs(), mainSec = allSecs.filter(function(s) { return s.main; })[0] || allSecs[0];
+				mainCard.appendChild(topBox());
+				/* колонок столько, чтобы ряды были полными: 1, 2, 3; четыре секции — 2×2 */
+				var cols = allSecs.length === 4 ? 2 : Math.min(allSecs.length, 3);
+				mainCard.appendChild(E('div', { 'class': 'zm-st-stats zm-fk-secs zm-fk-cols-' + cols }, [ mainSec ].concat(allSecs.filter(function(s) { return s !== mainSec; })).map(secBox)));
+				if (st.running && !busy) trafficStart();
 			} else if (st.installed) {
 				var sl = secs(), cv, rv = routeValue(cfg);
 				if (sl.length > 1) cv = [ nn(sl.length, 'секция', 'секции', 'секций'), sl.map(function(s) { return s.label + (s.enabled ? '' : ' (выкл.)'); }).join(' · ') ];
@@ -30902,9 +31330,24 @@ function renderInstalled(all) {
 
 		function removeByeTube() {
 			if (removeBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+			zm.dialog({ title: 'Удалить ByeTube?', danger: true, okText: 'Удалить ByeTube', blocks: [
+				{ type: 'switch', id: 'pkgs', value: true,
+					label: 'Удалить byedpi и hev-socks5-tunnel',
+					hint: 'Без ByeTube они не нужны. hev-socks5-tunnel останется, если им пользуется Mixomo.' },
+				{ type: 'list', title: 'Что произойдёт', items: function(v) { return [
+					'ByeTube удалится со всеми настройками и расписанием',
+					'Его правила файрвола и DNS уберутся',
+					v.pkgs ? 'byedpi и hev-socks5-tunnel удалятся' : 'byedpi и hev-socks5-tunnel останутся на роутере',
+					'YouTube пойдёт напрямую через провайдера'
+				]; } }
+			] }).then(function(v) { if (v) runRemoveByeTube(v.pkgs ? 'purge' : 'remove'); });
+		}
+
+		function runRemoveByeTube(mode) {
+			if (removeBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
 			removeBusy = true;
 			zm.toast('Удаляем ByeTube', 'warning');
-			callBytetubeAction('purge').then(function(res) {
+			callBytetubeAction(mode).then(function(res) {
 				if (res && res.error) { removeBusy = false; zm.toast(res.error, 'error'); return; }
 				if (res && res.started) {
 					zm.pollJob('bytetube_remove', removeLogEl, function(ok) {
@@ -33684,6 +34127,14 @@ html.zm-theme-dark #zmw-view .zm-node:not(.zm-active) { background: var(--surfac
 #zmw-view .zm-node.zm-active .zm-node-name::before { color: var(--a1); }
 #zmw-view .zm-node.zm-sec-add { border-style: dashed; }
 #zmw-view .zm-fk-sec:hover { border-color: var(--a1); }
+#zmw-view .zm-st-stat.zm-fk-top, #zmw-view .zm-fk-sec.zm-fk-sec-main { border-color: var(--a1); }
+#zmw-view .zm-fk-tile { background: var(--surface-3); }
+#zmw-view .zm-fk-tile > b, #zmw-view .zm-fk-info > div > b { color: var(--text); }
+#zmw-view .zm-fk-tile > span, #zmw-view .zm-fk-info > div > span { color: var(--muted); opacity: 1; }
+#zmw-view .zm-fk-info { border-top-color: var(--border); }
+#zmw-view .zm-fk-chip { background: var(--surface-3); color: var(--text); }
+#zmw-view .zm-fk-chip.zm-fk-chip-x { background: transparent; border-color: var(--border-2); color: var(--muted); opacity: 1; }
+#zmw-view .zm-fk-chip.zm-fk-chip-more { background: var(--surface-3); color: var(--a1); }
 #zmw-view .zm-sec-add-text { color: var(--a1); }
 #zmw-view .zm-node-name { color: var(--text); }
 #zmw-view .zm-node-foot > span:first-child { color: var(--muted); opacity: 1; }
@@ -33847,6 +34298,9 @@ html[data-theme="bento"] .zmw-orbs, html[data-theme="bento"] .zmw-grid-bg { disp
 html[data-theme="bento"] .zmw-top { background: linear-gradient(to bottom, rgba(239,235,228,.96) 40%, rgba(239,235,228,0)); }
 html[data-theme="bento"] .zmw-title { font-family: "Unbounded", sans-serif; font-weight: 800; letter-spacing: -.03em; }
 html[data-theme="bento"] .zmw-side { background: transparent; border-right: 0; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; }
+@media (max-width: 960px) {
+	html[data-theme="bento"] .zmw-side { background: var(--side-bg); box-shadow: var(--shadow-lg); }
+}
 html[data-theme="bento"] .zmw-nav-item { border-radius: 999px; }
 html[data-theme="bento"] .zmw-nav-item:hover { background: #ffffff; }
 html[data-theme="bento"] .zmw-nav-item.zmw-active { background: #1c1a17; color: #ffffff; }
@@ -34245,6 +34699,11 @@ mkdir -p /etc/crontabs 2>/dev/null || true
 [ -f /etc/crontabs/root ] || : > /etc/crontabs/root 2>/dev/null || true
 sed -i '/# zm-rpcd-watch$/d' /etc/crontabs/root 2>/dev/null || true
 echo '*/2 * * * * /opt/zapret-manager-luci/backend.sh zm_watch >/dev/null 2>&1 # zm-rpcd-watch' >> /etc/crontabs/root 2>/dev/null || true
+# Сторож панели запускается раз в 2 минуты — без этого cron пишет строку о каждом запуске в системный журнал.
+# Уровень 9 — только ошибки cron. Свой уровень, если его уже выставили, не трогаем.
+if [ -z "$(uci -q get system.@system[0].cronloglevel)" ]; then
+	uci -q set system.@system[0].cronloglevel='9' && uci -q commit system
+fi
 if [ -x /etc/init.d/cron ]; then
 	/etc/init.d/cron enable >/dev/null 2>&1 || true
 	/etc/init.d/cron restart >/dev/null 2>&1 || true
@@ -34304,6 +34763,7 @@ if grep -q '^159\.194\.200\.33 .*riotgames\.com' /etc/hosts 2>/dev/null; then
 	if [ -s /etc/hosts.zmtmp ]; then cat /etc/hosts.zmtmp > /etc/hosts; /etc/init.d/dnsmasq restart >/dev/null 2>&1 || true; fi
 	rm -f /etc/hosts.zmtmp
 fi
+/opt/zapret-manager-luci/backend.sh hosts_ai_migrate >/dev/null 2>&1 || true
 _zmi_say "Убираем временные файлы и остатки прошлых версий"
 _zm_cl="$(/opt/zapret-manager-luci/backend.sh zm_cleanup install 2>/dev/null || true)"
 _zm_cl_f="$(printf '%s' "$_zm_cl" | sed -n 's/.*"freed_flash_kb":\([0-9]*\).*/\1/p')"
