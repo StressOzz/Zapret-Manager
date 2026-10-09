@@ -1,10 +1,10 @@
 #!/bin/sh
-# Version: 2.66
+# Version: 2.67
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
-ZM_NEW_VER="2.66"
+ZM_NEW_VER="2.67"
 _zmi_say() { echo -e "${CYAN}==>${NC} $*"; }
 _zmi_ok() { echo -e "   ${GREEN}✓${NC} $*"; }
 _zmi_step() { echo -e "   → $*"; }
@@ -129,7 +129,7 @@ if [ "$1" = zm_watch ]; then
 fi
 
 CONF="/etc/config/zapret"
-ZM_VERSION="2.66"
+ZM_VERSION="2.67"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -9374,6 +9374,78 @@ _awg_fetch() {
 	return 1
 }
 
+# Пакеты kmod в OpenWrt жёстко привязаны к ядру: зависимость kernel=<версия>~<хеш конфигурации ядра>.
+# Готовые модули собраны SDK официальной сборки, и на прошивке, собранной самостоятельно или
+# сторонним сборщиком, хеш другой — apk/opkg отказываются ставить пакет («breaks: …[kernel=…]»),
+# хотя при той же версии ядра модуль обычно загружается. Такой модуль ставим в обход проверки,
+# а подойдёт ли он к ядру, проверит insmod в _awg_kmod_load.
+AWG_KMOD_MANUAL="/etc/zm-awg/kmod-manual"
+_awg_kmod_pin_bad() {	# $1 — файл kmod-amneziawg; 0 и AWG_KPIN/AWG_KMV — если пакет не принимают только из-за ядра
+	local out
+	AWG_KPIN=""; AWG_KMV=""
+	if [ "$PKG" = apk ]; then
+		out="$(apk add --simulate --allow-untrusted "$1" 2>&1)" && return 1
+		AWG_KPIN="$(printf '%s\n' "$out" | sed -n 's/.*kmod-amneziawg-[^[]*\[kernel=\([^]]*\)\].*/\1/p' | head -n1)"
+		AWG_KMV="$(printf '%s\n' "$out" | sed -n 's/.*kmod-amneziawg-\([^[ ]*\)\[kernel=.*/\1/p' | head -n1)"
+	else
+		out="$(opkg install --noaction "$1" 2>&1)"
+		AWG_KPIN="$(printf '%s\n' "$out" | sed -n 's/.*\*[[:space:]]*kernel (= *\([^)]*\)).*/\1/p' | head -n1)"
+	fi
+	[ -n "$AWG_KPIN" ]
+}
+_awg_kmod_have() {	# пакет стоит или модуль поставлен в обход проверки ядра
+	_pkg_is_installed kmod-amneziawg && return 0
+	[ -s "$AWG_KMOD_MANUAL" ] && [ -f "/lib/modules/$(uname -r)/amneziawg.ko" ]
+}
+_awg_kmod_ver() {
+	if [ -s "$AWG_KMOD_MANUAL" ] && [ -f "/lib/modules/$(uname -r)/amneziawg.ko" ]; then
+		awk '{ print $1; exit }' "$AWG_KMOD_MANUAL"
+	else
+		_awg_pkg_ver kmod-amneziawg
+	fi
+}
+_awg_kmod_manual_rm() {
+	[ -f "$AWG_KMOD_MANUAL" ] || return 0
+	rm -f "/lib/modules/$(uname -r)/amneziawg.ko" "$AWG_KMOD_MANUAL"
+}
+_awg_kmod_manual() {	# $1 — файл пакета; 2 — модуль собран под другую версию ядра
+	local f="$1" d="$ST_RUN/kx" ko dir kv cur
+	kv="$(uname -r)"; cur="$(_awg_pkg_ver kernel)"
+	_rb_warn "Ядро прошивки ($cur) собрано не так, как в официальной OpenWrt (модулю нужно $AWG_KPIN) — пакетный менеджер не даёт поставить модуль"
+	_rb_say "Ставим модуль ядра в обход этой проверки"
+	if [ "$PKG" != apk ]; then
+		$INSTALL --force-depends "$f"
+		return
+	fi
+	rm -rf "$d"; mkdir -p "$d"
+	if ! apk extract --allow-untrusted --destination "$d" "$f" >/dev/null 2>&1; then
+		echo "   ✗ apk не смог распаковать пакет модуля"
+		rm -rf "$d"; return 1
+	fi
+	ko="$(find "$d/lib/modules" -name amneziawg.ko 2>/dev/null | head -n1)"
+	if [ -z "$ko" ]; then
+		echo "   ✗ в пакете нет amneziawg.ko"
+		rm -rf "$d"; return 1
+	fi
+	dir="${ko#"$d"/lib/modules/}"; dir="${dir%%/*}"
+	if [ "$dir" != "$kv" ]; then
+		echo "   ✗ модуль собран для ядра $dir, а у роутера ядро $kv"
+		rm -rf "$d"; return 2
+	fi
+	if ! mkdir -p "/lib/modules/$kv" || ! cp "$ko" "/lib/modules/$kv/amneziawg.ko"; then
+		echo "   ✗ не удалось записать модуль в /lib/modules/$kv — мало места на флеше?"
+		rm -f "/lib/modules/$kv/amneziawg.ko"; rm -rf "$d"; return 1
+	fi
+	rm -rf "$d"
+	mkdir -p "${AWG_KMOD_MANUAL%/*}"
+	echo "${AWG_KMV:-?} $kv" > "$AWG_KMOD_MANUAL"
+	# amneziawg-tools зависит от kmod-amneziawg — отмечаем модуль в базе apk пустым виртуальным пакетом
+	_pkg_is_installed kmod-amneziawg || _zm_run 120 apk add --force-non-repository --virtual kmod-amneziawg >/dev/null 2>&1 ||
+		{ echo "   ✗ apk не принял отметку о модуле — amneziawg-tools не встанет"; return 1; }
+	echo "   ✓ Модуль положен в /lib/modules/$kv"
+	return 0
+}
+
 _awg_kmod_load() {
 	local kv ko dir out dm need p free msg
 	_st_awg_loaded && return 0
@@ -9423,13 +9495,12 @@ _awg_kmod_load() {
 _st_install_awg() {
 	local mode="$1"
 	if [ "$mode" != update ] && _st_awg_loaded && command -v awg >/dev/null 2>&1 && _awg_proto_ok; then return 0; fi
-	local rel arch tgt sub post luci old_luci base bases m p f ok=0 was_loaded=0 kver0 kver1 need="" force=""
+	local rel arch tgt sub post luci old_luci base bases m p f ok=0 was_loaded=0 kver0 kver1 need="" force="" why="" mrc
 	_st_awg_loaded && was_loaded=1
-	kver0="$(_awg_pkg_ver kmod-amneziawg)"
-	for p in kmod-amneziawg amneziawg-tools; do
-		if [ "$mode" = update ] || ! _pkg_is_installed "$p"; then need="$need $p"; fi
-	done
-	[ "$p" = amneziawg-tools ] && ! command -v awg >/dev/null 2>&1 && case " $need " in *" amneziawg-tools "*) ;; *) need="$need amneziawg-tools" ;; esac
+	kver0="$(_awg_kmod_ver)"
+	_awg_kmod_have || need=" kmod-amneziawg"
+	[ "$mode" = update ] && need=" kmod-amneziawg"
+	if [ "$mode" = update ] || ! _pkg_is_installed amneziawg-tools || ! command -v awg >/dev/null 2>&1; then need="$need amneziawg-tools"; fi
 	if [ -n "$need" ]; then
 		rel="$(_awg_rel_ver)"; arch="$(_awg_rel_arch)"; tgt="$(_awg_rel_target)"
 		sub="${tgt#*/}"; tgt="${tgt%%/*}"
@@ -9457,7 +9528,19 @@ _st_install_awg() {
 						$DELETE "$old_luci" >&2
 					fi
 					_rb_say "Ставим $p"
-					if $INSTALL $force "$f"; then
+					if [ "$p" = kmod-amneziawg ] && _awg_kmod_pin_bad "$f"; then
+						# хеш ядра у всех источников один (официальный SDK) — перебирать их бесполезно
+						_awg_kmod_manual "$f"; mrc=$?
+						if [ "$mrc" = 0 ]; then
+							[ "${ST_AWG_OWN:-1}" = 1 ] && _st_own "pkg $p"
+						else
+							ok=0
+							[ "$mrc" = 2 ] && why=kver
+							[ "$why" = kver ] || why=pin
+						fi
+					elif $INSTALL $force "$f"; then
+						# модуль из пакета заменил положенный вручную — убираем только отметку
+						[ "$p" = kmod-amneziawg ] && rm -f "$AWG_KMOD_MANUAL"
 						[ "${ST_AWG_OWN:-1}" = 1 ] && _st_own "pkg $p"
 					elif [ "$p" != "$luci" ]; then
 						ok=0
@@ -9479,15 +9562,25 @@ _st_install_awg() {
 				fi
 				break
 			fi
+			[ -n "$why" ] && break
 			_rb_warn "Здесь нет всех пакетов — пробуем другой источник"
 		done
 		_rb_rpcd_ensure
 		if [ "$ok" != 1 ]; then
-			echo "ОШИБКА: для OpenWrt $rel ($arch) нет готовых пакетов AmneziaWG"
+			case "$why" in
+				kver)
+					echo "ОШИБКА: готовый модуль AmneziaWG собран под ядро официальной OpenWrt $rel, а у роутера ядро $(uname -r)"
+					echo "!! Прошивка не официальная (${tgt}/${sub}). Поставьте официальную OpenWrt $rel или прошивку со встроенным AmneziaWG" ;;
+				pin)
+					echo "ОШИБКА: ядро прошивки ($(_awg_pkg_ver kernel)) отличается от официальной OpenWrt $rel — модуль AmneziaWG поставить не удалось"
+					echo "!! Поставьте официальную OpenWrt $rel (${tgt}/${sub}) или прошивку со встроенным AmneziaWG" ;;
+				*)
+					echo "ОШИБКА: для OpenWrt $rel ($arch, ${tgt}/${sub}) нет готовых пакетов AmneziaWG" ;;
+			esac
 			return 1
 		fi
 	fi
-	kver1="$(_awg_pkg_ver kmod-amneziawg)"
+	kver1="$(_awg_kmod_ver)"
 	if [ "$was_loaded" = 1 ] && [ -n "$kver0" ] && [ "$kver0" != "$kver1" ]; then
 		if [ -z "$(awg show interfaces 2>/dev/null)" ] && rmmod amneziawg >/dev/null 2>&1; then
 			_rb_say "Модуль ядра AmneziaWG перезагружен ($kver0 → $kver1)"
@@ -11589,6 +11682,7 @@ do_steer_remove() {
 		for p in luci-i18n-amneziawg-ru luci-proto-amneziawg luci-app-amneziawg amneziawg-tools kmod-amneziawg; do
 			_st_owns "pkg $p" && { _zm_pkg_purge "$p" || rc=1; }
 		done
+		_pkg_is_installed kmod-amneziawg || _awg_kmod_manual_rm
 	fi
 	_rb_rpcd_ensure
 	# что-то не удалилось — запоминаем, какие пакеты ставила панель: иначе повторное «Удалить» их уже не найдёт
@@ -13136,7 +13230,7 @@ _awg_pkg_ver() {
 		opkg list-installed 2>/dev/null | awk -v p="$1" '$1 == p { print $3; exit }'
 	fi
 }
-_awg_installed() { command -v awg >/dev/null 2>&1 && { _pkg_is_installed kmod-amneziawg || _st_awg_loaded; }; }
+_awg_installed() { command -v awg >/dev/null 2>&1 && { _awg_kmod_have || _st_awg_loaded; }; }
 _awg_proto_ok() { ubus call network get_proto_handlers 2>/dev/null | grep -q '"amneziawg"'; }
 _awg_ifaces() { uci -q show network | sed -n "s/^network\.\([A-Za-z0-9_]*\)\.proto='amneziawg'\$/\1/p"; }
 _awg_is_steer() { case "$1" in zmwarp|zmwarp[0-9]) return 0 ;; esac; return 1; }
@@ -13225,7 +13319,7 @@ awg_status() {
 	[ -x /etc/init.d/mihomo ] && mih=true
 	printf '{"running":%s,"phase":"%s","installed":%s,"kmod":"%s","tools":"%s","luci":"%s","luci_pkg":"%s","module":%s,"proto":%s,"steer":%s,"warp_conf":%s,"warp_path":"%s","warp_endpoint":"%s","mihomo":%s,"endpoints":"%s","steer_own":%s,"steer_active":"%s","ifaces":[%s]}\n' \
 		"$running" "$(cat "$AWG_RUN/phase" 2>/dev/null)" "$(_awg_installed && echo true || echo false)" \
-		"$(esc "$(_awg_pkg_ver kmod-amneziawg)")" "$(esc "$(_awg_pkg_ver amneziawg-tools)")" "$(esc "$lv")" "$lp" \
+		"$(esc "$(_awg_kmod_ver)")" "$(esc "$(_awg_pkg_ver amneziawg-tools)")" "$(esc "$lv")" "$lp" \
 		"$(_st_awg_loaded && echo true || echo false)" "$(_awg_proto_ok && echo true || echo false)" \
 		"$(_st_warp_on && echo true || echo false)" "$conf" "$MIXOMO_WARP_CONF" "$(esc "$ep")" "$mih" "$AWG_ENDPOINTS" "$(_st_warp_own && echo true || echo false)" "$(_st_warp_on && _st_active_if)" "$list"
 }
@@ -13273,6 +13367,7 @@ do_awg_remove() {
 	done
 	_awg_say "Выгружаем модуль ядра и чистим файлы"
 	rmmod amneziawg >/dev/null 2>&1
+	_awg_kmod_manual_rm
 	[ -d /sys/module/amneziawg ] && _zm_reboot_hint "AmneziaWG удалён, но его модуль ядра ещё загружен. Перезагрузите роутер, чтобы он выгрузился."
 	sed -i -E '/^pkg (kmod-amneziawg|amneziawg-tools|luci-proto-amneziawg|luci-app-amneziawg|luci-i18n-amneziawg-ru)$/d' "$ST_OWNED" 2>/dev/null
 	_zm_wipe "$AWG_DIR" /usr/bin/awg /usr/bin/awg-quick /lib/netifd/proto/amneziawg.sh || rc=1
