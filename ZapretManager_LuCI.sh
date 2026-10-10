@@ -1,10 +1,10 @@
 #!/bin/sh
-# Version: 2.67
+# Version: 2.68
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
-ZM_NEW_VER="2.67"
+ZM_NEW_VER="2.68"
 _zmi_say() { echo -e "${CYAN}==>${NC} $*"; }
 _zmi_ok() { echo -e "   ${GREEN}✓${NC} $*"; }
 _zmi_step() { echo -e "   → $*"; }
@@ -129,7 +129,7 @@ if [ "$1" = zm_watch ]; then
 fi
 
 CONF="/etc/config/zapret"
-ZM_VERSION="2.67"
+ZM_VERSION="2.68"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -8322,6 +8322,8 @@ doh_set() {
 RB_SHARE="/usr/share/zm-redbtn"
 ZM_LISTS_DIR="/opt/zapret-manager-luci/lists"
 ZM_LISTS_ITD="${GH_RAW}/itdoginfo/allow-domains/main"
+# Meta, Instagram, Facebook и WhatsApp — списки v2fly (и itdoginfo); те же ссылки берёт Forkozz (PKG_LISTS в netshift.uc)
+ZM_LISTS_V2F="${GH_RAW}/v2fly/domain-list-community/master/data"
 
 _rb_list_src() {
 	case "$1" in
@@ -8329,6 +8331,14 @@ _rb_list_src() {
 		svc_telegram.lst) echo "$ZM_LISTS_ITD/Services/telegram.lst" ;;
 		svc_discord.lst) echo "$ZM_LISTS_ITD/Services/discord.lst" ;;
 		svc_meta.lst) echo "$ZM_LISTS_ITD/Services/meta.lst" ;;
+		svc_instagram.lst) echo "$ZM_LISTS_V2F/instagram" ;;
+		svc_facebook.lst) echo "$ZM_LISTS_V2F/facebook" ;;
+		svc_messenger.lst) echo "$ZM_LISTS_V2F/messenger" ;;
+		svc_whatsapp.lst) echo "$ZM_LISTS_V2F/whatsapp" ;;
+		svc_v2meta.lst) echo "$ZM_LISTS_V2F/meta" ;;
+		svc_threads.lst) echo "$ZM_LISTS_V2F/threads" ;;
+		svc_oculus.lst) echo "$ZM_LISTS_V2F/oculus" ;;
+		svc_facebook_dev.lst) echo "$ZM_LISTS_V2F/facebook-dev" ;;
 		svc_twitter.lst) echo "$ZM_LISTS_ITD/Services/twitter.lst" ;;
 		telegram.lst) echo "$ZM_LISTS_ITD/Subnets/IPv4/telegram.lst" ;;
 		discord.lst) echo "$ZM_LISTS_ITD/Subnets/IPv4/discord.lst" ;;
@@ -9247,16 +9257,20 @@ _st_sel_remap() {
 		rm -f "$f.$$.tmp"
 	done
 }
-# Instagram и WhatsApp объединены в один пункт Meta (у них и так был общий список meta) — переносим старый выбор.
+# Meta включает Instagram, Facebook и WhatsApp: выбранная Meta (и Meta из каталога) — это все четыре пункта.
 _st_sel_meta() {
-	local f moved=""
+	local f id
 	for f in "$ST_SEL" "$ST_SKIP"; do
-		grep -qxE 'instagram|whatsapp' "$f" 2>/dev/null || continue
-		awk '{ k = ($0 == "instagram" || $0 == "whatsapp") ? "meta" : $0; if (k != "" && !(k in s)) { s[k] = 1; print k } }' "$f" > "$f.$$.tmp" && mv -f "$f.$$.tmp" "$f"
+		grep -qxE 'meta|c_itdoginfo_meta' "$f" 2>/dev/null || continue
+		awk -v kids="$([ "$f" = "$ST_SEL" ] && echo 1)" 'function put(k) { if (k != "" && !(k in s)) { s[k] = 1; print k } }
+			{ if ($0 == "meta" || $0 == "c_itdoginfo_meta") { put("meta"); if (kids) { put("instagram"); put("facebook"); put("whatsapp") } } else put($0) }' "$f" > "$f.$$.tmp" &&
+			{ if cmp -s "$f.$$.tmp" "$f"; then rm -f "$f.$$.tmp"; else mv -f "$f.$$.tmp" "$f"; fi; }
 		rm -f "$f.$$.tmp"
-		moved=1
 	done
-	[ -n "$moved" ] && _rb_in meta "$ST_SEL" && [ -f "$ST_SKIP" ] && { sed -i '/^meta$/d' "$ST_SKIP"; [ -s "$ST_SKIP" ] || rm -f "$ST_SKIP"; }
+	if [ -s "$ST_SKIP" ] && [ -s "$ST_SEL" ]; then
+		for id in meta instagram facebook whatsapp; do _rb_in "$id" "$ST_SEL" && _rb_in "$id" "$ST_SKIP" && sed -i "/^$id\$/d" "$ST_SKIP"; done
+		[ -s "$ST_SKIP" ] || rm -f "$ST_SKIP"
+	fi
 	return 0
 }
 _st_migrate
@@ -10481,7 +10495,7 @@ _st_tgws_warp() {
 }
 
 ST_LISTS_MANIFEST="https://github.com/xyzmean/splify2-lists/releases/latest/download/lists.json"
-ST_CAT_SKIP=" mydyson "
+ST_CAT_SKIP=" mydyson itdoginfo_meta "
 ST_SRS_FALLBACK="https://github.com/itdoginfo/allow-domains/releases/latest/download"
 
 _st_fetch() {
@@ -10792,7 +10806,11 @@ _st_model() {
 		echo
 	fi
 	_st_dev_model
-	for id; do _st_svc_lists "$id"; done
+	for id; do
+		# Meta уже содержит списки Instagram, Facebook и WhatsApp — отдельно их не добавляем
+		case "$id" in instagram|facebook|whatsapp) case " $* " in *" meta "*) continue ;; esac ;; esac
+		_st_svc_lists "$id"
+	done
 }
 
 _st_spec_apply() {
@@ -14795,7 +14813,7 @@ _fk_ip_clean() {
 _fk_fast_patch() {
 	local f=/usr/lib/netshift/rulesets.sh n
 	[ -f "$f" ] && [ -f /usr/lib/netshift/nft.sh ] && [ -f /usr/lib/netshift/helpers.sh ] || return 0
-	grep -q '^# zm-fast-begin 1$' "$f" && return 0
+	grep -q '^# zm-fast-begin 2$' "$f" && return 0
 	for n in patch_source_ruleset_rules import_plain_domain_list_to_local_source_ruleset_chunked import_plain_subnet_list_to_local_source_ruleset_chunked extract_ip_cidr_from_json_ruleset_to_file; do
 		grep -q "^$n() {" "$f" || return 0
 	done
@@ -14803,7 +14821,7 @@ _fk_fast_patch() {
 	grep -q '^comma_string_to_json_array() {' /usr/lib/netshift/helpers.sh || return 0
 	grep -q '^# zm-fast-begin' "$f" && sed -i '/^# zm-fast-begin/,/^# zm-fast-end$/d' "$f"
 	cat >> "$f" << 'ZM_FK_FAST_EOF'
-# zm-fast-begin 1
+# zm-fast-begin 2
 _zm_fast_subnets() {
 	awk -v n="$2" '{ gsub(/\r/, ""); sub(/^[ \t]+/, ""); sub(/[ \t]+$/, ""); if ($0 == "") next
 		m = split($0, p, "/"); if (m > 2) next
@@ -14818,7 +14836,7 @@ _zm_fast_subnets() {
 
 _zm_fast_domains() {
 	awk -v n="$2" '{ gsub(/\r/, ""); sub(/^[ \t]+/, ""); sub(/[ \t]+$/, ""); if ($0 == "") next
-		d = tolower($0); t = d; sub(/^\./, "", t)
+		d = tolower($0); sub(/^(full|domain|suffix):/, "", d); t = d; sub(/^\./, "", t)
 		if (t !~ /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/) next
 		if (t ~ /^[0-9.]+$/ || (d in seen)) next
 		seen[d] = 1; buf = buf (c ? "," : "") d
@@ -15847,6 +15865,7 @@ _fk_dns_probe() {
 		doh)
 			case "$v" in
 				https://*) url="$v"; case "${url#https://}" in */*) ;; *) url="$url/dns-query" ;; esac ;;
+				*/*) url="https://$v" ;;
 				*) url="https://$v/dns-query" ;;
 			esac
 			case "$url" in *\?*) url="$url&dns=$FK_DNS_Q" ;; *) url="$url?dns=$FK_DNS_Q" ;; esac
@@ -16405,7 +16424,21 @@ const ITD_RAW = "https://raw.githubusercontent.com/itdoginfo/allow-domains/main"
 const SRS_MAIN = "https://github.com/itdoginfo/allow-domains/releases/latest/download";
 const ITD_SUBNETS = { cloudflare: true, cloudfront: true, digitalocean: true, discord: true, google_meet: true, hetzner: true,
 	meta: true, ovh: true, roblox: true, telegram: true, twitter: true };
-const CAT_SKIP = { mydyson: true };
+const CAT_SKIP = { mydyson: true, itdoginfo_meta: true };
+/* Списки пакета без набора в каталоге — те же ссылки, что качает Steer (_rb_list_src): Meta, Instagram, Facebook, WhatsApp. */
+const V2F_RAW = "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data";
+const PKG_LISTS = {
+	"svc_meta.lst": ITD_RAW + "/Services/meta.lst",
+	"svc_v2meta.lst": V2F_RAW + "/meta",
+	"svc_threads.lst": V2F_RAW + "/threads",
+	"svc_oculus.lst": V2F_RAW + "/oculus",
+	"svc_facebook_dev.lst": V2F_RAW + "/facebook-dev",
+	"svc_instagram.lst": V2F_RAW + "/instagram",
+	"svc_facebook.lst": V2F_RAW + "/facebook",
+	"svc_messenger.lst": V2F_RAW + "/messenger",
+	"svc_whatsapp.lst": V2F_RAW + "/whatsapp",
+	"meta.lst": ITD_RAW + "/Subnets/IPv4/meta.lst"
+};
 const SCHEMES = /^(vless|vmess|trojan|ss|socks4|socks4a|socks5|hysteria2|hy2):\/\/[^ \t\r\n]+$/i;
 const BYPASS = "zm_bypass";
 const SUB_IVS = [ "30m", "1h", "3h", "6h", "12h", "1d" ];
@@ -16555,6 +16588,10 @@ function catalog_items(known_list) {
 		if (!id || id == "custom" || seen[id]) continue;
 		if (s(f[2]) + s(f[3]) + s(f[7]) == "") continue;
 		if (id == "github") t = set_tokens("github", known);
+		else if (s(f[7]) == "") {
+			for (let fl in [ ...split(s(f[2]), ","), ...split(s(f[3]), ",") ])
+				if (PKG_LISTS[fl]) push(t, "l:" + PKG_LISTS[fl]);
+		}
 		else for (let set in split(s(f[7]), ",")) {
 			if (set == "") continue;
 			t = [ ...t, ...set_tokens(set, known) ];
@@ -16913,11 +16950,13 @@ function dns_value_ok(t, v) {
 	if (t == "udp") return valid_ip(replace(v, /:[0-9]+$/, "")) && index(v, "/") < 0;
 	if (t == "dot") return !match(v, /^[a-z]+:\/\//i) && index(v, "/") < 0 && !!match(v, /^[A-Za-z0-9.-]+(:[0-9]+)?$/) && !!match(v, /\./);
 	if (match(v, /^https:\/\//i)) return !!match(v, /^https:\/\/[A-Za-z0-9.-]+\.[A-Za-z0-9-]+(:[0-9]+)?(\/[^ ]*)?$/i);
-	return !!match(v, /^[A-Za-z0-9.-]+\.[A-Za-z0-9-]+(:[0-9]+)?$/);
+	return !!match(v, /^[A-Za-z0-9.-]+\.[A-Za-z0-9-]+(:[0-9]+)?(\/[^ ]*)?$/);
 }
 
+/* DoH: голый адрес сервера (dns.example.com) — дописываем стандартный /dns-query; адрес со своим путём
+ * (dns.example.com/abc или dns.example.com/) и ссылку https://… берём как есть, путь не трогаем. */
 function dns_norm(t, v) {
-	if (t == "doh" && !match(v, /^https:\/\//i)) return "https://" + v + "/dns-query";
+	if (t == "doh" && !match(v, /^https:\/\//i)) return index(v, "/") >= 0 ? "https://" + v : "https://" + v + "/dns-query";
 	return v;
 }
 
@@ -17054,13 +17093,26 @@ function cmd_device_setup() {
 		}
 		migrated = true;
 	}
-	if (!v2) {
+	/* Пункт Meta теперь из списков пакета (с Instagram, Facebook и WhatsApp): секции со старым списком meta получают их все. */
+	let split_meta = false;
+	for (let x in sections(c, "section")) {
+		let cl = uniq(words(x.community_lists));
+		if (index(cl, "meta") < 0) continue;
+		/* только дописываем: остальные списки секции и их порядок не трогаем */
+		let n = x[".name"], urls = map(keys(PKG_LISTS), (k) => PKG_LISTS[k]), zr = rawlist(x.zm_refs);
+		set_list(c, n, "community_lists", filter(cl, (v) => v != "meta"));
+		if (length(zr)) set_list(c, n, "zm_refs", uniq([ ...zr, ...map(urls, (u) => "l:" + u) ]));
+		set_list(c, n, "remote_domain_lists", uniq([ ...words(x.remote_domain_lists), ...urls ]));
+		set_list(c, n, "remote_subnet_lists", uniq([ ...words(x.remote_subnet_lists), ...urls ]));
+		split_meta = true;
+	}
+	if (!v2 || split_meta) {
 		if (!c.get(CFG, "settings")) c.set(CFG, "settings", "settings");
 		c.set(CFG, "settings", "zm_dev_v2", "1");
 		c.save(CFG);
 		c.commit(CFG);
 	}
-	out({ ok: true, changed: patched || migrated, migrated });
+	out({ ok: true, changed: patched || migrated || split_meta, migrated });
 }
 
 function set_text(c, sec, key, list) {
@@ -17311,7 +17363,7 @@ function write_sec_ext(c, sec, mode, x) {
 			let t = s(x.dres_type), v = trim(s(x.dres_server));
 			if (index([ "udp", "dot", "doh" ], t) < 0) fail("неизвестный тип DNS для туннеля");
 			if (!dns_value_ok(t, v))
-				fail(t == "udp" ? "DNS туннеля: нужен IP-адрес, например 1.1.1.1" : t == "dot" ? "DNS туннеля: нужен адрес без https://, например one.one.one.one" : "DNS туннеля: нужна ссылка https://…/dns-query или адрес сервера");
+				fail(t == "udp" ? "DNS туннеля: нужен IP-адрес, например 1.1.1.1" : t == "dot" ? "DNS туннеля: нужен адрес без https://, например one.one.one.one" : "DNS туннеля: нужен адрес сервера или ссылка https://…");
 			c.set(CFG, sec, "domain_resolver_enabled", "1");
 			c.set(CFG, sec, "domain_resolver_dns_type", t);
 			c.set(CFG, sec, "domain_resolver_dns_server", dns_norm(t, v));
@@ -17635,7 +17687,7 @@ function cmd_set() {
 			if (!dns_value_ok(t, x))
 				fail(t == "udp" ? "для UDP нужен IP-адрес DNS, например 9.9.9.9 (ошибка в «" + x + "»)"
 					: t == "dot" ? "для DoT нужен адрес сервера без https://, например dns.quad9.net (ошибка в «" + x + "»)"
-					: "для DoH нужен адрес или ссылка https://…/dns-query (ошибка в «" + x + "»)");
+					: "для DoH нужен адрес сервера или ссылка https://… (ошибка в «" + x + "»)");
 			push(svs, dns_norm(t, x));
 		}
 		svs = uniq(svs);
@@ -20099,7 +20151,7 @@ function notifyStrategyResult(res, okLabel) {
 
 var SVC_BRANDS = [
 	[ /youtube/i, '#ff0033', 'YT' ], [ /discord/i, '#5865f2', 'DC' ], [ /telegram/i, '#229ed9', 'TG' ],
-	[ /^meta$/i, '#0866ff', 'M' ], [ /whatsapp/i, '#25d366', 'WA' ], [ /instagram|facebook|\bmeta\b/i, '#e1306c', 'IG' ], [ /twitter|^x\b/i, '#16181c', 'X' ],
+	[ /^meta$/i, '#0866ff', 'M' ], [ /whatsapp/i, '#25d366', 'WA' ], [ /instagram|\bmeta\b/i, '#e1306c', 'IG' ], [ /facebook/i, '#1877f2', 'FB' ], [ /twitter|^x\b/i, '#16181c', 'X' ],
 	[ /tiktok/i, '#fe2c55', 'TT' ], [ /google play/i, '#01875f', 'GP' ], [ /gemini|google ai/i, '#4285f4', 'AI' ],
 	[ /chatgpt|openai|claude|\bai\b|(^|[^а-яё])ии([^а-яё]|$)/i, '#10a37f', 'AI' ], [ /githubusercontent|github raw/i, '#57606a', 'GR' ], [ /github/i, '#24292f', 'GH' ],
 	[ /google/i, '#4285f4', 'G' ], [ /roblox/i, '#e2231a', 'RB' ], [ /supercell|brawl|clash/i, '#f59e0b', 'SC' ],
@@ -20131,7 +20183,22 @@ function svcTx(v) {
 	return (typeof v === 'string' || typeof v === 'number') ? [ String(v) ] : v;
 }
 
-var RI_IDS = { geoblock: 1, block: 1, news: 1, anime: 1, porn: 1, youtube: 1, discord: 1, meta: 1, instagram: 1, whatsapp: 1, twitter: 1, x: 1, tiktok: 1, hdrezka: 1 };
+/* Meta включает Instagram, Facebook и WhatsApp: Meta включает и выключает их вместе с собой,
+ * а снятый с Meta отдельный пункт снимает и саму Meta. */
+var META_KIDS = [ 'instagram', 'facebook', 'whatsapp' ];
+function svcPickToggle(p, id) {
+	if (p[id]) {
+		delete p[id];
+		if (id === 'meta') META_KIDS.forEach(function(k) { delete p[k]; });
+		else if (META_KIDS.indexOf(id) >= 0) delete p.meta;
+	} else {
+		p[id] = true;
+		if (id === 'meta') META_KIDS.forEach(function(k) { p[k] = true; });
+	}
+	return p;
+}
+
+var RI_IDS = { geoblock: 1, block: 1, news: 1, anime: 1, porn: 1, youtube: 1, discord: 1, meta: 1, instagram: 1, facebook: 1, whatsapp: 1, twitter: 1, x: 1, tiktok: 1, hdrezka: 1 };
 
 function riCovers(id) {
 	return !!RI_IDS[String(id || '').replace(/^c_itdoginfo_/, '')];
@@ -20942,6 +21009,7 @@ return baseclass.extend({
 	jobsCancel: callJobsCancel,
 	dock: dock,
 	riCovers: riCovers,
+	svcPickToggle: svcPickToggle,
 	riNote: riNote,
 	swRow: swRow,
 	dialog: dialog,
@@ -22905,7 +22973,7 @@ return view.extend({
 					if (busy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
 					pick = {};
 					for (var k in sel) if (sel[k] && k !== 'custom') pick[k] = true;
-					if (pick[s.id]) delete pick[s.id]; else pick[s.id] = true;
+					zm.svcPickToggle(pick, s.id);
 					renderLists();
 				} });
 			}
@@ -23917,7 +23985,10 @@ mkdir -p /usr/share/zm-redbtn
 cat > '/usr/share/zm-redbtn/services.conf' << 'ZM_INSTALLER_EOF'
 youtube|YouTube|svc_youtube.lst||www.youtube.com,youtubei.googleapis.com,manifest.googlevideo.com|youtu.be,i.ytimg.com,i9.ytimg.com,yt3.ggpht.com,yt4.ggpht.com,jnn-pa.googleapis.com,signaler-pa.youtube.com,yt3.googleusercontent.com,rr4---sn-4g5e6nze.googlevideo.com,rr4---sn-5go7yner.googlevideo.com,rr5---sn-n8v7knez.googlevideo.com,rr2---sn-q4fl6ndl.googlevideo.com,rr1---sn-q4fl6n6y.googlevideo.com,rr14---sn-n8v7kn7r.googlevideo.com,rr4---sn-jvhnu5g-c35d.googlevideo.com,rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com,rr12---sn-gvnuxaxjvh-bvwz.googlevideo.com,rr1---sn-ug5onuxaxjvh-n8v6.googlevideo.com||youtube
 discord|Discord|svc_discord.lst|discord.lst|discord.com,gateway.discord.gg,updates.discord.com|cdn.discordapp.com,media.discordapp.net||discord
-meta|Meta|svc_meta.lst|meta.lst|www.instagram.com,web.whatsapp.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com,static.whatsapp.net,mmg.whatsapp.net||meta
+meta|Meta|svc_meta.lst,svc_v2meta.lst,svc_instagram.lst,svc_facebook.lst,svc_messenger.lst,svc_whatsapp.lst,svc_threads.lst,svc_oculus.lst,svc_facebook_dev.lst|meta.lst|www.instagram.com,www.facebook.com,web.whatsapp.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com,static.xx.fbcdn.net,static.whatsapp.net,mmg.whatsapp.net||
+instagram|Instagram|svc_instagram.lst,svc_facebook.lst|meta.lst|www.instagram.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com||
+facebook|Facebook|svc_facebook.lst,svc_messenger.lst|meta.lst|www.facebook.com|static.xx.fbcdn.net||
+whatsapp|WhatsApp|svc_whatsapp.lst|meta.lst|web.whatsapp.com|static.whatsapp.net,mmg.whatsapp.net||
 x|X (Twitter)|svc_twitter.lst|twitter_x.lst|x.com|twitter.com,abs.twimg.com,video.twimg.com||twitter
 github|GitHub|own_github.lst||github.com,raw.githubusercontent.com,objects.githubusercontent.com|codeload.github.com,api.github.com,ghcr.io||
 telegram|Telegram|svc_telegram.lst|telegram.lst|web.telegram.org|t.me,core.telegram.org,telegra.ph||telegram
@@ -28422,14 +28493,23 @@ var DNS_TYPES = { udp: 'UDP', dot: 'DoT', doh: 'DoH' };
 var DNS_HELP = {
 	udp: { ph: '9.9.9.9', hint: 'Обычный DNS без шифрования — только IP-адрес. Провайдер видит и может подменять ответы.' },
 	dot: { ph: 'dns.quad9.net', hint: 'DNS over TLS: адрес сервера без https://, например dns.quad9.net или 9.9.9.9.' },
-	doh: { ph: 'https://dns.quad9.net/dns-query', hint: 'DNS over HTTPS: ссылка https://…/dns-query или просто адрес сервера.' }
+	doh: { ph: 'https://dns.quad9.net/dns-query', hint: 'DNS over HTTPS: ссылка https://… или адрес сервера. Голый адрес (dns.example.com) — допишем /dns-query; ссылка или адрес с путём берутся как есть, без пути — https://dns.example.com/.' }
 };
 
 var DNS_RE = {
 	udp: /^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(:\d{1,5})?$/,
 	dot: /^[A-Za-z0-9.-]+\.[A-Za-z0-9-]+(:\d{1,5})?$/,
-	doh: /^(https:\/\/[A-Za-z0-9.-]+\.[A-Za-z0-9-]+(:\d{1,5})?(\/[^\s@|,;'"<>]*)?|[A-Za-z0-9.-]+\.[A-Za-z0-9-]+(:\d{1,5})?)$/i
+	doh: /^(https:\/\/)?[A-Za-z0-9.-]+\.[A-Za-z0-9-]+(:\d{1,5})?(\/[^\s@|,;'"<>]*)?$/i
 };
+
+/* Свой DoH-сервер: голый адрес (dns.example.com) — стандартный путь /dns-query; ссылка https://сервер без пути —
+ * корень «/» (иначе sing-box сам подставит /dns-query); адрес со своим путём остаётся как есть. */
+function dohOwn(v) {
+	if (/^[A-Za-z0-9.-]+\.[A-Za-z0-9-]+(:\d{1,5})?$/.test(v)) return 'https://' + v + '/dns-query';
+	if (/^https:\/\/[^\/?#]+$/i.test(v)) return v + '/';
+	if (!/^https:\/\//i.test(v) && /^[A-Za-z0-9.-]+\.[A-Za-z0-9-]+(:\d{1,5})?\//.test(v)) return 'https://' + v;
+	return v;
+}
 
 function dnsFind(t, v) {
 	var list = DNS_CAT[t] || [];
@@ -29949,7 +30029,7 @@ return view.extend({
 			return zm.svcCard({ name: s.name, key: s.id, on: !!draft.sel[s.id], sub: by ? 'и в секции «' + by + '» — сработает верхняя' : shadowed ? 'перекрыт «Всё сразу» секции «' + ra + '»' : '', inc: !!draft.sel.russia_inside && s.id !== 'russia_inside' && !s.group && zm.riCovers(s.id), click: function() {
 				var nsel = {};
 				for (var k in draft.sel) if (draft.sel[k]) nsel[k] = true;
-				if (nsel[s.id]) delete nsel[s.id]; else nsel[s.id] = true;
+				zm.svcPickToggle(nsel, s.id);
 				set('sel', nsel);
 			} });
 		}
@@ -30210,7 +30290,7 @@ return view.extend({
 			function addOwn() {
 				var v = dnsInput.value.trim();
 				if (!v) return;
-				if (t === 'doh' && /^[A-Za-z0-9.-]+\.[A-Za-z0-9-]+$/.test(v)) v = 'https://' + v + '/dns-query';
+				if (t === 'doh') v = dohOwn(v);
 				if (!DNS_RE[t].test(v)) { zm.toast(DNS_HELP[t].hint, 'warning'); return; }
 				if (sel.indexOf(v) >= 0) { zm.toast('Этот сервер уже в списке', 'warning'); return; }
 				if (sel.length >= DNS_MAX) { zm.toast('Не больше ' + DNS_MAX + ' серверов', 'warning'); return; }
