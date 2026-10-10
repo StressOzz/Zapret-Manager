@@ -1,10 +1,10 @@
 #!/bin/sh
-# Version: 2.68
+# Version: 2.69
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
-ZM_NEW_VER="2.68"
+ZM_NEW_VER="2.69"
 _zmi_say() { echo -e "${CYAN}==>${NC} $*"; }
 _zmi_ok() { echo -e "   ${GREEN}✓${NC} $*"; }
 _zmi_step() { echo -e "   → $*"; }
@@ -129,7 +129,7 @@ if [ "$1" = zm_watch ]; then
 fi
 
 CONF="/etc/config/zapret"
-ZM_VERSION="2.68"
+ZM_VERSION="2.69"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -8322,7 +8322,10 @@ doh_set() {
 RB_SHARE="/usr/share/zm-redbtn"
 ZM_LISTS_DIR="/opt/zapret-manager-luci/lists"
 ZM_LISTS_ITD="${GH_RAW}/itdoginfo/allow-domains/main"
-# Meta, Instagram, Facebook и WhatsApp — списки v2fly (и itdoginfo); те же ссылки берёт Forkozz (PKG_LISTS в netshift.uc)
+# Meta, Instagram, Facebook и WhatsApp — списки v2fly (и itdoginfo); те же ссылки берёт Forkozz (PKG_LISTS в netshift.uc).
+# Instagram — только свой список и адреса Meta, без которых он не работает (встроенный instagram_extra.lst);
+# Facebook — свой список и Messenger. Подсети всей Meta (meta.lst) — только у Meta и WhatsApp:
+# по ним в туннель шёл бы весь трафик Meta, и Instagram включал бы заодно Facebook и WhatsApp.
 ZM_LISTS_V2F="${GH_RAW}/v2fly/domain-list-community/master/data"
 
 _rb_list_src() {
@@ -8332,6 +8335,7 @@ _rb_list_src() {
 		svc_discord.lst) echo "$ZM_LISTS_ITD/Services/discord.lst" ;;
 		svc_meta.lst) echo "$ZM_LISTS_ITD/Services/meta.lst" ;;
 		svc_instagram.lst) echo "$ZM_LISTS_V2F/instagram" ;;
+		svc_instagram_extra.lst) echo "$RB_SHARE/svc/instagram_extra.lst" ;;
 		svc_facebook.lst) echo "$ZM_LISTS_V2F/facebook" ;;
 		svc_messenger.lst) echo "$ZM_LISTS_V2F/messenger" ;;
 		svc_whatsapp.lst) echo "$ZM_LISTS_V2F/whatsapp" ;;
@@ -8364,6 +8368,21 @@ _rb_list_norm() {
 _rb_list_get() {
 	local f="$1" p="$ZM_LISTS_DIR/$1" u tmp
 	u="$(_rb_list_src "$f")" || return 1
+	case "$u" in /*)
+		# встроенный список пакета: не качаем, а берём из файла (обновляется вместе с панелью)
+		[ -s "$u" ] || { echo "     !! $f: нет встроенного списка" >&2; return 1; }
+		mkdir -p "$ZM_LISTS_DIR" 2>/dev/null
+		tmp="$ZM_LISTS_DIR/.$f.$$"
+		cp -f "$u" "$tmp" 2>/dev/null && _rb_list_norm "$f" "$tmp" > "$tmp.ok"
+		rm -f "$tmp"
+		if [ -s "$tmp.ok" ]; then
+			if cmp -s "$tmp.ok" "$p"; then rm -f "$tmp.ok"; else mv -f "$tmp.ok" "$p"; fi
+			echo "     ✓ $f: встроенный, строк $(wc -l < "$p" | tr -d ' ')" >&2
+			return 0
+		fi
+		rm -f "$tmp.ok"
+		return 1 ;;
+	esac
 	if [ -s "$p" ] && [ -z "$(find "$p" -mtime +6 2>/dev/null)" ]; then return 0; fi
 	if [ -s "$p" ] && [ -n "$(find "$ZM_LISTS_DIR/.$f.fail" -mmin -60 2>/dev/null)" ]; then return 0; fi
 	mkdir -p "$ZM_LISTS_DIR" 2>/dev/null
@@ -16425,7 +16444,9 @@ const SRS_MAIN = "https://github.com/itdoginfo/allow-domains/releases/latest/dow
 const ITD_SUBNETS = { cloudflare: true, cloudfront: true, digitalocean: true, discord: true, google_meet: true, hetzner: true,
 	meta: true, ovh: true, roblox: true, telegram: true, twitter: true };
 const CAT_SKIP = { mydyson: true, itdoginfo_meta: true };
-/* Списки пакета без набора в каталоге — те же ссылки, что качает Steer (_rb_list_src): Meta, Instagram, Facebook, WhatsApp. */
+/* Списки пакета без набора в каталоге — те же ссылки, что качает Steer (_rb_list_src): Meta, Instagram, Facebook, WhatsApp.
+ * instagram_extra — встроенный файл панели (адреса Meta, нужные Instagram без Facebook): идёт в local_domain_lists. */
+const PKG_LOCAL_DIR = "/usr/share/zm-redbtn/svc/";
 const V2F_RAW = "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data";
 const PKG_LISTS = {
 	"svc_meta.lst": ITD_RAW + "/Services/meta.lst",
@@ -16434,6 +16455,7 @@ const PKG_LISTS = {
 	"svc_oculus.lst": V2F_RAW + "/oculus",
 	"svc_facebook_dev.lst": V2F_RAW + "/facebook-dev",
 	"svc_instagram.lst": V2F_RAW + "/instagram",
+	"svc_instagram_extra.lst": PKG_LOCAL_DIR + "instagram_extra.lst",
 	"svc_facebook.lst": V2F_RAW + "/facebook",
 	"svc_messenger.lst": V2F_RAW + "/messenger",
 	"svc_whatsapp.lst": V2F_RAW + "/whatsapp",
@@ -16446,6 +16468,12 @@ const LIST_IVS = [ "1h", "3h", "12h", "1d", "3d" ];
 const LINK_KEYS = [ "proxy_string", "selector_proxy_links", "urltest_proxy_links", "selector_proxy_links_text", "urltest_proxy_links_text" ];
 
 function s(v) { return v == null ? "" : "" + v; }
+
+/* Встроенный список панели (локальный файл), а не ссылка. */
+function pkg_local(v) {
+	v = s(v);
+	return index(v, PKG_LOCAL_DIR) == 0 && !!match(v, /^\/[A-Za-z0-9_\/.-]+\.lst$/) && index(v, "..") < 0;
+}
 
 function ml(v) { return type(v) == "string" && (index(v, "\n") >= 0 || index(v, "\r") >= 0); }
 
@@ -17099,20 +17127,50 @@ function cmd_device_setup() {
 		let cl = uniq(words(x.community_lists));
 		if (index(cl, "meta") < 0) continue;
 		/* только дописываем: остальные списки секции и их порядок не трогаем */
-		let n = x[".name"], urls = map(keys(PKG_LISTS), (k) => PKG_LISTS[k]), zr = rawlist(x.zm_refs);
+		let n = x[".name"], all = map(keys(PKG_LISTS), (k) => PKG_LISTS[k]), zr = rawlist(x.zm_refs);
+		let urls = filter(all, (u) => !pkg_local(u)), locs = filter(all, (u) => pkg_local(u));
 		set_list(c, n, "community_lists", filter(cl, (v) => v != "meta"));
-		if (length(zr)) set_list(c, n, "zm_refs", uniq([ ...zr, ...map(urls, (u) => "l:" + u) ]));
+		if (length(zr)) set_list(c, n, "zm_refs", uniq([ ...zr, ...map(all, (u) => "l:" + u) ]));
 		set_list(c, n, "remote_domain_lists", uniq([ ...words(x.remote_domain_lists), ...urls ]));
 		set_list(c, n, "remote_subnet_lists", uniq([ ...words(x.remote_subnet_lists), ...urls ]));
+		set_list(c, n, "local_domain_lists", uniq([ ...words(x.local_domain_lists), ...locs ]));
 		split_meta = true;
 	}
-	if (!v2 || split_meta) {
+	/* Instagram раньше включал списки Facebook и подсети всей Meta, Facebook — подсети всей Meta. Один раз
+	 * переводим секции на новый состав: Instagram — свой список и встроенный instagram_extra, Facebook — без
+	 * подсетей Meta; подсети Meta остаются только там, где выбраны Meta или WhatsApp. */
+	let split_ig = false;
+	if (s(c.get(CFG, "settings", "zm_meta_v3")) != "1") {
+		let P = (k) => PKG_LISTS[k];
+		for (let x in sections(c, "section")) {
+			let rf = sec_refs(x), l = rf.l, has = (k) => index(rf.l, P(k)) >= 0;
+			if (!has("svc_instagram.lst") && !has("svc_facebook.lst") && !has("meta.lst")) continue;
+			let meta = has("svc_v2meta.lst") || has("svc_meta.lst"), drop = [];
+			if (has("svc_instagram.lst") && !has("svc_instagram_extra.lst")) l = [ ...l, P("svc_instagram_extra.lst") ];
+			if (!meta && has("svc_instagram.lst") && has("svc_facebook.lst") && !has("svc_messenger.lst")) push(drop, P("svc_facebook.lst"));
+			if (!meta && has("meta.lst") && !has("svc_whatsapp.lst")) push(drop, P("meta.lst"));
+			l = filter(uniq(l), (u) => index(drop, u) < 0);
+			if (join("\n", l) == join("\n", rf.l)) continue;
+			/* пишем только списки, остальное в секции не трогаем (как set_lists) */
+			let n = x[".name"], zr = rawlist(x.zm_refs), rl = filter(l, (u) => !pkg_local(u)), ll = filter(l, (u) => pkg_local(u));
+			if (length(zr)) set_list(c, n, "zm_refs", [ ...filter(zr, (t) => substr(t, 0, 2) != "l:"), ...map(l, (u) => "l:" + u) ]);
+			set_list(c, n, "remote_domain_lists", uniq([ ...rf.s, ...rf.r, ...rl ]));
+			set_list(c, n, "remote_subnet_lists", uniq([ ...rf.r, ...rl ]));
+			c.delete(CFG, n, "local_subnet_lists");
+			set_list(c, n, "local_domain_lists", uniq(ll));
+			split_ig = true;
+		}
+		if (!c.get(CFG, "settings")) c.set(CFG, "settings", "settings");
+		c.set(CFG, "settings", "zm_meta_v3", "1");
+		split_ig = true;
+	}
+	if (!v2 || split_meta || split_ig) {
 		if (!c.get(CFG, "settings")) c.set(CFG, "settings", "settings");
 		c.set(CFG, "settings", "zm_dev_v2", "1");
 		c.save(CFG);
 		c.commit(CFG);
 	}
-	out({ ok: true, changed: patched || migrated || split_meta, migrated });
+	out({ ok: true, changed: patched || migrated || split_meta || split_ig, migrated });
 }
 
 function set_text(c, sec, key, list) {
@@ -17150,9 +17208,12 @@ function set_lists(c, sec, rf, services, domains, subnets) {
 	let zr = [];
 	for (let k in [ "s", "r", "l" ]) for (let v in rf[k]) push(zr, k + ":" + v);
 	set_list(c, sec, "zm_refs", zr);
-	set_list(c, sec, "remote_domain_lists", uniq([ ...rf.s, ...rf.r, ...rf.l ]));
-	set_list(c, sec, "remote_subnet_lists", uniq([ ...rf.r, ...rf.l ]));
+	let rl = filter(rf.l, (u) => !pkg_local(u)), ll = filter(rf.l, (u) => pkg_local(u));
+	set_list(c, sec, "remote_domain_lists", uniq([ ...rf.s, ...rf.r, ...rl ]));
+	set_list(c, sec, "remote_subnet_lists", uniq([ ...rf.r, ...rl ]));
 	del_keys(c, sec, [ "local_domain_lists", "local_subnet_lists", "user_domains", "user_subnets" ]);
+	/* встроенные списки панели — только домены */
+	set_list(c, sec, "local_domain_lists", uniq(ll));
 	if (length(domains)) {
 		c.set(CFG, sec, "user_domain_list_type", "text");
 		c.set(CFG, sec, "user_domains_text", join("\n", domains));
@@ -17561,12 +17622,12 @@ function cmd_set() {
 	for (let x in [ ...rsets, ...rsubs ])
 		if (!match(x, /^https?:\/\/[^ \t]+$/i)) fail("неверная ссылка на набор правил: " + substr(x, 0, 60));
 	for (let x in rplain)
-		if (!valid_url(x)) fail("неверная ссылка на список: " + substr(x, 0, 60));
+		if (!valid_url(x) && !pkg_local(x)) fail("неверная ссылка на список: " + substr(x, 0, 60));
 	let domains = parse_domains(d.domains);
 	let subnets = uniq(tokens(d.subnets));
 	for (let x in subnets) if (!valid_ip(x)) fail("это не похоже на IP или подсеть: " + x);
 	let lists = uniq(tokens(d.lists));
-	for (let x in lists) if (!valid_url(x)) fail("внешний список должен быть ссылкой https://…: " + x);
+	for (let x in lists) if (!valid_url(x) && !pkg_local(x)) fail("внешний список должен быть ссылкой https://…: " + x);
 	let own_on = d.own_on == null ? !own_off(c.get_all(CFG, sec) || {}) : !!d.own_on;
 	let keep = { domains, subnets, lists };
 	if (!own_on) { domains = []; subnets = []; lists = []; }
@@ -23985,9 +24046,9 @@ mkdir -p /usr/share/zm-redbtn
 cat > '/usr/share/zm-redbtn/services.conf' << 'ZM_INSTALLER_EOF'
 youtube|YouTube|svc_youtube.lst||www.youtube.com,youtubei.googleapis.com,manifest.googlevideo.com|youtu.be,i.ytimg.com,i9.ytimg.com,yt3.ggpht.com,yt4.ggpht.com,jnn-pa.googleapis.com,signaler-pa.youtube.com,yt3.googleusercontent.com,rr4---sn-4g5e6nze.googlevideo.com,rr4---sn-5go7yner.googlevideo.com,rr5---sn-n8v7knez.googlevideo.com,rr2---sn-q4fl6ndl.googlevideo.com,rr1---sn-q4fl6n6y.googlevideo.com,rr14---sn-n8v7kn7r.googlevideo.com,rr4---sn-jvhnu5g-c35d.googlevideo.com,rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com,rr12---sn-gvnuxaxjvh-bvwz.googlevideo.com,rr1---sn-ug5onuxaxjvh-n8v6.googlevideo.com||youtube
 discord|Discord|svc_discord.lst|discord.lst|discord.com,gateway.discord.gg,updates.discord.com|cdn.discordapp.com,media.discordapp.net||discord
-meta|Meta|svc_meta.lst,svc_v2meta.lst,svc_instagram.lst,svc_facebook.lst,svc_messenger.lst,svc_whatsapp.lst,svc_threads.lst,svc_oculus.lst,svc_facebook_dev.lst|meta.lst|www.instagram.com,www.facebook.com,web.whatsapp.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com,static.xx.fbcdn.net,static.whatsapp.net,mmg.whatsapp.net||
-instagram|Instagram|svc_instagram.lst,svc_facebook.lst|meta.lst|www.instagram.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com||
-facebook|Facebook|svc_facebook.lst,svc_messenger.lst|meta.lst|www.facebook.com|static.xx.fbcdn.net||
+meta|Meta|svc_meta.lst,svc_v2meta.lst,svc_instagram.lst,svc_instagram_extra.lst,svc_facebook.lst,svc_messenger.lst,svc_whatsapp.lst,svc_threads.lst,svc_oculus.lst,svc_facebook_dev.lst|meta.lst|www.instagram.com,www.facebook.com,web.whatsapp.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com,static.xx.fbcdn.net,static.whatsapp.net,mmg.whatsapp.net||
+instagram|Instagram|svc_instagram.lst,svc_instagram_extra.lst||www.instagram.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com||
+facebook|Facebook|svc_facebook.lst,svc_messenger.lst||www.facebook.com|static.xx.fbcdn.net||
 whatsapp|WhatsApp|svc_whatsapp.lst|meta.lst|web.whatsapp.com|static.whatsapp.net,mmg.whatsapp.net||
 x|X (Twitter)|svc_twitter.lst|twitter_x.lst|x.com|twitter.com,abs.twimg.com,video.twimg.com||twitter
 github|GitHub|own_github.lst||github.com,raw.githubusercontent.com,objects.githubusercontent.com|codeload.github.com,api.github.com,ghcr.io||
@@ -24015,6 +24076,23 @@ ukraine_inside|Блокировки Украины||||||ukraine_inside
 custom|Свой список||||||
 ZM_INSTALLER_EOF
 chmod 0644 /usr/share/zm-redbtn/services.conf
+# Instagram без Facebook: адреса Meta, без которых у Instagram не грузятся фото и видео (fbcdn), вложения
+# и сообщения в Direct. Сам facebook.com сюда не входит — его включает пункт Facebook (или Meta).
+mkdir -p /usr/share/zm-redbtn/svc
+cat > '/usr/share/zm-redbtn/svc/instagram_extra.lst' << 'ZM_INSTALLER_EOF'
+fbcdn.net
+fbcdn.com
+fbsbx.com
+graph.facebook.com
+b-graph.facebook.com
+edge-mqtt.facebook.com
+mqtt-mini.facebook.com
+gateway.facebook.com
+z-p3-chat-e2ee-ig.facebook.com
+z-p4-chat-e2ee-ig.facebook.com
+z-p42-chat-e2ee-ig.facebook.com
+ZM_INSTALLER_EOF
+chmod 0644 /usr/share/zm-redbtn/svc/instagram_extra.lst
 if [ -d /usr/share/zm-redbtn/lists ]; then
 	mkdir -p /opt/zapret-manager-luci/lists
 	for f in /usr/share/zm-redbtn/lists/*.lst; do
