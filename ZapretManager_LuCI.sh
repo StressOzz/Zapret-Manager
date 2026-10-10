@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 2.73
+# Version: 2.75
 ZM_VERSION_EOF
 set -e
 
@@ -13240,7 +13240,11 @@ steer_action() {
 		dnslog)
 			stl_present && stl_running || { echo '{"error":"Steer не запущен"}'; return 1; }
 			w="$(_stl_t 15 steer dns-log 2>/dev/null | tr -d '\n\r')"
-			case "$w" in '{'*'"names"'*) printf '%s\n' "$w" ;; *) echo '{"error":"ядро Steer не отдало журнал имён — нужна версия 2.0 или новее"}'; return 1 ;; esac ;;
+			case "$w" in '{'*'"names"'*) ;; *) echo '{"error":"ядро Steer не отдало журнал имён — нужна версия 2.0 или новее"}'; return 1 ;; esac
+			mkdir -p "$ST_RUN"
+			printf '%s\n' "$w" > "$ST_RUN/dnslog.$$"
+			_st_dnslog_fix "$ST_RUN/dnslog.$$" 2>/dev/null | grep . || printf '%s\n' "$w"
+			rm -f "$ST_RUN/dnslog.$$" ;;
 		wfix_reset)
 			rm -f "$ST_WFIX_STATE"; printf '{"ok":true}\n' ;;
 		warp_own_get)
@@ -16116,6 +16120,98 @@ _st_where() {
 	done < "$res"
 	printf ']'
 	rm -f "$man" "$man.x" "$res"
+}
+
+# Журнал имён («Недавние сайты»): ядро ставит у имени имя КАНАЛА, а не правила. Правила с одним выходом
+# (у Steer это все выбранные сервисы — они идут в один туннель) ядро сливает в общий набор и зовёт его по
+# первому доменному правилу. Поэтому forum.ru-board.com из «Заблокированных сайтов» показывался как
+# «WhatsApp», если WhatsApp выбран раньше. Настоящий сервис находим сами — по спискам выбранных сервисов
+# (model.svc) теми же правилами, что ядро и _st_where: домен — с поддоменами, «=имя» — только имя, «*.имя» —
+# только поддомены. Из больших списков берём лишь строки, которые вообще могут подойти к именам журнала, —
+# памяти почти не нужно. Имя есть в нескольких выбранных сервисах — называем все по порядку правил. Имя не
+# нашлось в текстовых списках (попало по подсети, по ключевому слову .srs) — сервис не называем, лишь выход.
+_st_dnslog_fix() {
+	local src="$1" man="$ST_RUN/dlfix.$$" nl="$ST_RUN/dlfix.$$.n" map="$ST_RUN/dlfix.$$.m" tab x path nm
+	tab="$(printf '\t')"
+	# один выбранный сервис — канал и так назван им, править нечего
+	if [ ! -s "$ST_DIR/model.svc" ] || [ "$(grep -c '^svc	' "$ST_DIR/model.svc")" -le 1 ]; then cat "$src"; return 0; fi
+	mkdir -p "$ST_RUN/srsdump"
+	awk -F'\t' '$1 == "svc" { nm = $3; next } ($1 == "dom" || $1 == "srs") && nm != "" { print nm "\t" $2 }' "$ST_DIR/model.svc" |
+	while IFS="$tab" read -r nm path; do
+		case "$path" in
+			*.srs)
+				# та же раскладка .srs в текст, что у «Куда пойдёт запрос» (_st_where), — общий кэш
+				x="$ST_RUN/srsdump/$(printf '%s' "$path" | tr -c 'A-Za-z0-9_.-' '_')"
+				if [ -s "$path" ] && { { [ ! -s "$x.dom" ] && [ ! -s "$x.pfx" ]; } || [ "$path" -nt "$x.dom" ]; }; then
+					rm -f "$x.dom" "$x.pfx"
+					steer srs-read "$path" --out "$x.dom" --prefixes-out "$x.pfx" >/dev/null 2>&1 || rm -f "$x.dom" "$x.pfx"
+				fi
+				[ -s "$x.dom" ] && printf '%s\t%s\n' "$nm" "$x.dom" ;;
+			*) [ -s "$path" ] && printf '%s\t%s\n' "$nm" "$path" ;;
+		esac
+	done > "$man"
+	# имена журнала, попавшие в канал
+	grep -o '{"name":"[^"]*","channel":"' "$src" | sed 's/^{"name":"//; s/",.*$//' | awk '!s[$0]++' > "$nl"
+	if [ ! -s "$man" ] || [ ! -s "$nl" ]; then cat "$src"; rm -f "$man" "$nl"; return 0; fi
+	awk -F'\t' '
+		FNR == NR {
+			n = $0; sub(/\.$/, "", n); has[n] = 1; ord[++nn] = $0; key[$0] = n
+			s = n
+			while (1) { suf[s] = 1; i = index(s, "."); if (!i) break; s = substr(s, i + 1) }
+			next
+		}
+		function add(k, lab) { if (!((k, lab) in got)) { got[k, lab] = 1; hit[k] = hit[k] SUBSEP lab } }
+		{
+			lab = $1; path = $2
+			if (!(lab in rank)) rank[lab] = ++nr
+			while ((getline l < path) > 0) {
+				sub(/[#;].*$/, "", l); gsub(/^[ \t\r]+|[ \t\r]+$/, "", l)
+				if (l == "") continue
+				l = tolower(l)
+				c = substr(l, 1, 1)
+				if (c == "=") { w = substr(l, 2); if (w in has) add("e" SUBSEP w, lab); continue }
+				if (c == "*" && substr(l, 2, 1) == ".") { w = substr(l, 3); if (w in suf) add("s" SUBSEP w, lab); continue }
+				if (l ~ /^re:/ || l ~ /[*? \t\/]/) continue
+				if (l in suf) add("d" SUBSEP l, lab)
+			}
+			close(path)
+		}
+		END {
+			for (j = 1; j <= nn; j++) {
+				n = key[ord[j]]; all = ""; delete pick
+				s = n
+				while (1) {
+					all = all hit["d" SUBSEP s]
+					if (s == n) all = all hit["e" SUBSEP s]; else all = all hit["s" SUBSEP s]
+					i = index(s, "."); if (!i) break; s = substr(s, i + 1)
+				}
+				m = split(all, p, SUBSEP); out = ""
+				# по порядку правил (порядок выбранных сервисов), без повторов
+				for (r = 1; r <= nr; r++) for (t = 2; t <= m; t++) if (rank[p[t]] == r && !(p[t] in pick)) {
+					pick[p[t]] = 1; out = out (out == "" ? "" : ", ") p[t]
+				}
+				print ord[j] "\t" out
+			}
+		}' "$nl" "$man" > "$map"
+	# переписываем поле channel у имён журнала; объекты upstreams/other с «name» без channel не трогаем
+	awk -v map="$map" -v direct="$ST_DIRECT_OUT" '
+		BEGIN { while ((getline l < map) > 0) { k = index(l, "\t"); n = substr(l, 1, k - 1); v = substr(l, k + 1); gsub(/["\\]/, "", v); lab[n] = v; known[n] = 1 } close(map) }
+		{
+			sep = "{\"name\":\""; pre = "\",\"channel\":\""; rest = $0; o = ""
+			while ((i = index(rest, sep)) > 0) {
+				o = o substr(rest, 1, i - 1 + length(sep)); rest = substr(rest, i + length(sep))
+				k = index(rest, "\""); nm = substr(rest, 1, k - 1); t = substr(rest, k)
+				if (!(nm in known) || substr(t, 1, length(pre)) != pre) continue
+				t = substr(t, length(pre) + 1); e = 0
+				for (z = 1; z <= length(t); z++) { c = substr(t, z, 1); if (c == "\\") { z++; continue } if (c == "\"") { e = z; break } }
+				if (!e) continue
+				after = substr(t, e + 1)
+				if (index(after, ",\"out\":\"" direct "\"") == 1) continue
+				o = o nm "\",\"channel\":" (lab[nm] != "" ? "\"" lab[nm] "\"" : "null"); rest = after
+			}
+			print o rest
+		}' "$src"
+	rm -f "$man" "$nl" "$map"
 }
 
 steer_explain() {
