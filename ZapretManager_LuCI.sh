@@ -1,10 +1,11 @@
 #!/bin/sh
-# Version: 2.70
+read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
+# Version: 2.73
+ZM_VERSION_EOF
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
-ZM_NEW_VER="2.70"
 _zmi_say() { echo -e "${CYAN}==>${NC} $*"; }
 _zmi_ok() { echo -e "   ${GREEN}✓${NC} $*"; }
 _zmi_step() { echo -e "   → $*"; }
@@ -129,7 +130,7 @@ if [ "$1" = zm_watch ]; then
 fi
 
 CONF="/etc/config/zapret"
-ZM_VERSION="2.70"
+ZM_VERSION="@ZM_VERSION@"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -8757,7 +8758,7 @@ _stl_vpn_outs() {
 
 _stl_spec() {
 	local tab k a b c lists="" rules="" outs="" lan="" sep="" lid="" lab="" srs="" dom="" pfx="" d m
-	local clients="" drules="" cid dout byp=""
+	local clients="" drules="" cid dout byp="" xd="" xp="" xc="" xr=""
 	tab="$(printf '\t')"
 	local out="" body wp=latency
 	while IFS="$tab" read -r k a b c; do
@@ -8783,18 +8784,35 @@ _stl_spec() {
 			srs) srs="$srs${srs:+,}$(_stl_js "$a")" ;;
 			dom) dom="$dom${dom:+,}$(_stl_js "$a")" ;;
 			pfx) pfx="$pfx${pfx:+,}$(_stl_js "$a")" ;;
+			xdom) xd="$xd${xd:+,}$(_stl_js "$a")" ;;
+			xpfx) xp="$xp${xp:+,}$(_stl_js "$a")" ;;
 			dev)
 				# устройство целиком: клиент (MAC или один адрес) и правило «scope: device»
 				cid="$(_stl_ident "d_$b")"
 				case "$clients" in *"\"$cid\":"*) continue ;; esac
 				case "$b" in *:*) d="\"mac\":[$(_stl_js "$b")]" ;; *) d="\"addr\":[$(_stl_js "$b")]" ;; esac
 				clients="$clients${clients:+,}\"$cid\":{$d}"
-				if [ "$a" = byp ]; then dout="$ST_DIRECT_OUT"; byp=1; else dout="$out"; fi
+				if [ "$a" = byp ]; then dout="$ST_DIRECT_OUT"; byp=1; else dout="$out"; xc="$xc $cid"; fi
 				drules="$drules${drules:+,}{\"name\":$(_stl_js "$(_stl_ident "${a}_$b")"),\"for\":[\"$cid\"],\"to\":\"all\",\"out\":\"$dout\",\"scope\":\"device\"}" ;;
 		esac
 	done < "$1"
 	_stl_rule
 	[ -n "$rules$drules" ] || return 1
+	# Исключения — напрямую и с настоящими адресами (realip): первым общим правилом и правилом на каждое
+	# устройство «весь трафик через туннель» (правила на устройство старше общих, без своего исключения
+	# такое устройство увело бы исключённый сайт в туннель).
+	if [ -n "$xd$xp" ]; then
+		body=""
+		[ -n "$xd" ] && body="\"domains_file\":[$xd]"
+		[ -n "$xp" ] && body="$body${body:+,}\"prefixes_file\":[$xp]"
+		lists="\"$ST_EXCL_LIST\":{$body}${lists:+,}$lists"
+		rules="{\"name\":\"Исключения\",\"to\":\"$ST_EXCL_LIST\",\"out\":\"$ST_DIRECT_OUT\",\"resolve\":\"realip\"}${rules:+,}$rules"
+		for cid in $xc; do
+			xr="$xr${xr:+,}{\"name\":$(_stl_js "$(_stl_ident "x_$cid")"),\"for\":[\"$cid\"],\"to\":\"$ST_EXCL_LIST\",\"out\":\"$ST_DIRECT_OUT\",\"scope\":\"device\",\"resolve\":\"realip\"}"
+		done
+		[ -n "$xr" ] && drules="$xr${drules:+,}$drules"
+		byp=1
+	fi
 	[ -n "$byp" ] && outs="$outs${outs:+,}\"$ST_DIRECT_OUT\":{\"kind\":\"direct\"}"
 	[ -n "$drules" ] && [ -n "$rules" ] && drules="$drules,"
 	rules="$drules$rules"
@@ -9186,6 +9204,28 @@ _st_devs_all() { grep -q "^all	" "$ST_DEVS" 2>/dev/null; }
 _st_devs_n() { local n; n="$(grep -c "^$1	" "$ST_DEVS" 2>/dev/null)"; echo "${n:-0}"; }
 # Есть ли у Steer работа: выбран сервис или устройство целиком
 _st_work() { [ -n "$(_st_sel)" ] || _st_devs_all; }
+# Исключения Steer: домены и подсети, которые всегда идут напрямую. Правило стоит первым — выше сервисов,
+# а у устройств «весь трафик через туннель» есть своё такое же правило на устройство (они старше общих).
+ST_EXCL_LIST="zm_excl"
+_st_excl_model() {
+	[ -s "$ST_DIR/user/exclude.lst" ] && printf 'xdom\t%s\n' "$ST_DIR/user/exclude.lst"
+	[ -s "$ST_DIR/user/exclude.pfx" ] && printf 'xpfx\t%s\n' "$ST_DIR/user/exclude.pfx"
+	return 0
+}
+do_steer_excl() {
+	local rc nd np
+	_st_phase rules
+	rm -f "$ST_STOP_FLAG"
+	nd="$(cat "$ST_DIR/user/exclude.lst" 2>/dev/null | grep -c .)"; np="$(cat "$ST_DIR/user/exclude.pfx" 2>/dev/null | grep -c .)"
+	_rb_say "Исключения: доменов $nd, IP и подсетей $np"
+	if _st_owns "steer-spec" && _st_work; then
+		if _st_use_vpn; then _st_spec_quick; else _st_spec_quick_warp; fi
+		rc=$?
+		if [ "$rc" = 0 ]; then _rb_say "Готово: исключения применены, списки сервисов не перекачивались"; return 0; fi
+		[ "$rc" = 1 ] && return 1
+	fi
+	do_steer_apply
+}
 _st_dev_model() {
 	[ -s "$ST_DEVS" ] || return 0
 	awk -F'\t' '($1 == "all" || $1 == "byp") && $2 != "" && !s[$2]++ { printf "dev\t%s\t%s\t%s\n", $1, $2, $3 }' "$ST_DEVS"
@@ -10823,6 +10863,7 @@ _st_model() {
 		echo
 	fi
 	_st_dev_model
+	_st_excl_model
 	for id; do
 		_st_svc_lists "$id"
 	done
@@ -10836,7 +10877,7 @@ _st_spec_apply() {
 		if [ $# -gt 0 ] || ! grep -q '^dev	all	' "$m"; then rm -f "$m"; echo "ОШИБКА: для выбранных сервисов нет ни одного списка"; return 1; fi
 	fi
 	stl_apply "$m" || { rm -f "$m"; return 1; }
-	grep -v '^\(lan\|warp\|wpick\|vpn\|tun\|dev\)	' "$m" > "$ST_DIR/model.svc" 2>/dev/null
+	grep -v '^\(lan\|warp\|wpick\|vpn\|tun\|dev\|xdom\|xpfx\)	' "$m" > "$ST_DIR/model.svc" 2>/dev/null
 	rm -f "$m"
 	_st_own "steer-spec"
 }
@@ -11496,6 +11537,7 @@ _st_spec_quick() {
 		printf 'vpn\t%s\n' "$ST_SUB"
 		_st_sub_filter
 		_st_dev_model
+		_st_excl_model
 		cat "$ST_DIR/model.svc"
 	} > "$m"
 	stl_apply "$m"; f=$?
@@ -11514,6 +11556,7 @@ _st_spec_quick_warp() {
 		printf 'wpick\t%s\n' "$(_st_warp_pick)"
 		printf 'warp'; for id in $(_st_warp_use); do printf '\t%s' "$id"; done; echo
 		_st_dev_model
+		_st_excl_model
 		cat "$ST_DIR/model.svc"
 	} > "$m"
 	stl_apply "$m"; f=$?
@@ -11885,6 +11928,7 @@ ST_USER_DIR="$ST_DIR/user"
 
 _st_list_effective() {
 	local id="$1" set f any=0
+	if [ "$id" = exclude ]; then ST_LIST_SRC=user; cat "$ST_USER_DIR/$id.lst" "$ST_USER_DIR/$id.pfx" 2>/dev/null; return 0; fi
 	if [ -s "$ST_USER_DIR/$id.lst" ] || [ -s "$ST_USER_DIR/$id.pfx" ]; then ST_LIST_SRC=user; cat "$ST_USER_DIR/$id.lst" "$ST_USER_DIR/$id.pfx" 2>/dev/null; return 0; fi
 	for set in $(_rb_svc_field "$id" 8 | tr ',' ' '); do
 		f="$ST_DIR/lists/$set.dom"
@@ -11895,9 +11939,12 @@ _st_list_effective() {
 	for f in $(_rb_svc_field "$id" 3 | tr ',' ' '); do _rb_list_get "$f" 2>/dev/null && [ -s "$ZM_LISTS_DIR/$f" ] && cat "$ZM_LISTS_DIR/$f"; done
 }
 
+# Списки, которые правит человек: «Свой список» (custom — через Steer) и «Исключения» (exclude — всегда напрямую).
+_st_user_list() { [ "$1" = exclude ] || { [ "$1" = custom ] && _rb_routable "$1"; }; }
+
 steer_list_get() {
 	local id="$1" body n tmp="$JOBS_DIR/steer-list.$$"
-	[ "$id" = custom ] && _rb_routable "$id" || { echo '{"error":"редактируется только свой список"}'; return 1; }
+	_st_user_list "$id" || { echo '{"error":"редактируется только свой список или исключения"}'; return 1; }
 	ST_LIST_SRC=""
 	mkdir -p "$JOBS_DIR"
 	_st_list_effective "$id" > "$tmp"
@@ -11911,11 +11958,11 @@ steer_list_get() {
 steer_list_set() {
 	local id="${1%%|*}" body="${1#*|}" f tmp n
 	case "$1" in *'|'*) ;; *) echo '{"error":"нет списка"}'; return 1 ;; esac
-	[ "$id" = custom ] && _rb_routable "$id" || { echo '{"error":"редактируется только свой список"}'; return 1; }
+	_st_user_list "$id" || { echo '{"error":"редактируется только свой список или исключения"}'; return 1; }
 	mkdir -p "$ST_USER_DIR"
 	f="$ST_USER_DIR/$id.lst"; tmp="$f.tmp"
 	printf '%s\n' "$body" | tr -d '\r' | tr 'A-Z' 'a-z' | tr ',;' '\n\n' |
-		sed 's/[[:space:]]*#.*$//; s/^[[:space:]]*//; s/[[:space:]]*$//; s/^domain://; s/^full://; s/^suffix://; s/^\*\.//; s/^\.//' > "$tmp.all"
+		sed 's/[[:space:]]*#.*$//; s/^[[:space:]]*//; s/[[:space:]]*$//; s#^[a-z][a-z0-9+.-]*://\([^/?]*\).*#\1#; s/^domain://; s/^full://; s/^suffix://; s/^\*\.//; s/^\.//' > "$tmp.all"
 	grep -E '^[a-z0-9]([a-z0-9_-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9_-]*[a-z0-9])?)+$' "$tmp.all" | grep -vE '^[0-9.]+$' | awk '!s[$0]++' > "$tmp"
 	grep -E '^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?$' "$tmp.all" | awk -F'[./]' '$1 < 256 && $2 < 256 && $3 < 256 && $4 < 256 && ($5 == "" || $5 <= 32) { print ($5 == "" ? $0 "/32" : $0) }' | awk '!s[$0]++' > "$tmp.pfx"
 	rm -f "$tmp.all"
@@ -11927,7 +11974,7 @@ steer_list_set() {
 }
 
 steer_list_reset() {
-	[ "$1" = custom ] && _rb_routable "$1" || { echo '{"error":"редактируется только свой список"}'; return 1; }
+	_st_user_list "$1" || { echo '{"error":"редактируется только свой список или исключения"}'; return 1; }
 	rm -f "$ST_USER_DIR/$1.lst" "$ST_USER_DIR/$1.pfx"
 	if [ "$1" = custom ]; then
 		if _rb_in custom "$ST_SEL"; then
@@ -11944,6 +11991,15 @@ steer_list_reset() {
 }
 
 _st_list_changed() {
+	if [ "$1" = exclude ]; then
+		# исключения действуют без выбора в списке сервисов: применяем, если Steer уже ведёт правила
+		if _st_installed && [ ! -f "$ST_OFF" ] && [ -z "$(_st_blocker)" ] && _st_owns "steer-spec" && _st_work; then
+			job_start steer do_steer_excl
+		else
+			printf '{"ok":true,"saved":true,"count":%s}\n' "$2"
+		fi
+		return
+	fi
 	if _st_installed && [ ! -f "$ST_OFF" ] && [ -z "$(_st_blocker)" ] && _rb_in "$1" "$ST_SEL"; then
 		job_start steer do_steer_apply
 	else
@@ -15959,22 +16015,138 @@ _zm_resolve_any() {
 	printf '%s' "$a"
 }
 
+# Где лежит домен или адрес: в каких списках Steer он есть — чтобы «Куда пойдёт запрос» называл не только
+# выход, но и список со строкой, которая сработала. Ядро (steer explain) называет только канал, поэтому
+# списки проверяем сами, теми же правилами, что и ядро: домен — с поддоменами, «=имя» — только это имя,
+# «*.имя» — только поддомены, адрес — по подсетям и диапазонам. Наборы .srs проверяет sing-box, если он есть.
+# Порядок: исключения, выбранные сервисы (как их ведёт ядро), затем невыбранные сервисы с уже скачанными
+# списками (ничего не качаем — ответ должен быть быстрым). Печатает JSON-массив.
+_st_where() {
+	local host="$1" ip="$2" man="$ST_RUN/where.$$" res="$ST_RUN/where.$$.r" on id name f3 f4 f5 f6 f7 f8 rest x f n=0 st path ent sep="" lab
+	mkdir -p "$ST_RUN"
+	{
+		for f in "$ST_USER_DIR/exclude.lst" "$ST_USER_DIR/exclude.pfx"; do [ -s "$f" ] && printf 'x\texclude\tИсключения\t%s\n' "$f"; done
+		if [ -s "$ST_DIR/model.svc" ] && _st_owns "steer-spec" && [ ! -f "$ST_OFF" ]; then
+			awk -F'\t' '$1 == "svc" { id = $2; nm = $3; next } ($1 == "dom" || $1 == "pfx" || $1 == "srs") && id != "" { print "on\t" id "\t" nm "\t" $2 }' "$ST_DIR/model.svc"
+		fi
+	} > "$man"
+	on=" $(awk -F'\t' '$1 == "on" { print $2 }' "$man" | sort -u | tr '\n' ' ') "
+	_rb_svc_src | while IFS='|' read -r id name f3 f4 f5 f6 f7 f8 rest; do
+		[ -n "$id" ] || continue
+		case "$on" in *" $id "*) continue ;; esac
+		{
+			if [ "$id" = custom ]; then
+				printf '%s\n' "$ST_USER_DIR/custom.lst" "$ST_USER_DIR/custom.pfx"
+			else
+				for x in $(printf '%s,%s' "$f3" "$f4" | tr ',' ' '); do printf '%s\n' "$ZM_LISTS_DIR/$x"; done
+				for x in $(printf '%s' "$f8" | tr ',' ' '); do printf '%s\n' "$ST_DIR/lists/$x.dom" "$ST_DIR/lists/$x.pfx" "$ST_DIR/lists/$x.srs"; done
+			fi
+		} | while IFS= read -r f; do [ -s "$f" ] && printf 'off\t%s\t%s\t%s\n' "$id" "$name" "$f"; done
+	done | awk -F'\t' '!s[$2 "\t" $4]++' >> "$man"
+	# наборы .srs (каталог списков) ядро steer само раскладывает в текст: steer srs-read. Раскладку кладём
+	# рядом и берём заново, только когда набор обновился. Пятое поле строки — исходный файл, для подписи.
+	mkdir -p "$ST_RUN/srsdump"
+	awk -F'\t' '{ print NR "\t" $0 }' "$man" | while IFS="$(printf '\t')" read -r n st id name path; do
+		case "$path" in
+			*.srs)
+				x="$ST_RUN/srsdump/$(printf '%s' "$path" | tr -c 'A-Za-z0-9_.-' '_')"
+				if { [ ! -s "$x.dom" ] && [ ! -s "$x.pfx" ]; } || [ "$path" -nt "$x.dom" ]; then
+					rm -f "$x.dom" "$x.pfx"
+					steer srs-read "$path" --out "$x.dom" --prefixes-out "$x.pfx" >/dev/null 2>&1 || rm -f "$x.dom" "$x.pfx"
+				fi
+				if [ -f "$x.dom" ]; then
+					printf '%s\t%s\t%s\t%s\t%s\n' "$st" "$id" "$name" "$x.dom" "$path"
+					[ -s "$x.pfx" ] && printf '%s\t%s\t%s\t%s\t%s\n' "$st" "$id" "$name" "$x.pfx" "$path"
+				else
+					printf '%s\t%s\t%s\t%s\t%s\n' "$st" "$id" "$name" "$path" "$path"
+				fi ;;
+			*) printf '%s\t%s\t%s\t%s\t%s\n' "$st" "$id" "$name" "$path" "$path" ;;
+		esac
+	done > "$man.x"
+	mv -f "$man.x" "$man"
+	{
+		awk -F'\t' -v h="$host" -v ip="$ip" '
+			function ipn(a,  p) { if (split(a, p, ".") != 4) return -1; return ((p[1] * 256 + p[2]) * 256 + p[3]) * 256 + p[4] }
+			function under(n, d) { return length(n) > length(d) && substr(n, length(n) - length(d)) == "." d }
+			BEGIN { iv = ip != "" ? ipn(ip) : -1 }
+			$4 ~ /\.srs$/ { next }
+			{
+				best = ""; bw = -1; path = $4
+				while ((getline l < path) > 0) {
+					sub(/[#;].*$/, "", l); gsub(/^[ \t\r]+|[ \t\r]+$/, "", l); l = tolower(l)
+					if (l == "" || l ~ /^re:/ || l ~ /[ \t]/) continue
+					if (iv >= 0 && l ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/) {
+						split(l, c, "/"); b = (c[2] == "") ? 32 : c[2] + 0; if (b < 0 || b > 32) continue
+						z = 2 ^ (32 - b); a = ipn(c[1])
+						if (a >= 0 && int(iv / z) == int(a / z) && 100 + b > bw) { best = l; bw = 100 + b }
+						continue
+					}
+					if (iv >= 0 && l ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+-[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) {
+						split(l, c, "-"); if (iv >= ipn(c[1]) && iv <= ipn(c[2]) && 100 > bw) { best = l; bw = 100 }
+						continue
+					}
+					if (h == "") continue
+					if (substr(l, 1, 1) == "=") { w = substr(l, 2); if (h == w && length(w) > bw) { best = l; bw = length(w) } continue }
+					if (substr(l, 1, 2) == "*.") { w = substr(l, 3); if (under(h, w) && length(w) > bw) { best = l; bw = length(w) } continue }
+					if (l ~ /[*?]/) continue
+					if ((h == l || under(h, l)) && length(l) > bw) { best = l; bw = length(l) }
+				}
+				close(path)
+				if (best != "") print NR "\t" $1 "\t" $2 "\t" $3 "\t" ($5 != "" ? $5 : $4) "\t" best
+			}' "$man"
+		if command -v sing-box >/dev/null 2>&1; then
+			awk -F'\t' '$4 ~ /\.srs$/ { print NR "\t" $1 "\t" $2 "\t" $3 "\t" $4 }' "$man" | while IFS="$(printf '\t')" read -r n st id name path; do
+				for x in $host $ip; do
+					sing-box rule-set match -f binary "$path" "$x" 2>&1 | grep -q 'match rules' && { printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$st" "$id" "$name" "$path" ""; break; }
+				done
+			done
+		fi
+	} | sort -n -k1,1 | head -n 40 > "$res"
+	printf '['
+	while IFS="$(printf '\t')" read -r n st id name path ent; do
+		case "$path" in
+			"$ST_USER_DIR"/exclude.*) lab="Исключения" ;;
+			"$ST_USER_DIR"/custom.*) lab="Свой список" ;;
+			"$ST_DIR"/lists/*.base.dom) lab="основные домены сервиса" ;;
+			"$ST_DIR"/lists/*) lab="${path##*/}"; lab="${lab%.*} (каталог списков)" ;;
+			*) lab="${path##*/}" ;;
+		esac
+		printf '%s{"state":"%s","id":"%s","name":"%s","list":"%s","entry":"%s"}' "$sep" "$st" "$(esc "$id")" "$(esc "$name")" "$(esc "$lab")" "$(esc "$ent")"
+		sep=","
+	done < "$res"
+	printf ']'
+	rm -f "$man" "$man.x" "$res"
+}
+
 steer_explain() {
-	local q
+	local q host="" ip="" fd where
 	q="$(_zm_route_target "$1")" || { echo '{"error":"введите домен (например, youtube.com) или IP-адрес"}'; return 1; }
 	stl_present || { echo '{"error":"Steer не установлен"}'; return 1; }
-	{ _st_owns "steer-spec" && [ ! -f "$ST_OFF" ]; } || { printf '{"target":"%s","verdict":"off","text":""}\n' "$(esc "$q")"; return 0; }
+	if printf '%s' "$q" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then ip="$q"
+	elif printf '%s' "$q" | grep -q ':'; then :
+	else host="$q"; fi
+	if ! { _st_owns "steer-spec" && [ ! -f "$ST_OFF" ]; }; then
+		printf '{"target":"%s","verdict":"off","text":"","where":%s}\n' "$(esc "$q")" "$(_st_where "$host" "$ip")"
+		return 0
+	fi
 	local node
 	stl_explain "$q"
 	node="$(cat "$ST_SUB_NODE" 2>/dev/null)"
 	[ "$STL_X_VERDICT" = vpn ] && stl_state vpn && [ "$STL_UP" = true ] && [ -n "$STL_NODE" ] && node="$(_st_active_key)" && node="${node:-$STL_NODE}"
-	printf '{"target":"%s","verdict":"%s","out":"%s","dev":"%s","channel":"%s","addr":"%s","fake":%s,"node":"%s","text":"%s"}\n' \
+	# поддельный адрес — значит, имя из списков: ищем по имени; настоящий адрес домена — ещё и по подсетям
+	fd="$(printf '%s\n' "$STL_X_TEXT" | sed -n 's/^[[:space:]]*поддельный адрес имени \([^ ]*\).*/\1/p' | head -n1)"
+	[ -z "$host" ] && [ -n "$fd" ] && host="$fd" && ip=""
+	[ -z "$ip" ] && [ "$STL_X_FAKE" != true ] && printf '%s' "$STL_X_ADDR" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' && ip="$STL_X_ADDR"
+	where="$(_st_where "$host" "$ip")"
+	# выход «напрямую» из-за своих исключений — отдельный ответ, а не «Steer этот адрес не трогает»
+	[ "$STL_X_VERDICT" = direct ] && [ "$STL_X_OUT" = "$ST_DIRECT_OUT" ] && case "$where" in *'"state":"x"'*) STL_X_VERDICT=exclude ;; esac
+	printf '{"target":"%s","verdict":"%s","out":"%s","dev":"%s","channel":"%s","addr":"%s","fake":%s,"node":"%s","where":%s,"text":"%s"}\n' \
 		"$(esc "$q")" "$STL_X_VERDICT" "$(esc "$STL_X_OUT")" "$(esc "$STL_X_DEV")" "$(esc "$STL_X_SET")" "$(esc "$STL_X_ADDR")" "$STL_X_FAKE" \
-		"$(esc "$node")" "$(esc_ml "$STL_X_TEXT")"
+		"$(esc "$node")" "$where" "$(esc_ml "$STL_X_TEXT")"
 }
 
 fk_route_check() {
-	local q addr="" how="" verdict=direct tr rule="" ob="" ac="" sec="" s isip=0 caught=0 arg="$1" source="" err
+	local q addr="" how="" verdict=direct tr rule="" ob="" ac="" sec="" s isip=0 caught=0 arg="$1" source="" err wh=
 	case "$arg" in *'|'*) source="${arg#*|}"; arg="${arg%%|*}" ;; esac
 	q="$(_zm_route_target "$arg")" || { echo '{"error":"введите домен (например, youtube.com) или IP-адрес"}'; return 1; }
 	_fk_installed || { echo '{"error":"Forkozz не установлен"}'; return 1; }
@@ -15998,8 +16170,11 @@ fk_route_check() {
 			ob="$(printf '%s' "$tr" | jsonfilter -e '@.outbound' 2>/dev/null)"
 			ac="$(printf '%s' "$tr" | jsonfilter -e '@.action' 2>/dev/null)"
 			sec="$(printf '%s' "$tr" | jsonfilter -e '@.section' 2>/dev/null)"
+			# в каких списках секций нашёлся адрес — массив JSON, последний ключ ответа ucode
+			wh="$(printf '%s' "$tr" | sed -n 's/.*"where": *\(\[.*\]\) *}[[:space:]]*$/\1/p' | head -n1)"
 			;;
 	esac
+	case "$wh" in '['*']') ;; *) wh='[]' ;; esac
 	case "$ac" in
 		source_required) verdict=unknown ;;
 		fallback_direct) verdict=direct ;;
@@ -16009,9 +16184,9 @@ fk_route_check() {
 		*) if [ -z "$addr" ]; then verdict=unknown; else verdict=direct; fi ;;
 	esac
 	[ -z "$addr" ] && [ "$isip" = 0 ] && { [ "$verdict" = proxy ] || [ "$ac" = connection ] || [ "$ac" = outbound ]; } && verdict=unknown
-	printf '{"target":"%s","verdict":"%s","how":"%s","addr":"%s","ip":%s,"rule":"%s","outbound":"%s","action":"%s","section":"%s","source":"%s"}\n' \
+	printf '{"target":"%s","verdict":"%s","how":"%s","addr":"%s","ip":%s,"rule":"%s","outbound":"%s","action":"%s","section":"%s","source":"%s","where":%s}\n' \
 		"$(esc "$q")" "$verdict" "$how" "$(esc "$addr")" "$([ "$isip" = 1 ] && echo true || echo false)" "$(esc "$rule")" "$(esc "$ob")" "$(esc "$ac")" "$(esc "$sec")" \
-		"$(esc "$source")"
+		"$(esc "$source")" "$wh"
 }
 
 forkop_action() {
@@ -16410,6 +16585,7 @@ case "$cmd" in
 	*) echo '{"error":"неизвестная команда"}'; exit 1 ;;
 esac
 ZM_INSTALLER_EOF
+sed -i "s/@ZM_VERSION@/$ZM_NEW_VER/" '/opt/zapret-manager-luci/backend.sh.zm-new'
 chmod 0755 '/opt/zapret-manager-luci/backend.sh.zm-new'
 mv -f '/opt/zapret-manager-luci/backend.sh.zm-new' '/opt/zapret-manager-luci/backend.sh'
 cat > '/opt/zapret-manager-luci/netshift.uc' << 'ZM_INSTALLER_EOF'
@@ -18767,15 +18943,163 @@ function rule_hit(r, host, ip, sets, source) {
 	return !has && r.source_ip_cidr != null;
 }
 
+/* ---------- where: in which lists of the sections the domain or the IP is ----------
+ * sing-box names only the rule; netshift glues all plain lists of a section into one rule set, so the
+ * list itself is found here: each source of each section is checked on its own, the same way the
+ * engine matches (domain with subdomains, full:/keyword:/regexp:, IPv4 subnets; .srs/.json by
+ * sing-box itself). Missing files are downloaded for working sections while there is time; the
+ * catalog items no section uses are checked only from what is already on the router. */
+let WHERE_T0 = 0;
+/* время считается от начала проверки маршрута: докачка идёт, только пока с начала прошло меньше 15 с */
+function where_time() { return time() - WHERE_T0 < 15; }
+
+function dom_under(h, d) { return d != "" && (h == d || (length(h) > length(d) && substr(h, length(h) - length(d) - 1) == "." + d)); }
+
+function ref_base(u) {
+	let b = replace(replace(s(u), /[?#].*$/, ""), /^.*\//, "");
+	return b != "" ? b : s(u);
+}
+
+function cache_tag(u) {
+	let n = replace(replace(s(u), /^https?:\/\//, ""), /[^A-Za-z0-9_.-]/g, "_");
+	return length(n) > 120 ? substr(n, length(n) - 120) : n;
+}
+
+function plain_cache(u, fetch) {
+	if (substr(s(u), 0, 1) == "/") return fs.access(u) ? u : null;
+	let name = RS_CACHE + "/l_" + cache_tag(u), st = fs.stat(name);
+	if (fetch && where_time() && (!st || time() - st.mtime > 86400)) {
+		try { fs.mkdir(RS_CACHE); } catch (e) {}
+		sh("curl -sSL -m 8 -o " + q(name + ".tmp") + " " + q(u) + " && mv -f " + q(name + ".tmp") + " " + q(name));
+		st = fs.stat(name);
+	}
+	return st ? name : null;
+}
+
+function plain_hit(path, host, ip) {
+	let best = null, bw = -1;
+	for (let l in split(s(fs.readfile(path)), "\n")) {
+		l = lc(trim(replace(l, /[#;].*$/, "")));
+		if (l == "" || match(l, /[ \t]/) || substr(l, 0, 8) == "include:") continue;
+		if (match(l, /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/)) {
+			if (ip != "" && cidr_hit(ip, l)) {
+				let b = index(l, "/") >= 0 ? int(split(l, "/")[1]) : 32;
+				if (100 + b > bw) { best = l; bw = 100 + b; }
+			}
+			continue;
+		}
+		if (host == "") continue;
+		let w = l, hit = false;
+		if (substr(l, 0, 5) == "full:") { w = substr(l, 5); hit = host == w; }
+		else if (substr(l, 0, 8) == "keyword:") { w = substr(l, 8); hit = w != "" && index(host, w) >= 0; }
+		else if (match(l, /^(regexp|regex|re):/)) {
+			w = replace(l, /^[a-z]+:/, "");
+			try { hit = !!match(host, regexp(w)); } catch (e) { hit = false; }
+			w = "";
+		}
+		else { w = replace(replace(l, /^domain:/, ""), /^(\*\.|\.)/, ""); hit = dom_under(host, w); }
+		if (hit && length(w) > bw) { best = l; bw = length(w); }
+	}
+	return best;
+}
+
+function srs_hit(rs, host, ip, fetch) {
+	/* тот же кеш, что у rs_file, но качаем коротко (8 с) и только пока есть время: проверка маршрута
+	 * в оболочке ограничена 40 секундами, и долгая докачка оставила бы человека вовсе без ответа */
+	let name = RS_CACHE + "/" + replace(s(rs.tag), /[^A-Za-z0-9_.-]/g, "_") + (s(rs.format) == "binary" ? ".srs" : ".json");
+	let st = fs.stat(name);
+	if (fetch && where_time() && s(rs.url) != "" && (!st || time() - st.mtime > 86400)) {
+		try { fs.mkdir(RS_CACHE); } catch (e) {}
+		sh("curl -sSL -m 8 -o " + q(name + ".tmp") + " " + q(rs.url) + " && mv -f " + q(name + ".tmp") + " " + q(name));
+		st = fs.stat(name);
+	}
+	let f = st ? { path: name, fmt: s(rs.format || "binary") } : null;
+	if (!f) return false;
+	for (let t in [ host, ip ]) {
+		if (t == "") continue;
+		let r = sh("sing-box rule-set match -f " + q(f.fmt) + " " + q(f.path) + " " + q(t) + " 2>&1 | cat");
+		if (match(r, /(^|\n)[^\n]*match rules/)) return true;
+	}
+	return false;
+}
+
+function url_rs(u) {
+	return { type: "remote", tag: "u_" + cache_tag(u), url: u, format: url_ext(u) == "json" ? "source" : "binary" };
+}
+
+function where_scan(host, ip, win) {
+	let out = [];
+	if (host == "" && ip == "") return out;
+	if (!WHERE_T0) WHERE_T0 = time();
+	let c = cursor(), p = pick(c), used = {}, names = {}, items = [];
+	try { items = catalog_items(services_list()); } catch (e) { items = []; }
+	for (let it in items) for (let t in it.targets) if (names[t] == null) names[t] = it.name;
+	let won = false;
+	for (let x in sections(c, "section")) {
+		let n = x[".name"], byp = n == BYPASS;
+		if (!byp && !is_conn(x)) continue;
+		let on = byp || n == p.sec || s(x.disabled) != "1", rf = sec_refs(x);
+		let st = byp ? "x" : on ? "on" : "dis", label = byp ? "" : sec_label(x, n == p.sec);
+		let add = (name, list, entry) => {
+			let e = { state: st, sec: label, name, list, entry: entry ?? "", win: false };
+			if (!won && on && n == win) { e.win = true; won = true; }
+			push(out, e);
+		};
+		let own = byp ? "Исключения" : "Свой список";
+		if (host != "") for (let d in domain_lines(x)) if (dom_under(host, lc(replace(s(d), /^(\*\.|\.)/, "")))) { add(own, "свои домены", d); break; }
+		if (ip != "") for (let sn in subnet_lines(x)) if (cidr_hit(ip, sn)) { add(own, "свои IP и подсети", sn); break; }
+		for (let cn in rf.c) {
+			used["c:" + cn] = true;
+			if (srs_hit({ type: "remote", tag: n + "-" + cn + "-community-ruleset", url: SRS_MAIN + "/" + cn + ".srs", format: "binary" }, host, ip, on))
+				add(names["c:" + cn] ?? cn, cn + ".srs", "");
+		}
+		for (let k in [ "s", "r" ]) for (let u in rf[k]) {
+			used[k + ":" + u] = true;
+			if (srs_hit(url_rs(u), host, ip, on)) add(names[k + ":" + u] ?? ref_base(u), ref_base(u), "");
+		}
+		for (let u in rf.l) {
+			used["l:" + u] = true;
+			let f = plain_cache(u, on), e = f ? plain_hit(f, host, ip) : null;
+			if (e != null) add(names["l:" + u] ?? ref_base(u), ref_base(u), e);
+		}
+	}
+	/* пункты каталога, которые ни одна секция не выбрала: только то, что уже есть на роутере */
+	for (let it in items) {
+		let hit = null;
+		for (let t in it.targets) {
+			if (used[t]) continue;
+			let k = substr(t, 0, 1), v = substr(t, 2);
+			if (k == "l") {
+				let f = plain_cache(v, false), e = f ? plain_hit(f, host, ip) : null;
+				if (e != null) { hit = { list: ref_base(v), entry: e }; break; }
+			} else if (k == "c") {
+				if (srs_hit({ type: "remote", tag: "zmw-" + v + "-community-ruleset", url: SRS_MAIN + "/" + v + ".srs", format: "binary" }, host, ip, false)) { hit = { list: v + ".srs", entry: "" }; break; }
+			} else if (k == "s" || k == "r") {
+				if (srs_hit(url_rs(v), host, ip, false)) { hit = { list: ref_base(v), entry: "" }; break; }
+			}
+		}
+		if (hit) push(out, { state: "off", sec: "", name: it.name, list: hit.list, entry: hit.entry, win: false });
+		if (length(out) >= 40) break;
+	}
+	return out;
+}
+
 function cmd_route(target, addr, source) {
+	WHERE_T0 = time();
 	source = trim(s(source));
 	if (source != "" && ip4n(source) == null) fail("укажите IPv4-адрес устройства, например 192.168.1.100");
 	let cfgj = null;
 	try { cfgj = json(s(fs.readfile(SB_CONF))); } catch (e) { cfgj = null; }
-	if (type(cfgj) != "object" || type(cfgj.route) != "object") { out({ action: "", outbound: "", section: "", rule: "" }); return; }
+	if (type(cfgj) != "object" || type(cfgj.route) != "object") {
+		let t = lc(s(target)), v4 = !!match(t, /^[0-9.]+$/);
+		out({ action: "", outbound: "", section: "", rule: "", where: where_scan(v4 || index(t, ":") >= 0 ? "" : t, v4 ? t : (ip4n(addr) != null && !match(s(addr), /^198\.1[89]\./) ? s(addr) : ""), "") });
+		return;
+	}
 	target = lc(s(target));
 	let isip = !!match(target, /^[0-9.]+$/) || index(target, ":") >= 0;
 	let host = isip ? "" : target, ip = isip ? target : (ip4n(addr) != null && !match(s(addr), /^198\.1[89]\./) ? s(addr) : "");
+	if (isip && match(target, /^198\.1[89]\./)) ip = "";
+	let fin = (o) => { o.where = where_scan(host, ip, o.action == "bypass" ? BYPASS : s(o.section)); out(o); };
 	let sets = {};
 	for (let rs in as_arr(cfgj.route.rule_set)) sets[s(rs.tag)] = rs;
 	let c = cursor(), p = pick(c), labels = {};
@@ -18786,7 +19110,7 @@ function cmd_route(target, addr, source) {
 		if (r.domain == "ip.podkop.fyi" || r.domain == "fakeip.podkop.fyi") continue;
 		if (!rule_hit(r, host, ip, sets, source)) continue;
 		if (r.source_ip_cidr != null && source == "") {
-			out({ action: "source_required", outbound: "", section: "", rule: "" });
+			fin({ action: "source_required", outbound: "", section: "", rule: "" });
 			return;
 		}
 		if (s(r.action) == "reject") {
@@ -18796,20 +19120,20 @@ function cmd_route(target, addr, source) {
 					let x = labels[k];
 					if (!bs && index(s(rt), x.name + "-") == 0) bs = x;
 				}
-			out({ action: "block", outbound: "", section: bs ? bs.name : "", rule: bs ? bs.label : "" });
+			fin({ action: "block", outbound: "", section: bs ? bs.name : "", rule: bs ? bs.label : "" });
 			return;
 		}
 		let ob = s(r.outbound);
-		if (ob == "direct-out") { out({ action: "bypass", outbound: ob, section: BYPASS, rule: "Исключения" }); return; }
+		if (ob == "direct-out") { fin({ action: "bypass", outbound: ob, section: BYPASS, rule: "Исключения" }); return; }
 		let x = labels[ob];
 		if (x && ob == fallback_tag(x.name) && fallback_info(x.name, px).direct) {
-			out({ action: "fallback_direct", outbound: "direct-out", section: x.name, rule: x.label });
+			fin({ action: "fallback_direct", outbound: "direct-out", section: x.name, rule: x.label });
 			return;
 		}
-		out({ action: x ? "connection" : "outbound", outbound: ob, section: x ? x.name : "", rule: x ? x.label : ob });
+		fin({ action: x ? "connection" : "outbound", outbound: ob, section: x ? x.name : "", rule: x ? x.label : ob });
 		return;
 	}
-	out({ action: "direct", outbound: "direct-out", section: "", rule: "" });
+	fin({ action: "direct", outbound: "direct-out", section: "", rule: "" });
 }
 
 /* ---------- migration from a Forkop configuration ---------- */
@@ -20953,6 +21277,27 @@ function routeCheck(o) {
 	return el;
 }
 
+/* «Куда пойдёт запрос»: в каких списках нашёлся домен или адрес — строки для карточки результата.
+ * w — [{ state, name, list, entry, win, sec }]: state x — исключения, on — действует, off — не выбран или
+ * выключен; win — именно это правило и решило, куда пойдёт запрос. Пусто — null. */
+function routeWhere(w, o) {
+	o = o || {};
+	w = (w || []).filter(function(x) { return x && x.list; });
+	if (!w.length) return null;
+	var tags = o.tags || { x: 'исключение', on: 'действует', off: 'сервис не выбран' }, max = o.max || 12;
+	var out = w.slice(0, max).map(function(x) {
+		var kids = [ E('b', {}, x.name || x.list) ];
+		if (x.sec) kids.push(' · ' + x.sec);
+		if (x.name && x.list && x.list !== x.name) kids.push(' · ' + x.list);
+		if (x.entry) { kids.push(' · '); kids.push(E('code', { 'class': 'zm-route-entry' }, x.entry)); }
+		var t = x.win ? (o.winTag || 'сработало') : (tags[x.state] || '');
+		if (t) kids.push(E('span', { 'class': 'zm-route-tag' + (x.win ? ' zm-route-tag-win' : '') }, t));
+		return E('div', { 'class': 'zm-route-where' + (x.state !== 'on' && x.state !== 'x' && !x.win ? ' zm-route-where-off' : '') }, kids);
+	});
+	if (w.length > max) out.push(E('div', { 'class': 'zm-route-where zm-route-where-off' }, 'и ещё списков: ' + (w.length - max)));
+	return out;
+}
+
 function hostsWarn(name) {
 	var href = document.body.classList.contains('zmw-body') ? '#/hosts' : L.url('admin/services/zapret-manager/hosts');
 	var el = E('div', { 'class': 'zm-refresh-banner zm-show zm-hosts-warn', 'role': 'note', 'style': 'display:none' }, [
@@ -21086,6 +21431,7 @@ return baseclass.extend({
 	linksEditor: linksEditor,
 	linkInfo: linkInfo,
 	routeCheck: routeCheck,
+	routeWhere: routeWhere,
 	rebootBanner: rebootBanner,
 	rebootRouter: rebootRouter,
 	rebootSlot: rebootSlot,
@@ -22601,6 +22947,8 @@ return view.extend({
 		var routeCard = E('div', { 'class': 'zm-card' }), routeBox = null;
 		var customCard = E('div', { 'class': 'zm-card' });
 		var customData = null, customLoading = false, customEditor = null, customDraft = null, customDirty = false;
+		var exclCard = E('div', { 'class': 'zm-card' });
+		var exclData = null, exclLoading = false, exclEditor = null, exclDraft = null, exclDirty = false;
 		var warpCard = E('div', { 'class': 'zm-card' });
 		var autoCard = E('div', { 'class': 'zm-card' });
 		var wfixCard = E('div', { 'class': 'zm-card' }), wfixBusy = false;
@@ -22629,6 +22977,7 @@ return view.extend({
 			else if (lastAction === 'remove') msg = 'Steer удалён';
 			else if (lastAction === 'stop') msg = 'Steer выключен — всё идёт напрямую';
 			else if (lastAction === 'domlist') msg = 'Готово, новый список доменов работает';
+			else if (lastAction === 'excl') msg = 'Готово, исключения работают';
 			else if (lastAction === 'lists' || lastAction === 'start') msg = 'Готово, выбор применён';
 			else if (/^sub_/.test(lastAction)) msg = 'Готово';
 			else if (lastAction === 'devs_set') msg = 'Готово, выбор устройств применён';
@@ -23186,6 +23535,80 @@ return view.extend({
 			customCard.appendChild(E('p', { 'class': 'zm-hint' }, 'По одному на строку: домен (поддомены включаются сами — example.com это и www.example.com), IP-адрес (1.2.3.4) или подсеть (91.108.4.0/22). Остальное при сохранении отбрасывается.'));
 			customCard.appendChild(cbar);
 		}
+
+		/* Исключения: домены и IP, которые всегда идут напрямую — выше любого сервиса и у устройств «весь трафик». */
+		function loadExcl() {
+			exclLoading = true;
+			renderExcl();
+			zm.steerAction('list_get', 'exclude').then(function(res) {
+				exclLoading = false;
+				if (res.error) { exclData = null; renderExcl(); zm.toast(res.error, 'error'); return; }
+				exclData = res;
+				exclDraft = null;
+				exclDirty = false;
+				renderExcl();
+			}).catch(function() { exclLoading = false; renderExcl(); });
+		}
+
+		function saveExcl(action, arg, okText) {
+			if (busy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
+			zm.steerAction(action, arg).then(function(res) {
+				if (res.error) { zm.toast(res.error, 'error'); return; }
+				exclDraft = null;
+				exclDirty = false;
+				if (res.saved) {
+					zm.toast(okText + (res.count ? ' (' + res.count + ')' : ''), 'info');
+					loadExcl();
+					refresh();
+					return;
+				}
+				zm.toast(okText + ' — применяем правила', 'info');
+				lastAction = 'excl';
+				data.running = true;
+				data.phase = 'rules';
+				follow();
+				loadExcl();
+			}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
+		}
+
+		function renderExcl() {
+			if (exclEditor && exclDirty) exclDraft = exclEditor.value;
+			if (exclEditor && !exclDirty) exclDraft = null;
+			exclCard.innerHTML = '';
+			exclCard.style.display = data.blocker ? 'none' : '';
+			if (data.blocker) return;
+			exclCard.appendChild(E('h3', {}, 'Исключения'));
+			exclCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Эти домены и IP всегда идут напрямую, мимо WARP и VPN — даже если входят в выбранный сервис.'));
+			if (exclLoading && !exclData) { exclCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Загружаем список…')); return; }
+			var nd = exclData ? (parseInt(exclData.domains, 10) || 0) : 0, np = exclData ? (parseInt(exclData.subnets, 10) || 0) : 0;
+			exclCard.appendChild(row('Состояние', !(nd + np) ? badge('zm-off', 'исключений нет')
+				: !data.installed ? badge('zm-warn', 'заработают после установки Steer')
+				: data.stopped ? badge('zm-off', 'Steer выключен')
+				: badge('zm-ok', 'действуют — эти адреса идут напрямую')));
+			if (nd + np) exclCard.appendChild(row('В списке', E('span', {}, 'доменов: ' + nd + ' · IP и подсетей: ' + np)));
+			exclEditor = E('textarea', {
+				'class': 'zm-config-editor', 'spellcheck': 'false', 'style': 'min-height:160px', 'placeholder': 'music.youtube.com\nbank.example.ru\n203.0.113.0/24'
+			});
+			exclEditor.value = (exclData && exclData.content) || '';
+			exclCard.appendChild(exclEditor);
+			var ebar = zm.editorBar(exclEditor, {
+				saveLabel: data.installed && !data.stopped ? 'Сохранить и применить' : 'Сохранить',
+				onSave: function(v) {
+					if (!v.trim()) { zm.toast('Добавьте хотя бы один домен или IP, либо нажмите «Очистить»', 'warning'); return false; }
+					saveExcl('list_set', 'exclude|' + v, 'Исключения сохранены');
+					return false;
+				}
+			});
+			exclEditor.addEventListener('input', function() { exclDirty = ebar.dirty(); exclDraft = exclEditor.value; });
+			if (exclDirty && exclDraft !== null) { exclEditor.value = exclDraft; exclEditor.dispatchEvent(new Event('input')); }
+			if (nd + np) exclCard.appendChild(E('div', { 'class': 'zm-actions' }, [ E('button', { 'class': 'cbi-button cbi-button-remove', 'click': function() {
+				if (!confirm('Очистить исключения?\n\nЭти адреса снова пойдут так, как велят сервисы.')) return;
+				saveExcl('list_reset', 'exclude', 'Исключения очищены');
+			} }, 'Очистить') ]));
+			exclCard.appendChild(E('p', { 'class': 'zm-hint' }, 'По одному на строку: домен (поддомены включаются сами), IP-адрес или подсеть. Сайты исключайте доменом: подсеть не остановит сайт, который Steer ловит по имени — устройство тогда ходит на подменный адрес, а не на настоящий.'));
+			exclCard.appendChild(ebar);
+		}
+
 
 		function runDiag(quiet) {
 			if (diagBusy) return;
@@ -23954,9 +24377,18 @@ return view.extend({
 		function routeVerdict(r) {
 			var tl = data.tunnels || [];
 			var lines = [];
-			if (r.addr) lines.push([ 'Адрес', r.fake ? [ r.addr, ' (подменный — домен есть в списках Steer)' ] : [ r.addr, ' (настоящий — домена нет в списках Steer)' ] ]);
-			if (r.channel && !/^zm_(warp|vpn)_/.test(r.channel)) lines.push([ 'Правило', r.channel ]);
-			if (r.verdict === 'off') return { tone: 'off', cls: 'zm-off', label: 'Steer выключен', title: 'запрос пойдёт напрямую', note: 'Запустите Steer, чтобы сервисы шли через WARP или VPN.' };
+			if (r.addr) lines.push([ 'Адрес', r.fake ? [ r.addr, ' (подменный — домен есть в списках Steer)' ] : r.verdict === 'exclude' ? [ r.addr, ' (настоящий — домен в исключениях)' ] : [ r.addr, ' (настоящий — домена нет в списках Steer)' ] ]);
+			/* В каких списках нашёлся адрес. Сработало первое: исключения стоят выше сервисов, сервисы — в порядке правил. */
+			var wh = (r.where || []).map(function(x) { var y = {}; for (var k in x) y[k] = x[k]; return y; });
+			var winState = r.verdict === 'exclude' ? 'x' : (r.verdict === 'warp' || r.verdict === 'vpn' || r.verdict === 'other') ? 'on' : '';
+			for (var wi = 0; winState && wi < wh.length; wi++) if (wh[wi].state === winState) { wh[wi].win = true; break; }
+			var whl = zm.routeWhere(wh);
+			if (whl) lines.push([ 'Списки', whl ]);
+			else if (r.channel && !/^zm_/.test(r.channel)) lines.push([ 'Правило', r.channel ]);
+			var offSvc = wh.filter(function(x) { return x.state === 'off'; }).map(function(x) { return x.name; }).filter(function(n, i, a) { return n && a.indexOf(n) === i; });
+			var onSvc = wh.filter(function(x) { return x.state === 'on'; }).length > 0;
+			if (r.verdict === 'off') return { tone: 'off', cls: 'zm-off', label: 'Steer выключен', title: 'запрос пойдёт напрямую', lines: lines, note: 'Запустите Steer, чтобы сервисы шли через WARP или VPN.' };
+			if (r.verdict === 'exclude') return { tone: 'warn', cls: 'zm-warn', label: 'напрямую · исключение', title: 'адрес в «Исключениях» Steer — идёт мимо WARP и VPN', lines: lines };
 			if (r.verdict === 'vpn') {
 				lines.push([ 'Выход', 'VPN' + (data.sub_label ? ' · ' + data.sub_label : '') ]);
 				lines.push([ 'Сервер', r.node ? r.node : 'выбирается автоматически (первый рабочий)' ]);
@@ -23973,8 +24405,10 @@ return view.extend({
 				lines.push([ 'Выход', r.out + (r.dev ? ' · ' + r.dev : '') ]);
 				return { tone: 'ok', cls: 'zm-ok', label: 'через ' + (r.out || 'туннель'), title: 'идёт через выход из своих настроек', lines: lines, raw: r.text };
 			}
-			if (r.verdict === 'direct') return { tone: 'warn', cls: 'zm-warn', label: 'напрямую', title: 'Steer этот адрес не трогает', lines: lines,
-				note: 'Если сайт должен идти через ' + (data.exit === 'vpn' ? 'VPN' : warpName()) + ' — включите его сервис в списке или добавьте домен в «Свой список».', raw: r.text };
+			if (r.verdict === 'direct') return { tone: 'warn', cls: 'zm-warn', label: 'напрямую', title: onSvc ? 'адрес есть в выбранном сервисе, но ядро его сейчас не ведёт' : 'Steer этот адрес не трогает', lines: lines,
+				note: onSvc ? 'Устройство могло запомнить настоящий адрес сайта: очистите DNS-кэш или подождите пару минут. Если не поможет — нажмите «Применить».'
+					: offSvc.length ? 'Адрес есть в списке ' + (offSvc.length > 1 ? 'сервисов ' : 'сервиса ') + offSvc.map(function(n) { return '«' + n + '»'; }).join(', ') + ' — включите его, чтобы сайт шёл через ' + (data.exit === 'vpn' ? 'VPN' : warpName()) + '.'
+					: 'Если сайт должен идти через ' + (data.exit === 'vpn' ? 'VPN' : warpName()) + ' — включите его сервис в списке или добавьте домен в «Свой список».', raw: r.text };
 			return { tone: 'bad', cls: 'zm-bad', label: 'не удалось определить', title: 'смотрите ответ роутера', lines: lines, raw: r.text };
 		}
 
@@ -24019,6 +24453,7 @@ return view.extend({
 			renderDns();
 			renderLists();
 			renderCustom();
+			renderExcl();
 			renderCheck();
 			renderRoute();
 			renderWarp();
@@ -24029,12 +24464,12 @@ return view.extend({
 
 		renderAll();
 		if (tab === 'dev' && !data.blocker && data.installed) loadDevs();
-		[ listCard, customCard, checkCard, routeCard ].forEach(function(n) { panes.svc.appendChild(n); });
+		[ listCard, customCard, exclCard, checkCard, routeCard ].forEach(function(n) { panes.svc.appendChild(n); });
 		[ warpCard, wfixCard, autoCard ].forEach(function(n) { panes.warp.appendChild(n); });
 		panes.dev.appendChild(devCard);
 		panes.sub.appendChild(subCard);
 		[ zm.rebootSlot(), mainCard, hostsWarn, logEl, dnsCard, tabBar, panes.svc, panes.dev, panes.warp, panes.sub ].forEach(function(n) { wrap.appendChild(n); });
-		if (!data.blocker) { loadCustom(); loadSub(); }
+		if (!data.blocker) { loadCustom(); loadExcl(); loadSub(); }
 
 		if (data.running) { lastAction = data.phase === 'remove' ? 'remove' : [ 'install', 'pkgs', 'awg', 'keys', 'tunnel' ].indexOf(data.phase) >= 0 ? 'install' : 'apply'; follow(); }
 		else if (data.installed && !data.stopped && (parseInt(data.channels, 10) || 0) > 0) runDiag(true);
@@ -27517,6 +27952,12 @@ html.zm-theme-dark .zm-dock .zm-refresh-banner { background: #2f2a1c; color: #e3
 .zm-route-k { flex-shrink: 0; width: 120px; opacity: .65; }
 .zm-route-v { min-width: 0; overflow-wrap: anywhere; }
 .zm-route-note { margin: 8px 0 0; }
+.zm-route-where { line-height: 1.5; overflow-wrap: anywhere; }
+.zm-route-where + .zm-route-where { margin-top: 2px; }
+.zm-route-where-off { opacity: .6; }
+.zm-route-entry { font-size: 12px; padding: 0 4px; border-radius: 4px; background: rgba(127,127,127,.14); }
+.zm-route-tag { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 11px; line-height: 1.6; border: 1px solid rgba(127,127,127,.35); opacity: .85; }
+.zm-route-tag-win { border-color: #2ea043; color: #2ea043; opacity: 1; }
 .zm-fold { margin-top: 14px; border-top: 1px solid rgba(0,0,0,.08); padding-top: 10px; }
 html.zm-theme-dark .zm-fold { border-top-color: rgba(255,255,255,.1); }
 .zm-fold-head { display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; font-size: 13px; user-select: none; flex-wrap: wrap; }
@@ -30644,7 +31085,12 @@ return view.extend({
 			var lines = [], via = rs ? (rs.mode === 'iface' ? 'интерфейс ' + (rs.iface || '') : 'VPN') : 'VPN';
 			if (r.action === 'source_required') return { tone: 'warn', cls: 'zm-warn', label: 'нужен IP устройства', title: 'маршрут зависит от устройства', note: 'Укажите IP устройства над полем сайта и повторите проверку.' };
 			if (r.source) lines.push([ 'Устройство', r.source ]);
+			/* в каких списках нашёлся адрес: сработавшее отмечено, рядом — другие секции и невыбранные сервисы */
+			var wh = (r.where || []).map(function(x) { var y = {}; for (var k in x) y[k] = x[k]; if (sl.length < 2 && y.state === 'on') y.sec = ''; return y; });
+			var whl = zm.routeWhere(wh, { tags: { x: 'исключение', on: 'действует', dis: 'секция выключена', off: 'сервис не выбран' } });
+			var offSvc = wh.filter(function(x) { return x.state === 'off'; }).map(function(x) { return x.name; }).filter(function(n, i, a) { return n && a.indexOf(n) === i; });
 			if (r.verdict === 'bypass') {
+				if (whl) lines.push([ 'Списки', whl ]);
 				return { tone: 'warn', cls: 'zm-warn', label: 'напрямую · исключение', title: 'адрес в исключениях — идёт мимо VPN', lines: lines,
 					note: 'Проверьте вкладки «Исключения» и «Устройства → Мимо Forkozz». Чтобы запрос снова шёл через VPN, уберите соответствующее исключение и сохраните.' };
 			}
@@ -30653,6 +31099,7 @@ return view.extend({
 			if (r.how === 'subnet') lines.push([ 'Совпадение', 'адрес входит в подсети Forkozz' ]);
 			if (sl.length > 1 && rs) lines.push([ 'Секция', rs.label ]);
 			else if (r.rule) lines.push([ 'Правило', r.rule ]);
+			if (whl) lines.push([ 'Списки', whl ]);
 			if (r.action === 'fallback_direct') return { tone: 'warn', cls: 'zm-warn', label: 'напрямую · VPN недоступны', title: 'сработал резервный прямой выход секции', lines: lines,
 				note: 'Forkozz продолжает проверять VPN раз в 2 минуты и вернёт секцию через рабочий сервер после восстановления.' };
 			if (r.verdict === 'proxy') {
@@ -30672,7 +31119,8 @@ return view.extend({
 			if (r.verdict === 'direct') {
 				if (r.outbound && r.outbound !== 'direct' && r.outbound !== 'direct-out') lines.push([ 'По настройкам', r.outbound ]);
 				return { tone: 'warn', cls: 'zm-warn', label: 'напрямую', title: 'Forkozz этот адрес не трогает', lines: lines,
-					note: r.ip ? 'Чтобы IP шёл через VPN, добавьте его подсеть на вкладке «Сервисы».' : 'Чтобы сайт шёл через VPN, включите его сервис или добавьте домен на вкладке «Сервисы». Если домен уже в списке — устройство могло запомнить старый адрес: очистите DNS-кэш или подождите пару минут.' };
+					note: offSvc.length ? 'Адрес есть в списке ' + (offSvc.length > 1 ? 'сервисов ' : 'сервиса ') + offSvc.map(function(n) { return '«' + n + '»'; }).join(', ') + ' — выберите его в секции на вкладке «Сервисы», чтобы он шёл через VPN.'
+						: r.ip ? 'Чтобы IP шёл через VPN, добавьте его подсеть на вкладке «Сервисы».' : 'Чтобы сайт шёл через VPN, включите его сервис или добавьте домен на вкладке «Сервисы». Если домен уже в списке — устройство могло запомнить старый адрес: очистите DNS-кэш или подождите пару минут.' };
 			}
 			return { tone: 'bad', cls: 'zm-bad', label: 'не удалось определить', title: 'роутер не смог узнать адрес домена', lines: lines, note: 'Проверьте, что DNS роутера работает (кнопка «Проверить» выше).' };
 		}
