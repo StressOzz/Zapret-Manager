@@ -1,10 +1,10 @@
 #!/bin/sh
-# Version: 2.69
+# Version: 2.70
 set -e
 
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
-ZM_NEW_VER="2.69"
+ZM_NEW_VER="2.70"
 _zmi_say() { echo -e "${CYAN}==>${NC} $*"; }
 _zmi_ok() { echo -e "   ${GREEN}✓${NC} $*"; }
 _zmi_step() { echo -e "   → $*"; }
@@ -129,7 +129,7 @@ if [ "$1" = zm_watch ]; then
 fi
 
 CONF="/etc/config/zapret"
-ZM_VERSION="2.69"
+ZM_VERSION="2.70"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
@@ -8322,10 +8322,10 @@ doh_set() {
 RB_SHARE="/usr/share/zm-redbtn"
 ZM_LISTS_DIR="/opt/zapret-manager-luci/lists"
 ZM_LISTS_ITD="${GH_RAW}/itdoginfo/allow-domains/main"
-# Meta, Instagram, Facebook и WhatsApp — списки v2fly (и itdoginfo); те же ссылки берёт Forkozz (PKG_LISTS в netshift.uc).
-# Instagram — только свой список и адреса Meta, без которых он не работает (встроенный instagram_extra.lst);
-# Facebook — свой список и Messenger. Подсети всей Meta (meta.lst) — только у Meta и WhatsApp:
-# по ним в туннель шёл бы весь трафик Meta, и Instagram включал бы заодно Facebook и WhatsApp.
+# Meta, Instagram, Facebook и WhatsApp — списки v2fly (и встроенные дополнения из itdoginfo); те же ссылки берёт Forkozz
+# (PKG_LISTS в netshift.uc). Пункты не пересекаются: каждый включает только свой сервис. Подсети Meta (AS32934) не берём —
+# по IP не отличить Instagram от Facebook и WhatsApp, они включили бы всё сразу. svc_meta.lst, svc_facebook_dev.lst и
+# meta.lst остались только для старых настроек.
 ZM_LISTS_V2F="${GH_RAW}/v2fly/domain-list-community/master/data"
 
 _rb_list_src() {
@@ -8339,6 +8339,7 @@ _rb_list_src() {
 		svc_facebook.lst) echo "$ZM_LISTS_V2F/facebook" ;;
 		svc_messenger.lst) echo "$ZM_LISTS_V2F/messenger" ;;
 		svc_whatsapp.lst) echo "$ZM_LISTS_V2F/whatsapp" ;;
+		svc_whatsapp_extra.lst) echo "$RB_SHARE/svc/whatsapp_extra.lst" ;;
 		svc_v2meta.lst) echo "$ZM_LISTS_V2F/meta" ;;
 		svc_threads.lst) echo "$ZM_LISTS_V2F/threads" ;;
 		svc_oculus.lst) echo "$ZM_LISTS_V2F/oculus" ;;
@@ -9276,25 +9277,22 @@ _st_sel_remap() {
 		rm -f "$f.$$.tmp"
 	done
 }
-# Meta включает Instagram, Facebook и WhatsApp: выбранная Meta (и Meta из каталога) — это все четыре пункта.
+# Старая «Meta» из каталога itdoginfo (c_itdoginfo_meta) — это была вся Meta: превращаем её в четыре отдельных пункта.
+# Обычная Meta больше ничего за собой не тянет — Instagram, Facebook и WhatsApp выбираются сами по себе.
 _st_sel_meta() {
-	local f id
+	local f
 	for f in "$ST_SEL" "$ST_SKIP"; do
-		grep -qxE 'meta|c_itdoginfo_meta' "$f" 2>/dev/null || continue
+		grep -qx 'c_itdoginfo_meta' "$f" 2>/dev/null || continue
 		awk -v kids="$([ "$f" = "$ST_SEL" ] && echo 1)" 'function put(k) { if (k != "" && !(k in s)) { s[k] = 1; print k } }
-			{ if ($0 == "meta" || $0 == "c_itdoginfo_meta") { put("meta"); if (kids) { put("instagram"); put("facebook"); put("whatsapp") } } else put($0) }' "$f" > "$f.$$.tmp" &&
+			{ if ($0 == "c_itdoginfo_meta") { put("meta"); if (kids) { put("instagram"); put("facebook"); put("whatsapp") } } else put($0) }' "$f" > "$f.$$.tmp" &&
 			{ if cmp -s "$f.$$.tmp" "$f"; then rm -f "$f.$$.tmp"; else mv -f "$f.$$.tmp" "$f"; fi; }
 		rm -f "$f.$$.tmp"
 	done
-	if [ -s "$ST_SKIP" ] && [ -s "$ST_SEL" ]; then
-		for id in meta instagram facebook whatsapp; do _rb_in "$id" "$ST_SEL" && _rb_in "$id" "$ST_SKIP" && sed -i "/^$id\$/d" "$ST_SKIP"; done
-		[ -s "$ST_SKIP" ] || rm -f "$ST_SKIP"
-	fi
 	return 0
 }
 _st_migrate
-_st_sel_remap
 _st_sel_meta
+_st_sel_remap
 mkdir -p "$ST_RUN" 2>/dev/null
 
 _st_splify2_pkg() { grep -qx 'P:luci-app-splify2' /lib/apk/db/installed 2>/dev/null || [ -f /usr/lib/opkg/info/luci-app-splify2.control ]; }
@@ -10826,8 +10824,6 @@ _st_model() {
 	fi
 	_st_dev_model
 	for id; do
-		# Meta уже содержит списки Instagram, Facebook и WhatsApp — отдельно их не добавляем
-		case "$id" in instagram|facebook|whatsapp) case " $* " in *" meta "*) continue ;; esac ;; esac
 		_st_svc_lists "$id"
 	done
 }
@@ -16445,7 +16441,7 @@ const ITD_SUBNETS = { cloudflare: true, cloudfront: true, digitalocean: true, di
 	meta: true, ovh: true, roblox: true, telegram: true, twitter: true };
 const CAT_SKIP = { mydyson: true, itdoginfo_meta: true };
 /* Списки пакета без набора в каталоге — те же ссылки, что качает Steer (_rb_list_src): Meta, Instagram, Facebook, WhatsApp.
- * instagram_extra — встроенный файл панели (адреса Meta, нужные Instagram без Facebook): идёт в local_domain_lists. */
+ * *_extra — встроенные файлы панели: идут в local_domain_lists. svc_meta, svc_facebook_dev и meta.lst — только чтобы узнать старые настройки. */
 const PKG_LOCAL_DIR = "/usr/share/zm-redbtn/svc/";
 const V2F_RAW = "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data";
 const PKG_LISTS = {
@@ -16459,7 +16455,15 @@ const PKG_LISTS = {
 	"svc_facebook.lst": V2F_RAW + "/facebook",
 	"svc_messenger.lst": V2F_RAW + "/messenger",
 	"svc_whatsapp.lst": V2F_RAW + "/whatsapp",
+	"svc_whatsapp_extra.lst": PKG_LOCAL_DIR + "whatsapp_extra.lst",
 	"meta.lst": ITD_RAW + "/Subnets/IPv4/meta.lst"
+};
+/* Пункты Meta-семьи — отдельные, без общих списков */
+const META_FAM = {
+	meta: [ "svc_v2meta.lst", "svc_threads.lst", "svc_oculus.lst" ],
+	instagram: [ "svc_instagram.lst", "svc_instagram_extra.lst" ],
+	facebook: [ "svc_facebook.lst", "svc_messenger.lst" ],
+	whatsapp: [ "svc_whatsapp.lst", "svc_whatsapp_extra.lst" ]
 };
 const SCHEMES = /^(vless|vmess|trojan|ss|socks4|socks4a|socks5|hysteria2|hy2):\/\/[^ \t\r\n]+$/i;
 const BYPASS = "zm_bypass";
@@ -17121,13 +17125,14 @@ function cmd_device_setup() {
 		}
 		migrated = true;
 	}
-	/* Пункт Meta теперь из списков пакета (с Instagram, Facebook и WhatsApp): секции со старым списком meta получают их все. */
+	/* Старый список meta (вся Meta) — это четыре пункта: Meta, Instagram, Facebook и WhatsApp. */
 	let split_meta = false;
 	for (let x in sections(c, "section")) {
 		let cl = uniq(words(x.community_lists));
 		if (index(cl, "meta") < 0) continue;
 		/* только дописываем: остальные списки секции и их порядок не трогаем */
-		let n = x[".name"], all = map(keys(PKG_LISTS), (k) => PKG_LISTS[k]), zr = rawlist(x.zm_refs);
+		let n = x[".name"], all = [], zr = rawlist(x.zm_refs);
+		for (let id in [ "meta", "instagram", "facebook", "whatsapp" ]) for (let k in META_FAM[id]) push(all, PKG_LISTS[k]);
 		let urls = filter(all, (u) => !pkg_local(u)), locs = filter(all, (u) => pkg_local(u));
 		set_list(c, n, "community_lists", filter(cl, (v) => v != "meta"));
 		if (length(zr)) set_list(c, n, "zm_refs", uniq([ ...zr, ...map(all, (u) => "l:" + u) ]));
@@ -17136,20 +17141,25 @@ function cmd_device_setup() {
 		set_list(c, n, "local_domain_lists", uniq([ ...words(x.local_domain_lists), ...locs ]));
 		split_meta = true;
 	}
-	/* Instagram раньше включал списки Facebook и подсети всей Meta, Facebook — подсети всей Meta. Один раз
-	 * переводим секции на новый состав: Instagram — свой список и встроенный instagram_extra, Facebook — без
-	 * подсетей Meta; подсети Meta остаются только там, где выбраны Meta или WhatsApp. */
+	/* Meta, Instagram, Facebook и WhatsApp стали отдельными пунктами без общих списков. Один раз переводим секции:
+	 * по старым спискам узнаём, какие пункты были выбраны (старая Meta — это все четыре), убираем все прежние списки
+	 * Meta-семьи (и подсети Meta) и ставим новые списки этих пунктов. Остальные списки секции не трогаем. */
 	let split_ig = false;
-	if (s(c.get(CFG, "settings", "zm_meta_v3")) != "1") {
-		let P = (k) => PKG_LISTS[k];
+	if (s(c.get(CFG, "settings", "zm_meta_v4")) != "1") {
+		let P = (k) => PKG_LISTS[k], fam = map(keys(PKG_LISTS), (k) => PKG_LISTS[k]);
 		for (let x in sections(c, "section")) {
-			let rf = sec_refs(x), l = rf.l, has = (k) => index(rf.l, P(k)) >= 0;
-			if (!has("svc_instagram.lst") && !has("svc_facebook.lst") && !has("meta.lst")) continue;
-			let meta = has("svc_v2meta.lst") || has("svc_meta.lst"), drop = [];
-			if (has("svc_instagram.lst") && !has("svc_instagram_extra.lst")) l = [ ...l, P("svc_instagram_extra.lst") ];
-			if (!meta && has("svc_instagram.lst") && has("svc_facebook.lst") && !has("svc_messenger.lst")) push(drop, P("svc_facebook.lst"));
-			if (!meta && has("meta.lst") && !has("svc_whatsapp.lst")) push(drop, P("meta.lst"));
-			l = filter(uniq(l), (u) => index(drop, u) < 0);
+			let rf = sec_refs(x), has = (k) => index(rf.l, P(k)) >= 0;
+			if (!length(filter(rf.l, (u) => index(fam, u) >= 0))) continue;
+			let all = has("svc_meta.lst") || (has("svc_v2meta.lst") && has("svc_instagram.lst") && has("svc_whatsapp.lst"));
+			let pick = {
+				meta: all || has("svc_v2meta.lst") || has("svc_threads.lst") || has("svc_oculus.lst"),
+				instagram: all || has("svc_instagram.lst"),
+				facebook: all || (has("svc_facebook.lst") && has("svc_messenger.lst")),
+				whatsapp: all || has("svc_whatsapp.lst")
+			};
+			let l = filter(rf.l, (u) => index(fam, u) < 0);
+			for (let id in [ "meta", "instagram", "facebook", "whatsapp" ]) if (pick[id]) for (let k in META_FAM[id]) push(l, P(k));
+			l = uniq(l);
 			if (join("\n", l) == join("\n", rf.l)) continue;
 			/* пишем только списки, остальное в секции не трогаем (как set_lists) */
 			let n = x[".name"], zr = rawlist(x.zm_refs), rl = filter(l, (u) => !pkg_local(u)), ll = filter(l, (u) => pkg_local(u));
@@ -17158,10 +17168,10 @@ function cmd_device_setup() {
 			set_list(c, n, "remote_subnet_lists", uniq([ ...rf.r, ...rl ]));
 			c.delete(CFG, n, "local_subnet_lists");
 			set_list(c, n, "local_domain_lists", uniq(ll));
-			split_ig = true;
 		}
 		if (!c.get(CFG, "settings")) c.set(CFG, "settings", "settings");
-		c.set(CFG, "settings", "zm_meta_v3", "1");
+		c.delete(CFG, "settings", "zm_meta_v3");
+		c.set(CFG, "settings", "zm_meta_v4", "1");
 		split_ig = true;
 	}
 	if (!v2 || split_meta || split_ig) {
@@ -20212,7 +20222,7 @@ function notifyStrategyResult(res, okLabel) {
 
 var SVC_BRANDS = [
 	[ /youtube/i, '#ff0033', 'YT' ], [ /discord/i, '#5865f2', 'DC' ], [ /telegram/i, '#229ed9', 'TG' ],
-	[ /^meta$/i, '#0866ff', 'M' ], [ /whatsapp/i, '#25d366', 'WA' ], [ /instagram|\bmeta\b/i, '#e1306c', 'IG' ], [ /facebook/i, '#1877f2', 'FB' ], [ /twitter|^x\b/i, '#16181c', 'X' ],
+	[ /^meta\b/i, '#0866ff', 'M' ], [ /whatsapp/i, '#25d366', 'WA' ], [ /instagram/i, '#e1306c', 'IG' ], [ /facebook/i, '#1877f2', 'FB' ], [ /twitter|^x\b/i, '#16181c', 'X' ],
 	[ /tiktok/i, '#fe2c55', 'TT' ], [ /google play/i, '#01875f', 'GP' ], [ /gemini|google ai/i, '#4285f4', 'AI' ],
 	[ /chatgpt|openai|claude|\bai\b|(^|[^а-яё])ии([^а-яё]|$)/i, '#10a37f', 'AI' ], [ /githubusercontent|github raw/i, '#57606a', 'GR' ], [ /github/i, '#24292f', 'GH' ],
 	[ /google/i, '#4285f4', 'G' ], [ /roblox/i, '#e2231a', 'RB' ], [ /supercell|brawl|clash/i, '#f59e0b', 'SC' ],
@@ -20244,18 +20254,10 @@ function svcTx(v) {
 	return (typeof v === 'string' || typeof v === 'number') ? [ String(v) ] : v;
 }
 
-/* Meta включает Instagram, Facebook и WhatsApp: Meta включает и выключает их вместе с собой,
- * а снятый с Meta отдельный пункт снимает и саму Meta. */
-var META_KIDS = [ 'instagram', 'facebook', 'whatsapp' ];
+/* Каждый пункт включается и выключается сам по себе: Meta, Instagram, Facebook и WhatsApp не тянут друг друга. */
 function svcPickToggle(p, id) {
-	if (p[id]) {
-		delete p[id];
-		if (id === 'meta') META_KIDS.forEach(function(k) { delete p[k]; });
-		else if (META_KIDS.indexOf(id) >= 0) delete p.meta;
-	} else {
-		p[id] = true;
-		if (id === 'meta') META_KIDS.forEach(function(k) { p[k] = true; });
-	}
+	if (p[id]) delete p[id];
+	else p[id] = true;
 	return p;
 }
 
@@ -24046,10 +24048,10 @@ mkdir -p /usr/share/zm-redbtn
 cat > '/usr/share/zm-redbtn/services.conf' << 'ZM_INSTALLER_EOF'
 youtube|YouTube|svc_youtube.lst||www.youtube.com,youtubei.googleapis.com,manifest.googlevideo.com|youtu.be,i.ytimg.com,i9.ytimg.com,yt3.ggpht.com,yt4.ggpht.com,jnn-pa.googleapis.com,signaler-pa.youtube.com,yt3.googleusercontent.com,rr4---sn-4g5e6nze.googlevideo.com,rr4---sn-5go7yner.googlevideo.com,rr5---sn-n8v7knez.googlevideo.com,rr2---sn-q4fl6ndl.googlevideo.com,rr1---sn-q4fl6n6y.googlevideo.com,rr14---sn-n8v7kn7r.googlevideo.com,rr4---sn-jvhnu5g-c35d.googlevideo.com,rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com,rr12---sn-gvnuxaxjvh-bvwz.googlevideo.com,rr1---sn-ug5onuxaxjvh-n8v6.googlevideo.com||youtube
 discord|Discord|svc_discord.lst|discord.lst|discord.com,gateway.discord.gg,updates.discord.com|cdn.discordapp.com,media.discordapp.net||discord
-meta|Meta|svc_meta.lst,svc_v2meta.lst,svc_instagram.lst,svc_instagram_extra.lst,svc_facebook.lst,svc_messenger.lst,svc_whatsapp.lst,svc_threads.lst,svc_oculus.lst,svc_facebook_dev.lst|meta.lst|www.instagram.com,www.facebook.com,web.whatsapp.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com,static.xx.fbcdn.net,static.whatsapp.net,mmg.whatsapp.net||
+meta|Meta (Threads, Quest, AI)|svc_v2meta.lst,svc_threads.lst,svc_oculus.lst||www.meta.com,www.threads.com|meta.ai,www.oculus.com||
 instagram|Instagram|svc_instagram.lst,svc_instagram_extra.lst||www.instagram.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com||
-facebook|Facebook|svc_facebook.lst,svc_messenger.lst||www.facebook.com|static.xx.fbcdn.net||
-whatsapp|WhatsApp|svc_whatsapp.lst|meta.lst|web.whatsapp.com|static.whatsapp.net,mmg.whatsapp.net||
+facebook|Facebook|svc_facebook.lst,svc_messenger.lst||www.facebook.com|m.facebook.com,www.messenger.com||
+whatsapp|WhatsApp|svc_whatsapp.lst,svc_whatsapp_extra.lst||web.whatsapp.com|static.whatsapp.net,mmg.whatsapp.net||
 x|X (Twitter)|svc_twitter.lst|twitter_x.lst|x.com|twitter.com,abs.twimg.com,video.twimg.com||twitter
 github|GitHub|own_github.lst||github.com,raw.githubusercontent.com,objects.githubusercontent.com|codeload.github.com,api.github.com,ghcr.io||
 telegram|Telegram|svc_telegram.lst|telegram.lst|web.telegram.org|t.me,core.telegram.org,telegra.ph||telegram
@@ -24076,23 +24078,26 @@ ukraine_inside|Блокировки Украины||||||ukraine_inside
 custom|Свой список||||||
 ZM_INSTALLER_EOF
 chmod 0644 /usr/share/zm-redbtn/services.conf
-# Instagram без Facebook: адреса Meta, без которых у Instagram не грузятся фото и видео (fbcdn), вложения
-# и сообщения в Direct. Сам facebook.com сюда не входит — его включает пункт Facebook (или Meta).
+# Meta, Instagram, Facebook и WhatsApp — четыре отдельных пункта без общих списков (v2fly + itdoginfo):
+#   Instagram — v2fly instagram + instagram_extra (ниже); Facebook — v2fly facebook + messenger;
+#   WhatsApp — v2fly whatsapp + whatsapp_extra (то, что есть только у itdoginfo); Meta — v2fly meta (без include) + threads + oculus.
+# instagram_extra — единственное, что Instagram берёт у Facebook: фото и видео грузятся с *.fna.fbcdn.net,
+# вложения Direct — lookaside.fbsbx.com, Direct в реальном времени и E2EE-чаты — хосты ниже. Сам facebook.com сюда не входит.
 mkdir -p /usr/share/zm-redbtn/svc
 cat > '/usr/share/zm-redbtn/svc/instagram_extra.lst' << 'ZM_INSTALLER_EOF'
 fbcdn.net
-fbcdn.com
-fbsbx.com
-graph.facebook.com
-b-graph.facebook.com
+lookaside.fbsbx.com
 edge-mqtt.facebook.com
 mqtt-mini.facebook.com
-gateway.facebook.com
 z-p3-chat-e2ee-ig.facebook.com
 z-p4-chat-e2ee-ig.facebook.com
 z-p42-chat-e2ee-ig.facebook.com
 ZM_INSTALLER_EOF
-chmod 0644 /usr/share/zm-redbtn/svc/instagram_extra.lst
+cat > '/usr/share/zm-redbtn/svc/whatsapp_extra.lst' << 'ZM_INSTALLER_EOF'
+whatsapp.biz
+circlecrewpinkcrowd.com
+ZM_INSTALLER_EOF
+chmod 0644 /usr/share/zm-redbtn/svc/instagram_extra.lst /usr/share/zm-redbtn/svc/whatsapp_extra.lst
 if [ -d /usr/share/zm-redbtn/lists ]; then
 	mkdir -p /opt/zapret-manager-luci/lists
 	for f in /usr/share/zm-redbtn/lists/*.lst; do
