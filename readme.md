@@ -1,7 +1,7 @@
 <div align="center">
-  
+
 # Zapret Manager
-  
+
 **Одна панель для обхода блокировок на роутере OpenWrt — Zapret, Steer, Forkozz, ByeTube, Mixomo, TG WS Proxy, AmneziaWG, DoH, блокировка рекламы и hosts в одном месте.**
 
 [![Stars](https://img.shields.io/github/stars/StressOzz/Zapret-Manager?style=for-the-badge&color=38BDF8)](https://github.com/StressOzz/Zapret-Manager/stargazers)
@@ -678,15 +678,19 @@ Zapret Manager собирает в одном месте работу этих �
 | hev-socks5-tunnel | [heiher](https://github.com/heiher/hev-socks5-tunnel) |
 | MagiTrickle | [MagiTrickle](https://github.com/MagiTrickle/MagiTrickle) |
 | sTGWS, Steer, каталог списков | [xyzmean](https://github.com/xyzmean) |
+| steer (ядро) и релизы | [splify2](https://github.com/splify2/steer) |
 | tg-ws-proxy-go (MTProto) | [spatiumstas](https://github.com/spatiumstas/tg-ws-proxy-go) |
 | tg-ws-proxy-go (SOCKS5) | [d0mhate](https://github.com/d0mhate/-tg-ws-proxy-Manager-go) |
 | tg-ws-proxy-rs (Rust) | [valnesfjord](https://github.com/valnesfjord/tg-ws-proxy-rs) |
 | Mixomo, GeoHideDNS | [Internet-Helper](https://github.com/Internet-Helper) |
 | allow-domains | [itdoginfo](https://github.com/itdoginfo) |
+| zapret4rocket (список РКН) | [IndeecFOX](https://github.com/IndeecFOX/zapret4rocket) |
 | NetShift (основа Forkozz) | [yandexru45](https://github.com/yandexru45/netshift) |
 | sing-box | [SagerNet](https://github.com/SagerNet/sing-box) |
 | sing-box-extended | [shtorm-7](https://github.com/shtorm-7/sing-box-extended) |
 | ios_rule_script | [blackmatrix7](https://github.com/blackmatrix7/ios_rule_script) |
+| ad-filter (список рекламы для Forkozz) | [zxc-rv](https://github.com/zxc-rv/ad-filter) |
+| sing-box-supercell-ruleset | [ushan0v](https://github.com/ushan0v/sing-box-supercell-ruleset) |
 | b4geoip | [DanielLavrushin](https://github.com/DanielLavrushin/b4geoip) |
 | b4geoip-forkop | [Greeg0ry](https://github.com/Greeg0ry/b4geoip-forkop) |
 | domain-list-community | [v2fly](https://github.com/v2fly/domain-list-community) |
