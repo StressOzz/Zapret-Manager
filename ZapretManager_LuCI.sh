@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 2.92
+# Version: 2.93
 ZM_VERSION_EOF
 set -e
 
@@ -21221,20 +21221,22 @@ function jobName(j) {
 
 function stopAll() {
 	if (_stopBusy) return;
-	if (!confirm('Остановить все операции?\n\nВсе их процессы будут принудительно завершены. Если прервать установку, её можно просто запустить заново.')) return;
-	_stopBusy = true;
-	renderStopBar();
-	callJobsCancel('').then(function(res) {
-		_stopBusy = false;
-		if (res && res.error) { toast(res.error, 'error'); renderStopBar(); return; }
-		var n = (res && res.stopped || []).length;
-		toast(n ? 'Остановлено: ' + res.stopped.map(jobName).join(', ') : 'Активных операций не было', n ? 'warning' : 'info');
-		_stuck = {};
+	return ask('Остановить все операции?\n\nВсе их процессы будут принудительно завершены. Если прервать установку, её можно просто запустить заново.').then(function(ok) {
+		if (!ok) return;
+		_stopBusy = true;
 		renderStopBar();
-	}).catch(function() {
-		_stopBusy = false;
-		renderStopBar();
-		toast('Роутер не ответил — попробуйте ещё раз', 'error');
+		callJobsCancel('').then(function(res) {
+			_stopBusy = false;
+			if (res && res.error) { toast(res.error, 'error'); renderStopBar(); return; }
+			var n = (res && res.stopped || []).length;
+			toast(n ? 'Остановлено: ' + res.stopped.map(jobName).join(', ') : 'Активных операций не было', n ? 'warning' : 'info');
+			_stuck = {};
+			renderStopBar();
+		}).catch(function() {
+			_stopBusy = false;
+			renderStopBar();
+			toast('Роутер не ответил — попробуйте ещё раз', 'error');
+		});
 	});
 }
 
@@ -21576,6 +21578,16 @@ function dialog(o) {
 					});
 				} else if (b.type === 'switch') {
 					body.appendChild(swRow(!!vals[b.id], b.label, b.hint, function() { vals[b.id] = !vals[b.id]; draw(); }, b.disabled));
+				} else if (b.type === 'input') {
+					if (b.title) body.appendChild(E('div', { 'class': 'zm-dlg-title' }, b.title));
+					var inp = E('input', { 'type': 'text', 'class': 'cbi-input-text zm-dlg-input', 'spellcheck': 'false', 'autocapitalize': 'off', 'autocomplete': 'off',
+						'placeholder': b.placeholder || '', 'aria-label': b.title || b.placeholder || '' });
+					inp.value = vals[b.id] == null ? '' : String(vals[b.id]);
+					inp.addEventListener('input', function() { vals[b.id] = inp.value; if (okBtn) { if (allowed()) okBtn.removeAttribute('disabled'); else okBtn.setAttribute('disabled', ''); } });
+					inp.addEventListener('keydown', function(ev) { if (ev.key === 'Enter') { ev.preventDefault(); if (allowed()) close(vals); } });
+					body.appendChild(inp);
+					if (b.hint) body.appendChild(E('div', { 'class': 'zm-hint', 'style': 'margin:6px 0 0' }, b.hint));
+					if (!o._focus) o._focus = inp;
 				}
 			});
 			if (okBtn) { if (allowed()) okBtn.removeAttribute('disabled'); else okBtn.setAttribute('disabled', ''); }
@@ -21596,7 +21608,43 @@ function dialog(o) {
 		draw();
 		document.addEventListener('keydown', onKey);
 		document.body.appendChild(wrap);
+		/* фокус: в поле ввода, иначе на кнопку подтверждения — Enter сразу подтверждает, Esc отменяет */
+		setTimeout(function() { try { (o._focus || okBtn).focus(); if (o._focus) o._focus.select(); } catch (e) {} }, 0);
 	});
+}
+
+/* Вопрос «да/нет» в оформлении панели вместо confirm() браузера. Текст как у confirm: первая строка —
+   заголовок, остальное (после пустой строки) — пояснение. Подпись кнопки — глагол из вопроса
+   («Перезагрузить», «Очистить»), опасные действия — красной кнопкой. Ответ — Promise<boolean>. */
+var ASK_DANGER = /^(удалить|очистить|убрать|остановить|сбросить|отменить|заменить|свернуть)$/i;
+function askVerb(title) {
+	var words = String(title).replace(/[«»"()?!.,:;—–]/g, ' ').split(/\s+/), i, w, found = [];
+	for (i = 0; i < words.length; i++) {
+		w = words[i].toLowerCase();
+		if (w.length > 3 && w !== 'есть' && w !== 'быть' && /(ть|ти|ться)$/.test(w)) found.push(w);
+	}
+	/* «Отменить» рядом с кнопкой «Отмена» путает — берём следующее действие («перечитать», «перейти») */
+	if (found.length > 1 && found[0] === 'отменить') found.shift();
+	return found.length ? found[0].charAt(0).toUpperCase() + found[0].slice(1) : '';
+}
+function ask(text, o) {
+	o = o || {};
+	var t = String(text || ''), cut = t.indexOf('\n\n');
+	var title = (cut < 0 ? t : t.slice(0, cut)).trim(), rest = cut < 0 ? '' : t.slice(cut + 2).trim();
+	if (!rest && title.length > 70) {
+		var dot = title.search(/[.?!]\s/);
+		if (dot > 0 && dot < title.length - 2) { rest = title.slice(dot + 1).trim(); title = title.slice(0, dot + 1).trim(); }
+	}
+	var verb = o.okText || (/\?\s*$/.test(title) ? askVerb(title) : '') || (/\?\s*$/.test(title) ? 'Да' : 'Продолжить');
+	var danger = o.danger != null ? !!o.danger : (ASK_DANGER.test(verb) || /несохранённ|будут удалены|пропадут/i.test(t));
+	return dialog({ title: title, intro: rest, okText: verb, cancelText: o.cancelText || 'Отмена', danger: danger }).then(function(v) { return !!v; });
+}
+
+/* Строка ввода в оформлении панели вместо prompt(). Ответ — введённый текст или null (отмена). */
+function askText(o) {
+	o = o || {};
+	return dialog({ title: o.title || '', intro: o.intro || '', okText: o.okText || 'Сохранить', blocks: [ { type: 'input', id: 'v', value: o.value || '', placeholder: o.placeholder || '', hint: o.hint || '' } ] })
+		.then(function(v) { return v ? String(v.v == null ? '' : v.v) : null; });
 }
 
 function saveBar(o) {
@@ -21699,12 +21747,14 @@ function rebootWait(note) {
 }
 
 function rebootRouter() {
-	if (!confirm('Перезагрузить роутер?\n\nИнтернет пропадёт на 1–2 минуты, потом всё поднимется само.')) return Promise.resolve(false);
-	return callSystemReboot().then(function(r) {
-		if (r && r.error) { toast(r.error, 'error'); return false; }
-		rebootWait(E('span', { 'class': 'zm-hint', 'style': 'margin:0' }));
-		return true;
-	}, function() { toast('Роутер не ответил', 'error'); return false; });
+	return ask('Перезагрузить роутер?\n\nИнтернет пропадёт на 1–2 минуты, потом всё поднимется само.').then(function(ok) {
+		if (!ok) return Promise.resolve(false);
+		return callSystemReboot().then(function(r) {
+			if (r && r.error) { toast(r.error, 'error'); return false; }
+			rebootWait(E('span', { 'class': 'zm-hint', 'style': 'margin:0' }));
+			return true;
+		}, function() { toast('Роутер не ответил', 'error'); return false; });
+	});
 }
 
 function rebootBanner(text) {
@@ -21920,8 +21970,7 @@ function hidePicker(o) {
 		}, function() { saving = false; syncBar(); });
 	}
 	function reset() {
-		if (!confirm('Вернуть все ' + noun + ' в список?')) return;
-		Promise.resolve(o.onReset()).then(function(ok) { if (ok !== false) stop(); }, function() {});
+		return ask('Вернуть все ' + noun + ' в список?').then(function(ok) { if (!ok) return; Promise.resolve(o.onReset()).then(function(ok) { if (ok !== false) stop(); }, function() {}); });
 	}
 	function markGrid() {
 		Array.prototype.forEach.call(el.querySelectorAll('.zm-hide-grid > .zm-node'), function(t) {
@@ -22097,8 +22146,7 @@ function linksEditor(o) {
 			E('div', { 'class': 'zm-link-btns' }, [
 				btn('Изменить', '', function() { editing = i; render(); }),
 				btn('✕', 'cbi-button-remove', function() {
-					if (!confirm('Убрать сервер «' + (inf.name || inf.host || 'без названия') + '» из списка?')) return;
-					lines.splice(i, 1); editing = -1; emit(); render();
+					return ask('Убрать сервер «' + (inf.name || inf.host || 'без названия') + '» из списка?').then(function(ok) { if (!ok) return; lines.splice(i, 1); editing = -1; emit(); render(); });
 				}, 'Убрать из списка')
 			])
 		]);
@@ -22373,6 +22421,8 @@ return baseclass.extend({
 	riNote: riNote,
 	swRow: swRow,
 	dialog: dialog,
+	ask: ask,
+	askText: askText,
 	saveBar: saveBar,
 	exclParse: exclParse,
 	exclNorm: exclNorm,
@@ -23286,8 +23336,7 @@ return view.extend({
 					job('install', '', 'Доустанавливаем AmneziaWG');
 				} }, 'Доустановить'));
 				acts.push(E('button', { 'class': 'cbi-button', 'click': function() {
-					if (!confirm('Переустановить AmneziaWG?\n\nЕсли туннели работают, новый модуль заработает после перезагрузки роутера.')) return;
-					job('update', '', 'Переустанавливаем AmneziaWG');
+					return zm.ask('Переустановить AmneziaWG?\n\nЕсли туннели работают, новый модуль заработает после перезагрузки роутера.').then(function(ok) { if (!ok) return; job('update', '', 'Переустанавливаем AmneziaWG'); });
 				} }, 'Переустановить'));
 				acts.push(E('button', { 'class': 'cbi-button cbi-button-remove', 'click': function() {
 					var list = (data.ifaces || []).filter(function(f) { return f.owner !== 'steer'; });
@@ -23381,8 +23430,7 @@ return view.extend({
 				acts.push(E('button', { 'class': 'cbi-button', 'click': function() { open[f.name] = open[f.name] === 'ep' ? null : 'ep'; renderIfaces(); } }, 'Точка входа'));
 			}
 			if (!(steer && (data.steer_own || f.name === 'zmwarp4'))) acts.push(E('button', { 'class': 'cbi-button cbi-button-action', 'click': function() {
-				if (!confirm('Новые ключи WARP для ' + f.name + '?\n\n' + (f.warp ? 'Точка входа и маскировка сохранятся.' : 'Туннель переключится с вашего сервера на WARP.'))) return;
-				job('regen', f.name, 'Новые ключи WARP для ' + f.name);
+				return zm.ask('Новые ключи WARP для ' + f.name + '?\n\n' + (f.warp ? 'Точка входа и маскировка сохранятся.' : 'Туннель переключится с вашего сервера на WARP.'), { okText: 'Получить ключи' }).then(function(ok) { if (!ok) return; job('regen', f.name, 'Новые ключи WARP для ' + f.name); });
 			} }, 'Новый WARP'));
 			acts.push(E('button', { 'class': 'cbi-button', 'click': function() {
 				if (open[f.name] === 'conf') { open[f.name] = null; renderIfaces(); return; }
@@ -23422,12 +23470,14 @@ return view.extend({
 					onCancel: function() { ta.value = open[f.name + ':orig']; open[f.name + ':conf'] = ta.value; ta.dispatchEvent(new Event('input')); },
 					onSave: function(t) {
 						if (!/\[interface\]/i.test(t) || !/\[peer\]/i.test(t)) { zm.toast('Нужны секции [Interface] и [Peer]', 'warning'); return false; }
-						if (!confirm('Заменить конфиг ' + f.name + '?\n\nЗона firewall и маршруты останутся как есть, туннель переподключится.')) return false;
-						var k = f.name + ':orig', prev = open[k];
-						open[k] = t; open[f.name + ':conf'] = t;
-						return job('replace', f.name + '|' + t, 'Применяем конфиг ' + f.name).then(function(ok) {
-							if (ok) delete open[k]; else open[k] = prev;
-							return ok;
+						return zm.ask('Заменить конфиг ' + f.name + '?\n\nЗона firewall и маршруты останутся как есть, туннель переподключится.').then(function(ok) {
+							if (!ok) return false;
+							var k = f.name + ':orig', prev = open[k];
+							open[k] = t; open[f.name + ':conf'] = t;
+							return job('replace', f.name + '|' + t, 'Применяем конфиг ' + f.name).then(function(ok) {
+								if (ok) delete open[k]; else open[k] = prev;
+								return ok;
+							});
 						});
 					}
 				});
@@ -23469,8 +23519,9 @@ return view.extend({
 
 			function run(mode, toastText) {
 				if (busy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
-				if (data.warp_conf && !confirm('WARP.conf уже есть — заменить его новым?')) return;
-				job('gen', mode, toastText);
+				var zmGo = function() { job('gen', mode, toastText); };
+				if (data.warp_conf) return zm.ask('WARP.conf уже есть — заменить его новым?').then(function(ok) { return ok ? zmGo() : undefined; });
+				return zmGo();
 			}
 			genCard.appendChild(E('div', { 'class': 'zm-actions' }, [
 				E('button', { 'class': 'cbi-button cbi-button-positive', 'disabled': busy ? '' : null, 'click': function() {
@@ -23598,9 +23649,12 @@ return view.extend({
 					if (!/^[a-z][a-z0-9_]{0,10}$/.test(nm)) { zm.toast('Имя: латиница в нижнем регистре, цифры и _, до 11 символов', 'warning'); return; }
 					if (!/\[interface\]/i.test(mk.text) || !/\[peer\]/i.test(mk.text)) { zm.toast('Вставьте конфигурацию с секциями [Interface] и [Peer]', 'warning'); return; }
 					var exists = (data.ifaces || []).some(function(f) { return f.name === nm; });
-					if (exists && !confirm('Интерфейс ' + nm + ' уже есть — заменить его?')) return;
-					job('create', nm + '|' + (mk.route ? 1 : 0) + '|' + (mk.fw ? 1 : 0) + '|' + mk.text, 'Создаём интерфейс ' + nm);
-					mk.name = '';
+					var zmGo = function() {
+						job('create', nm + '|' + (mk.route ? 1 : 0) + '|' + (mk.fw ? 1 : 0) + '|' + mk.text, 'Создаём интерфейс ' + nm);
+						mk.name = '';
+					};
+					if (exists) return zm.ask('Интерфейс ' + nm + ' уже есть — заменить его?').then(function(ok) { return ok ? zmGo() : undefined; });
+					return zmGo();
 				} }, 'Создать интерфейс')
 			]));
 		}
@@ -24603,15 +24657,16 @@ return view.extend({
 
 		function catalogEdit() {
 			var c = data.catalog || {};
-			var u = prompt('Ссылка на свой каталог списков (lists.json в формате splify2-lists, например из форка).\n\nПусто — каталог по умолчанию.', c.custom ? c.url : '');
-			if (u === null) return;
-			u = u.trim();
-			zm.toast('Скачиваем каталог…', 'info');
-			zm.steerAction('catalog_src', u).then(function(res) {
-				if (res.error) { zm.toast(res.error, 'error'); return; }
-				zm.toast('Каталог подключён', 'info');
-				refresh();
-			}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
+			zm.askText({ title: 'Свой каталог списков', intro: 'Ссылка на lists.json в формате splify2-lists — например, из форка каталога.', placeholder: 'https://…/lists.json', hint: 'Оставьте поле пустым, чтобы вернуть каталог по умолчанию.', value: c.custom ? c.url : '', okText: 'Подключить' }).then(function(u) {
+				if (u === null) return;
+				u = u.trim();
+				zm.toast('Скачиваем каталог…', 'info');
+				zm.steerAction('catalog_src', u).then(function(res) {
+					if (res.error) { zm.toast(res.error, 'error'); return; }
+					zm.toast('Каталог подключён', 'info');
+					refresh();
+				}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
+			});
 		}
 
 		function catalogBlock() {
@@ -24819,8 +24874,7 @@ return view.extend({
 			customEditor.addEventListener('input', function() { customDirty = cbar.dirty(); customDraft = customEditor.value; });
 			if (customDirty && customDraft !== null) { customEditor.value = customDraft; customEditor.dispatchEvent(new Event('input')); }
 			if (n) customCard.appendChild(E('div', { 'class': 'zm-actions' }, [ E('button', { 'class': 'cbi-button cbi-button-remove', 'click': function() {
-				if (!confirm('Очистить свой список?\n\nДомены из него пойдут напрямую.')) return;
-				saveCustom('list_reset', 'custom', 'Свой список очищен');
+				return zm.ask('Очистить свой список?\n\nДомены из него пойдут напрямую.').then(function(ok) { if (!ok) return; saveCustom('list_reset', 'custom', 'Свой список очищен'); });
 			} }, 'Очистить') ]));
 			customCard.appendChild(E('p', { 'class': 'zm-hint' }, 'По одному на строку: домен (поддомены включаются сами — example.com это и www.example.com), IP-адрес (1.2.3.4) или подсеть (91.108.4.0/22). Остальное при сохранении отбрасывается.'));
 			customCard.appendChild(cbar);
@@ -24892,8 +24946,7 @@ return view.extend({
 			exclEditor.addEventListener('input', function() { exclDirty = ebar.dirty(); exclDraft = exclEditor.value; });
 			if (exclDirty && exclDraft !== null) { exclEditor.value = exclDraft; exclEditor.dispatchEvent(new Event('input')); }
 			if (nd + np) exclCard.appendChild(E('div', { 'class': 'zm-actions' }, [ E('button', { 'class': 'cbi-button cbi-button-remove', 'click': function() {
-				if (!confirm('Очистить исключения?\n\nЭти адреса снова пойдут так, как велят сервисы.')) return;
-				saveExcl('list_reset', 'exclude', 'Исключения очищены');
+				return zm.ask('Очистить исключения?\n\nЭти адреса снова пойдут так, как велят сервисы.').then(function(ok) { if (!ok) return; saveExcl('list_reset', 'exclude', 'Исключения очищены'); });
 			} }, 'Очистить') ]));
 			exclCard.appendChild(E('p', { 'class': 'zm-hint' }, 'По одному на строку: домен (поддомены включаются сами), IP-адрес или подсеть. Сайты исключайте доменом: подсеть не остановит сайт, который Steer ловит по имени — устройство тогда ходит на подменный адрес, а не на настоящий.'));
 			exclCard.appendChild(ebar);
@@ -25021,9 +25074,11 @@ return view.extend({
 					E('div', { 'class': 'zm-seg-item' + (sel === 'auto' ? ' zm-active' : ''), 'click': function() {
 						if (busy || sel === 'auto') return;
 						if (own) {
-							if (!confirm('Перейти на автоматический WARP?\n\nВключатся прежние автоматические туннели (если их ещё не было — роутер получит ключи у Cloudflare и подберёт три туннеля за несколько минут). Свой туннель выключится, но сохранится.')) return;
-							act('warp_mode', 'auto', 'Переходим на автоматический WARP — это займёт несколько минут');
-							return;
+							return zm.ask('Перейти на автоматический WARP?\n\nВключатся прежние автоматические туннели (если их ещё не было — роутер получит ключи у Cloudflare и подберёт три туннеля за несколько минут). Свой туннель выключится, но сохранится.').then(function(ok) {
+								if (!ok) return;
+								act('warp_mode', 'auto', 'Переходим на автоматический WARP — это займёт несколько минут');
+								return;
+							});
 						}
 						warpPick = null; renderWarp();
 					} }, 'Автоматически'),
@@ -25130,8 +25185,7 @@ return view.extend({
 					var fix = partial && tunnelBad(t) ? E('span', { 'style': 'display:inline-flex; gap:6px; margin-left:auto' }, [
 						E('button', { 'class': 'cbi-button cbi-button-action', 'disabled': busy ? '' : null, 'click': function() { act('warp_fix', String(t.n), 'Переделываем WARP ' + t.n); } }, 'Переделать'),
 						E('button', { 'class': 'cbi-button', 'disabled': busy ? '' : null, 'click': function() {
-							if (!confirm('Получить новые ключи для WARP ' + t.n + '?\n\nОстальные туннели не тронутся.')) return;
-							act('warp_fixkeys', String(t.n), 'Новые ключи для WARP ' + t.n);
+							return zm.ask('Получить новые ключи для WARP ' + t.n + '?\n\nОстальные туннели не тронутся.').then(function(ok) { if (!ok) return; act('warp_fixkeys', String(t.n), 'Новые ключи для WARP ' + t.n); });
 						} }, 'Новые ключи')
 					]) : '';
 					var st = badge(live ? 'zm-ok' : t.up ? 'zm-warn' : 'zm-bad', live ? 'работает' : t.up ? 'нет связи' : 'не поднят');
@@ -25173,8 +25227,7 @@ return view.extend({
 				E('button', { 'class': 'cbi-button', 'click': function() { act('warp_restart', '', 'Перезапускаем туннели'); } }, 'Перезапустить туннели'),
 				E('button', { 'class': 'cbi-button', 'click': function() { act('warp_endpoint', '', 'Ищем точки входа'); } }, 'Сменить точки входа'),
 				E('button', { 'class': 'cbi-button', 'click': function() {
-					if (!confirm('Пересоздать WARP?\n\nБудут получены новые ключи, туннели переподключатся. Помогает, если Cloudflare перестал пускать старые ключи.')) return;
-					act('warp_recreate', '', 'Пересоздаём WARP');
+					return zm.ask('Пересоздать WARP?\n\nБудут получены новые ключи, туннели переподключатся. Помогает, если Cloudflare перестал пускать старые ключи.').then(function(ok) { if (!ok) return; act('warp_recreate', '', 'Пересоздаём WARP'); });
 				} }, 'Новые ключи')
 			]));
 			warpCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Не работает — «Перезапустить туннели». Медленно — «Сменить точки входа». Совсем не помогает — «Новые ключи».'));
@@ -26136,15 +26189,17 @@ return view.extend({
 				E('button', {
 					'class': 'cbi-button',
 					'click': function() {
-						if (hostsBar.dirty() && !confirm('Отменить несохранённые изменения и перечитать файл?')) return;
-						refreshHostsFile(); zm.toast('Содержимое перечитано с диска', 'info');
+						var zmGo = function() { refreshHostsFile(); zm.toast('Содержимое перечитано с диска', 'info'); };
+						if (hostsBar.dirty()) return zm.ask('Отменить несохранённые изменения и перечитать файл?').then(function(ok) { return ok ? zmGo() : undefined; });
+						return zmGo();
 					}
 				}, 'Перечитать файл'),
 				E('button', {
 					'class': 'cbi-button',
 					'click': function() {
-						if (hostsBar.dirty() && !confirm('Есть несохранённые изменения. Свернуть без сохранения?')) return;
-						editorOpen = false; hostsBar.reset(); renderEditorCard();
+						var zmGo = function() { editorOpen = false; hostsBar.reset(); renderEditorCard(); };
+						if (hostsBar.dirty()) return zm.ask('Есть несохранённые изменения. Свернуть без сохранения?').then(function(ok) { return ok ? zmGo() : undefined; });
+						return zmGo();
 					}
 				}, 'Свернуть')
 			]));
@@ -26953,8 +27008,9 @@ return view.extend({
 			E('button', {
 				'class': 'cbi-button',
 				'click': function() {
-					if (configBar.dirty() && !confirm('Отменить несохранённые изменения и перечитать файл?')) return;
-					refreshConfig(); zm.toast('Конфигурация перечитана с диска', 'info');
+					var zmGo = function() { refreshConfig(); zm.toast('Конфигурация перечитана с диска', 'info'); };
+					if (configBar.dirty()) return zm.ask('Отменить несохранённые изменения и перечитать файл?').then(function(ok) { return ok ? zmGo() : undefined; });
+					return zmGo();
 				}
 			}, 'Перечитать файл')
 		]));
@@ -27140,9 +27196,12 @@ return view.extend({
 			E('button', {
 				'class': 'cbi-button',
 				'click': function() {
-					if (warpBar.dirty() && !confirm('Отменить несохранённые изменения и перечитать файл?')) return;
-					zm.mixomoWarpStatus().then(function(w) { renderWarpConf(w); });
-					zm.toast('Содержимое перечитано с диска', 'info');
+					var zmGo = function() {
+						zm.mixomoWarpStatus().then(function(w) { renderWarpConf(w); });
+						zm.toast('Содержимое перечитано с диска', 'info');
+					};
+					if (warpBar.dirty()) return zm.ask('Отменить несохранённые изменения и перечитать файл?').then(function(ok) { return ok ? zmGo() : undefined; });
+					return zmGo();
 				}
 			}, 'Перечитать файл')
 		]));
@@ -27595,15 +27654,17 @@ return view.extend({
 					E('button', {
 						'class': 'cbi-button',
 						'click': function() {
-							if (nfqwsBar.dirty() && !confirm('Отменить несохранённые изменения и перечитать файл?')) return;
-							refreshNfqwsOpt(); zm.toast('Содержимое перечитано с диска', 'info');
+							var zmGo = function() { refreshNfqwsOpt(); zm.toast('Содержимое перечитано с диска', 'info'); };
+							if (nfqwsBar.dirty()) return zm.ask('Отменить несохранённые изменения и перечитать файл?').then(function(ok) { return ok ? zmGo() : undefined; });
+							return zmGo();
 						}
 					}, 'Перечитать файл'),
 					E('button', {
 						'class': 'cbi-button',
 						'click': function() {
-							if (nfqwsBar.dirty() && !confirm('Есть несохранённые изменения. Свернуть без сохранения?')) return;
-							nfqwsOpen = false; nfqwsBar.reset(); renderNfqwsCard();
+							var zmGo = function() { nfqwsOpen = false; nfqwsBar.reset(); renderNfqwsCard(); };
+							if (nfqwsBar.dirty()) return zm.ask('Есть несохранённые изменения. Свернуть без сохранения?').then(function(ok) { return ok ? zmGo() : undefined; });
+							return zmGo();
 						}
 					}, 'Свернуть')
 				]));
@@ -27661,8 +27722,9 @@ return view.extend({
 				customCard.appendChild(customEl);
 				customCard.appendChild(E('div', { 'class': 'zm-actions' }, [
 					E('button', { 'class': 'cbi-button', 'click': function() {
-						if (customBar.dirty() && !confirm('Есть несохранённые изменения. Свернуть без сохранения?')) return;
-						customOpen = false; customBar.reset(customText); renderCustomCard(); renderLaunch();
+						var zmGo = function() { customOpen = false; customBar.reset(customText); renderCustomCard(); renderLaunch(); };
+						if (customBar.dirty()) return zm.ask('Есть несохранённые изменения. Свернуть без сохранения?').then(function(ok) { return ok ? zmGo() : undefined; });
+						return zmGo();
 					} }, 'Свернуть')
 				]));
 				customCard.appendChild(customBar);
@@ -27793,13 +27855,15 @@ return view.extend({
 				autoCard.appendChild(E('div', { 'class': 'zm-actions zm-ab-actions' }, [
 					E('button', { 'class': 'cbi-button cbi-button-positive', 'disabled': busy || !zapretInstalled ? '' : null, 'click': function() {
 						if (busy) { zm.toast('Дождитесь окончания текущего теста', 'warning'); return; }
-						if (!confirm('Запустить автоподбор сейчас?\n\nПроверка займёт 5–10 минут. Zapret в это время перезапускается со стратегиями по очереди.')) return;
-						busy = true; curMode = 'auto'; renderLaunch(); renderAuto();
-						zm.testAction('auto_run', '').then(function(res) {
-							if (res && res.error) { busy = false; curMode = ''; zm.toast(res.error, 'error'); renderLaunch(); renderAuto(); return; }
-							zm.toast('Автоподбор запущен', 'info');
-							startPolling();
-						}).catch(function() { busy = false; curMode = ''; renderLaunch(); renderAuto(); zm.toast('Роутер не ответил', 'error'); });
+						return zm.ask('Запустить автоподбор сейчас?\n\nПроверка займёт 5–10 минут. Zapret в это время перезапускается со стратегиями по очереди.').then(function(ok) {
+							if (!ok) return;
+							busy = true; curMode = 'auto'; renderLaunch(); renderAuto();
+							zm.testAction('auto_run', '').then(function(res) {
+								if (res && res.error) { busy = false; curMode = ''; zm.toast(res.error, 'error'); renderLaunch(); renderAuto(); return; }
+								zm.toast('Автоподбор запущен', 'info');
+								startPolling();
+							}).catch(function() { busy = false; curMode = ''; renderLaunch(); renderAuto(); zm.toast('Роутер не ответил', 'error'); });
+						});
 					} }, busy && curMode === 'auto' ? 'Идёт автоподбор…' : 'Запустить сейчас'),
 					last && last.at ? E('button', { 'class': 'cbi-button', 'disabled': busy ? '' : null, 'click': function() {
 						zm.testAction('auto_clear', '').then(function(r) { if (r && !r.error) { autoInfo = r.auto || {}; timeInfo = r; renderAuto(); } });
@@ -27917,24 +27981,28 @@ return view.extend({
 				if (mode === 'custom' || mode === 'custom_yt') {
 					var block = customBlock(name);
 					if (!block) { zm.toast('Стратегии «' + name + '» уже нет в вашем списке', 'warning'); return; }
-					if (!confirm('Применить свою стратегию «' + name + '»?\n\nОна заменит весь блок стратегий Zapret (NFQWS_OPT) — вместе с частями для YouTube, Discord и игр. Вернуть их можно выбором стратегии на вкладке «Стратегии».')) return;
-					zm.toast('Применяем ' + name + '…', 'warning');
-					zm.nfqwsOptSet(block).then(function(r) {
-						if (r && r.error) { zm.toast(r.error, 'error'); return; }
-						zm.toast('Стратегия ' + name + ' применена', 'info');
-						refreshAll();
-					}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
-					return;
+					return zm.ask('Применить свою стратегию «' + name + '»?\n\nОна заменит весь блок стратегий Zapret (NFQWS_OPT) — вместе с частями для YouTube, Discord и игр. Вернуть их можно выбором стратегии на вкладке «Стратегии».').then(function(ok) {
+						if (!ok) return;
+						zm.toast('Применяем ' + name + '…', 'warning');
+						zm.nfqwsOptSet(block).then(function(r) {
+							if (r && r.error) { zm.toast(r.error, 'error'); return; }
+							zm.toast('Стратегия ' + name + ' применена', 'info');
+							refreshAll();
+						}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
+						return;
+					});
 				}
 				if (/^v([1-9]|10)$/.test(name)) call = function() { return zm.strategySetV(name); };
 				else if (mode === 'youtube') call = function() { return zm.strategySetYoutube(name); };
 				else call = function() { return zm.strategySetFlowseal(name); };
-				if (!confirm('Применить стратегию ' + name + '?')) return;
-				zm.toast('Применяем ' + name + '…', 'warning');
-				call().then(function(r) {
-					if (r && r.error) { zm.toast(r.error, 'error'); return; }
-					zm.toast('Стратегия ' + name + ' применена', 'info');
-				}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
+				return zm.ask('Применить стратегию ' + name + '?').then(function(ok) {
+					if (!ok) return;
+					zm.toast('Применяем ' + name + '…', 'warning');
+					call().then(function(r) {
+						if (r && r.error) { zm.toast(r.error, 'error'); return; }
+						zm.toast('Стратегия ' + name + ' применена', 'info');
+					}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
+				});
 			}
 
 			function chips(list) {
@@ -28489,13 +28557,16 @@ return view.extend({
 					});
 				}
 				function toggle() {
-					if (st.open && dirty() && !confirm('В «' + L.title + '» есть несохранённые изменения. Свернуть и отменить их?')) return;
-					st.open = !st.open;
-					if (!st.open && st.loaded) { ta.value = st.saved; syncCount(); }
-					card.classList.toggle('zm-list-open', st.open);
-					body.style.display = st.open ? '' : 'none';
-					head.setAttribute('aria-expanded', st.open ? 'true' : 'false');
-					if (st.open) (st.loaded ? Promise.resolve() : load(true)).then(function() { ta.focus(); });
+					var zmGo = function() {
+						st.open = !st.open;
+						if (!st.open && st.loaded) { ta.value = st.saved; syncCount(); }
+						card.classList.toggle('zm-list-open', st.open);
+						body.style.display = st.open ? '' : 'none';
+						head.setAttribute('aria-expanded', st.open ? 'true' : 'false');
+						if (st.open) (st.loaded ? Promise.resolve() : load(true)).then(function() { ta.focus(); });
+					};
+					if (st.open && dirty()) return zm.ask('В «' + L.title + '» есть несохранённые изменения. Свернуть и отменить их?').then(function(ok) { return ok ? zmGo() : undefined; });
+					return zmGo();
 				}
 
 				ta.addEventListener('input', syncCount);
@@ -28511,21 +28582,24 @@ return view.extend({
 					}).catch(function() { busy = false; syncCount(); zm.toast('Роутер не ответил', 'error'); });
 				});
 				btnReload.addEventListener('click', function() {
-					if (dirty() && !confirm('Отменить несохранённые изменения и перечитать «' + L.title + '» из файла?')) return;
-					load(false);
+					var zmGo = function() { load(false); };
+					if (dirty()) return zm.ask('Отменить несохранённые изменения и перечитать «' + L.title + '» из файла?').then(function(ok) { return ok ? zmGo() : undefined; });
+					return zmGo();
 				});
 				if (btnRestore) btnRestore.addEventListener('click', function() {
 					if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-					if (!confirm('Заменить список исключений исходным из репозитория Zapret Manager? Ваши правки в нём пропадут.')) return;
-					busy = true;
-					zm.toast('Скачиваем исходный список исключений', 'warning');
-					zm.zapretListRestore(L.id).then(function(r) {
-						busy = false;
-						if (r.error) { zm.toast(r.error, 'error'); syncCount(); return; }
-						st.saved = r.content || ''; if (st.saved && st.saved.slice(-1) !== '\n') st.saved += '\n';
-						ta.value = st.saved; st.loaded = true; st.info = r.info || st.info; syncCount();
-						zm.toast('Список исключений восстановлен, Zapret перезапущен', 'info');
-					}).catch(function() { busy = false; syncCount(); zm.toast('Роутер не ответил', 'error'); });
+					return zm.ask('Заменить список исключений исходным из репозитория Zapret Manager? Ваши правки в нём пропадут.').then(function(ok) {
+						if (!ok) return;
+						busy = true;
+						zm.toast('Скачиваем исходный список исключений', 'warning');
+						zm.zapretListRestore(L.id).then(function(r) {
+							busy = false;
+							if (r.error) { zm.toast(r.error, 'error'); syncCount(); return; }
+							st.saved = r.content || ''; if (st.saved && st.saved.slice(-1) !== '\n') st.saved += '\n';
+							ta.value = st.saved; st.loaded = true; st.info = r.info || st.info; syncCount();
+							zm.toast('Список исключений восстановлен, Zapret перезапущен', 'info');
+						}).catch(function() { busy = false; syncCount(); zm.toast('Роутер не ответил', 'error'); });
+					});
 				});
 
 				var head = E('div', { 'class': 'zm-list-head', 'role': 'button', 'tabindex': '0', 'aria-expanded': 'false', 'click': toggle,
@@ -29719,7 +29793,8 @@ html.zm-theme-dark .zm-fold { border-top-color: rgba(255,255,255,.1); }
 .zm-dlg-wrap { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0,0,0,.5); }
 .zm-dlg { width: 100%; max-width: 540px; max-height: 88vh; overflow: auto; box-shadow: 0 12px 40px rgba(0,0,0,.3); }
 .zm-dlg h3 { font-size: 17px; margin-bottom: 8px; }
-.zm-dlg-intro { margin: 0 0 6px; font-size: 13px; line-height: 1.5; opacity: .8; }
+.zm-dlg-intro { margin: 0 0 6px; font-size: 13px; line-height: 1.5; opacity: .8; white-space: pre-line; overflow-wrap: anywhere; }
+.zm-dlg-input { width: 100% !important; box-sizing: border-box; margin: 4px 0 0; }
 .zm-dlg-title { margin: 16px 0 6px; font-size: 13px; font-weight: 600; }
 .zm-dlg-list { margin: 0; padding-left: 20px; font-size: 13px; line-height: 1.6; }
 .zm-dlg-note { margin: 12px 0 0; padding: 9px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.5; background: rgba(110,118,129,.12); }
@@ -31392,28 +31467,31 @@ return view.extend({
 			if (busy || saving) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
 			if (name === draft.sec && !force) return;
 			var secDirty = draft.sec === 'new' ? false : secSig(draft) !== secSig(withBootMode(fromCfg(cfg)));
-			if (secDirty && !force && !confirm('В секции «' + secName() + '» есть несохранённые изменения.\n\nОтменить их и перейти к другой секции?')) return;
-			var keep = {};
-			GLOBAL_KEYS.forEach(function(k) { keep[k] = draft[k]; });
-			secBusy = true;
-			loadGen++;
-			renderSections();
-			getCfg(name === (cfg && cfg.main) ? '' : name).then(function(c) {
-				secBusy = false;
-				c = validCfg(c);
-				if (!c) { zm.toast('Не удалось загрузить секцию', 'error'); renderSections(); return; }
-				cfg = c;
-				rememberSec(c.sec);
-				draft = withBootMode(fromCfg(cfg));
-				savedSig = sig(draft);
-				GLOBAL_KEYS.forEach(function(k) { draft[k] = keep[k]; });
-				dirty = sig(draft) !== savedSig;
-				servers = null; srvErr = ''; srvRetry = 0; hideMode = false;
-				syncAreas();
-				if (!isSecTab(tab)) tabTo('conn');
-				renderAll();
-				if (st.running && secLive()) loadServers();
-			}).catch(function() { secBusy = false; renderSections(); zm.toast('Роутер не ответил', 'error'); });
+			var zmGo = function() {
+				var keep = {};
+				GLOBAL_KEYS.forEach(function(k) { keep[k] = draft[k]; });
+				secBusy = true;
+				loadGen++;
+				renderSections();
+				getCfg(name === (cfg && cfg.main) ? '' : name).then(function(c) {
+					secBusy = false;
+					c = validCfg(c);
+					if (!c) { zm.toast('Не удалось загрузить секцию', 'error'); renderSections(); return; }
+					cfg = c;
+					rememberSec(c.sec);
+					draft = withBootMode(fromCfg(cfg));
+					savedSig = sig(draft);
+					GLOBAL_KEYS.forEach(function(k) { draft[k] = keep[k]; });
+					dirty = sig(draft) !== savedSig;
+					servers = null; srvErr = ''; srvRetry = 0; hideMode = false;
+					syncAreas();
+					if (!isSecTab(tab)) tabTo('conn');
+					renderAll();
+					if (st.running && secLive()) loadServers();
+				}).catch(function() { secBusy = false; renderSections(); zm.toast('Роутер не ответил', 'error'); });
+			};
+			if (secDirty && !force) return zm.ask('В секции «' + secName() + '» есть несохранённые изменения.\n\nОтменить их и перейти к другой секции?').then(function(ok) { return ok ? zmGo() : undefined; });
+			return zmGo();
 		}
 
 		function deleteSec() {
@@ -31784,7 +31862,7 @@ return view.extend({
 			}
 			if (st.newer) b.push(E('button', { 'class': 'cbi-button cbi-button-action', 'click': function() { act('update'); } }, 'Обновить до ' + st.latest));
 			else b.push(E('button', { 'class': 'cbi-button', 'title': 'Скачать движок Forkozz ' + (st.version || '') + ' заново и доставить недостающие пакеты. Настройки, секции и sing-box останутся', 'click': function() {
-				if (confirm('Переустановить Forkozz ' + (st.version || '') + '?\n\nДвижок скачается с GitHub заново, недостающие пакеты доставятся. Настройки, секции и sing-box останутся.' + (st.running ? '\nНа время переустановки Forkozz остановится.' : ''))) act('reinstall');
+				zm.ask('Переустановить Forkozz ' + (st.version || '') + '?\n\nДвижок скачается с GitHub заново, недостающие пакеты доставятся. Настройки, секции и sing-box останутся.' + (st.running ? '\nНа время переустановки Forkozz остановится.' : '')).then(function(ok) { if (ok) act('reinstall'); });
 			} }, 'Переустановить'));
 			b.push(E('button', { 'class': 'cbi-button cbi-button-remove', 'click': removeDialog }, 'Удалить'));
 			mainCard.appendChild(E('div', { 'class': 'zm-actions' }, b));
@@ -32253,10 +32331,11 @@ return view.extend({
 				});
 			} }, 'Обновить каталог'));
 			if (!c.off) b.push(E('button', { 'class': 'cbi-button', 'click': function() {
-				var u = prompt('Ссылка на свой каталог списков (lists.json в формате splify2-lists, например из форка).\n\nПусто — каталог по умолчанию.', c.custom ? c.url : '');
-				if (u === null) return;
-				zm.toast('Скачиваем каталог…', 'info');
-				call('catalog_src', u.trim(), 'Каталог подключён', function() { reload(); });
+				zm.askText({ title: 'Свой каталог списков', intro: 'Ссылка на lists.json в формате splify2-lists — например, из форка каталога.', placeholder: 'https://…/lists.json', hint: 'Оставьте поле пустым, чтобы вернуть каталог по умолчанию.', value: c.custom ? c.url : '', okText: 'Подключить' }).then(function(u) {
+					if (u === null) return;
+					zm.toast('Скачиваем каталог…', 'info');
+					call('catalog_src', u.trim(), 'Каталог подключён', function() { reload(); });
+				});
 			} }, 'Сменить источник'));
 			b.push(E('button', { 'class': 'cbi-button', 'click': function() {
 				var turnOn = !!c.off;
@@ -32993,8 +33072,9 @@ return view.extend({
 			}
 			netCard.appendChild(sw(draft.ipv6, 'Поддержка IPv6', 'Маршрутизация и DNS для IPv6. Включайте, только если провайдер даёт роутеру рабочий IPv6 — иначе сайты могут открываться дольше.', function() { set('ipv6', !draft.ipv6); }));
 			netCard.appendChild(sw(draft.no_dhcp, 'Не менять настройки DNS роутера', '⚠ Для опытных. Forkozz не будет перенаправлять dnsmasq на себя — тогда это нужно сделать вручную (сервер 127.0.0.42), иначе сайты по доменам пойдут мимо Forkozz.', function() {
-				if (!draft.no_dhcp && !confirm('Forkozz перестанет сам настраивать DNS роутера.\n\nБез ручной настройки dnsmasq сервисы по доменам пойдут напрямую. Продолжить?')) return;
-				set('no_dhcp', !draft.no_dhcp);
+				var zmGo = function() { set('no_dhcp', !draft.no_dhcp); };
+				if (!draft.no_dhcp) return zm.ask('Forkozz перестанет сам настраивать DNS роутера.\n\nБез ручной настройки dnsmasq сервисы по доменам пойдут напрямую. Продолжить?').then(function(ok) { return ok ? zmGo() : undefined; });
+				return zmGo();
 			}));
 		}
 
@@ -33049,14 +33129,12 @@ return view.extend({
 			sbCard.appendChild(row('Версия', E('span', {}, has ? st.singbox + ' · ' + (SB_NAMES[sv] || 'установлен вручную') : 'не установлен')));
 			sbCard.appendChild(row('Вариант', seg(vars, curVar, function(v) {
 				var it = vars.filter(function(x) { return x.id === v; })[0];
-				if (!confirm((has ? 'Заменить sing-box на ' : 'Установить ') + it.label.toLowerCase() + (has ? '' : ' sing-box') + '?\n\n' + it.warn + restartNote + (has ? 'Если новый sing-box не установится, останется прежний.' : ''))) return;
-				act('singbox', v);
+				return zm.ask((has ? 'Заменить sing-box на ' : 'Установить ') + it.label.toLowerCase() + (has ? '' : ' sing-box') + '?\n\n' + it.warn + restartNote + (has ? 'Если новый sing-box не установится, останется прежний.' : '')).then(function(ok) { if (!ok) return; act('singbox', v); });
 			})));
 			if (has && curVar) {
 				var cur = vars.filter(function(x) { return x.id === curVar; })[0];
 				sbCard.appendChild(E('div', { 'class': 'zm-actions' }, [ E('button', { 'class': 'cbi-button', 'disabled': busy ? '' : null, 'click': function() {
-					if (!confirm('Переустановить ' + cur.label.toLowerCase() + ' sing-box?\n\n' + (curVar === 'extended' ? 'Скачается свежая сборка с GitHub (около 40 МБ).\n' : 'Пакет скачается из репозитория OpenWrt заново.\n') + restartNote + 'Если не установится, останется прежний.')) return;
-					act('singbox_reinstall', curVar);
+					return zm.ask('Переустановить ' + cur.label.toLowerCase() + ' sing-box?\n\n' + (curVar === 'extended' ? 'Скачается свежая сборка с GitHub (около 40 МБ).\n' : 'Пакет скачается из репозитория OpenWrt заново.\n') + restartNote + 'Если не установится, останется прежний.').then(function(ok) { if (!ok) return; act('singbox_reinstall', curVar); });
 				} }, curVar === 'extended' ? 'Переустановить (обновить сборку)' : 'Переустановить') ]));
 			}
 			sbCard.appendChild(E('div', { 'class': 'zm-kv' }, vars.map(function(x) {
@@ -34390,13 +34468,15 @@ function renderInstalled(all) {
 			}
 
 			function onReset() {
-				if (!confirm('Вернуть встроенный список? Ваши правки будут удалены.')) return;
-				bt.listReset(o.kind).then(function(res) {
-					if (res.error) { bt.toast(res.error, 'error'); return; }
-					o.apply(res);
-					reload().then(function() {
-						ed.sync();
-						bt.toast('Возвращён встроенный список', 'info');
+				return zm.ask('Вернуть встроенный список? Ваши правки будут удалены.').then(function(ok) {
+					if (!ok) return;
+					bt.listReset(o.kind).then(function(res) {
+						if (res.error) { bt.toast(res.error, 'error'); return; }
+						o.apply(res);
+						reload().then(function() {
+							ed.sync();
+							bt.toast('Возвращён встроенный список', 'info');
+						});
 					});
 				});
 			}
@@ -34529,7 +34609,7 @@ function renderInstalled(all) {
 					E('td', { 'class': 'bt-td-a' }, [
 						isCur ? '' : btn('Применить', 'cbi-button-apply', function() {
 							var q = 'Применить стратегию и перезапустить службу?\n\n' + (p ? p.name + '\n' : '') + r.opts;
-							if (confirm(q)) setStrategy(r.opts, p ? (p.label || p.name) : 'Стратегия');
+							zm.ask(q, { okText: 'Применить' }).then(function(ok) { if (ok) setStrategy(r.opts, p ? (p.label || p.name) : 'Стратегия'); });
 						})
 					])
 				]);
@@ -36533,11 +36613,11 @@ html[data-theme="light"] .zmw-orbs i { opacity: .28; }
 #zmw-view .bt-col .zm-row { padding: 6px 0; margin: 0; border-bottom: 1px dashed var(--border); }
 #zmw-view .bt-col .zm-row:last-child { border-bottom: 0; }
 
-#zmw-view .zm-hint, #zmw-view p.zm-hint, .zm-dock .zm-hint, .zm-dock p.zm-hint { opacity: 1; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
-#zmw-view a:not(.cbi-button), .zm-dock a:not(.cbi-button) { color: var(--a2); text-decoration-color: rgba(59,130,246,.35); text-underline-offset: 3px; }
-html[data-theme="dark"] #zmw-view a:not(.cbi-button), html[data-theme="dark"] .zm-dock a:not(.cbi-button) { color: #8ab4ff; }
+#zmw-view .zm-hint, #zmw-view p.zm-hint, .zm-dock .zm-hint, .zm-dock p.zm-hint, .zmw-modal .zm-hint, .zmw-modal p.zm-hint { opacity: 1; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
+#zmw-view a:not(.cbi-button), .zm-dock a:not(.cbi-button), .zmw-modal a:not(.cbi-button) { color: var(--a2); text-decoration-color: rgba(59,130,246,.35); text-underline-offset: 3px; }
+html[data-theme="dark"] #zmw-view a:not(.cbi-button), html[data-theme="dark"] .zm-dock a:not(.cbi-button), html[data-theme="dark"] .zmw-modal a:not(.cbi-button) { color: #8ab4ff; }
 
-#zmw-view .zm-badge, .zm-dock .zm-badge { padding: 4px 11px 4px 9px; font-size: 12px; font-weight: 650; gap: 7px; letter-spacing: .01em; }
+#zmw-view .zm-badge, .zm-dock .zm-badge, .zmw-modal .zm-badge { padding: 4px 11px 4px 9px; font-size: 12px; font-weight: 650; gap: 7px; letter-spacing: .01em; }
 #zmw-view .zm-ok { background: var(--ok-bg); color: var(--ok); }
 #zmw-view .zm-ok .zm-dot { background: var(--ok-dot); box-shadow: 0 0 8px var(--ok-dot); animation: zmw-pulse 2.4s infinite; }
 #zmw-view .zm-bad { background: var(--bad-bg); color: var(--bad); }
@@ -36558,27 +36638,27 @@ html[data-theme="dark"] #zmw-view a:not(.cbi-button), html[data-theme="dark"] .z
 	transition: border-color .15s, background .15s, transform .1s, box-shadow .15s, color .15s;
 	-webkit-appearance: none; appearance: none;
 }
-html[data-theme="dark"] #zmw-view .cbi-button, html[data-theme="dark"] .zm-dock .cbi-button { background: rgba(255,255,255,.05); }
-#zmw-view .cbi-button:hover, .zm-dock .cbi-button:hover { border-color: rgba(124,92,255,.55); background: var(--surface-solid); transform: translateY(-1px); box-shadow: 0 6px 16px -10px rgba(99,102,241,.6); }
-html[data-theme="dark"] #zmw-view .cbi-button:hover, html[data-theme="dark"] .zm-dock .cbi-button:hover { background: rgba(255,255,255,.08); }
-#zmw-view .cbi-button:active, .zm-dock .cbi-button:active { transform: translateY(0) scale(.98); }
-#zmw-view .cbi-button:focus-visible, .zm-dock .cbi-button:focus-visible { outline: none; box-shadow: var(--ring); }
-#zmw-view .cbi-button[disabled], #zmw-view .cbi-button:disabled, .zm-dock .cbi-button[disabled], .zm-dock .cbi-button:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
+html[data-theme="dark"] #zmw-view .cbi-button, html[data-theme="dark"] .zm-dock .cbi-button, html[data-theme="dark"] .zmw-modal .cbi-button { background: rgba(255,255,255,.05); }
+#zmw-view .cbi-button:hover, .zm-dock .cbi-button:hover, .zmw-modal .cbi-button:hover { border-color: rgba(124,92,255,.55); background: var(--surface-solid); transform: translateY(-1px); box-shadow: 0 6px 16px -10px rgba(99,102,241,.6); }
+html[data-theme="dark"] #zmw-view .cbi-button:hover, html[data-theme="dark"] .zm-dock .cbi-button:hover, html[data-theme="dark"] .zmw-modal .cbi-button:hover { background: rgba(255,255,255,.08); }
+#zmw-view .cbi-button:active, .zm-dock .cbi-button:active, .zmw-modal .cbi-button:active { transform: translateY(0) scale(.98); }
+#zmw-view .cbi-button:focus-visible, .zm-dock .cbi-button:focus-visible, .zmw-modal .cbi-button:focus-visible { outline: none; box-shadow: var(--ring); }
+#zmw-view .cbi-button[disabled], #zmw-view .cbi-button:disabled, .zm-dock .cbi-button[disabled], .zm-dock .cbi-button:disabled, .zmw-modal .cbi-button[disabled], .zmw-modal .cbi-button:disabled { opacity: .5; cursor: not-allowed; transform: none; box-shadow: none; }
 
 #zmw-view .cbi-button-positive, .zm-refresh-banner .cbi-button-positive,
-html[data-theme="dark"] #zmw-view .cbi-button-positive, .zm-dock .cbi-button-positive, html[data-theme="dark"] .zm-dock .cbi-button-positive {
+html[data-theme="dark"] #zmw-view .cbi-button-positive, .zm-dock .cbi-button-positive, html[data-theme="dark"] .zm-dock .cbi-button-positive, .zmw-modal .cbi-button-positive, html[data-theme="dark"] .zmw-modal .cbi-button-positive {
 	background: var(--grad); background-size: 150% 100%; color: #fff; border-color: transparent;
 	box-shadow: 0 8px 20px -10px rgba(99,102,241,.9), inset 0 1px 0 rgba(255,255,255,.22);
 }
-#zmw-view .cbi-button-positive:hover, html[data-theme="dark"] #zmw-view .cbi-button-positive:hover, .zm-dock .cbi-button-positive:hover, html[data-theme="dark"] .zm-dock .cbi-button-positive:hover {
+#zmw-view .cbi-button-positive:hover, html[data-theme="dark"] #zmw-view .cbi-button-positive:hover, .zm-dock .cbi-button-positive:hover, html[data-theme="dark"] .zm-dock .cbi-button-positive:hover, .zmw-modal .cbi-button-positive:hover, html[data-theme="dark"] .zmw-modal .cbi-button-positive:hover {
 	background: var(--grad); background-size: 150% 100%; background-position: 100% 0;
 	border-color: transparent; color: #fff;
 	box-shadow: 0 12px 26px -10px rgba(99,102,241,1), inset 0 1px 0 rgba(255,255,255,.22);
 }
-#zmw-view .cbi-button-remove, html[data-theme="dark"] #zmw-view .cbi-button-remove, .zm-dock .cbi-button-remove, html[data-theme="dark"] .zm-dock .cbi-button-remove {
+#zmw-view .cbi-button-remove, html[data-theme="dark"] #zmw-view .cbi-button-remove, .zm-dock .cbi-button-remove, html[data-theme="dark"] .zm-dock .cbi-button-remove, .zmw-modal .cbi-button-remove, html[data-theme="dark"] .zmw-modal .cbi-button-remove {
 	background: var(--bad-bg); color: var(--bad); border-color: rgba(239,68,68,.28); box-shadow: none;
 }
-#zmw-view .cbi-button-remove:hover, html[data-theme="dark"] #zmw-view .cbi-button-remove:hover, .zm-dock .cbi-button-remove:hover, html[data-theme="dark"] .zm-dock .cbi-button-remove:hover {
+#zmw-view .cbi-button-remove:hover, html[data-theme="dark"] #zmw-view .cbi-button-remove:hover, .zm-dock .cbi-button-remove:hover, html[data-theme="dark"] .zm-dock .cbi-button-remove:hover, .zmw-modal .cbi-button-remove:hover, html[data-theme="dark"] .zmw-modal .cbi-button-remove:hover {
 	background: rgba(239,68,68,.18); border-color: rgba(239,68,68,.5); color: var(--bad);
 	box-shadow: 0 8px 20px -12px rgba(239,68,68,.8);
 }
@@ -36595,13 +36675,13 @@ html[data-theme="dark"] #zmw-view .cbi-button-positive, .zm-dock .cbi-button-pos
 	width: max-content; max-width: 100%;
 }
 #zmw-view .zm-actions.zmw-tabs::-webkit-scrollbar { display: none; }
-#zmw-view .zmw-tabs .cbi-button, .zm-dock .zmw-tabs .cbi-button {
+#zmw-view .zmw-tabs .cbi-button, .zm-dock .zmw-tabs .cbi-button, .zmw-modal .zmw-tabs .cbi-button {
 	flex-shrink: 0; white-space: nowrap;
 	border: 0; background: transparent; box-shadow: none; color: var(--muted);
 	min-height: 36px; padding: 7px 16px; border-radius: 11px;
 }
-#zmw-view .zmw-tabs .cbi-button:hover, .zm-dock .zmw-tabs .cbi-button:hover { background: var(--surface-2); color: var(--text); transform: none; box-shadow: none; }
-#zmw-view .zmw-tabs .cbi-button-positive, #zmw-view .zmw-tabs .cbi-button-positive:hover, .zm-dock .zmw-tabs .cbi-button-positive, .zm-dock .zmw-tabs .cbi-button-positive:hover {
+#zmw-view .zmw-tabs .cbi-button:hover, .zm-dock .zmw-tabs .cbi-button:hover, .zmw-modal .zmw-tabs .cbi-button:hover { background: var(--surface-2); color: var(--text); transform: none; box-shadow: none; }
+#zmw-view .zmw-tabs .cbi-button-positive, #zmw-view .zmw-tabs .cbi-button-positive:hover, .zm-dock .zmw-tabs .cbi-button-positive, .zm-dock .zmw-tabs .cbi-button-positive:hover, .zmw-modal .zmw-tabs .cbi-button-positive, .zmw-modal .zmw-tabs .cbi-button-positive:hover {
 	background: var(--grad); color: #fff;
 	box-shadow: 0 6px 16px -8px rgba(99,102,241,.9);
 }
@@ -36898,8 +36978,8 @@ html body.zmw-body .zm-toast { background: var(--toast-bg); color: var(--toast-f
 	#zmw-view .zm-cards { grid-template-columns: 1fr; }
 	#zmw-view .zm-header { padding: 16px; }
 	#zmw-view .zm-header-links { margin-left: 0; }
-	#zmw-view .zm-actions .cbi-button, .zm-dock .zm-actions .cbi-button { flex: 1 1 auto; }
-	#zmw-view .zmw-tabs .cbi-button, .zm-dock .zmw-tabs .cbi-button { flex: 0 0 auto; }
+	#zmw-view .zm-actions .cbi-button, .zm-dock .zm-actions .cbi-button, .zmw-modal .zm-actions .cbi-button { flex: 1 1 auto; }
+	#zmw-view .zmw-tabs .cbi-button, .zm-dock .zmw-tabs .cbi-button, .zmw-modal .zmw-tabs .cbi-button { flex: 0 0 auto; }
 	#zmw-view .zm-actions.zmw-tabs { width: 100%; }
 	#zmw-view .zm-refresh-banner, .zm-refresh-banner { flex-direction: column; align-items: stretch; text-align: left; }
 	.zmw-brand-name { font-size: 15px; white-space: nowrap; }
@@ -37026,26 +37106,26 @@ html[data-theme="ink"] #zmw-view .zm-card {
 }
 html[data-theme="ink"] #zmw-view .zm-card:hover { box-shadow: 5px 5px 0 #0a0a0a; border-color: #0a0a0a; }
 html[data-theme="ink"] #zmw-view .zm-card h3::before { background: #0a9cff; border: 1.5px solid #0a0a0a; }
-html[data-theme="ink"] #zmw-view .cbi-button, html[data-theme="ink"] .zm-dock .cbi-button {
+html[data-theme="ink"] #zmw-view .cbi-button, html[data-theme="ink"] .zm-dock .cbi-button, html[data-theme="ink"] .zmw-modal .cbi-button {
 	border: 2px solid #0a0a0a; border-radius: 6px; box-shadow: 3px 3px 0 #0a0a0a; background: #ffffff; color: #0a0a0a;
 	transition: transform .08s, box-shadow .08s;
 }
-html[data-theme="ink"] #zmw-view .cbi-button:hover, html[data-theme="ink"] .zm-dock .cbi-button:hover { background: #e8f6ff; transform: none; box-shadow: 3px 3px 0 #0a0a0a; }
-html[data-theme="ink"] #zmw-view .cbi-button:active, html[data-theme="ink"] .zm-dock .cbi-button:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #0a0a0a; }
-html[data-theme="ink"] #zmw-view .cbi-button-positive, html[data-theme="ink"] #zmw-view .cbi-button-positive:hover, html[data-theme="ink"] .zm-dock .cbi-button-positive, html[data-theme="ink"] .zm-dock .cbi-button-positive:hover { background: #0a9cff; color: #0a0a0a; border-color: #0a0a0a; }
-html[data-theme="ink"] #zmw-view .cbi-button-remove, html[data-theme="ink"] #zmw-view .cbi-button-remove:hover, html[data-theme="ink"] .zm-dock .cbi-button-remove, html[data-theme="ink"] .zm-dock .cbi-button-remove:hover { background: #ff4d3d; color: #0a0a0a; border-color: #0a0a0a; }
-html[data-theme="ink"] #zmw-view .cbi-button-action, html[data-theme="ink"] #zmw-view .cbi-button-action:hover, html[data-theme="ink"] .zm-dock .cbi-button-action, html[data-theme="ink"] .zm-dock .cbi-button-action:hover { background: #d6f0ff; color: #0a0a0a; }
-html[data-theme="ink"] #zmw-view .cbi-button[disabled], html[data-theme="ink"] .zm-dock .cbi-button[disabled] { box-shadow: none; opacity: .5; }
-html[data-theme="ink"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="ink"] .zm-dock .zmw-tabs .cbi-button { box-shadow: none; }
-html[data-theme="ink"] #zmw-view .zmw-tabs .cbi-button-positive, html[data-theme="ink"] .zm-dock .zmw-tabs .cbi-button-positive { box-shadow: 3px 3px 0 #0a0a0a; }
+html[data-theme="ink"] #zmw-view .cbi-button:hover, html[data-theme="ink"] .zm-dock .cbi-button:hover, html[data-theme="ink"] .zmw-modal .cbi-button:hover { background: #e8f6ff; transform: none; box-shadow: 3px 3px 0 #0a0a0a; }
+html[data-theme="ink"] #zmw-view .cbi-button:active, html[data-theme="ink"] .zm-dock .cbi-button:active, html[data-theme="ink"] .zmw-modal .cbi-button:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #0a0a0a; }
+html[data-theme="ink"] #zmw-view .cbi-button-positive, html[data-theme="ink"] #zmw-view .cbi-button-positive:hover, html[data-theme="ink"] .zm-dock .cbi-button-positive, html[data-theme="ink"] .zm-dock .cbi-button-positive:hover, html[data-theme="ink"] .zmw-modal .cbi-button-positive, html[data-theme="ink"] .zmw-modal .cbi-button-positive:hover { background: #0a9cff; color: #0a0a0a; border-color: #0a0a0a; }
+html[data-theme="ink"] #zmw-view .cbi-button-remove, html[data-theme="ink"] #zmw-view .cbi-button-remove:hover, html[data-theme="ink"] .zm-dock .cbi-button-remove, html[data-theme="ink"] .zm-dock .cbi-button-remove:hover, html[data-theme="ink"] .zmw-modal .cbi-button-remove, html[data-theme="ink"] .zmw-modal .cbi-button-remove:hover { background: #ff4d3d; color: #0a0a0a; border-color: #0a0a0a; }
+html[data-theme="ink"] #zmw-view .cbi-button-action, html[data-theme="ink"] #zmw-view .cbi-button-action:hover, html[data-theme="ink"] .zm-dock .cbi-button-action, html[data-theme="ink"] .zm-dock .cbi-button-action:hover, html[data-theme="ink"] .zmw-modal .cbi-button-action, html[data-theme="ink"] .zmw-modal .cbi-button-action:hover { background: #d6f0ff; color: #0a0a0a; }
+html[data-theme="ink"] #zmw-view .cbi-button[disabled], html[data-theme="ink"] .zm-dock .cbi-button[disabled], html[data-theme="ink"] .zmw-modal .cbi-button[disabled] { box-shadow: none; opacity: .5; }
+html[data-theme="ink"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="ink"] .zm-dock .zmw-tabs .cbi-button, html[data-theme="ink"] .zmw-modal .zmw-tabs .cbi-button { box-shadow: none; }
+html[data-theme="ink"] #zmw-view .zmw-tabs .cbi-button-positive, html[data-theme="ink"] .zm-dock .zmw-tabs .cbi-button-positive, html[data-theme="ink"] .zmw-modal .zmw-tabs .cbi-button-positive { box-shadow: 3px 3px 0 #0a0a0a; }
 html[data-theme="ink"] #zmw-view .zm-tile {
 	background: #ffffff; border: 2px solid #0a0a0a; border-radius: 6px; box-shadow: 3px 3px 0 #0a0a0a; color: #0a0a0a;
 }
 html[data-theme="ink"] #zmw-view .zm-tile:hover { background: #e8f6ff; transform: none; }
 html[data-theme="ink"] #zmw-view .zm-tile.zm-active { background: #0a9cff; color: #0a0a0a; border-color: #0a0a0a; box-shadow: 3px 3px 0 #0a0a0a; }
 html[data-theme="ink"] #zmw-view .zm-tile.zm-active::before { color: #0a0a0a; }
-html[data-theme="ink"] #zmw-view .zm-badge, html[data-theme="ink"] .zm-dock .zm-badge { border: 2px solid #0a0a0a; color: #0a0a0a; }
-html[data-theme="ink"] #zmw-view .zm-badge .zm-dot, html[data-theme="ink"] .zm-dock .zm-badge .zm-dot { box-shadow: none; animation: none; }
+html[data-theme="ink"] #zmw-view .zm-badge, html[data-theme="ink"] .zm-dock .zm-badge, html[data-theme="ink"] .zmw-modal .zm-badge { border: 2px solid #0a0a0a; color: #0a0a0a; }
+html[data-theme="ink"] #zmw-view .zm-badge .zm-dot, html[data-theme="ink"] .zm-dock .zm-badge .zm-dot, html[data-theme="ink"] .zmw-modal .zm-badge .zm-dot { box-shadow: none; animation: none; }
 html[data-theme="ink"] #zmw-view input[type="text"], html[data-theme="ink"] #zmw-view input[type="password"],
 html[data-theme="ink"] #zmw-view input[type="number"], html[data-theme="ink"] #zmw-view select,
 html[data-theme="ink"] #zmw-view textarea:not(.zm-config-editor) { border: 2px solid #0a0a0a; border-radius: 6px; background: #ffffff; }
@@ -37066,7 +37146,7 @@ html[data-theme="ink"] #zmw-view .zm-quota > i { background: #0a9cff; border-rad
 html[data-theme="ink"] #zmw-view .zm-switch { border: 2px solid #0a0a0a; background: #ffffff; }
 html[data-theme="ink"] #zmw-view .zm-switch > span { border: 2px solid #0a0a0a; box-shadow: none; top: 1px; left: 1px; }
 html[data-theme="ink"] #zmw-view .zm-switch.zm-switch-on { background: #0a9cff; }
-html[data-theme="ink"] #zmw-view a:not(.cbi-button), html[data-theme="ink"] .zm-dock a:not(.cbi-button) { color: #0060c0; text-decoration: underline; text-underline-offset: 2px; }
+html[data-theme="ink"] #zmw-view a:not(.cbi-button), html[data-theme="ink"] .zm-dock a:not(.cbi-button), html[data-theme="ink"] .zmw-modal a:not(.cbi-button) { color: #0060c0; text-decoration: underline; text-underline-offset: 2px; }
 html[data-theme="ink"] .zmw-logo svg { filter: none; }
 html[data-theme="ink"] .zmw-logo-lg::after { display: none; }
 html[data-theme="bento"] {
@@ -37107,13 +37187,13 @@ html[data-theme="bento"] #zmw-view .zm-cards > .zm-card:nth-child(4n+3) { backgr
 html[data-theme="bento"] #zmw-view .zm-cards > .zm-card:nth-child(4n+4) { background: #dff2e2; }
 html[data-theme="bento"] #zmw-view .zm-card h3::before { display: none; }
 html[data-theme="bento"] #zmw-view .zm-card h3 { font-size: 15px; font-weight: 600; color: inherit; opacity: .8; }
-html[data-theme="bento"] #zmw-view .cbi-button, html[data-theme="bento"] .zmw-icon-btn, html[data-theme="bento"] .zm-dock .cbi-button { border-radius: 14px; border: 0; background: #f6f2ea; color: #1c1a17; box-shadow: none; }
-html[data-theme="bento"] #zmw-view .cbi-button:hover, html[data-theme="bento"] .zmw-icon-btn:hover, html[data-theme="bento"] .zm-dock .cbi-button:hover { background: #e4ddd0; transform: none; }
-html[data-theme="bento"] #zmw-view .cbi-button-positive, html[data-theme="bento"] #zmw-view .cbi-button-positive:hover, html[data-theme="bento"] .zmw-btn-primary, html[data-theme="bento"] .zm-dock .cbi-button-positive, html[data-theme="bento"] .zm-dock .cbi-button-positive:hover { background: #1c1a17; color: #ffffff; border: 0; box-shadow: none; }
-html[data-theme="bento"] #zmw-view .cbi-button-remove, html[data-theme="bento"] #zmw-view .cbi-button-remove:hover, html[data-theme="bento"] .zm-dock .cbi-button-remove, html[data-theme="bento"] .zm-dock .cbi-button-remove:hover { background: #ffd9d4; color: #8a1c14; }
+html[data-theme="bento"] #zmw-view .cbi-button, html[data-theme="bento"] .zmw-icon-btn, html[data-theme="bento"] .zm-dock .cbi-button, html[data-theme="bento"] .zmw-modal .cbi-button { border-radius: 14px; border: 0; background: #f6f2ea; color: #1c1a17; box-shadow: none; }
+html[data-theme="bento"] #zmw-view .cbi-button:hover, html[data-theme="bento"] .zmw-icon-btn:hover, html[data-theme="bento"] .zm-dock .cbi-button:hover, html[data-theme="bento"] .zmw-modal .cbi-button:hover { background: #e4ddd0; transform: none; }
+html[data-theme="bento"] #zmw-view .cbi-button-positive, html[data-theme="bento"] #zmw-view .cbi-button-positive:hover, html[data-theme="bento"] .zmw-btn-primary, html[data-theme="bento"] .zm-dock .cbi-button-positive, html[data-theme="bento"] .zm-dock .cbi-button-positive:hover, html[data-theme="bento"] .zmw-modal .cbi-button-positive, html[data-theme="bento"] .zmw-modal .cbi-button-positive:hover { background: #1c1a17; color: #ffffff; border: 0; box-shadow: none; }
+html[data-theme="bento"] #zmw-view .cbi-button-remove, html[data-theme="bento"] #zmw-view .cbi-button-remove:hover, html[data-theme="bento"] .zm-dock .cbi-button-remove, html[data-theme="bento"] .zm-dock .cbi-button-remove:hover, html[data-theme="bento"] .zmw-modal .cbi-button-remove, html[data-theme="bento"] .zmw-modal .cbi-button-remove:hover { background: #ffd9d4; color: #8a1c14; }
 html[data-theme="bento"] #zmw-view .zm-tile { border-radius: 18px; border: 0; background: #f6f2ea; }
 html[data-theme="bento"] #zmw-view .zm-tile.zm-active { background: #1c1a17; color: #ffffff; border: 0; }
-html[data-theme="bento"] #zmw-view .zm-badge, html[data-theme="bento"] .zm-dock .zm-badge { border-radius: 999px; }
+html[data-theme="bento"] #zmw-view .zm-badge, html[data-theme="bento"] .zm-dock .zm-badge, html[data-theme="bento"] .zmw-modal .zm-badge { border-radius: 999px; }
 html[data-theme="bento"] #zmw-view .zm-log, html[data-theme="bento"] #zmw-view .zm-config-editor { border-radius: 24px; }
 html[data-theme="bento"] .zmw-login-card, html[data-theme="bento"] .zmw-modal, html[data-theme="bento"] .zmw-theme-menu { border: 0; border-radius: 28px; background: #ffffff; backdrop-filter: none; }
 
@@ -37151,16 +37231,16 @@ html[data-theme="minimal"] #zmw-view .zm-card { border: 0; border-top: 1px solid
 html[data-theme="minimal"] #zmw-view .zm-card:hover { box-shadow: none; }
 html[data-theme="minimal"] #zmw-view .zm-card h3 { font-weight: 400; font-size: 13px; text-transform: uppercase; letter-spacing: .12em; color: #6b6b6b; }
 html[data-theme="minimal"] #zmw-view .zm-card h3::before { display: none; }
-html[data-theme="minimal"] #zmw-view .cbi-button, html[data-theme="minimal"] .zmw-icon-btn, html[data-theme="minimal"] .zm-dock .cbi-button { border-radius: 0; border: 1px solid #111111; background: #ffffff; color: #111111; box-shadow: none; font-weight: 400; }
-html[data-theme="minimal"] #zmw-view .cbi-button:hover, html[data-theme="minimal"] .zmw-icon-btn:hover, html[data-theme="minimal"] .zm-dock .cbi-button:hover { background: #111111; color: #ffffff; transform: none; }
-html[data-theme="minimal"] #zmw-view .cbi-button-positive, html[data-theme="minimal"] #zmw-view .cbi-button-positive:hover, html[data-theme="minimal"] .zmw-btn-primary, html[data-theme="minimal"] .zm-dock .cbi-button-positive, html[data-theme="minimal"] .zm-dock .cbi-button-positive:hover { background: #111111; color: #ffffff; border: 1px solid #111111; box-shadow: none; }
-html[data-theme="minimal"] #zmw-view .cbi-button-remove, html[data-theme="minimal"] .zm-dock .cbi-button-remove { border-color: #b3261e; color: #b3261e; background: #ffffff; }
-html[data-theme="minimal"] #zmw-view .cbi-button-remove:hover, html[data-theme="minimal"] .zm-dock .cbi-button-remove:hover { background: #b3261e; color: #ffffff; }
+html[data-theme="minimal"] #zmw-view .cbi-button, html[data-theme="minimal"] .zmw-icon-btn, html[data-theme="minimal"] .zm-dock .cbi-button, html[data-theme="minimal"] .zmw-modal .cbi-button { border-radius: 0; border: 1px solid #111111; background: #ffffff; color: #111111; box-shadow: none; font-weight: 400; }
+html[data-theme="minimal"] #zmw-view .cbi-button:hover, html[data-theme="minimal"] .zmw-icon-btn:hover, html[data-theme="minimal"] .zm-dock .cbi-button:hover, html[data-theme="minimal"] .zmw-modal .cbi-button:hover { background: #111111; color: #ffffff; transform: none; }
+html[data-theme="minimal"] #zmw-view .cbi-button-positive, html[data-theme="minimal"] #zmw-view .cbi-button-positive:hover, html[data-theme="minimal"] .zmw-btn-primary, html[data-theme="minimal"] .zm-dock .cbi-button-positive, html[data-theme="minimal"] .zm-dock .cbi-button-positive:hover, html[data-theme="minimal"] .zmw-modal .cbi-button-positive, html[data-theme="minimal"] .zmw-modal .cbi-button-positive:hover { background: #111111; color: #ffffff; border: 1px solid #111111; box-shadow: none; }
+html[data-theme="minimal"] #zmw-view .cbi-button-remove, html[data-theme="minimal"] .zm-dock .cbi-button-remove, html[data-theme="minimal"] .zmw-modal .cbi-button-remove { border-color: #b3261e; color: #b3261e; background: #ffffff; }
+html[data-theme="minimal"] #zmw-view .cbi-button-remove:hover, html[data-theme="minimal"] .zm-dock .cbi-button-remove:hover, html[data-theme="minimal"] .zmw-modal .cbi-button-remove:hover { background: #b3261e; color: #ffffff; }
 html[data-theme="minimal"] #zmw-view .zm-tile { border-radius: 0; border: 1px solid #e0e0e0; background: #ffffff; font-weight: 400; }
 html[data-theme="minimal"] #zmw-view .zm-tile.zm-active { border-color: #111111; background: #ffffff; color: #111111; box-shadow: inset 0 0 0 1px #111111; }
 html[data-theme="minimal"] #zmw-view .zm-tile.zm-active::before { color: #0078e8; }
-html[data-theme="minimal"] #zmw-view .zm-badge, html[data-theme="minimal"] .zm-dock .zm-badge { padding-left: 0; font-weight: 400; }
-html[data-theme="minimal"] #zmw-view .zm-badge .zm-dot, html[data-theme="minimal"] .zm-dock .zm-badge .zm-dot { width: 6px; height: 6px; box-shadow: none; animation: none; }
+html[data-theme="minimal"] #zmw-view .zm-badge, html[data-theme="minimal"] .zm-dock .zm-badge, html[data-theme="minimal"] .zmw-modal .zm-badge { padding-left: 0; font-weight: 400; }
+html[data-theme="minimal"] #zmw-view .zm-badge .zm-dot, html[data-theme="minimal"] .zm-dock .zm-badge .zm-dot, html[data-theme="minimal"] .zmw-modal .zm-badge .zm-dot { width: 6px; height: 6px; box-shadow: none; animation: none; }
 html[data-theme="minimal"] #zmw-view .zm-log, html[data-theme="minimal"] #zmw-view .zm-config-editor { border-radius: 0; }
 html[data-theme="minimal"] .zmw-login-card, html[data-theme="minimal"] .zmw-modal, html[data-theme="minimal"] .zmw-theme-menu { border-radius: 0; border: 1px solid #111111; box-shadow: none; background: #ffffff; backdrop-filter: none; }
 html[data-theme="minimal"] .zmw-theme-opt { border-radius: 0; }
@@ -37204,18 +37284,18 @@ html[data-theme="retro"] #zmw-view .zm-card {
 html[data-theme="retro"] #zmw-view .zm-card { padding: 0 14px 14px; }
 html[data-theme="retro"] #zmw-view .zm-card h3 { margin: 3px -11px 14px; padding: 5px 8px; background: linear-gradient(90deg, #000080, #1084d0); color: #ffffff; font-size: 13px; font-weight: 700; }
 html[data-theme="retro"] #zmw-view .zm-card h3::before { display: none; }
-html[data-theme="retro"] #zmw-view .cbi-button, html[data-theme="retro"] .zmw-icon-btn, html[data-theme="retro"] .zmw-btn-primary, html[data-theme="retro"] .zm-dock .cbi-button {
+html[data-theme="retro"] #zmw-view .cbi-button, html[data-theme="retro"] .zmw-icon-btn, html[data-theme="retro"] .zmw-btn-primary, html[data-theme="retro"] .zm-dock .cbi-button, html[data-theme="retro"] .zmw-modal .cbi-button {
 	border-radius: 0; background: #c0c0c0; color: #000000; box-shadow: inset -1px -1px 0 #808080, inset 1px 1px 0 #dfdfdf;
 	border-top: 2px solid #ffffff; border-left: 2px solid #ffffff; border-right: 2px solid #000000; border-bottom: 2px solid #000000; font-weight: 400;
 }
-html[data-theme="retro"] #zmw-view .cbi-button:hover, html[data-theme="retro"] .zmw-icon-btn:hover, html[data-theme="retro"] .zm-dock .cbi-button:hover { background: #c0c0c0; transform: none; }
-html[data-theme="retro"] #zmw-view .cbi-button:active, html[data-theme="retro"] .zmw-icon-btn:active, html[data-theme="retro"] .zm-dock .cbi-button:active { border-top-color: #000000; border-left-color: #000000; border-right-color: #ffffff; border-bottom-color: #ffffff; }
-html[data-theme="retro"] #zmw-view .cbi-button-positive, html[data-theme="retro"] #zmw-view .cbi-button-positive:hover, html[data-theme="retro"] .zm-dock .cbi-button-positive, html[data-theme="retro"] .zm-dock .cbi-button-positive:hover { background: #c0c0c0; color: #000000; font-weight: 700; outline: 1px dotted #000000; outline-offset: -5px; }
-html[data-theme="retro"] #zmw-view .cbi-button-remove, html[data-theme="retro"] #zmw-view .cbi-button-remove:hover, html[data-theme="retro"] .zm-dock .cbi-button-remove, html[data-theme="retro"] .zm-dock .cbi-button-remove:hover { background: #c0c0c0; color: #a00000; }
+html[data-theme="retro"] #zmw-view .cbi-button:hover, html[data-theme="retro"] .zmw-icon-btn:hover, html[data-theme="retro"] .zm-dock .cbi-button:hover, html[data-theme="retro"] .zmw-modal .cbi-button:hover { background: #c0c0c0; transform: none; }
+html[data-theme="retro"] #zmw-view .cbi-button:active, html[data-theme="retro"] .zmw-icon-btn:active, html[data-theme="retro"] .zm-dock .cbi-button:active, html[data-theme="retro"] .zmw-modal .cbi-button:active { border-top-color: #000000; border-left-color: #000000; border-right-color: #ffffff; border-bottom-color: #ffffff; }
+html[data-theme="retro"] #zmw-view .cbi-button-positive, html[data-theme="retro"] #zmw-view .cbi-button-positive:hover, html[data-theme="retro"] .zm-dock .cbi-button-positive, html[data-theme="retro"] .zm-dock .cbi-button-positive:hover, html[data-theme="retro"] .zmw-modal .cbi-button-positive, html[data-theme="retro"] .zmw-modal .cbi-button-positive:hover { background: #c0c0c0; color: #000000; font-weight: 700; outline: 1px dotted #000000; outline-offset: -5px; }
+html[data-theme="retro"] #zmw-view .cbi-button-remove, html[data-theme="retro"] #zmw-view .cbi-button-remove:hover, html[data-theme="retro"] .zm-dock .cbi-button-remove, html[data-theme="retro"] .zm-dock .cbi-button-remove:hover, html[data-theme="retro"] .zmw-modal .cbi-button-remove, html[data-theme="retro"] .zmw-modal .cbi-button-remove:hover { background: #c0c0c0; color: #a00000; }
 html[data-theme="retro"] #zmw-view .zm-tile { border-radius: 0; background: #ffffff; border-top: 2px solid #808080; border-left: 2px solid #808080; border-right: 2px solid #ffffff; border-bottom: 2px solid #ffffff; }
 html[data-theme="retro"] #zmw-view .zm-tile.zm-active { background: #000080; color: #ffffff; }
-html[data-theme="retro"] #zmw-view .zm-badge, html[data-theme="retro"] .zm-dock .zm-badge { border-radius: 0; padding-left: 0; }
-html[data-theme="retro"] #zmw-view .zm-badge .zm-dot, html[data-theme="retro"] .zm-dock .zm-badge .zm-dot { box-shadow: none; animation: none; }
+html[data-theme="retro"] #zmw-view .zm-badge, html[data-theme="retro"] .zm-dock .zm-badge, html[data-theme="retro"] .zmw-modal .zm-badge { border-radius: 0; padding-left: 0; }
+html[data-theme="retro"] #zmw-view .zm-badge .zm-dot, html[data-theme="retro"] .zm-dock .zm-badge .zm-dot, html[data-theme="retro"] .zmw-modal .zm-badge .zm-dot { box-shadow: none; animation: none; }
 html[data-theme="retro"] #zmw-view input, html[data-theme="retro"] #zmw-view select, html[data-theme="retro"] #zmw-view textarea:not(.zm-config-editor), html[data-theme="retro"] .zmw-input {
 	border-radius: 0; background: #ffffff; border-top: 2px solid #808080; border-left: 2px solid #808080; border-right: 2px solid #ffffff; border-bottom: 2px solid #ffffff;
 }
@@ -37254,14 +37334,14 @@ html[data-theme="depth"] #zmw-view .zm-card {
 	transform: translateZ(0); transition: transform .35s cubic-bezier(.2,.8,.2,1), box-shadow .35s;
 }
 html[data-theme="depth"] #zmw-view .zm-card:hover { transform: rotateX(4deg) translateY(-4px); box-shadow: 0 1px 0 rgba(255,255,255,.1) inset, 0 14px 0 -2px #0c1426, 0 40px 60px -14px rgba(0,0,0,.85), 0 0 40px -10px rgba(0,182,255,.35); border-color: rgba(127,220,255,.4); }
-html[data-theme="depth"] #zmw-view .cbi-button, html[data-theme="depth"] .zmw-icon-btn, html[data-theme="depth"] .zm-dock .cbi-button {
+html[data-theme="depth"] #zmw-view .cbi-button, html[data-theme="depth"] .zmw-icon-btn, html[data-theme="depth"] .zm-dock .cbi-button, html[data-theme="depth"] .zmw-modal .cbi-button {
 	background: #1e2b48; border: 1px solid rgba(127,220,255,.25); color: #e8eefc;
 	box-shadow: 0 4px 0 #0c1426, 0 8px 16px -6px rgba(0,0,0,.7); transition: transform .08s, box-shadow .08s;
 }
-html[data-theme="depth"] #zmw-view .cbi-button:hover, html[data-theme="depth"] .zmw-icon-btn:hover, html[data-theme="depth"] .zm-dock .cbi-button:hover { background: #253559; transform: translateY(-1px); }
-html[data-theme="depth"] #zmw-view .cbi-button:active, html[data-theme="depth"] .zmw-icon-btn:active, html[data-theme="depth"] .zm-dock .cbi-button:active { transform: translateY(4px); box-shadow: 0 0 0 #0c1426; }
-html[data-theme="depth"] #zmw-view .cbi-button-positive, html[data-theme="depth"] #zmw-view .cbi-button-positive:hover, html[data-theme="depth"] .zmw-btn-primary, html[data-theme="depth"] .zm-dock .cbi-button-positive, html[data-theme="depth"] .zm-dock .cbi-button-positive:hover { background: linear-gradient(180deg, #33c6ff, #0090ff); color: #04111f; border-color: #0090ff; box-shadow: 0 4px 0 #005a9e, 0 10px 24px -8px rgba(0,182,255,.8); }
-html[data-theme="depth"] #zmw-view .cbi-button-remove, html[data-theme="depth"] #zmw-view .cbi-button-remove:hover, html[data-theme="depth"] .zm-dock .cbi-button-remove, html[data-theme="depth"] .zm-dock .cbi-button-remove:hover { background: linear-gradient(180deg, #ff8a7a, #e84a3a); color: #1a0503; border-color: #e84a3a; box-shadow: 0 4px 0 #8f2419; }
+html[data-theme="depth"] #zmw-view .cbi-button:hover, html[data-theme="depth"] .zmw-icon-btn:hover, html[data-theme="depth"] .zm-dock .cbi-button:hover, html[data-theme="depth"] .zmw-modal .cbi-button:hover { background: #253559; transform: translateY(-1px); }
+html[data-theme="depth"] #zmw-view .cbi-button:active, html[data-theme="depth"] .zmw-icon-btn:active, html[data-theme="depth"] .zm-dock .cbi-button:active, html[data-theme="depth"] .zmw-modal .cbi-button:active { transform: translateY(4px); box-shadow: 0 0 0 #0c1426; }
+html[data-theme="depth"] #zmw-view .cbi-button-positive, html[data-theme="depth"] #zmw-view .cbi-button-positive:hover, html[data-theme="depth"] .zmw-btn-primary, html[data-theme="depth"] .zm-dock .cbi-button-positive, html[data-theme="depth"] .zm-dock .cbi-button-positive:hover, html[data-theme="depth"] .zmw-modal .cbi-button-positive, html[data-theme="depth"] .zmw-modal .cbi-button-positive:hover { background: linear-gradient(180deg, #33c6ff, #0090ff); color: #04111f; border-color: #0090ff; box-shadow: 0 4px 0 #005a9e, 0 10px 24px -8px rgba(0,182,255,.8); }
+html[data-theme="depth"] #zmw-view .cbi-button-remove, html[data-theme="depth"] #zmw-view .cbi-button-remove:hover, html[data-theme="depth"] .zm-dock .cbi-button-remove, html[data-theme="depth"] .zm-dock .cbi-button-remove:hover, html[data-theme="depth"] .zmw-modal .cbi-button-remove, html[data-theme="depth"] .zmw-modal .cbi-button-remove:hover { background: linear-gradient(180deg, #ff8a7a, #e84a3a); color: #1a0503; border-color: #e84a3a; box-shadow: 0 4px 0 #8f2419; }
 html[data-theme="depth"] #zmw-view .zm-tile { background: #1e2b48; border: 1px solid rgba(127,220,255,.2); box-shadow: 0 4px 0 #0c1426; transition: transform .15s, box-shadow .15s; }
 html[data-theme="depth"] #zmw-view .zm-tile:hover { transform: translateY(-2px); box-shadow: 0 6px 0 #0c1426, 0 14px 24px -10px rgba(0,182,255,.5); }
 html[data-theme="depth"] #zmw-view .zm-tile.zm-active { background: linear-gradient(180deg, #33c6ff, #0090ff); color: #04111f; border-color: #0090ff; box-shadow: 0 4px 0 #005a9e; }
@@ -37326,19 +37406,19 @@ html[data-theme="micro"] .zmw-mem-bar i { background: #2d5bff; border-radius: in
 html[data-theme="micro"] #zmw-view .zm-card { background: #ffffff; border: 1px solid #e3e6ee; border-radius: 20px; box-shadow: 0 1px 2px rgba(0,0,0,.04); backdrop-filter: none; -webkit-backdrop-filter: none; color: #151a26; }
 html[data-theme="micro"] #zmw-view .zm-card:hover { border-color: #e3e6ee; }
 html[data-theme="micro"] #zmw-view .zm-card h3 { color: #151a26; } html[data-theme="micro"] #zmw-view .zm-card h3::before { background: #2d5bff; }
-html[data-theme="micro"] #zmw-view .zm-hint, html[data-theme="micro"] #zmw-view p.zm-hint, html[data-theme="micro"] #zmw-view .zm-label, html[data-theme="micro"] .zm-dock .zm-hint, html[data-theme="micro"] .zm-dock p.zm-hint { color: #5a6377; opacity: 1; }
-html[data-theme="micro"] #zmw-view a:not(.cbi-button), html[data-theme="micro"] .zm-dock a:not(.cbi-button) { color: #2d5bff; }
-html[data-theme="micro"] #zmw-view .cbi-button, html[data-theme="micro"] .zmw-icon-btn, html[data-theme="micro"] .zm-dock .cbi-button { background: #f7f8fb; color: #151a26; border: 1px solid #e3e6ee; border-radius: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
-html[data-theme="micro"] #zmw-view .cbi-button:hover, html[data-theme="micro"] .zmw-icon-btn:hover, html[data-theme="micro"] .zm-dock .cbi-button:hover { background: #eceff5; color: #151a26; }
-html[data-theme="micro"] #zmw-view .cbi-button-positive, html[data-theme="micro"] #zmw-view .cbi-button-positive:hover, html[data-theme="micro"] .zmw-btn-primary, html[data-theme="micro"] .zm-dock .cbi-button-positive, html[data-theme="micro"] .zm-dock .cbi-button-positive:hover { background: #2d5bff; color: #ffffff; border-color: #2d5bff; }
-html[data-theme="micro"] #zmw-view .cbi-button-remove, html[data-theme="micro"] #zmw-view .cbi-button-remove:hover, html[data-theme="micro"] .zm-dock .cbi-button-remove, html[data-theme="micro"] .zm-dock .cbi-button-remove:hover { background: #ffe1e1; color: #9a1f1f; border-color: #ffe1e1; }
-html[data-theme="micro"] #zmw-view .cbi-button-action, html[data-theme="micro"] #zmw-view .cbi-button-action:hover, html[data-theme="micro"] .zm-dock .cbi-button-action, html[data-theme="micro"] .zm-dock .cbi-button-action:hover { background: #e6ecff; color: #151a26; }
+html[data-theme="micro"] #zmw-view .zm-hint, html[data-theme="micro"] #zmw-view p.zm-hint, html[data-theme="micro"] #zmw-view .zm-label, html[data-theme="micro"] .zm-dock .zm-hint, html[data-theme="micro"] .zm-dock p.zm-hint, html[data-theme="micro"] .zmw-modal .zm-hint, html[data-theme="micro"] .zmw-modal p.zm-hint { color: #5a6377; opacity: 1; }
+html[data-theme="micro"] #zmw-view a:not(.cbi-button), html[data-theme="micro"] .zm-dock a:not(.cbi-button), html[data-theme="micro"] .zmw-modal a:not(.cbi-button) { color: #2d5bff; }
+html[data-theme="micro"] #zmw-view .cbi-button, html[data-theme="micro"] .zmw-icon-btn, html[data-theme="micro"] .zm-dock .cbi-button, html[data-theme="micro"] .zmw-modal .cbi-button { background: #f7f8fb; color: #151a26; border: 1px solid #e3e6ee; border-radius: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+html[data-theme="micro"] #zmw-view .cbi-button:hover, html[data-theme="micro"] .zmw-icon-btn:hover, html[data-theme="micro"] .zm-dock .cbi-button:hover, html[data-theme="micro"] .zmw-modal .cbi-button:hover { background: #eceff5; color: #151a26; }
+html[data-theme="micro"] #zmw-view .cbi-button-positive, html[data-theme="micro"] #zmw-view .cbi-button-positive:hover, html[data-theme="micro"] .zmw-btn-primary, html[data-theme="micro"] .zm-dock .cbi-button-positive, html[data-theme="micro"] .zm-dock .cbi-button-positive:hover, html[data-theme="micro"] .zmw-modal .cbi-button-positive, html[data-theme="micro"] .zmw-modal .cbi-button-positive:hover { background: #2d5bff; color: #ffffff; border-color: #2d5bff; }
+html[data-theme="micro"] #zmw-view .cbi-button-remove, html[data-theme="micro"] #zmw-view .cbi-button-remove:hover, html[data-theme="micro"] .zm-dock .cbi-button-remove, html[data-theme="micro"] .zm-dock .cbi-button-remove:hover, html[data-theme="micro"] .zmw-modal .cbi-button-remove, html[data-theme="micro"] .zmw-modal .cbi-button-remove:hover { background: #ffe1e1; color: #9a1f1f; border-color: #ffe1e1; }
+html[data-theme="micro"] #zmw-view .cbi-button-action, html[data-theme="micro"] #zmw-view .cbi-button-action:hover, html[data-theme="micro"] .zm-dock .cbi-button-action, html[data-theme="micro"] .zm-dock .cbi-button-action:hover, html[data-theme="micro"] .zmw-modal .cbi-button-action, html[data-theme="micro"] .zmw-modal .cbi-button-action:hover { background: #e6ecff; color: #151a26; }
 html[data-theme="micro"] #zmw-view .zm-tile:not(.zm-active):not(.zm-tile-off), html[data-theme="micro"] #zmw-view .zm-tile { background: #f7f8fb; color: #151a26; border: 1px solid #e3e6ee; border-radius: 14px; }
 html[data-theme="micro"] #zmw-view .zm-tile.zm-active { background: #2d5bff; color: #ffffff; border-color: #2d5bff; }
 html[data-theme="micro"] #zmw-view .zm-tile.zm-active::before { color: #ffffff; }
 html[data-theme="micro"] #zmw-view .zm-seg-item { color: #151a26; } html[data-theme="micro"] #zmw-view .zm-seg-item.zm-active { background: #2d5bff; color: #ffffff; }
 html[data-theme="micro"] #zmw-view .zm-node.zm-active { background: #e6ecff; border-color: #2d5bff; } html[data-theme="micro"] #zmw-view .zm-node.zm-active .zm-node-name, html[data-theme="micro"] #zmw-view .zm-node.zm-active .zm-node-name::before { color: #151a26; }
-html[data-theme="micro"] #zmw-view .zm-badge, html[data-theme="micro"] .zm-dock .zm-badge { border-radius: 999px; }
+html[data-theme="micro"] #zmw-view .zm-badge, html[data-theme="micro"] .zm-dock .zm-badge, html[data-theme="micro"] .zmw-modal .zm-badge { border-radius: 999px; }
 html[data-theme="micro"] #zmw-view input, html[data-theme="micro"] #zmw-view select, html[data-theme="micro"] #zmw-view textarea:not(.zm-config-editor), html[data-theme="micro"] .zmw-input { background: #f7f8fb; color: #151a26; border: 1px solid #e3e6ee; border-radius: 14px; }
 html[data-theme="micro"] #zmw-view .zm-current-banner, html[data-theme="micro"] #zmw-view .zm-refresh-banner { background: #e6ecff; color: #151a26; border-color: #2d5bff; }
 html[data-theme="micro"] #zmw-view .zm-credit-tile, html.zm-theme-dark[data-theme="micro"] #zmw-view .zm-credit-tile { background: #f7f8fb; border-color: #e3e6ee; color: #151a26; }
@@ -37349,41 +37429,41 @@ html[data-theme="micro"] .zmw-login-card, html[data-theme="micro"] .zmw-modal, h
 html[data-theme="micro"] .zmw-theme-opt { color: #151a26; } html[data-theme="micro"] .zmw-theme-opt:hover { background: #f7f8fb; }
 html[data-theme="micro"] .zmw-theme-opt.zmw-on { background: #2d5bff; color: #ffffff; } html[data-theme="micro"] .zmw-theme-opt.zmw-on .zmw-theme-mark, html[data-theme="micro"] .zmw-theme-opt.zmw-on .zmw-i { color: #ffffff; }
 html[data-theme="micro"] .zmw-theme-group { color: #5a6377; }
-html[data-theme="micro"] #zmw-view .cbi-button, html[data-theme="micro"] .zmw-icon-btn, html[data-theme="micro"] .zmw-btn-primary, html[data-theme="micro"] .zm-dock .cbi-button { transition: transform .12s, box-shadow .12s, background .2s, border-radius .25s; }
-html[data-theme="micro"] #zmw-view .cbi-button:hover, html[data-theme="micro"] .zmw-icon-btn:hover, html[data-theme="micro"] .zm-dock .cbi-button:hover { transform: scale(1.03); }
-html[data-theme="micro"] #zmw-view .cbi-button:active, html[data-theme="micro"] .zmw-icon-btn:active, html[data-theme="micro"] .zmw-btn-primary:active, html[data-theme="micro"] .zm-dock .cbi-button:active { transform: scale(.95); box-shadow: none; }
-html[data-theme="micro"] #zmw-view .cbi-button-positive:hover, html[data-theme="micro"] .zmw-btn-primary:hover, html[data-theme="micro"] .zm-dock .cbi-button-positive:hover { border-radius: 22px; box-shadow: 0 12px 24px -10px rgba(45,91,255,.7); }
+html[data-theme="micro"] #zmw-view .cbi-button, html[data-theme="micro"] .zmw-icon-btn, html[data-theme="micro"] .zmw-btn-primary, html[data-theme="micro"] .zm-dock .cbi-button, html[data-theme="micro"] .zmw-modal .cbi-button { transition: transform .12s, box-shadow .12s, background .2s, border-radius .25s; }
+html[data-theme="micro"] #zmw-view .cbi-button:hover, html[data-theme="micro"] .zmw-icon-btn:hover, html[data-theme="micro"] .zm-dock .cbi-button:hover, html[data-theme="micro"] .zmw-modal .cbi-button:hover { transform: scale(1.03); }
+html[data-theme="micro"] #zmw-view .cbi-button:active, html[data-theme="micro"] .zmw-icon-btn:active, html[data-theme="micro"] .zmw-btn-primary:active, html[data-theme="micro"] .zm-dock .cbi-button:active, html[data-theme="micro"] .zmw-modal .cbi-button:active { transform: scale(.95); box-shadow: none; }
+html[data-theme="micro"] #zmw-view .cbi-button-positive:hover, html[data-theme="micro"] .zmw-btn-primary:hover, html[data-theme="micro"] .zm-dock .cbi-button-positive:hover, html[data-theme="micro"] .zmw-modal .cbi-button-positive:hover { border-radius: 22px; box-shadow: 0 12px 24px -10px rgba(45,91,255,.7); }
 html[data-theme="micro"] #zmw-view .zm-tile { transition: transform .2s cubic-bezier(.2,.8,.2,1), box-shadow .2s; }
 html[data-theme="micro"] #zmw-view .zm-tile:hover { transform: translateY(-2px); box-shadow: 0 10px 18px -12px rgba(45,91,255,.6); }
-html[data-theme="micro"] #zmw-view .zm-badge .zm-dot, html[data-theme="micro"] .zm-dock .zm-badge .zm-dot { animation: zmw-micro-ring 2s infinite; }
+html[data-theme="micro"] #zmw-view .zm-badge .zm-dot, html[data-theme="micro"] .zm-dock .zm-badge .zm-dot, html[data-theme="micro"] .zmw-modal .zm-badge .zm-dot { animation: zmw-micro-ring 2s infinite; }
 @keyframes zmw-micro-ring { 0% { box-shadow: 0 0 0 0 rgba(30,180,110,.45); } 70% { box-shadow: 0 0 0 7px rgba(30,180,110,0); } 100% { box-shadow: 0 0 0 0 rgba(30,180,110,0); } }
 html[data-theme="micro"] .zmw-nav-item { transition: background .2s, transform .15s; }
 html[data-theme="micro"] .zmw-nav-item:active { transform: scale(.97); }
 html[data-theme="ink"] #zmw-view .zm-actions.zmw-tabs { background: #ffffff; border: 2.5px solid #0a0a0a; border-radius: 6px; box-shadow: 4px 4px 0 #0a0a0a; backdrop-filter: none; }
-html[data-theme="ink"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="ink"] .zm-dock .zmw-tabs .cbi-button { background: transparent; border: 2px solid transparent; border-radius: 4px; box-shadow: none; color: #0a0a0a; transform: none; }
-html[data-theme="ink"] #zmw-view .zmw-tabs .cbi-button:hover, html[data-theme="ink"] .zm-dock .zmw-tabs .cbi-button:hover { background: #e8f6ff; border-color: transparent; box-shadow: none; }
-html[data-theme="ink"] #zmw-view .zmw-tabs .cbi-button-positive, html[data-theme="ink"] #zmw-view .zmw-tabs .cbi-button-positive:hover, html[data-theme="ink"] .zm-dock .zmw-tabs .cbi-button-positive, html[data-theme="ink"] .zm-dock .zmw-tabs .cbi-button-positive:hover { background: #0a9cff; border-color: #0a0a0a; color: #0a0a0a; box-shadow: none; }
+html[data-theme="ink"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="ink"] .zm-dock .zmw-tabs .cbi-button, html[data-theme="ink"] .zmw-modal .zmw-tabs .cbi-button { background: transparent; border: 2px solid transparent; border-radius: 4px; box-shadow: none; color: #0a0a0a; transform: none; }
+html[data-theme="ink"] #zmw-view .zmw-tabs .cbi-button:hover, html[data-theme="ink"] .zm-dock .zmw-tabs .cbi-button:hover, html[data-theme="ink"] .zmw-modal .zmw-tabs .cbi-button:hover { background: #e8f6ff; border-color: transparent; box-shadow: none; }
+html[data-theme="ink"] #zmw-view .zmw-tabs .cbi-button-positive, html[data-theme="ink"] #zmw-view .zmw-tabs .cbi-button-positive:hover, html[data-theme="ink"] .zm-dock .zmw-tabs .cbi-button-positive, html[data-theme="ink"] .zm-dock .zmw-tabs .cbi-button-positive:hover, html[data-theme="ink"] .zmw-modal .zmw-tabs .cbi-button-positive, html[data-theme="ink"] .zmw-modal .zmw-tabs .cbi-button-positive:hover { background: #0a9cff; border-color: #0a0a0a; color: #0a0a0a; box-shadow: none; }
 html[data-theme="bento"] #zmw-view .zm-actions.zmw-tabs { background: #ffffff; border: 0; border-radius: 999px; box-shadow: none; backdrop-filter: none; }
-html[data-theme="bento"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="bento"] .zm-dock .zmw-tabs .cbi-button { background: transparent; border: 0; border-radius: 999px; color: #6f685d; box-shadow: none; }
-html[data-theme="bento"] #zmw-view .zmw-tabs .cbi-button:hover, html[data-theme="bento"] .zm-dock .zmw-tabs .cbi-button:hover { background: #f6f2ea; color: #1c1a17; }
-html[data-theme="bento"] #zmw-view .zmw-tabs .cbi-button-positive, html[data-theme="bento"] #zmw-view .zmw-tabs .cbi-button-positive:hover, html[data-theme="bento"] .zm-dock .zmw-tabs .cbi-button-positive, html[data-theme="bento"] .zm-dock .zmw-tabs .cbi-button-positive:hover { background: #1c1a17; color: #ffffff; }
+html[data-theme="bento"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="bento"] .zm-dock .zmw-tabs .cbi-button, html[data-theme="bento"] .zmw-modal .zmw-tabs .cbi-button { background: transparent; border: 0; border-radius: 999px; color: #6f685d; box-shadow: none; }
+html[data-theme="bento"] #zmw-view .zmw-tabs .cbi-button:hover, html[data-theme="bento"] .zm-dock .zmw-tabs .cbi-button:hover, html[data-theme="bento"] .zmw-modal .zmw-tabs .cbi-button:hover { background: #f6f2ea; color: #1c1a17; }
+html[data-theme="bento"] #zmw-view .zmw-tabs .cbi-button-positive, html[data-theme="bento"] #zmw-view .zmw-tabs .cbi-button-positive:hover, html[data-theme="bento"] .zm-dock .zmw-tabs .cbi-button-positive, html[data-theme="bento"] .zm-dock .zmw-tabs .cbi-button-positive:hover, html[data-theme="bento"] .zmw-modal .zmw-tabs .cbi-button-positive, html[data-theme="bento"] .zmw-modal .zmw-tabs .cbi-button-positive:hover { background: #1c1a17; color: #ffffff; }
 html[data-theme="minimal"] #zmw-view .zm-actions.zmw-tabs { background: transparent; border: 0; border-bottom: 1px solid #e0e0e0; border-radius: 0; box-shadow: none; padding: 0; gap: 24px; backdrop-filter: none; }
-html[data-theme="minimal"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="minimal"] .zm-dock .zmw-tabs .cbi-button { background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: #6b6b6b; padding: 10px 0; box-shadow: none; font-weight: 400; }
-html[data-theme="minimal"] #zmw-view .zmw-tabs .cbi-button:hover, html[data-theme="minimal"] .zm-dock .zmw-tabs .cbi-button:hover { background: transparent; color: #111111; }
-html[data-theme="minimal"] #zmw-view .zmw-tabs .cbi-button-positive, html[data-theme="minimal"] #zmw-view .zmw-tabs .cbi-button-positive:hover, html[data-theme="minimal"] .zm-dock .zmw-tabs .cbi-button-positive, html[data-theme="minimal"] .zm-dock .zmw-tabs .cbi-button-positive:hover { background: transparent; color: #111111; border-bottom-color: #111111; font-weight: 500; }
+html[data-theme="minimal"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="minimal"] .zm-dock .zmw-tabs .cbi-button, html[data-theme="minimal"] .zmw-modal .zmw-tabs .cbi-button { background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: #6b6b6b; padding: 10px 0; box-shadow: none; font-weight: 400; }
+html[data-theme="minimal"] #zmw-view .zmw-tabs .cbi-button:hover, html[data-theme="minimal"] .zm-dock .zmw-tabs .cbi-button:hover, html[data-theme="minimal"] .zmw-modal .zmw-tabs .cbi-button:hover { background: transparent; color: #111111; }
+html[data-theme="minimal"] #zmw-view .zmw-tabs .cbi-button-positive, html[data-theme="minimal"] #zmw-view .zmw-tabs .cbi-button-positive:hover, html[data-theme="minimal"] .zm-dock .zmw-tabs .cbi-button-positive, html[data-theme="minimal"] .zm-dock .zmw-tabs .cbi-button-positive:hover, html[data-theme="minimal"] .zmw-modal .zmw-tabs .cbi-button-positive, html[data-theme="minimal"] .zmw-modal .zmw-tabs .cbi-button-positive:hover { background: transparent; color: #111111; border-bottom-color: #111111; font-weight: 500; }
 html[data-theme="retro"] #zmw-view .zm-actions.zmw-tabs { background: transparent; border: 0; border-bottom: 2px solid #ffffff; border-radius: 0; box-shadow: none; padding: 0 0 0 4px; gap: 2px; align-items: flex-end; backdrop-filter: none; }
-html[data-theme="retro"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="retro"] .zm-dock .zmw-tabs .cbi-button { background: #c0c0c0; color: #000000; border-radius: 0; border-top: 2px solid #ffffff; border-left: 2px solid #ffffff; border-right: 2px solid #000000; border-bottom: 0; box-shadow: inset -1px 0 0 #808080; min-height: 30px; padding: 5px 16px; margin: 0; outline: none; font-weight: 400; }
-html[data-theme="retro"] #zmw-view .zmw-tabs .cbi-button:hover, html[data-theme="retro"] .zm-dock .zmw-tabs .cbi-button:hover { background: #c0c0c0; color: #000000; }
-html[data-theme="retro"] #zmw-view .zmw-tabs .cbi-button-positive, html[data-theme="retro"] #zmw-view .zmw-tabs .cbi-button-positive:hover, html[data-theme="retro"] .zm-dock .zmw-tabs .cbi-button-positive, html[data-theme="retro"] .zm-dock .zmw-tabs .cbi-button-positive:hover { background: #c0c0c0; color: #000000; font-weight: 700; min-height: 34px; outline: none; margin-bottom: -2px; padding-bottom: 7px; }
+html[data-theme="retro"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="retro"] .zm-dock .zmw-tabs .cbi-button, html[data-theme="retro"] .zmw-modal .zmw-tabs .cbi-button { background: #c0c0c0; color: #000000; border-radius: 0; border-top: 2px solid #ffffff; border-left: 2px solid #ffffff; border-right: 2px solid #000000; border-bottom: 0; box-shadow: inset -1px 0 0 #808080; min-height: 30px; padding: 5px 16px; margin: 0; outline: none; font-weight: 400; }
+html[data-theme="retro"] #zmw-view .zmw-tabs .cbi-button:hover, html[data-theme="retro"] .zm-dock .zmw-tabs .cbi-button:hover, html[data-theme="retro"] .zmw-modal .zmw-tabs .cbi-button:hover { background: #c0c0c0; color: #000000; }
+html[data-theme="retro"] #zmw-view .zmw-tabs .cbi-button-positive, html[data-theme="retro"] #zmw-view .zmw-tabs .cbi-button-positive:hover, html[data-theme="retro"] .zm-dock .zmw-tabs .cbi-button-positive, html[data-theme="retro"] .zm-dock .zmw-tabs .cbi-button-positive:hover, html[data-theme="retro"] .zmw-modal .zmw-tabs .cbi-button-positive, html[data-theme="retro"] .zmw-modal .zmw-tabs .cbi-button-positive:hover { background: #c0c0c0; color: #000000; font-weight: 700; min-height: 34px; outline: none; margin-bottom: -2px; padding-bottom: 7px; }
 html[data-theme="depth"] #zmw-view .zm-actions.zmw-tabs { background: #16203a; border: 1px solid rgba(127,220,255,.2); box-shadow: 0 6px 0 -2px #0c1426; }
-html[data-theme="depth"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="depth"] .zm-dock .zmw-tabs .cbi-button { background: transparent; border: 0; box-shadow: none; color: #9fb0cc; }
-html[data-theme="depth"] #zmw-view .zmw-tabs .cbi-button:hover, html[data-theme="depth"] .zm-dock .zmw-tabs .cbi-button:hover { background: rgba(127,220,255,.08); color: #e8eefc; transform: none; }
-html[data-theme="depth"] #zmw-view .zmw-tabs .cbi-button-positive, html[data-theme="depth"] #zmw-view .zmw-tabs .cbi-button-positive:hover, html[data-theme="depth"] .zm-dock .zmw-tabs .cbi-button-positive, html[data-theme="depth"] .zm-dock .zmw-tabs .cbi-button-positive:hover { background: linear-gradient(180deg, #33c6ff, #0090ff); color: #04111f; box-shadow: 0 3px 0 #005a9e; }
+html[data-theme="depth"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="depth"] .zm-dock .zmw-tabs .cbi-button, html[data-theme="depth"] .zmw-modal .zmw-tabs .cbi-button { background: transparent; border: 0; box-shadow: none; color: #9fb0cc; }
+html[data-theme="depth"] #zmw-view .zmw-tabs .cbi-button:hover, html[data-theme="depth"] .zm-dock .zmw-tabs .cbi-button:hover, html[data-theme="depth"] .zmw-modal .zmw-tabs .cbi-button:hover { background: rgba(127,220,255,.08); color: #e8eefc; transform: none; }
+html[data-theme="depth"] #zmw-view .zmw-tabs .cbi-button-positive, html[data-theme="depth"] #zmw-view .zmw-tabs .cbi-button-positive:hover, html[data-theme="depth"] .zm-dock .zmw-tabs .cbi-button-positive, html[data-theme="depth"] .zm-dock .zmw-tabs .cbi-button-positive:hover, html[data-theme="depth"] .zmw-modal .zmw-tabs .cbi-button-positive, html[data-theme="depth"] .zmw-modal .zmw-tabs .cbi-button-positive:hover { background: linear-gradient(180deg, #33c6ff, #0090ff); color: #04111f; box-shadow: 0 3px 0 #005a9e; }
 html[data-theme="micro"] #zmw-view .zm-actions.zmw-tabs { background: #ffffff; border: 1px solid #e3e6ee; border-radius: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.04); backdrop-filter: none; }
-html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button { background: transparent; border: 0; border-radius: 11px; color: #5a6377; box-shadow: none; transform: none; }
-html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button:hover, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button:hover { background: #f0f3fa; color: #151a26; transform: none; }
-html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button-positive, html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button-positive:hover, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button-positive, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button-positive:hover { background: #2d5bff; color: #ffffff; box-shadow: 0 6px 14px -8px rgba(45,91,255,.9); border-radius: 11px; }
-html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button:active, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button:active { transform: scale(.96); }
+html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button, html[data-theme="micro"] .zmw-modal .zmw-tabs .cbi-button { background: transparent; border: 0; border-radius: 11px; color: #5a6377; box-shadow: none; transform: none; }
+html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button:hover, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button:hover, html[data-theme="micro"] .zmw-modal .zmw-tabs .cbi-button:hover { background: #f0f3fa; color: #151a26; transform: none; }
+html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button-positive, html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button-positive:hover, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button-positive, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button-positive:hover, html[data-theme="micro"] .zmw-modal .zmw-tabs .cbi-button-positive, html[data-theme="micro"] .zmw-modal .zmw-tabs .cbi-button-positive:hover { background: #2d5bff; color: #ffffff; box-shadow: 0 6px 14px -8px rgba(45,91,255,.9); border-radius: 11px; }
+html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button:active, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button:active, html[data-theme="micro"] .zmw-modal .zmw-tabs .cbi-button:active { transform: scale(.96); }
 html[data-theme="retro"] #zmw-view .zm-current-banner { background: #ffffe1; border: 1px solid #000000; border-radius: 0; color: #000000; }
 html[data-theme="micro"] .zmw-icon-btn.zmw-link-kvn { background: #3C3489; color: #ffffff; border-color: #3C3489; box-shadow: 0 6px 16px -10px rgba(60,52,137,.9); }
 html[data-theme="micro"] .zmw-icon-btn.zmw-link-kvn:hover { background: #463d9c; color: #ffffff; border-color: #463d9c; box-shadow: 0 8px 20px -10px rgba(60,52,137,1); }
@@ -37421,8 +37501,8 @@ html[data-theme="ink"] #zmw-view .zm-svc.zm-svc-on .zm-svc-sub { color: #0a0a0a;
 html[data-theme="retro"] #zmw-view .zm-refresh-banner { background: #ffffe1; border: 1px solid #000000; border-radius: 0; color: #000000; box-shadow: none; }#zmw-view .zm-log-step { color: #a9b4c7; }
 #zmw-view .zm-log-step-ok { color: #4ade80; }
 #zmw-view .zm-log-step-bad { color: #fb7185; }
-#zmw-view .zm-savebar, .zm-dock .zm-savebar { background: var(--surface-solid); border: 1px solid rgba(124,92,255,.45); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); color: var(--text); }
-#zmw-view .zm-savebar-dot, .zm-dock .zm-savebar-dot { background: var(--warn-dot); box-shadow: 0 0 0 4px var(--warn-bg); }
+#zmw-view .zm-savebar, .zm-dock .zm-savebar, .zmw-modal .zm-savebar { background: var(--surface-solid); border: 1px solid rgba(124,92,255,.45); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); color: var(--text); }
+#zmw-view .zm-savebar-dot, .zm-dock .zm-savebar-dot, .zmw-modal .zm-savebar-dot { background: var(--warn-dot); box-shadow: 0 0 0 4px var(--warn-bg); }
 .zm-stopbar { font-family: var(--font); }
 html[data-theme="dark"] .zm-stopbar, html[data-theme="depth"] .zm-stopbar { background: #2a1416; color: #fecaca; border-color: rgba(248,113,113,.5); }
 #zmw-view .zm-ri-note { background: var(--grad-soft); border-color: rgba(124,92,255,.3); color: var(--text); }
@@ -37468,12 +37548,12 @@ html.zm-theme-dark .zm-find { background: var(--surface-solid, #1c2128); color: 
 #zmw-view .zm-sb-left { background: var(--bad-bg); border-color: rgba(239,68,68,.3); }
 .zm-stopbar .cbi-button.zm-stopbar-btn { padding: 10px 18px; border-radius: 12px; font-size: 14px; line-height: 1.2; box-shadow: 0 8px 20px -10px rgba(220,38,38,.8); }
 @media (min-width: 961px) {
-	html body.zmw-body .zm-dock { left: calc(var(--side-w) + (100vw - var(--side-w)) / 2); width: min(860px, calc(100vw - var(--side-w) - 48px)); }
+	html body.zmw-body .zm-dock, html body.zmw-body .zmw-modal { left: calc(var(--side-w) + (100vw - var(--side-w)) / 2); width: min(860px, calc(100vw - var(--side-w) - 48px)); }
 }
-.zm-dock .zm-savebar { background: var(--surface-solid); border: 1px solid rgba(124,92,255,.45); border-radius: var(--radius-sm); color: var(--text); box-shadow: var(--shadow-lg); }
-.zmw-body .zm-dock .zm-refresh-banner { margin: 0 !important; background: var(--surface-solid); border: 1px solid rgba(245,158,11,.5); border-radius: var(--radius-sm); color: var(--text); box-shadow: var(--shadow-lg); display: flex; align-items: center; justify-content: space-between; gap: 14px; }
-.zm-dock .zm-savebar-dot { background: var(--warn-dot); box-shadow: 0 0 0 4px var(--warn-bg); }
-.zm-dock .cbi-button { font-family: var(--font); }
+.zm-dock .zm-savebar, .zmw-modal .zm-savebar { background: var(--surface-solid); border: 1px solid rgba(124,92,255,.45); border-radius: var(--radius-sm); color: var(--text); box-shadow: var(--shadow-lg); }
+.zmw-body .zm-dock .zm-refresh-banner, .zmw-body .zmw-modal .zm-refresh-banner { margin: 0 !important; background: var(--surface-solid); border: 1px solid rgba(245,158,11,.5); border-radius: var(--radius-sm); color: var(--text); box-shadow: var(--shadow-lg); display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.zm-dock .zm-savebar-dot, .zmw-modal .zm-savebar-dot { background: var(--warn-dot); box-shadow: 0 0 0 4px var(--warn-bg); }
+.zm-dock .cbi-button, .zmw-modal .cbi-button { font-family: var(--font); }
 #zmw-view .zm-dns-item { background: var(--surface-2); border-color: var(--border); border-radius: var(--radius-sm); }
 #zmw-view .zm-dns-item.zm-dns-active { background: var(--ok-bg); border-color: rgba(16,185,129,.4); }
 #zmw-view .zm-dns-num { background: var(--grad); }
