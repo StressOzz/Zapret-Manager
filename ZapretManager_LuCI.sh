@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 2.91
+# Version: 2.92
 ZM_VERSION_EOF
 set -e
 
@@ -180,6 +180,34 @@ _tg_arch_init() {
 ZM_NL='
 '
 _zm_re() { case "$1" in *"$ZM_NL"*) return 1 ;; esac; printf '%s\n' "$1" | grep -qE -- "$2"; }
+
+# Ограничение времени команды. В части прошивок busybox собран без timeout, а ссылка /usr/bin/timeout
+# осталась — «command -v» её находит, а запуск даёт «timeout: applet not found». Поэтому проверяем делом
+# (один раз за вызов скрипта); старый busybox с синтаксисом «timeout -t» проверку тоже не проходит.
+# Нет рабочего timeout — ограничиваем сами: команда в фоне (stdin сохраняем), сторож снимает её по сроку.
+ZM_TMO=""
+_zm_tmo_ok() {
+	[ -n "$ZM_TMO" ] || { if timeout 1 true >/dev/null 2>&1; then ZM_TMO=1; else ZM_TMO=0; fi; }
+	[ "$ZM_TMO" = 1 ]
+}
+_zm_tmo() {
+	local s="$1" p w rc
+	shift
+	# timeout умеет запускать только программы; функцию оболочки ограничиваем своим сторожем
+	case "$(type "$1" 2>/dev/null)" in *function*) ;; *) if _zm_tmo_ok; then timeout "$s" "$@"; return; fi ;; esac
+	case "$s" in ''|*[!0-9]*) s=60 ;; esac
+	# фоновой команде оболочка подставляет /dev/null вместо stdin — отдаём ей наш stdin через fd 3
+	{ "$@" <&3 3<&- & } 3<&0
+	p=$!
+	( i=0
+	  while [ "$i" -lt "$s" ] && kill -0 "$p" 2>/dev/null; do sleep 1; i=$((i + 1)); done
+	  if kill -0 "$p" 2>/dev/null; then kill "$p" 2>/dev/null; sleep 1; kill -9 "$p" 2>/dev/null; fi ) >/dev/null 2>&1 </dev/null &
+	w=$!
+	wait "$p" 2>/dev/null; rc=$?
+	wait "$w" 2>/dev/null
+	case "$rc" in 137|143) rc=124 ;; esac
+	return $rc
+}
 
 esc() {
 	printf '%s' "$1" | tr -d '\000-\010\013\014\016-\037' | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g; s/\r/\\r/g' | tr '\n' ' '
@@ -8173,8 +8201,7 @@ _doh_boots_for() {
 _doh_t() {
 	local s="$1"
 	shift
-	# у старого busybox другой синтаксис timeout — тогда обходимся без него
-	if timeout 1 true >/dev/null 2>&1; then timeout "$s" "$@"; else "$@"; fi
+	_zm_tmo "$s" "$@"
 }
 
 # Адреса DoH-сервера — через Bootstrap DNS, а не через DNS роутера: тот может как раз не работать
@@ -8545,7 +8572,7 @@ STL_VPN_DEV="zm_vpn"
 
 _stl_say() { echo "==> $*"; }
 _st_onfail() { [ "$(cat /etc/zm-steer/onfail 2>/dev/null)" = drop ] && echo drop || echo direct; }
-_stl_t() { if command -v timeout >/dev/null 2>&1; then timeout "$@"; else shift; "$@"; fi; }
+_stl_t() { _zm_tmo "$@"; }
 _stl_out() { case "$1" in vpn) echo "$STL_VPN_OUT" ;; *) echo "$STL_WARP_OUT" ;; esac; }
 _stl_js() { printf '"%s"' "$(esc "$1")"; }
 _stl_ident() {
@@ -16617,8 +16644,8 @@ fk_route_check() {
 			nft get element inet "$FK_NFT" "$s" "{ $addr }" >/dev/null 2>&1 && { caught=1; how=subnet; break; }
 		done ;;
 	esac
-	if command -v timeout >/dev/null 2>&1; then tr="$(timeout 40 ucode "$FK_UC" route "$q" "$addr" "$source" 2>/dev/null)"
-	else tr="$(_fk_uc route "$q" "$addr" "$source" 2>/dev/null)"; fi
+	if _zm_tmo_ok; then tr="$(timeout 40 ucode "$FK_UC" route "$q" "$addr" "$source" 2>/dev/null)"
+	else tr="$(_zm_tmo 40 _fk_uc route "$q" "$addr" "$source" 2>/dev/null)"; fi
 	case "$tr" in
 		'{'*)
 			err="$(printf '%s' "$tr" | jsonfilter -e '@.error' 2>/dev/null)"
