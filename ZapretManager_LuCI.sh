@@ -17176,11 +17176,9 @@ do_ab_apply() {
 	ids="$(_ab_ids)"
 	_ab_say "Блокировка рекламы: $(_ab_title "$(_ab_get list pro)")$([ "$(_ab_get tif 0)" = 1 ] && echo ' + защита от фишинга')$([ "$(_ab_get doh 0)" = 1 ] && echo ' + запрет чужих DoH')"
 	avail="$(awk '/^MemAvailable:/ { print $2 }' /proc/meminfo 2>/dev/null)"
-	if [ -n "$avail" ] && [ "$avail" -lt 60000 ] 2>/dev/null; then
-		echo "ОШИБКА: свободной памяти роутера всего $((avail / 1024)) МБ — для списка нужно хотя бы 60 МБ. Выберите список поменьше или отключите защиту от фишинга"
-		_ab_put err "мало свободной памяти" errat "$(date +%s)"
-		return 1
-	fi
+if [ -n "$avail" ] && [ "$avail" -lt 60000 ]; then
+    echo "!! Свободной памяти $((avail / 1024)) МБ, продолжаем на свой риск"
+fi
 	_ab_say "Скачиваем списки"
 	now="$(date +%s)"
 	for id in $ids; do
