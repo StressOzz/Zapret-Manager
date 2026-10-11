@@ -114,6 +114,8 @@ userapi.com
 vk-apps.com
 vkcache.com
 vkclips.app
+gigabyte.com
+bambulab.com
 skillbox.pro
 tarantool.io
 vk-portal.net
@@ -624,4 +626,7 @@ nintendo-europe.com
 #################################### Хmeye
 xmeye.net
 xiongmaitech.com
+#################################### Pico
+picoxr.com
+picovr.com
 ####################################
