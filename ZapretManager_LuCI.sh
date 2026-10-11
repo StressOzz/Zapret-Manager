@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 2.93
+# Version: 2.94
 ZM_VERSION_EOF
 set -e
 
@@ -37614,9 +37614,12 @@ sed -i '/# zm-rpcd-watch$/d' /etc/crontabs/root 2>/dev/null || true
 echo '*/2 * * * * /opt/zapret-manager-luci/backend.sh zm_watch >/dev/null 2>&1 # zm-rpcd-watch' >> /etc/crontabs/root 2>/dev/null || true
 # Сторож панели запускается раз в 2 минуты — без этого cron пишет строку о каждом запуске в системный журнал.
 # Уровень 9 — только ошибки cron. Свой уровень, если его уже выставили, не трогаем.
-if [ -z "$(uci -q get system.@system[0].cronloglevel)" ]; then
-	uci -q set system.@system[0].cronloglevel='9' && uci -q commit system
-fi
+# Пусто, 5 (так в стандартном /etc/config/system OpenWrt) или 8 (умолчание busybox) — это не ваш выбор,
+# а заводское значение: при нём crond пишет «cron.err … USER root pid … cmd …» о каждом успешном запуске.
+case "$(uci -q get system.@system[0].cronloglevel)" in
+	''|5|8)
+	uci -q set system.@system[0].cronloglevel='9' && uci -q commit system ;;
+esac
 if [ -x /etc/init.d/cron ]; then
 	/etc/init.d/cron enable >/dev/null 2>&1 || true
 	/etc/init.d/cron restart >/dev/null 2>&1 || true
