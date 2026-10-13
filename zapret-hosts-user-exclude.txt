@@ -56,6 +56,7 @@ easy4ip.com
 senkuro.com
 ibyteimg.com
 duolingo.com
+duolingo.cn
 map-care.com
 gravatar.com
 battleye.com
