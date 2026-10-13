@@ -375,9 +375,9 @@ config strategy 'games_tcp'
 	list protocol 'tcp'
 	option script '--out-range=<n4
 --payload=known,unknown
---lua-desync=fake:blob=blob_stun2:repeats=8:tcp_ts=-600000:payload=known,unknown
+--lua-desync=fake:blob=blob_stun:repeats=8:tcp_ts=-600000:payload=known,unknown
 --lua-desync=fake:blob=blob_tls_clienthello_www_onetrust_com:repeats=8:tcp_ts=-600000:payload=known,unknown
---lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=blob_tls_clienthello_www_onetrust_com:repeats=8:payload=known,unknown'
+--lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=blob_stun:repeats=8:payload=known,unknown'
 
 config strategy 'games_udp'
 	option enabled '1'
@@ -386,7 +386,7 @@ config strategy 'games_udp'
 	list protocol 'udp'
 	option script '--out-range=<n4
 --payload=known,unknown
---lua-desync=fake:blob=blob_quic_initial_4pda_to:repeats=10:payload=known,unknown'
+--lua-desync=fake:blob=blob_stun:repeats=10:payload=known,unknown'
 
 config strategy 'games_udp_1'
 	option enabled '0'
@@ -649,9 +649,9 @@ config strategy 'alt11'
 	option port '80,443'
 	list filter_l3 'ipv4'
 	list protocol 'tcp'
-	option script '--lua-desync=fake:blob=blob_stun2:repeats=8:tcp_ts=-600000
---lua-desync=fake:blob=blob_tls_clienthello_www_onetrust_com:repeats=8:tcp_ts=-600000
---lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=blob_tls_clienthello_www_onetrust_com:repeats=8'
+	option script '--lua-desync=fake:blob=blob_stun:repeats=8:tcp_ts=-600000
+--lua-desync=fake:blob=blob_stun:repeats=8:tcp_ts=-600000
+--lua-desync=multisplit:pos=1:seqovl=664:seqovl_pattern=blob_stun:repeats=8'
 	list hostlist_exclude 'list_hosts_user_exclude'
 	list hostlist_exclude 'list_hosts_youtube'
 
