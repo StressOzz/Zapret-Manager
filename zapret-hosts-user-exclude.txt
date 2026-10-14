@@ -630,4 +630,36 @@ xiongmaitech.com
 #################################### Pico
 picoxr.com
 picovr.com
+#################################### Apple
+me.com
+asto.re
+itun.es
+mac.com
+apple.co
+apple.ru
+apple.com
+appsto.re
+apple.news
+shazam.com
+itunes.com
+icloud.com
+akadns.net
+appleid.com
+itunesu.com
+aaplimg.com
+edgekey.net
+mzstatic.com
+apple-dns.net
+apple-dns.com
+cdn-apple.com
+edgesuite.net
+applemusic.com
+apple-mapkit.com
+apple-studies.com
+apple-cloudkit.com
+services-apple.net
+icloud-content.com
+icloud-sandbox.com
+apple-livephotoskit.com
+axm-usercontent-apple.com
 ####################################
