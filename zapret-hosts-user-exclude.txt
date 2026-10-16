@@ -158,6 +158,7 @@ unrealtournament.com
 #################################### Steam
 s.team
 steam.tv
+dota2.com
 valve.net
 clngaa.com
 qtlglb.com
@@ -187,6 +188,7 @@ valvesoftware.com
 valvesoftware.net
 steambroadcast.com
 steamcommunity.com
+counter-strike.net
 steamusercontent.com
 gstore.val.manlaxy.com
 steam.cdn.orcon.net.nz
@@ -385,6 +387,7 @@ live.com
 lync.com
 live.net
 xbox.com
+bing.com
 skype.com
 microsoft
 fabric.io
