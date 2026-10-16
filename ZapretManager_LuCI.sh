@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 3.24
+# Version: 3.27
 ZM_VERSION_EOF
 set -e
 
@@ -104,6 +104,15 @@ if [ "$1" = zm_watch ]; then
 		[ -s "$s/strategy_test.backup" ] && return 1
 		[ -f "$d/resolv.conf.zm-bak" ] && return 1
 		[ -f "$s/tg.watch" ] && return 1
+		# российские сайты через DNS провайдера: провайдер сменил адреса DNS — их надо обновить
+		if grep -qx 'ru=isp' /opt/zapret-manager-luci/dns_net 2>/dev/null; then
+			for t in /tmp/resolv.conf.d/resolv.conf.auto /tmp/resolv.conf.auto; do
+				[ -s "$t" ] || continue
+				v="$(awk '$1 == "nameserver" && ($2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ || ($2 ~ /^[0-9A-Fa-f:]+$/ && $2 ~ /:.*:/)) && $2 !~ /^(127\.|0\.0\.0\.0$|::1$|[Ff][Ee]80:)/ && !u[$2]++ { print $2 }' "$t" | head -n 4 | tr '\n' ',' | sed 's/,$//')"
+				[ -n "$v" ] && ! grep -qxF "ispips=$v" /opt/zapret-manager-luci/dns_net 2>/dev/null && return 1
+				break
+			done
+		fi
 		# Forkozz: сторож и правки движка нужны, только если он стоит
 		{ [ -e /usr/bin/netshift ] || [ -e /usr/lib/netshift ]; } && return 1
 		# Steer: панель им управляет?
@@ -1201,6 +1210,7 @@ zm_watch() {
 	_st_vpn_watch
 	_tg_watch
 	_ab_watch
+	_dn_watch
 	return 0
 }
 
@@ -2690,8 +2700,10 @@ hosts_ai_migrate() {
 	return 0
 }
 
+# все блоки вкладки «Hosts» (их же убирает полное удаление)
+HOSTS_BLOCKS="nalog ntc instagram librusec ai_openai ai_claude ai_gemini ai_aistudio ai_grok ai_copilot ai_deepl ai_elevenlabs ai_windsurf ai_trae ai_manus ai_notion twitch telegram spotify spotifyext rutor rutracker scell roblox githubraw github tapeop finland"
 hosts_status() {
-	local blocks="nalog ntc instagram librusec ai_openai ai_claude ai_gemini ai_aistudio ai_grok ai_copilot ai_deepl ai_elevenlabs ai_windsurf ai_trae ai_manus ai_notion twitch telegram spotify spotifyext rutor rutracker scell roblox githubraw github tapeop finland" b
+	local blocks="$HOSTS_BLOCKS" b
 	local geohide=""
 	if grep -q '^### dns.malw.link: hosts file' "$HOSTS_FILE" 2>/dev/null; then geohide="malw"
 	elif grep -q '^### geohide.ru: hosts file' "$HOSTS_FILE" 2>/dev/null; then
@@ -3173,7 +3185,7 @@ _zm_junk_raw() {
 	foreign="$(_st_blocker 2>/dev/null)"
 	_zm_busy_job >/dev/null 2>&1 && busy=1
 	for f in /tmp/zm-run.* /tmp/zm-wait.* /tmp/zm-quiet.* /tmp/zm-pkg.* /tmp/ytb-ct.* /tmp/ytb-diag.* /tmp/ytb-ins.* /tmp/ytb-dl /tmp/zm-zash /tmp/netshift-sbext.* \
-		/tmp/mihomo.gz /tmp/zashboard.zip /tmp/zashboard /tmp/metacubexd.tgz /tmp/metacubexd /tmp/tg-ws-proxy.ipk /tmp/tg-ws-proxy.apk /tmp/zm_uninstall_panel.sh \
+		/tmp/mihomo.gz /tmp/zashboard.zip /tmp/zashboard /tmp/metacubexd.tgz /tmp/metacubexd /tmp/tg-ws-proxy.ipk /tmp/tg-ws-proxy.apk /tmp/zm_uninstall_panel.sh /tmp/zm-backup-*.tar.gz \
 		"$JOBS_DIR"/install_tmp "$JOBS_DIR"/install_z2_tmp "$JOBS_DIR"/flowseal.zip "$JOBS_DIR"/flowseal_src "$JOBS_DIR"/tg-ws-proxy-rs.tar.gz \
 		"$JOBS_DIR"/netshift-src "$JOBS_DIR"/forkop-src "$JOBS_DIR"/forkop-import "$JOBS_DIR"/zm_head.* "$JOBS_DIR"/steer-list.* "$JOBS_DIR"/tgws_install.* \
 		"$JOBS_DIR"/geohide_hosts.tmp "$JOBS_DIR"/cleanup.* "$ST_RUN"/*.src "$ST_RUN"/cat.flat \
@@ -3383,13 +3395,15 @@ zm_cleanup() {
 # расписание, а сторож за пару минут снова включает блокировку рекламы. «wipe» — удалить всё, как раньше.
 system_uninstall_panel() {
 	local script="/tmp/zm_uninstall_panel.sh" j
-	if j="$(_zm_busy_job)"; then
+	# ZM_PG_SELF — последний шаг полного удаления: его операция ещё идёт, это не помеха
+	if [ -z "$ZM_PG_SELF" ] && j="$(_zm_busy_job)"; then
 		printf '{"error":"%s"}\n' "$(esc "идёт операция «$j» — дождитесь её окончания и удалите панель")"
 		return 1
 	fi
 	cat > "$script" << 'ZM_UNINSTALL_EOF'
 sleep 1
 /opt/zapret-manager-luci/backend.sh redbtn_panel_gone >/dev/null 2>&1
+/opt/zapret-manager-luci/backend.sh dns_net_gone >/dev/null 2>&1
 if [ -s /tmp/zapret-manager-luci/resolv.conf.zm-bak ]; then
 	if [ -e /tmp/resolv.conf ]; then cat /tmp/zapret-manager-luci/resolv.conf.zm-bak > /tmp/resolv.conf 2>/dev/null || true
 	else cat /tmp/zapret-manager-luci/resolv.conf.zm-bak > /etc/resolv.conf 2>/dev/null || true; fi
@@ -3399,6 +3413,7 @@ for zm_d in $(sed -n 's/^conf-dir=\([^,]*\).*/\1/p' /var/etc/dnsmasq.conf.* 2>/d
 	if [ -f "$zm_d/zm-adblock-stats.conf" ]; then rm -f "$zm_d/zm-adblock-stats.conf"; zm_dns=1; fi
 done
 nft delete table inet zm_adblock_free >/dev/null 2>&1
+nft delete table inet zm_rb_ztest >/dev/null 2>&1
 [ -s /var/run/zm-adblock-free.pid ] && kill "$(cat /var/run/zm-adblock-free.pid)" 2>/dev/null
 rm -f /var/run/zm-adblock-free.pid /var/etc/zm-adblock-free.conf /var/etc/zm-adblock-free.conf.macs
 [ -n "$zm_dns" ] && /etc/init.d/dnsmasq restart >/dev/null 2>&1
@@ -3427,6 +3442,8 @@ ZM_PATHS="$ZM_OPT /usr/libexec/rpcd/zapret-manager \
 	/www/luci-static/resources/view/bytetube \
 	/tmp/zapret-manager-luci /tmp/luci-indexcache* /tmp/luci-modulecache/* \
 	/tmp/zm-run.* /tmp/zm-wait.* /tmp/zm-quiet.* /tmp/zm-pkg.* /tmp/zm-rpc.* /tmp/zm_update_install.log \
+	/tmp/zm-rpcd-plugin.stamp /tmp/zm-rpcd-slow /tmp/zm-zash /tmp/zm-doh-failover.* /tmp/zm-doh.* /tmp/zm-dohfo.* \
+	/tmp/zm-adblock-stats /tmp/zm-fk-* /tmp/zm-backup-*.tar.gz /var/run/dnsmasq/zm-queries.log \
 	/usr/lib/zapret-manager* /etc/zapret_manager_expert_mode* /etc/hosts.zmtmp /etc/hosts.zmdrop \
 	/www/zm /www/zm-webui.html /etc/zm-warp-own.conf /usr/bin/zmw"
 zm_try=0
@@ -3452,9 +3469,238 @@ uci -q delete uhttpd.zmweb && uci -q commit uhttpd
 rm -f "$0"
 ZM_UNINSTALL_EOF
 	[ "$1" = wipe ] || sed -i '1i ZM_SAVE=1' "$script"
+	# после полного удаления странице нужно успеть дочитать журнал операции
+	[ -n "$ZM_PG_SELF" ] && sed -i '1s/^sleep 1$/sleep 8/' "$script"
 	chmod 0755 "$script"
 	( sh "$script" >/dev/null 2>&1 & )
 	printf '{"ok":true,"kept":%s}\n' "$([ "$1" = wipe ] && echo false || echo true)"
+}
+
+# ---------- Полное удаление: всё, что ставила панель, вместе с хвостами ----------
+# Перечень компонентов: что ставила панель и что от каждого может остаться. Проверка (purge_scan) смотрит, что
+# из этого есть на роутере; удаление (purge_run) по каждому выбранному: сначала обычное удаление компонента
+# (то же, что кнопка «Удалить» на его странице), затем по перечню добивает всё, что осталось, — даже если
+# сам компонент давно удалён. Сеть, Wi-Fi, пакеты OpenWrt и свои записи человека не трогаются: удаляется
+# только то, что есть в перечне. Сама панель — последней.
+PG_ORDER="steer forkozz mixomo awg bytetube zapret zapret2 tgproxy stgws terminal adblock doh dnsnet hosts panel"
+_pg_title() {
+	case "$1" in
+		zapret) echo "Zapret" ;; zapret2) echo "Zapret2" ;; bytetube) echo "ByeTube (ByeDPI, hev-socks5-tunnel)" ;;
+		steer) echo "Steer (ядро steer, WARP, подписки)" ;; forkozz) echo "Forkozz (netshift, sing-box)" ;;
+		mixomo) echo "Mixomo (Mihomo, MagiTrickle)" ;; awg) echo "AmneziaWG" ;;
+		tgproxy) echo "TG WS Proxy (MTProto, SOCKS5, Rust)" ;; stgws) echo "sTGWS" ;; terminal) echo "Терминал (ttyd)" ;;
+		adblock) echo "Блокировка рекламы" ;; doh) echo "DNS over HTTPS (https-dns-proxy)" ;;
+		dnsnet) echo "Браузеры и российские сайты (записи DNS)" ;; hosts) echo "Записи панели в hosts" ;;
+		panel) echo "Zapret Manager (LuCI, Web UI, настройки, zms и zmw)" ;;
+	esac
+}
+_pg_group() {
+	case "$1" in
+		zapret|zapret2|bytetube) echo block ;; steer|forkozz|mixomo|awg|tgproxy|stgws) echo vpn ;;
+		adblock|doh|dnsnet|hosts) echo dns ;; terminal) echo tools ;; panel) echo panel ;;
+	esac
+}
+# стоит ли компонент сейчас (рабочая установка, а не хвосты)
+_pg_inst() {
+	case "$1" in
+		zapret) [ -f /etc/init.d/zapret ] || _pg_pkg zapret ;;
+		zapret2) [ -f /etc/init.d/zapret2 ] || _pg_pkg zapret2 ;;
+		bytetube) [ -x /usr/bin/bytetube ] ;;
+		steer) [ -s "$ST_OWNED" ] ;;
+		forkozz) _fk_present ;;
+		mixomo) _mx_installed || [ -x /etc/init.d/magitrickle ] ;;
+		awg) _awg_installed ;;
+		tgproxy) [ -x /etc/init.d/tg-ws-proxy ] || [ -x "$TG_BIN_GO" ] || [ -x "$TG_BIN_RS" ] ;;
+		stgws) [ -x /etc/init.d/tgws ] || _pg_pkg tgws ;;
+		terminal) _term_installed ;;
+		adblock) _ab_on ;;
+		doh) _doh_pkg ;;
+		dnsnet) [ -s "$DN_OWN" ] ;;
+		hosts) _pg_hosts_has ;;
+		panel) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+# Что может остаться: путь (можно со *), pkg:пакет, nft:таблица, cron:метка (# zm-…), cronrx:слово, uci:настройка,
+# dnsconf:файл в папках dnsmasq. Только фиксированные строки отсюда — ничего не собирается из ввода.
+_pg_trace() {
+	case "$1" in
+		zapret) echo "pkg:luci-i18n-zapret-ru pkg:luci-app-zapret pkg:zapret /opt/zapret /etc/config/zapret /etc/config/zapret-opkg /etc/init.d/zapret /etc/rc.d/*[0-9]zapret /etc/firewall.zapret /etc/hotplug.d/*/*zapret nft:zapret cron:zm-autobest $ZO_RKN_FLAG $ZO_USER_FLAG $ZA_MODE_FILE $ZA_LAST $ZA_TS $ZA_TIME_FILE $TEST_BACKUP $ZC_FILE $ZC_BAK $ZC_AFTER $YV_OFF_FLAG $DV_OFF_FLAG $TEST_DIR $TEST_CUSTOM_FILE" ;;
+		zapret2) echo "pkg:luci-i18n-zapret2-ru pkg:luci-app-zapret2 pkg:zapret2 /opt/zapret2 /etc/config/zapret2 /etc/config/zapret2-opkg /etc/init.d/zapret2 /etc/rc.d/*zapret2 /etc/hotplug.d/*/*zapret2 nft:zapret2 cronrx:zapret2" ;;
+		bytetube)
+			echo "pkg:byedpi /usr/bin/bytetube /etc/config/bytetube /etc/init.d/bytetube /etc/rc.d/*bytetube /usr/libexec/bytetube /usr/share/bytetube /etc/bytetube /etc/hotplug.d/firewall/90-bytetube /usr/share/nftables.d/chain-pre/forward/50-bytetube.nft /var/etc/bytetube /var/run/bytetube.started /tmp/bytetube-test /lib/upgrade/keep.d/bytetube /tmp/dhcp.ytb.bak dnsconf:bytetube.conf cronrx:bytetube"
+			# hev-socks5-tunnel нужен и Mixomo — пока Mixomo стоит, пакет его
+			_mx_installed || echo "pkg:hev-socks5-tunnel /etc/config/hev-socks5-tunnel /etc/init.d/hev-socks5-tunnel /etc/hev-socks5-tunnel" ;;
+		steer) echo "$ST_DIR $ST_TGWS_WARP $ST_WARP_OWN_KEEP cron:zm-steer cron:zm-wfix cron:zm-subupd cron:zm-subping" ;;
+		forkozz)
+			echo "pkg:luci-i18n-netshift-ru pkg:luci-app-netshift pkg:netshift /usr/bin/netshift /usr/lib/netshift /etc/netshift /etc/init.d/netshift /etc/rc.d/*netshift /etc/config/netshift /etc/config/netshift-opkg $FK_SAVE $FK_EXT_FAIL $ZM_STATE_DIR/fk.zash.fail $ZM_STATE_DIR/fk.watch $FK_SERIAL_DIR /tmp/zm-fk-* /tmp/netshift-sbext.* nft:$FK_NFT nft:ForkopTable nft:ForkopTableDpiGuard cronrx:netshift"
+			echo "pkg:luci-app-forkop pkg:forkop /usr/lib/forkop /usr/share/forkop /etc/forkop /usr/bin/forkop /etc/init.d/forkop /etc/config/forkop"
+			# sing-box ставил Forkozz; нужен другой программе (podkop, passwall…) — остаётся
+			[ -z "$(_fk_sb_users)" ] && echo "pkg:sing-box-tiny pkg:sing-box pkg:sing-box-extended /usr/bin/sing-box /etc/init.d/sing-box /etc/sing-box /etc/config/sing-box" ;;
+		mixomo) echo "$MIHOMO_BIN $MIHOMO_DIR /tmp/mihomo* /tmp/zashboard /tmp/zashboard.zip /tmp/metacubexd /tmp/metacubexd.tgz /etc/init.d/mihomo /etc/rc.d/*mihomo pkg:magitrickle /etc/magitrickle /etc/init.d/magitrickle /etc/config/magitrickle nft:magitrickle uci:network.Mihomo uci:firewall.Mihomo uci:firewall.lan_to_Mihomo cronrx:mihomo cronrx:magitrickle" ;;
+		awg) echo "pkg:luci-i18n-amneziawg-ru pkg:luci-app-amneziawg pkg:luci-proto-amneziawg pkg:amneziawg-tools pkg:kmod-amneziawg $AWG_DIR /usr/bin/awg /usr/bin/awg-quick /lib/netifd/proto/amneziawg.sh" ;;
+		tgproxy) echo "pkg:tg-ws-proxy /usr/bin/tg-ws-proxy /etc/init.d/tg-ws-proxy /etc/tg-ws-proxy /etc/tg-ws-proxy.conf /etc/config/tg-ws-proxy $TG_BIN_GO $TG_BIN_GO.new $TG_INIT_GO $TG_BIN_RS $TG_INIT_RS $TG_SECRET_RS_FILE $TG_VER_GO_FILE $TG_VER_RS_FILE /usr/bin/tg-ws-proxy-go.ver /usr/bin/tg-ws-proxy-rs.ver /etc/config/tg-ws-proxy-rs $TG_WATCH_FLAG /tmp/tg-ws-proxy.ipk /tmp/tg-ws-proxy.apk /etc/rc.d/*tg-ws-proxy* cron:zm-tg-auto cronrx:tg-ws-proxy" ;;
+		stgws) echo "pkg:tgws /etc/init.d/tgws /usr/sbin/tgws /usr/sbin/stgws /etc/config/tgws /etc/rc.d/*tgws* /var/lib/tgws /var/lib/stgws nft:tgws nft:stgws cronrx:tgws" ;;
+		terminal) echo "pkg:luci-i18n-ttyd-ru pkg:luci-app-ttyd pkg:ttyd /usr/bin/ttyd /etc/config/ttyd /etc/init.d/ttyd /etc/rc.d/*ttyd" ;;
+		adblock) echo "$AB_DIR $AB_STATS_DIR $AB_STATS_LOG dnsconf:zm-adblock.conf dnsconf:zm-adblock-stats.conf nft:zm_adblock_free /var/run/zm-adblock-free.pid /var/etc/zm-adblock-free.conf /var/etc/zm-adblock-free.conf.macs cron:zm-adblock cron:zm-abstats" ;;
+		doh) echo "pkg:luci-i18n-https-dns-proxy-ru pkg:luci-app-https-dns-proxy pkg:https-dns-proxy /etc/config/https-dns-proxy /etc/init.d/https-dns-proxy /etc/rc.d/*https-dns-proxy /etc/config/https-dns-proxy-opkg /etc/config/https-dns-proxy.apk-new /etc/config/https-dns-proxy.zm-prev $DOH_OFF_FLAG $DOH_FORCE_MODE_FILE $DOH_BOOT_FILE $DOH_FO_FILE $DOH_OWN_FILE $DOH_FO_STATE $DOH_FO_EVENTS /tmp/zm-doh-failover.lock cron:zm-dohwatch" ;;
+		dnsnet) echo "$DN_FILE $DN_OWN" ;;
+		panel) echo "/opt/zapret-manager-luci /www/zm /www/zm-webui.html /usr/libexec/rpcd/zapret-manager /www/luci-static/resources/view/zapret-manager /usr/share/zm-redbtn /usr/bin/zmw /usr/bin/zms uci:uhttpd.zmweb cronrx:/opt/zapret-manager-luci/backend.sh" ;;
+	esac
+}
+# hosts: блоки панели (вкладка «Hosts») и hosts, заменённый целиком на GeoHide или dns.malw.link
+_pg_hosts_geo() { grep -qE '^### (geohide\.ru|dns\.malw\.link): hosts file' "$HOSTS_FILE" 2>/dev/null; }
+_pg_hosts_lines() { local b; for b in $HOSTS_BLOCKS; do _hosts_block "$b"; done; }
+_pg_hosts_has() {
+	_pg_hosts_geo && return 0
+	_pg_hosts_lines | awk -v hf="$HOSTS_FILE" 'function n(s) { gsub(/\r/, "", s); gsub(/[ \t]+/, " ", s); sub(/^ /, "", s); sub(/ $/, "", s); return s }
+		BEGIN { while ((getline l < hf) > 0) have[n(l)] = 1; close(hf) }
+		{ k = n($0); if (k != "" && k !~ /^#/ && (k in have)) { f = 1; exit } } END { exit !f }'
+}
+# найденное по перечню — по строке на каждую находку
+_pg_found() {
+	local t f d
+	for t in $(_pg_trace "$1"); do
+		case "$t" in
+			pkg:*) _pg_pkg "${t#pkg:}" && echo "пакет ${t#pkg:}" ;;
+			nft:*) nft list table inet "${t#nft:}" >/dev/null 2>&1 && echo "правила nft ${t#nft:}" ;;
+			cron:*) grep -qF "# ${t#cron:}" "$CRON_FILE" 2>/dev/null && echo "задания расписания (# ${t#cron:})" ;;
+			cronrx:*) grep -qF "${t#cronrx:}" "$CRON_FILE" 2>/dev/null && echo "задания расписания (${t#cronrx:})" ;;
+			uci:*) uci -q get "${t#uci:}" >/dev/null 2>&1 && echo "настройка ${t#uci:}" ;;
+			dnsconf:*) for d in $(dnsmasq_confdirs) /tmp/dnsmasq.d; do [ -e "$d/${t#dnsconf:}" ] && { echo "$d/${t#dnsconf:}"; break; }; done ;;
+			/*) for f in $t; do { [ -e "$f" ] || [ -L "$f" ]; } && echo "$f"; done ;;
+		esac
+	done 2>/dev/null
+	[ "$1" = hosts ] && _pg_hosts_has && { _pg_hosts_geo && echo "hosts заменён на GeoHide / dns.malw.link" || echo "строки блоков панели в /etc/hosts"; }
+	return 0
+}
+# установленные пакеты — один раз на всю проверку, а не opkg на каждый пакет
+_pg_pkg() {
+	[ -n "$PG_PKGLIST" ] || { _pkg_is_installed "$1"; return; }
+	grep -qxF "$1" "$PG_PKGLIST" 2>/dev/null
+}
+purge_scan() {
+	local id out="" sep="" st n items f
+	mkdir -p "$JOBS_DIR"
+	PG_PKGLIST="$JOBS_DIR/pg.pkgs.$$"
+	if [ -f /lib/apk/db/installed ]; then sed -n 's/^P://p' /lib/apk/db/installed
+	elif [ -f /usr/lib/opkg/status ]; then sed -n 's/^Package: //p' /usr/lib/opkg/status
+	else opkg list-installed 2>/dev/null | cut -d' ' -f1; fi > "$PG_PKGLIST"
+	for id in $PG_ORDER; do
+		f="$JOBS_DIR/pg.$id.$$"
+		_pg_found "$id" | sort -u > "$f"
+		n="$(grep -c . "$f")"
+		if _pg_inst "$id"; then st=installed; elif [ "$n" -gt 0 ]; then st=tails; else st=clean; fi
+		items="$(head -n 8 "$f" | awk '{ gsub(/["\\]/, ""); printf "%s\"%s\"", (NR > 1 ? "," : ""), $0 }')"
+		rm -f "$f"
+		out="$out$sep{\"id\":\"$id\",\"title\":\"$(esc "$(_pg_title "$id")")\",\"group\":\"$(_pg_group "$id")\",\"state\":\"$st\",\"n\":$n,\"items\":[$items]}"
+		sep=","
+	done
+	rm -f "$PG_PKGLIST"; PG_PKGLIST=""
+	printf '{"items":[%s],"busy":"%s"}\n' "$out" "$(esc "$(_zm_busy_job)")"
+}
+# добить по перечню всё, что осталось после обычного удаления
+_pg_sweep() {
+	local t f d n=0 cfg
+	for t in $(_pg_trace "$1"); do
+		case "$t" in
+			pkg:*) _pkg_is_installed "${t#pkg:}" && { ZM_PKG_QUIET=1 _zm_pkg_purge "${t#pkg:}" >/dev/null 2>&1; n=$((n + 1)); } ;;
+			nft:*) nft list table inet "${t#nft:}" >/dev/null 2>&1 && { nft delete table inet "${t#nft:}" >/dev/null 2>&1; n=$((n + 1)); } ;;
+			cron:*) grep -qF "# ${t#cron:}" "$CRON_FILE" 2>/dev/null && { grep -vF "# ${t#cron:}" "$CRON_FILE" > "$CRON_FILE.zm"; cat "$CRON_FILE.zm" > "$CRON_FILE"; rm -f "$CRON_FILE.zm"; PG_CRON=1; n=$((n + 1)); } ;;
+			cronrx:*) grep -qF "${t#cronrx:}" "$CRON_FILE" 2>/dev/null && { grep -vF "${t#cronrx:}" "$CRON_FILE" > "$CRON_FILE.zm"; cat "$CRON_FILE.zm" > "$CRON_FILE"; rm -f "$CRON_FILE.zm"; PG_CRON=1; n=$((n + 1)); } ;;
+			uci:*) uci -q get "${t#uci:}" >/dev/null 2>&1 && { uci -q delete "${t#uci:}"; cfg="${t#uci:}"; uci -q commit "${cfg%%.*}"; n=$((n + 1)); } ;;
+			dnsconf:*) for d in $(dnsmasq_confdirs) /tmp/dnsmasq.d; do [ -e "$d/${t#dnsconf:}" ] && { rm -f "$d/${t#dnsconf:}"; PG_DNS=1; n=$((n + 1)); }; done ;;
+			/*) for f in $t; do { [ -e "$f" ] || [ -L "$f" ]; } || continue; case "$f" in /|/etc|/usr|/opt|/tmp|/www|/var|/root) continue ;; esac; rm -rf "$f" 2>/dev/null; n=$((n + 1)); done ;;
+		esac
+	done 2>/dev/null
+	PG_SWEPT="$n"
+}
+# обычное удаление компонента — то же, что кнопка «Удалить» на его странице. Проверку интернета после каждого
+# не делаем: она одна, в конце
+_pg_remove() {
+	_zm_after_remove() { :; }
+	# что не убрало обычное удаление, добивается следом по перечню — поэтому без «ОШИБКА» и совета перезагрузиться
+	_zm_rm_done() {
+		if [ "$1" = 0 ]; then echo "==> Готово: $2 удалён полностью, остатков нет"
+		else echo "   · $2: после обычного удаления кое-что осталось — сейчас добьём по списку"; fi
+		return 0
+	}
+	case "$1" in
+		zapret) do_remove_zapret ;;
+		zapret2) do_remove_zapret2 ;;
+		bytetube) do_bytetube_purge ;;
+		steer) do_steer_remove ;;
+		forkozz) do_fk_remove "tun=delete;sb=remove"; _fk_legacy && _fk_legacy_remove remove ;;
+		mixomo) do_mixomo_remove ;;
+		awg) ZM_NO_NETCHECK=1 do_awg_remove all ;;
+		tgproxy) do_tg_remove_mtproto; do_tg_remove_socks5; do_tg_remove_rust ;;
+		stgws) do_tgws_remove ;;
+		terminal) do_term_remove ;;
+		adblock) adblock_action off >/dev/null 2>&1; rm -rf "$AB_DIR"; rm -f "$JOBS_DIR"/adblock.*; echo "   ✓ Блокировка рекламы выключена, списки, белый список и статистика удалены" ;;
+		doh) do_doh_remove ;;
+		dnsnet) dns_net_gone; echo "   ✓ Записи «Браузеры и российские сайты» убраны из настроек DNS" ;;
+		hosts)
+			if _pg_hosts_geo; then
+				printf '%s\n' "127.0.0.1	localhost" "" "::1	localhost ip6-localhost ip6-loopback" "ff02::1 ip6-allnodes" "ff02::2 ip6-allrouters" > "$HOSTS_FILE"
+				echo "   ✓ hosts, заменённый на GeoHide / dns.malw.link, возвращён к стандартному"
+			else
+				_pg_hosts_lines | _hosts_drop_lines
+				echo "   ✓ Строки блоков панели убраны из hosts, свои записи остались"
+			fi
+			PG_DNS=1 ;;
+	esac
+}
+do_purge() {
+	local ids="$1" id n=0 total=0 rc=0 left panel=""
+	for id in $PG_ORDER; do case ",$ids," in *",$id,"*) [ "$id" = panel ] && panel=1 || total=$((total + 1)) ;; esac; done
+	_rb_say "Полное удаление: выбрано $total$([ -n "$panel" ] && echo " и сама панель")"
+	PG_CRON=""; PG_DNS=""
+	for id in $PG_ORDER; do
+		case ",$ids," in *",$id,"*) ;; *) continue ;; esac
+		[ "$id" = panel ] && continue
+		n=$((n + 1))
+		echo ""
+		_rb_say "[$n/$total] $(_pg_title "$id")"
+		( _pg_remove "$id" ) 2>&1
+		_pg_sweep "$id"
+		[ "${PG_SWEPT:-0}" -gt 0 ] && echo "   ✓ Добито оставшихся хвостов: $PG_SWEPT"
+		left="$(_pg_found "$id" | sort -u)"
+		if [ -n "$left" ]; then
+			rc=1
+			echo "!! Осталось:"; printf '%s\n' "$left" | head -n 8 | sed 's/^/   · /'
+		else
+			echo "   ✓ $(_pg_title "$id") — ничего не осталось"
+		fi
+	done
+	echo ""
+	[ -n "$PG_CRON" ] && /etc/init.d/cron restart >/dev/null 2>&1
+	if [ "$total" -gt 0 ]; then
+		/etc/init.d/firewall reload >/dev/null 2>&1
+		/etc/init.d/dnsmasq restart >/dev/null 2>&1
+		rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null
+		_zm_net_recover || rc=1
+	fi
+	if [ -n "$panel" ]; then
+		_rb_say "Удаляем саму панель Zapret Manager — через несколько секунд страница перестанет отвечать"
+		rm -rf /usr/bin/zms /usr/share/zm-redbtn
+		ZM_PG_SELF=1 system_uninstall_panel wipe >/dev/null 2>&1
+		echo "==> Готово: всё выбранное удалено, панель удаляется"
+		return 0
+	fi
+	if [ "$rc" = 0 ]; then echo "==> Готово: всё выбранное удалено полностью, хвостов не осталось"
+	else echo "!! Готово, но кое-что осталось — список выше. Перезагрузите роутер и запустите полное удаление ещё раз"; fi
+	return "$rc"
+}
+purge_run() {
+	local v="$1" id ids="" j
+	set -f
+	for id in $(printf '%s' "$v" | tr -c 'a-z0-9,' ' ' | tr ',' ' '); do
+		case " $PG_ORDER " in *" $id "*) case ",$ids," in *",$id,"*) ;; *) ids="$ids${ids:+,}$id" ;; esac ;; esac
+	done
+	set +f
+	[ -n "$ids" ] || { echo '{"error":"ничего не выбрано"}'; return 1; }
+	if j="$(_zm_busy_job)"; then printf '{"error":"%s"}\n' "$(esc "идёт операция «$j» — дождитесь её окончания")"; return 1; fi
+	job_start purge do_purge "$ids"
 }
 
 # ---- Зеркала OpenWrt -----------------------------------------------------------------------------
@@ -5438,10 +5684,25 @@ _zt_tz() {
 	esac
 }
 
+# Серверы точного времени. «Стандартные» — pool.ntp.org: роутер находит их через DNS, и если DNS не работает
+# (например, сервер DoH не отвечает), время не синхронизируется — а без точного времени не открываются ни DoH,
+# ни HTTPS. «По IP» — ВНИИФТРИ, Cloudflare и Google по адресам: синхронизация работает и без DNS.
+ZT_NTP_STD="0.openwrt.pool.ntp.org 1.openwrt.pool.ntp.org 2.openwrt.pool.ntp.org 3.openwrt.pool.ntp.org"
+ZT_NTP_IP="89.109.251.21 89.109.251.22 162.159.200.1 162.159.200.123 216.239.35.0 216.239.35.4"
+_zt_ntp_list() { uci -q get system.ntp.server 2>/dev/null | tr -s ' \t' '  ' | sed 's/^ //; s/ $//'; }
+_zt_ntp_preset() {
+	local l
+	l="$(_zt_ntp_list)"
+	[ -n "$l" ] || { echo none; return 0; }
+	[ "$l" = "$ZT_NTP_IP" ] && { echo ip; return 0; }
+	printf '%s\n' $l | grep -qv 'pool\.ntp\.org$' && echo own || echo std
+}
+
 _zt_json() {
-	printf '"time":%s,"time_text":"%s","zone":"%s","utc_offset":"%s","ntp":%s' \
+	printf '"time":%s,"time_text":"%s","zone":"%s","utc_offset":"%s","ntp":%s,"ntp_preset":"%s","ntp_servers":"%s","dnsm":%s' \
 		"$(date +%s)" "$(date '+%d.%m.%Y %H:%M:%S')" "$(esc "$(uci -q get system.@system[0].zonename)")" "$(date +%z)" \
-		"$([ "$(uci -q get system.ntp.enabled)" = 0 ] && echo false || echo true)"
+		"$([ "$(uci -q get system.ntp.enabled)" = 0 ] && echo false || echo true)" \
+		"$(_zt_ntp_preset)" "$(esc "$(_zt_ntp_list)")" "$(_dnsm_present && echo true || echo false)"
 }
 
 # Часовой пояс по месту роутера: спрашиваем несколько независимых сервисов геолокации параллельно
@@ -5499,7 +5760,8 @@ _zt_sync() {
 	local p d i t n prev=""
 	ZT_SYNC=""
 	if command -v ntpd >/dev/null 2>&1; then
-		ntpd -n -q -p 0.openwrt.pool.ntp.org -p 1.openwrt.pool.ntp.org -p time.cloudflare.com -p ntp1.vniiftri.ru >/dev/null 2>&1 &
+		# два сервера по IP — на случай, если DNS на роутере сейчас не отвечает
+		ntpd -n -q -p 0.openwrt.pool.ntp.org -p 1.openwrt.pool.ntp.org -p time.cloudflare.com -p ntp1.vniiftri.ru -p 162.159.200.1 -p 89.109.251.21 >/dev/null 2>&1 &
 		p=$!
 		( sleep 7; kill "$p" 2>/dev/null ) >/dev/null 2>&1 &
 		wait "$p" 2>/dev/null && ZT_SYNC=ntp
@@ -5524,8 +5786,20 @@ _zt_sync() {
 }
 
 system_time_set() {
-	local a="$1" tz
+	local a="$1" tz p
 	case "$a" in
+		ntpsrv:std|ntpsrv:ip)
+			_dnsm_present && { printf '{"error":"Серверы времени настраивает DNS Manager — меняйте их в нём",%s}\n' "$(_zt_json)"; return 1; }
+			if [ "$a" = ntpsrv:ip ]; then tz="$ZT_NTP_IP"; else tz="$ZT_NTP_STD"; fi
+			uci -q get system.ntp >/dev/null 2>&1 || uci -q set system.ntp=timeserver
+			uci -q delete system.ntp.server
+			for p in $tz; do uci -q add_list system.ntp.server="$p"; done
+			uci -q set system.ntp.enabled='1'
+			uci -q commit system
+			/etc/init.d/sysntpd restart >/dev/null 2>&1
+			_zt_sync
+			printf '{"ok":true,"ntpsrv":"%s","sync":"%s",%s}\n' "${a#ntpsrv:}" "$ZT_SYNC" "$(_zt_json)"
+			return 0 ;;
 		ntp)
 			_zt_sync || { printf '{"error":"время не синхронизировалось — ни NTP, ни сайты не ответили. Проверьте интернет на роутере",%s}\n' "$(_zt_json)"; return 1; }
 			printf '{"ok":true,"sync":"%s",%s}\n' "$ZT_SYNC" "$(_zt_json)"
@@ -6832,7 +7106,8 @@ do_versions_refresh() {
 		j="$(mixomo_status)"
 		add "$(_ver_item Mihomo "$(_jf "$j" '@.mihomo_version')" "$(_jf "$j" '@.mihomo_latest')")"
 		add "$(_ver_item MagiTrickle "$(_jf "$j" '@.magitrickle_version')" "$(_jf "$j" '@.magitrickle_latest')")"
-		add "$(_ver_item hev-socks5-tunnel "$(_jf "$j" '@.hev_version')" "$(_vl _ver_feed_latest hev-socks5-tunnel)")"
+		# hev-socks5-tunnel — здесь, только когда стоит Mixomo; без него (ByeTube) — ниже, рядом с ByeDPI, одной строкой
+		{ [ -x "$MIHOMO_BIN" ] || [ -x /etc/init.d/magitrickle ]; } && add "$(_ver_item hev-socks5-tunnel "$(_jf "$j" '@.hev_version')" "$(_vl _ver_feed_latest hev-socks5-tunnel)")"
 	fi
 	j="$(tg_status)"
 	add "$(_ver_item 'TG WS Proxy (Go, MTProto)' "$(_jf "$j" '@.mtproto_version')" "$(_jf "$j" '@.mtproto_latest')")"
@@ -8496,7 +8771,17 @@ _doh_force_apply() {
 	return 0
 }
 
+# DNS Manager (github.com/PoTuStoronu222/DNS-Manager) сам настраивает https-dns-proxy, перехват и NTP.
+# Пока он стоит, панель эти настройки не меняет — иначе две программы переписывали бы друг друга.
+_dnsm_present() { [ -x /usr/bin/dns-manager ] || [ -x /usr/libexec/rpcd/dns_manager ]; }
+_dnsm_guard() {
+	_dnsm_present || return 0
+	echo '{"error":"DNS на роутере настраивает DNS Manager — меняйте настройки в нём, панель их не трогает"}'
+	return 1
+}
+
 doh_force_set() {
+	_dnsm_guard || return 1
 	case "$1" in auto|off) ;; on) set -- auto ;; *) echo '{"error":"неизвестный режим"}'; return 1 ;; esac
 	if [ ! -f "$_doh_file" ] || [ -f "$DOH_OFF_FLAG" ] || [ ! -x /etc/init.d/https-dns-proxy ]; then
 		echo '{"error":"DNS over HTTPS не установлен — сначала нажмите «Установить DNS over HTTPS»"}'
@@ -8541,22 +8826,29 @@ do_doh_remove() {
 	echo "==> Удаляем пакеты"
 	_zm_pkg_wipe luci-i18n-https-dns-proxy-ru luci-app-https-dns-proxy https-dns-proxy || rc=1
 	echo "==> Удаляем настройки и правила перехвата DNS"
-	_zm_wipe /etc/config/https-dns-proxy /etc/config/https-dns-proxy-opkg /etc/config/https-dns-proxy.apk-new /etc/init.d/https-dns-proxy /etc/rc.d/*https-dns-proxy "$DOH_OFF_FLAG" "$DOH_FORCE_MODE_FILE" "$DOH_BOOT_FILE" "$DOH_FO_FILE" "$DOH_FO_STATE" "$DOH_FO_EVENTS" || rc=1
+	_zm_wipe /etc/config/https-dns-proxy /etc/config/https-dns-proxy-opkg /etc/config/https-dns-proxy.apk-new /etc/init.d/https-dns-proxy /etc/rc.d/*https-dns-proxy "$DOH_OFF_FLAG" "$DOH_FORCE_MODE_FILE" "$DOH_BOOT_FILE" "$DOH_FO_FILE" "$DOH_FO_STATE" "$DOH_FO_EVENTS" "$DOH_OWN_FILE" "$_doh_file.zm-prev" /tmp/zm-doh-failover.lock || rc=1
 	_doh_fo_cron off
 	_zm_dns_scrub '^127\.0\.0\.1#50[0-9][0-9]$'
 	for r in $(uci -q -X show firewall | sed -n "s/^firewall\.\([^.=]*\)\.name='[^']*[Hh]ttps[-_ ]dns[-_ ]proxy[^']*'\$/\1/p" | sort -u); do uci -q delete "firewall.$r"; done
 	uci -q commit firewall
 	/etc/init.d/firewall reload >/dev/null 2>&1
 	_zm_cron_drop 'https-dns-proxy' "DoH"
+	if [ "$(_dn_get ru off)" != off ]; then
+		echo "==> Российские сайты снова идут через обычный DNS роутера"
+		_dn_put ru off
+		_dn_apply norestart
+	fi
 	echo "==> Перезапускаем DNS роутера"
 	/etc/init.d/dnsmasq restart >/dev/null 2>&1
 	_zm_rm_done "$rc" "DNS over HTTPS"
 }
 doh_remove() {
+	_dnsm_guard || return 1
 	job_start doh_remove do_doh_remove
 }
 
 doh_install() {
+	_dnsm_guard || return 1
 	job_start doh_install do_doh_install
 }
 
@@ -8575,6 +8867,8 @@ _doh_provider_of() {
 		https://geohide.ru/*|https://dns.geohide.ru*) echo geohide_ru ;;
 		https://dns.malw.link/*) echo malw ;;
 		https://dns.zapret.moe/*) echo zapretmoe ;;
+		https://freedns.controld.com/p0) echo controld ;;
+		https://unfiltered.joindns4.eu/*) echo dns4eu ;;
 		*) echo "" ;;
 	esac
 }
@@ -8590,6 +8884,7 @@ _hosts_extra() {
 
 doh_status() {
 	local installed="false" current="" running=false force=false list="" sep="" i url port prov n=0 provs=""
+	_doh_legacy_fix
 	_doh_pkg && [ ! -f "$DOH_OFF_FLAG" ] && installed="true"
 	if [ -f "$_doh_file" ]; then
 		i=0
@@ -8606,11 +8901,12 @@ doh_status() {
 		[ "$(uci -q get https-dns-proxy.config.force_dns)" != "0" ] && force=true
 	fi
 	/etc/init.d/https-dns-proxy running >/dev/null 2>&1 && running=true
-	printf '{"installed":%s,"current":"%s","running":%s,"force_dns":%s,"force_mode":"%s","resolvers":[%s],"steer_active":%s,"steer_installed":%s,"forkozz":%s,"bootstrap_custom":"%s","hosts_extra":%s,"failover":%s}\n' \
+	printf '{"installed":%s,"current":"%s","running":%s,"force_dns":%s,"force_mode":"%s","resolvers":[%s],"steer_active":%s,"steer_installed":%s,"forkozz":%s,"bootstrap_custom":"%s","hosts_extra":%s,"failover":%s,"dnsm":%s,"net":%s,"own":[%s]}\n' \
 		"$installed" "$(esc "$current")" "$running" "$force" "$(_doh_force_mode)" "$list" \
 		"$(_doh_steer_active && echo true || echo false)" \
 		"$(grep -qx 'engine' /etc/zm-steer/owned 2>/dev/null && stl_present && echo true || echo false)" \
-		"$(_fk_present && echo true || echo false)" "$(esc "$(cat "$DOH_BOOT_FILE" 2>/dev/null)")" "$(_hosts_extra)" "$(_doh_fo_json)"
+		"$(_fk_present && echo true || echo false)" "$(esc "$(cat "$DOH_BOOT_FILE" 2>/dev/null)")" "$(_hosts_extra)" "$(_doh_fo_json)" \
+		"$(_dnsm_present && echo true || echo false)" "$(_dn_json)" "$(_doh_own_json)"
 }
 
 DOH_BOOT_FILE="/opt/zapret-manager-luci/doh_bootstrap"
@@ -8622,6 +8918,8 @@ _doh_boot_of() {
 		quad9) echo "9.9.9.9,149.112.112.112,2620:fe::fe,2620:fe::9" ;;
 		yandex_family) echo "77.88.8.7,77.88.8.3" ;;
 		yandex_safe) echo "77.88.8.88,77.88.8.2" ;;
+		controld) echo "76.76.2.0,76.76.10.0" ;;
+		dns4eu) echo "86.54.11.100,86.54.11.200" ;;
 	esac
 }
 
@@ -8637,6 +8935,7 @@ _doh_ip_ok() {
 
 doh_bootstrap_set() {
 	local v="$1" ip out="" n=0 i url b
+	_dnsm_guard || return 1
 	case "$v" in *[*?\[]*) echo '{"error":"укажите IP-адреса через запятую, например 77.88.8.8, 1.1.1.1"}'; return 1 ;; esac
 	for ip in $(printf '%s' "$v" | tr ',;' '  '); do
 		_doh_ip_ok "$ip" || { printf '{"error":"%s"}\n' "$(esc "«$ip» — не IP-адрес. Укажите IP через запятую, например 77.88.8.8, 1.1.1.1")"; return 1; }
@@ -8679,6 +8978,8 @@ _doh_url_of() {
 		geohide_us)    echo "https://us.geohide.ru/dns-query" ;;
 		malw)          echo "https://dns.malw.link/dns-query" ;;
 		zapretmoe)     echo "https://dns.zapret.moe/dns-query" ;;
+		controld)      echo "https://freedns.controld.com/p0" ;;
+		dns4eu)        echo "https://unfiltered.joindns4.eu/dns-query" ;;
 		https://*)
 			# свой сервер: адрес попадёт в конфиг, поэтому только буквы, цифры и обычные знаки ссылки
 			printf '%s' "$1" | grep -qE '^https://[A-Za-z0-9.-]+\.[A-Za-z0-9-]+(:[0-9]{1,5})?(/[A-Za-z0-9._~%/+=&?-]*)?$' || return 1
@@ -8836,6 +9137,7 @@ doh_check() {
 
 doh_set() {
 	local provider="$1" r
+	_dnsm_guard || return 1
 	_doh_url_of "$provider" >/dev/null || { echo '{"error":"адрес сервера не подходит — нужна ссылка вида https://…/dns-query"}'; return 1; }
 	local installed; installed=$(doh_status | grep -o '"installed":[a-z]*' | cut -d: -f2)
 	if [ "$installed" != "true" ]; then
@@ -8919,14 +9221,14 @@ _doh_fo_event() {
 _doh_fo_on() { [ "$(_doh_fo_get fo 0)" = 1 ] || [ "$(_doh_fo_get direct 0)" = 1 ]; }
 _doh_group_of() {
 	case "$1" in
-		google|cloudflare|quad9) echo plain ;;
+		google|cloudflare|quad9|controld|dns4eu) echo plain ;;
 		xbox|comss|dnsai|geohide_ru|geohide_eu|geohide_us|malw|zapretmoe) echo geo ;;
 		yandex_safe|yandex_family) echo family ;;
 	esac
 }
 _doh_group_ids() {
 	case "$1" in
-		plain) echo "google cloudflare quad9" ;;
+		plain) echo "google cloudflare quad9 controld dns4eu" ;;
 		geo) echo "xbox comss dnsai geohide_ru geohide_eu geohide_us malw zapretmoe" ;;
 		family) echo "yandex_safe yandex_family" ;;
 	esac
@@ -8936,7 +9238,8 @@ _doh_name() {
 		google) echo Google ;; cloudflare) echo Cloudflare ;; quad9) echo Quad9 ;; xbox) echo XBOX ;; comss) echo Comss ;; dnsai) echo DNS-AI ;;
 		yandex_family) echo "Яндекс Семейный" ;; yandex_safe) echo "Яндекс Безопасный" ;; geohide_ru) echo "GeoHide RU" ;; geohide_eu) echo "GeoHide EU" ;;
 		geohide_us) echo "GeoHide US" ;; malw) echo MALW ;; zapretmoe) echo zapret.moe ;;
-		https://*) printf '%s' "$1" | sed 's#^https://\([^/]*\).*#\1#' ;; *) echo "$1" ;;
+		controld) echo "Control D" ;; dns4eu) echo DNS4EU ;;
+		https://*) _doh_own_title "$1" | grep . || printf '%s' "$1" | sed 's#^https://\([^/]*\).*#\1#' ;; *) echo "$1" ;;
 	esac
 }
 # Что стоит сейчас: один сервер — его имя из списка или адрес; несколько — пусто (там автопереключение не нужно)
@@ -8977,6 +9280,8 @@ doh_watch() {
 	_doh_fo_on || { _doh_fo_cron off; return 0; }
 	[ -f "$_doh_file" ] && _doh_pkg && [ ! -f "$DOH_OFF_FLAG" ] || return 0
 	_fk_present && return 0
+	_dnsm_present && return 0
+	_doh_legacy_fix
 	mkdir "$lk" 2>/dev/null || { [ -n "$(find "$lk" -maxdepth 0 -mmin +5 2>/dev/null)" ] && rmdir "$lk" 2>/dev/null; return 0; }
 	mode="$(_doh_st_get mode normal)"
 	/etc/init.d/https-dns-proxy running >/dev/null 2>&1 && run=1
@@ -9074,6 +9379,7 @@ _doh_fo_json() {
 # Настройки из страницы: «fo=1 direct=0 chain=malw,zapretmoe,https://dns.example.com/dns-query»
 doh_failover_set() {
 	local kv k v fo direct pool chain="" setch="" id n=0 pref bad=""
+	_dnsm_guard || return 1
 	fo="$(_doh_fo_get fo 0)"; direct="$(_doh_fo_get direct 0)"; pool="$(_doh_fo_get pool same)"
 	pref="$(_doh_fo_get pref "")"; [ -n "$pref" ] || pref="$(_doh_cur_id)"
 	# по словам, без подстановки имён файлов: в своих адресах бывает «?»
@@ -9111,6 +9417,221 @@ doh_failover_set() {
 		rm -f "$DOH_FO_STATE"
 	fi
 	printf '%s\n' "$(_doh_fo_json)"
+}
+
+# ---------- Свои серверы DoH ----------
+# Список «Свои» на вкладке DoH: серверы, которые человек добавил сам. Их можно выбрать основным и поставить
+# запасными в цепочку «Если сервер перестал отвечать». Строка файла: «адрес<TAB>название» (название — по желанию).
+DOH_OWN_FILE="/opt/zapret-manager-luci/doh_own"
+DOH_OWN_MAX=12
+_doh_own_urls() { cut -f1 "$DOH_OWN_FILE" 2>/dev/null | grep '^https://'; }
+_doh_own_has() { _doh_own_urls | grep -qxF "$1"; }
+_doh_own_title() { [ -s "$DOH_OWN_FILE" ] && ZM_U="$1" awk -F'\t' '$1 == ENVIRON["ZM_U"] { print $2; exit }' "$DOH_OWN_FILE"; }
+_doh_own_json() {
+	[ -s "$DOH_OWN_FILE" ] || return 0
+	awk -F'\t' '$1 ~ /^https:\/\// { n2 = $2; gsub(/["\\]/, "", n2); printf "%s{\"url\":\"%s\",\"name\":\"%s\"}", (n++ ? "," : ""), $1, n2 }' "$DOH_OWN_FILE"
+}
+# $1 — адрес, $2 — название: есть такой адрес — меняем название на месте, нет — добавляем в конец
+_doh_own_put() {
+	mkdir -p "$(dirname "$DOH_OWN_FILE")"
+	touch "$DOH_OWN_FILE"
+	ZM_U="$1" ZM_N="$2" awk -F'\t' 'BEGIN { OFS = "\t" } $1 == ENVIRON["ZM_U"] { print $1, ENVIRON["ZM_N"]; f = 1; next } NF { print } END { if (!f) print ENVIRON["ZM_U"], ENVIRON["ZM_N"] }' \
+		"$DOH_OWN_FILE" > "$DOH_OWN_FILE.zm" && mv -f "$DOH_OWN_FILE.zm" "$DOH_OWN_FILE"
+}
+_doh_own_drop() {
+	[ -f "$DOH_OWN_FILE" ] || return 0
+	ZM_U="$1" awk -F'\t' '$1 != ENVIRON["ZM_U"] && NF' "$DOH_OWN_FILE" > "$DOH_OWN_FILE.zm" && mv -f "$DOH_OWN_FILE.zm" "$DOH_OWN_FILE"
+	[ -s "$DOH_OWN_FILE" ] || rm -f "$DOH_OWN_FILE"
+}
+# Серверы, убранные из встроенного списка (Comss RU, Mafioznik, AstraCat, AdGuard). У кого такой сервер стоит
+# сейчас или записан в цепочку запасных, — переносим его в «Свои» по адресу: настройка продолжает работать.
+_doh_legacy_url() {
+	case "$1" in
+		comss_ru) echo "https://dns.comss.ru/dns-query	Comss RU" ;;
+		mafioznik) echo "https://dns.mafioznik.com/dns-query	Mafioznik" ;;
+		astracat) echo "https://dns.astrakat.ru/dns-query	AstraCat" ;;
+		adguard) echo "https://unfiltered.adguard-dns.com/dns-query	AdGuard" ;;
+	esac
+}
+_doh_legacy_fix() {
+	local id l u cur
+	cur="$(uci -q get 'https-dns-proxy.@https-dns-proxy[0].resolver_url')"
+	for id in comss_ru mafioznik astracat adguard; do
+		l="$(_doh_legacy_url "$id")"; u="${l%%	*}"
+		if grep -qE "^(pref|active|chain)=(.*,)?$id(,|\$)" "$DOH_FO_FILE" 2>/dev/null; then
+			sed -i -E "/^(pref|active|chain)=/ s#(=|,)$id(,|\$)#\1$u\2#g" "$DOH_FO_FILE"
+		elif [ "$cur" != "$u" ]; then
+			continue
+		fi
+		_doh_own_has "$u" || _doh_own_put "$u" "${l#*	}"
+	done
+	return 0
+}
+# Из страницы: «add https://… Название» — добавить или переименовать, «del https://…» — убрать
+doh_own_set() {
+	local act rest url name cur pref ch
+	_dnsm_guard || return 1
+	_doh_legacy_fix
+	act="${1%% *}"; rest="${1#"$act"}"; rest="${rest# }"
+	url="${rest%% *}"; name="${rest#"$url"}"
+	name="$(printf '%s' "$name" | tr -d '\000-\037\177"\\<>' | sed 's/[[:space:]][[:space:]]*/ /g; s/^ //; s/ $//')"
+	case "$act" in
+		add)
+			case "$url" in https://*) ;; *) url="" ;; esac
+			[ -n "$url" ] && _doh_url_of "$url" >/dev/null || { echo '{"error":"Адрес не подходит — нужна ссылка вида https://dns.example.com/dns-query"}'; return 1; }
+			[ -z "$(_doh_provider_of "$url")" ] || { printf '{"error":"Этот сервер уже есть в списке — %s"}\n' "$(esc "$(_doh_name "$(_doh_provider_of "$url")")")"; return 1; }
+			[ "${#name}" -le 96 ] || { echo '{"error":"Название слишком длинное — не больше 32 букв"}'; return 1; }
+			if ! _doh_own_has "$url" && [ "$(_doh_own_urls | wc -l)" -ge "$DOH_OWN_MAX" ]; then
+				printf '{"error":"В списке «Свои» уже %s серверов — уберите ненужный"}\n' "$DOH_OWN_MAX"; return 1
+			fi
+			_doh_own_put "$url" "$name" ;;
+		del)
+			case "$url" in https://*) ;; *) echo '{"error":"Нет такого сервера"}'; return 1 ;; esac
+			cur="$(_doh_cur_id)"
+			[ "$cur" != "$url" ] || { echo '{"error":"Сейчас DNS идёт через этот сервер — сначала выберите другой"}'; return 1; }
+			pref="$(_doh_fo_get pref "")"
+			if [ "$pref" = "$url" ] && _doh_fo_on; then
+				echo '{"error":"Это основной сервер цепочки «Если сервер перестал отвечать» — сначала выберите другой"}'; return 1
+			fi
+			_doh_own_drop "$url"
+			# из цепочки запасных он тоже уходит
+			if grep -q '^chain=' "$DOH_FO_FILE" 2>/dev/null; then
+				ch="$(_doh_fo_get chain "" | tr ',' '\n' | grep -vxF "$url" | grep . | tr '\n' ',')"
+				_doh_fo_put chain "${ch%,}"
+			fi ;;
+		*) echo '{"error":"неизвестное действие"}'; return 1 ;;
+	esac
+	printf '{"ok":true,"own":[%s],"failover":%s}\n' "$(_doh_own_json)" "$(_doh_fo_json)"
+}
+
+# ---------- Браузеры и российские сайты ----------
+# 1. «Не давать браузерам свой DNS»: на служебные имена Firefox (use-application-dns.net) и Частного узла iCloud
+#    (mask.icloud.com, mask-h2.icloud.com) роутер отвечает «такого имени нет» — так они узнают, что в сети свой
+#    DNS, и не уходят в обход роутера (иначе для них не работают DoH роутера, блокировка рекламы и Steer).
+#    https-dns-proxy делает то же только при включённом перехвате DNS — здесь это работает всегда.
+# 2. «Российские сайты»: адреса в зонах .ru, .su и .рф dnsmasq узнаёт у Яндекс DNS или у DNS провайдера,
+#    остальное — через DoH. Записи для одной зоны https-dns-proxy при запуске и остановке не трогает.
+# Всё — обычными записями dnsmasq в /etc/config/dhcp (address и server), на флеше: переживает перезагрузку.
+# Панель помнит, какие записи добавила сама (dns_net.owned), и убирает только их — свои записи человека остаются.
+DN_FILE="/opt/zapret-manager-luci/dns_net"
+DN_OWN="/opt/zapret-manager-luci/dns_net.owned"
+DN_CANARY="use-application-dns.net mask.icloud.com mask-h2.icloud.com"
+DN_RU_ZONES="ru su xn--p1ai"
+DN_YANDEX="77.88.8.8 77.88.8.1"
+_dn_get() { local v; v="$(sed -n "s/^$1=//p" "$DN_FILE" 2>/dev/null | tail -n1)"; echo "${v:-$2}"; }
+_dn_put() {
+	mkdir -p "$(dirname "$DN_FILE")"
+	{ grep -v "^$1=" "$DN_FILE" 2>/dev/null; echo "$1=$2"; } > "$DN_FILE.zm" && mv -f "$DN_FILE.zm" "$DN_FILE"
+}
+_dn_secs() { uci -q -X show dhcp 2>/dev/null | sed -n "s/^dhcp\.\([A-Za-z0-9_]*\)=dnsmasq\$/\1/p"; }
+# DNS провайдера: то, что роутер получил от провайдера (DHCP/PPPoE), — без локальных и link-local адресов
+_dn_isp() {
+	local f
+	for f in /tmp/resolv.conf.d/resolv.conf.auto /tmp/resolv.conf.auto; do
+		[ -s "$f" ] || continue
+		awk '$1 == "nameserver" && ($2 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ || ($2 ~ /^[0-9A-Fa-f:]+$/ && $2 ~ /:.*:/)) && $2 !~ /^(127\.|0\.0\.0\.0$|::1$|[Ff][Ee]80:)/ && !u[$2]++ { print $2 }' "$f" | head -n 4 | tr '\n' ',' | sed 's/,$//'
+		return 0
+	done
+}
+_dn_ru_ips() {
+	case "$(_dn_get ru off)" in
+		yandex) echo "$DN_YANDEX" ;;
+		isp) _dn_get ispips "" | tr ',' ' ' ;;
+	esac
+}
+_dn_has() { uci -q get "dhcp.$1.$2" 2>/dev/null | tr ' ' '\n' | grep -qxF "$3"; }
+_dn_add() {
+	_dn_has "$1" "$2" "$3" && return 0
+	uci -q add_list "dhcp.$1.$2=$3" && echo "$1 $2 $3" >> "$DN_OWN"
+}
+# убрать записи, добавленные панелью: canary — address, ru — server, all — все
+_dn_drop() {
+	local sec opt val keep="$DN_OWN.keep"
+	[ -s "$DN_OWN" ] || { rm -f "$DN_OWN"; return 0; }
+	: > "$keep"
+	while read -r sec opt val; do
+		[ -n "$val" ] || continue
+		if [ "$1" = all ] || { [ "$1" = canary ] && [ "$opt" = address ]; } || { [ "$1" = ru ] && [ "$opt" = server ]; }; then
+			uci -q del_list "dhcp.$sec.$opt=$val"
+		else
+			echo "$sec $opt $val" >> "$keep"
+		fi
+	done < "$DN_OWN"
+	if [ -s "$keep" ]; then mv -f "$keep" "$DN_OWN"; else rm -f "$keep" "$DN_OWN"; fi
+}
+_dn_snap() { uci -q -X show dhcp 2>/dev/null | grep -E '^dhcp\.[^.]*\.(address|server)='; }
+# привести записи dnsmasq к настройкам; $1=norestart — dnsmasq перезапустит вызвавший
+_dn_apply() {
+	local before sec d ip ips
+	before="$(_dn_snap)"
+	_dn_drop all
+	ips="$(_dn_ru_ips)"
+	for sec in $(_dn_secs); do
+		if [ "$(_dn_get canary 0)" = 1 ]; then
+			for d in $DN_CANARY; do _dn_add "$sec" address "/$d/"; done
+		fi
+		for d in $DN_RU_ZONES; do
+			for ip in $ips; do _dn_add "$sec" server "/$d/$ip"; done
+		done
+	done
+	# ничего не поменялось (записи уже стояли) — dnsmasq не перезапускаем
+	[ "$before" = "$(_dn_snap)" ] && { uci -q commit dhcp; return 0; }
+	uci -q commit dhcp
+	[ "$1" = norestart ] || /etc/init.d/dnsmasq restart >/dev/null 2>&1
+	return 0
+}
+_dn_json() {
+	local doh=false
+	uci -q -X show dhcp 2>/dev/null | grep -E '^dhcp\.[^.]*\.server=' | grep -qF "'/use-application-dns.net/'" && doh=true
+	printf '{"canary":%s,"canary_doh":%s,"ru":"%s","ru_ips":"%s","isp":"%s"}' \
+		"$([ "$(_dn_get canary 0)" = 1 ] && echo true || echo false)" "$doh" "$(esc "$(_dn_get ru off)")" \
+		"$(esc "$(_dn_ru_ips | tr ' ' ',')")" "$(esc "$(_dn_isp)")"
+}
+# Из страницы: «canary=1 ru=yandex» (ru: off — через DoH, yandex, isp — DNS провайдера)
+dns_net_set() {
+	local kv k v canary ru ips
+	_dnsm_guard || return 1
+	canary="$(_dn_get canary 0)"; ru="$(_dn_get ru off)"
+	for kv in $(printf '%s' "$1" | tr -c 'A-Za-z0-9=_-' ' '); do
+		k="${kv%%=*}"; v="${kv#*=}"
+		case "$k" in
+			canary) if [ "$v" = 1 ]; then canary=1; else canary=0; fi ;;
+			ru) case "$v" in off|yandex|isp) ru="$v" ;; *) echo '{"error":"неизвестный режим для российских сайтов"}'; return 1 ;; esac ;;
+		esac
+	done
+	if [ "$ru" != off ] && [ "$ru" != "$(_dn_get ru off)" ] && _fk_present; then
+		echo '{"error":"Стоит Forkozz — он сам решает, куда идут запросы DNS. Российские сайты оставлены как есть"}'
+		return 1
+	fi
+	if [ "$ru" = isp ]; then
+		ips="$(_dn_isp)"
+		[ -n "$ips" ] || { echo '{"error":"Провайдер не выдал роутеру адреса DNS — выберите Яндекс DNS"}'; return 1; }
+		_dn_put ispips "$ips"
+	fi
+	_dn_put canary "$canary"
+	_dn_put ru "$ru"
+	_dn_apply
+	printf '{"ok":true,"net":%s}\n' "$(_dn_json)"
+}
+# Сторож (раз в 2 минуты): провайдер сменил адреса DNS — обновляем записи для российских сайтов
+_dn_watch() {
+	local now
+	[ "$(_dn_get ru off)" = isp ] || return 0
+	_dnsm_present && return 0
+	now="$(_dn_isp)"
+	[ -n "$now" ] && [ "$now" != "$(_dn_get ispips "")" ] || return 0
+	_dn_put ispips "$now"
+	_dn_apply
+	logger -t zapret-manager "Российские сайты: DNS провайдера сменился — теперь $(printf '%s' "$now" | sed 's/,/, /g')"
+}
+# Удаление панели: убираем свои записи dnsmasq
+dns_net_gone() {
+	[ -s "$DN_OWN" ] || { rm -f "$DN_FILE" "$DN_OWN"; return 0; }
+	_dn_drop all
+	uci -q commit dhcp
+	rm -f "$DN_FILE" "$DN_OWN"
+	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	return 0
 }
 
 RB_SHARE="/usr/share/zm-redbtn"
@@ -14808,6 +15329,10 @@ do_awg_remove() {
 	[ -d /sys/module/amneziawg ] && _zm_reboot_hint "AmneziaWG удалён, но его модуль ядра ещё загружен. Перезагрузите роутер, чтобы он выгрузился."
 	sed -i -E '/^pkg (kmod-amneziawg|amneziawg-tools|luci-proto-amneziawg|luci-app-amneziawg|luci-i18n-amneziawg-ru)$/d' "$ST_OWNED" 2>/dev/null
 	_zm_wipe "$AWG_DIR" /usr/bin/awg /usr/bin/awg-quick /lib/netifd/proto/amneziawg.sh || rc=1
+	# WARP.conf (кнопка «Получить WARP.conf»): нужен ещё только Mixomo — без него удаляем, как это делает Mixomo
+	if [ -s "$MIXOMO_WARP_CONF" ]; then
+		if _mx_installed; then echo "   · $MIXOMO_WARP_CONF оставляем — он нужен Mixomo"; else rm -f "$MIXOMO_WARP_CONF"; fi
+	fi
 	rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null
 	_rb_rpcd_ensure
 	# внутри удаления другого раздела (Forkozz) итог и проверку интернета печатает он сам
@@ -18322,6 +18847,29 @@ AB_STATS_DIR="/tmp/zm-adblock-stats"
 AB_STATS_CRON="# zm-abstats"
 # итоги за всё время: на флеше, дописываются раз в час, когда закрывается очередной час
 AB_STATS_ALL="$AB_DIR/stats-all.txt"
+# Кто спрашивает: dnsmasq пишет адрес, а у одного телефона их несколько (IPv4 и IPv6, причём IPv6 он
+# сам меняет раз в сутки-двое). Поэтому адреса сводятся к устройству: по MAC (таблица соседей роутера,
+# аренды DHCP), а адреса IPv6 без MAC — по имени из DHCPv6. Имя — из «Статических аренд», иначе то,
+# что назвало само устройство. Сам роутер (127.0.0.1, ::1 и его адреса) — служебные запросы: время,
+# обновления, проверки; в статистику устройств они не входят.
+# Карта: R адрес — роутер; M адрес MAC; F MAC IPv4; N MAC имя; H адрес имя.
+_ab_devmap() {
+	{
+		printf 'R\t127.0.0.1\nR\t::1\n'
+		ip -o addr show | awk '{ a = $4; sub(/\/.*/, "", a); if (a != "") printf "R\t%s\n", a }'
+		awk 'NR > 1 && $4 ~ /^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$/ && $4 != "00:00:00:00:00:00" { printf "M\t%s\t%s\n", $1, tolower($4) }' /proc/net/arp
+		ip neigh show | awk '{ for (i = 2; i < NF; i++) if ($i == "lladdr") { printf "M\t%s\t%s\n", $1, tolower($(i + 1)); break } }'
+		awk '$2 ~ /^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$/ && $3 != "" { m = tolower($2); printf "M\t%s\t%s\nF\t%s\t%s\n", $3, m, m, $3; if ($4 != "" && $4 != "*") printf "N\t%s\t%s\n", m, $4 }' /tmp/dhcp.leases
+		uci -q -X show dhcp | awk -F= '{ split($1, p, "."); v = $2; gsub("\047", "", v) }
+			p[3] == "name" { nm[p[2]] = v } p[3] == "mac" { mc[p[2]] = tolower(v) }
+			END { for (k in nm) if (k in mc) { n = split(mc[k], a, " "); for (i = 1; i <= n; i++) printf "N\t%s\t%s\n", a[i], nm[k] } }'
+		awk '$1 !~ /^#/ && $1 ~ /:/ && NF >= 2 { n = $NF; sub(/\..*/, "", n); if (n != "") printf "H\t%s\t%s\n", $1, n }' /tmp/hosts/odhcpd
+	} 2>/dev/null
+}
+AB_KEY_AWK='
+function abmap(f,   l, a) { while ((getline l < f) > 0) { split(l, a, "\t"); if (a[1] == "R") R[a[2]] = 1; else if (a[1] == "M") M[a[2]] = a[3]; else if (a[1] == "F") F4[a[2]] = a[3]; else if (a[1] == "N") N[a[2]] = a[3]; else if (a[1] == "H") H[a[2]] = a[3] } close(f) }
+function abkey(k) { if (k == "r" || k ~ /^[mn]:/) return k; if (k in R) return "r"; if (k in M) return "m:" M[k]; if (k in H) return "n:" H[k]; return k }
+'
 AB_URL_GH="${GH_RAW}/hagezi/dns-blocklists/main/dnsmasq"
 AB_URL_CDN="https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/dnsmasq"
 AB_ALLOW_DEFAULT='# Переходы по рекламе в поиске Яндекса
@@ -18501,6 +19049,8 @@ eu.geohide.ru
 us.geohide.ru
 dns.malw.link
 dns.zapret.moe
+freedns.controld.com
+unfiltered.joindns4.eu
 ZM_AB_DNS_EOF
 }
 # Для страницы: исключения, которые панель добавляет сама (группами). dns_own — серверы DNS, выбранные сейчас
@@ -18624,7 +19174,7 @@ _ab_build() {
 			}
 			print "local=/" d "/"; n++
 		}
-		END { for (a in A) print "server=/" a "/#"; print n + 0 > cf }' > "$out" || return 1
+		END { for (a in A) print "server=/" a "/#"; print n + 0 > cf }' > "$out" || { rm -f "$allow" "$out.count"; return 1; }
 	rm -f "$allow"
 	n="$(cat "$out.count" 2>/dev/null)"; rm -f "$out.count"
 	[ "${n:-0}" -gt 0 ] || { echo "список получился пустым" >&2; return 1; }
@@ -18668,9 +19218,10 @@ _ab_install() {
 # всех папок экземпляров (/tmp/dnsmasq.<имя>.d). Раньше брались только объявленные — а если dnsmasq в этот
 # момент перезапускали (Forkozz, Steer), его конфига не было, копия в папке экземпляра оставалась и
 # подхватывалась снова: блокировка «выключалась» только перезагрузкой роутера.
+_ab_alldirs() { { _ab_dirs; echo /tmp/dnsmasq.d; ls -d /tmp/dnsmasq.*.d 2>/dev/null; uci -q show dhcp 2>/dev/null | sed -n "s/^dhcp\.[^.]*\.confdir='\(.*\)'\$/\1/p"; } | sort -u; }
 _ab_unplug() {
 	local d
-	for d in $(_ab_dirs) /tmp/dnsmasq.d /tmp/dnsmasq.*.d $(uci -q show dhcp 2>/dev/null | sed -n "s/^dhcp\.[^.]*\.confdir='\(.*\)'\$/\1/p"); do
+	for d in $(_ab_alldirs); do
 		[ -d "$d" ] || continue
 		rm -f "$d/$AB_NAME" "$d/$AB_NAME.zm-tmp"
 	done
@@ -18684,11 +19235,12 @@ _ab_stats_plug() {
 }
 _ab_stats_unplug() {
 	local d
-	for d in $(_ab_dirs) /tmp/dnsmasq.d /tmp/dnsmasq.*.d; do [ -d "$d" ] && rm -f "${d:?}/zm-adblock-stats.conf"; done
+	for d in $(_ab_alldirs); do [ -d "$d" ] && rm -f "${d:?}/$AB_STATS_CONF"; done
 }
+# вся статистика: почасовые счётчики в ОЗУ (вместе с промежуточными файлами), журнал запросов и итоги на флеше
 _ab_stats_wipe() {
-	rm -f /tmp/zm-adblock-stats/h.* /tmp/zm-adblock-stats/chunk.* /tmp/zm-adblock-stats/folded /var/run/dnsmasq/zm-queries.log "$AB_STATS_ALL" "$AB_STATS_ALL.zm"
-	rmdir /tmp/zm-adblock-stats/.lock /tmp/zm-adblock-stats 2>/dev/null
+	rm -rf "$AB_STATS_DIR"
+	rm -f "$AB_STATS_LOG" "$AB_STATS_ALL" "$AB_STATS_ALL.zm" "$AB_STATS_ALL.c" "$AB_STATS_ALL.new"
 	return 0
 }
 _ab_stats_applied() {
@@ -18804,20 +19356,37 @@ _ab_stats_fold() {
 	[ -n "$todo" ] || return 0
 	mkdir -p "$(dirname "$AB_STATS_ALL")"
 	# S — с какого времени идёт счёт: первый сложенный час (у старых версий итогов за всё время не было)
-	( cd "$AB_STATS_DIR" && awk -v s0="$(( $(for h in $todo; do echo "$h"; done | sort -n | head -n1) * 3600 ))" '
+	_ab_devmap > "$AB_STATS_DIR/devmap.fold"
+	( cd "$AB_STATS_DIR" && awk -v s0="$(( $(for h in $todo; do echo "$h"; done | sort -n | head -n1) * 3600 ))" -v mf="$AB_STATS_DIR/devmap.fold" "$AB_KEY_AWK"'
+		BEGIN { abmap(mf) }
 		$1 == "S" { S = $2 }
-		$1 == "T" { T += $2 } $1 == "B" { B += $2 } $1 == "C" { C[$2] += $3 } $1 == "X" { X[$2] += $3 } $1 == "D" { D[$2] += $3 }
+		$1 == "T" { T += $2 } $1 == "B" { B += $2 } $1 == "D" { D[$2] += $3 }
+		$1 == "W" { WA[$2] = ($3 == "-" ? "" : $3); WN[$2] = ($4 == "-" ? "" : $4) }
+		$1 == "C" || $1 == "X" {
+			k = abkey($2)
+			if ($1 == "C") C[k] += $3; else X[k] += $3
+			if ($2 != "r" && $2 !~ /^[mn]:/ && (!(k in IP) || (IP[k] ~ /:/ && $2 ~ /\./))) IP[k] = $2
+		}
 		END {
 			print "S " (S ? S : s0); print "T " T + 0; print "B " B + 0
 			for (k in C) print "C " k " " C[k]
 			for (k in X) print "X " k " " X[k]
 			for (k in D) print "D " k " " D[k]
+			# W — имя и адрес устройства на момент подсчёта: через месяц аренда DHCP уже другая, а подпись остаётся
+			for (k in C) {
+				if (k !~ /^[mn]:/) continue
+				m = k ~ /^m:/ ? substr(k, 3) : ""
+				nm = m != "" ? N[m] : substr(k, 3); if (nm == "") nm = WN[k]
+				ad = m != "" && (m in F4) ? F4[m] : (k in IP) ? IP[k] : WA[k]
+				gsub(/[ \t]/, "_", nm)
+				if (nm != "" || ad != "") print "W " k " " (ad == "" ? "-" : ad) " " (nm == "" ? "-" : nm)
+			}
 		}' $([ -s "$AB_STATS_ALL" ] && echo "$AB_STATS_ALL") $(for h in $todo; do echo "h.$h"; done) ) > "$AB_STATS_ALL.zm" 2>/dev/null || { rm -f "$AB_STATS_ALL.zm"; return 0; }
 	# размер на флеше ограничен: 1000 самых частых доменов и 256 самых активных устройств
 	{ grep -E '^(S|T|B) ' "$AB_STATS_ALL.zm"; grep '^C ' "$AB_STATS_ALL.zm" | sort -k3,3nr | head -n 256 > "$AB_STATS_ALL.c"; cat "$AB_STATS_ALL.c"
-	  awk 'NR == FNR { k[$2] = 1; next } $1 == "X" && ($2 in k)' "$AB_STATS_ALL.c" "$AB_STATS_ALL.zm"
+	  awk 'NR == FNR { k[$2] = 1; next } ($1 == "X" || $1 == "W") && ($2 in k)' "$AB_STATS_ALL.c" "$AB_STATS_ALL.zm"
 	  grep '^D ' "$AB_STATS_ALL.zm" | sort -k3,3nr | head -n 1000; } > "$AB_STATS_ALL.new"
-	rm -f "$AB_STATS_ALL.zm" "$AB_STATS_ALL.c"
+	rm -f "$AB_STATS_ALL.zm" "$AB_STATS_ALL.c" "$AB_STATS_DIR/devmap.fold"
 	if [ -s "$AB_STATS_ALL.new" ]; then mv -f "$AB_STATS_ALL.new" "$AB_STATS_ALL"; else rm -f "$AB_STATS_ALL.new"; return 0; fi
 	for h in $todo; do echo "$h"; done >> "$AB_STATS_DIR/folded"
 }
@@ -18848,24 +19417,48 @@ _ab_stats_json() {
 			[ "$h" -ge "$from" ] && list="$list $f"
 		done
 	fi
-	awk -v per="$([ "$per" = all ] && echo 0 || echo "$per")" -v since="${since:-0}" -v lf="/tmp/dhcp.leases" '
+	mkdir -p "$AB_STATS_DIR"
+	_ab_devmap > "$AB_STATS_DIR/devmap.$$"
+	awk -v per="$([ "$per" = all ] && echo 0 || echo "$per")" -v since="${since:-0}" -v mf="$AB_STATS_DIR/devmap.$$" "$AB_KEY_AWK"'
 		function js(v) { gsub(/[\\"]/, "", v); gsub(/[\001-\037]/, "", v); return v }
-		BEGIN { while ((getline l < lf) > 0) { split(l, a, " "); if (a[4] != "" && a[4] != "*") N[a[3]] = a[4] } close(lf) }
-		$1 == "T" { T += $2 } $1 == "B" { B += $2 } $1 == "C" { C[$2] += $3 } $1 == "X" { X[$2] += $3 } $1 == "D" { D[$2] += $3 }
+		BEGIN { abmap(mf) }
+		$1 == "T" { T += $2 } $1 == "B" { B += $2 } $1 == "D" { D[$2] += $3 }
+		$1 == "W" { WA[$2] = ($3 == "-" ? "" : $3); WN[$2] = ($4 == "-" ? "" : $4) }
+		$1 == "C" || $1 == "X" {
+			k = abkey($2)
+			if ($1 == "C") C[k] += $3; else X[k] += $3
+			# какой адрес показать: IPv4, если он есть
+			if ($2 != "r" && $2 !~ /^[mn]:/ && (!(k in IP) || (IP[k] ~ /:/ && $2 ~ /\./))) IP[k] = $2
+		}
 		END {
+			# служебные запросы самого роутера — не устройство сети
+			T -= C["r"]; B -= X["r"]; if (T < 0) T = 0; if (B < 0) B = 0; delete C["r"]; delete X["r"]
+			# имя и адрес: сейчас (аренды, соседи), иначе — запомненные при подсчёте (W)
+			for (k in C) {
+				m = k ~ /^m:/ ? substr(k, 3) : ""
+				NAME[k] = m != "" ? N[m] : k ~ /^n:/ ? substr(k, 3) : ""
+				if (NAME[k] == "" && (k in WN)) NAME[k] = WN[k]
+				ADDR[k] = m != "" && (m in F4) ? F4[m] : (k in IP) ? IP[k] : k ~ /^[mn]:/ ? "" : k
+				if (ADDR[k] == "" && (k in WA)) ADDR[k] = WA[k]
+			}
+			# адреса IPv6 без MAC — к устройству с тем же именем
+			for (k in C) if (k ~ /^m:/ && NAME[k] != "") NM[NAME[k]] = k
+			nn = 0; for (k in C) if (k ~ /^n:/ && (NAME[k] in NM)) L[++nn] = k
+			for (i = 1; i <= nn; i++) { k = L[i]; t = NM[NAME[k]]; C[t] += C[k]; X[t] += X[k]; if (ADDR[t] == "") ADDR[t] = ADDR[k]; delete C[k] }
 			nc = 0; for (k in C) nc++
 			printf "{\"on\":true,\"period\":%d,\"since\":%d,\"total\":%d,\"blocked\":%d,\"clients\":%d,\"top\":[", per, since, T, B, nc
 			for (j = 0; j < 10; j++) { best = ""; bn = 0; for (k in D) if (D[k] > bn) { bn = D[k]; best = k } if (best == "") break; printf "%s{\"d\":\"%s\",\"n\":%d}", (j ? "," : ""), js(best), bn; delete D[best] }
 			printf "],\"devs\":["
-			for (j = 0; j < 6; j++) { best = ""; bn = 0; for (k in C) if (C[k] > bn) { bn = C[k]; best = k } if (best == "") break; printf "%s{\"ip\":\"%s\",\"name\":\"%s\",\"q\":%d,\"b\":%d}", (j ? "," : ""), js(best), js(N[best]), bn, X[best] + 0; delete C[best] }
+			for (j = 0; j < 6; j++) { best = ""; bn = 0; for (k in C) if (C[k] > bn) { bn = C[k]; best = k } if (best == "") break; printf "%s{\"ip\":\"%s\",\"name\":\"%s\",\"q\":%d,\"b\":%d}", (j ? "," : ""), js(ADDR[best]), js(NAME[best]), bn, X[best] + 0; delete C[best] }
 			printf "]}\n"
 		}' $list /dev/null
+	rm -f "$AB_STATS_DIR/devmap.$$"
 }
 
 # Остался ли где-нибудь список после выключения
 _ab_leftover() {
 	local d
-	for d in $(_ab_dirs) /tmp/dnsmasq.d /tmp/dnsmasq.*.d; do [ -e "$d/$AB_NAME" ] && return 0; done
+	for d in $(_ab_alldirs); do [ -e "$d/$AB_NAME" ] || [ -e "$d/$AB_STATS_CONF" ] && return 0; done
 	return 1
 }
 
@@ -18910,6 +19503,8 @@ _ab_free_stop() {
 	nft delete table inet "$AB_FREE_NFT" >/dev/null 2>&1
 	p="$(cat "$AB_FREE_PID" 2>/dev/null)"
 	[ -n "$p" ] && kill "$p" 2>/dev/null
+	# pid-файла нет, а процесс остался (dnsmasq упал и поднят заново) — находим по его конфигу
+	_kill_match "-C $AB_FREE_CONF"
 	rm -f "$AB_FREE_PID" "$AB_FREE_CONF" "$AB_FREE_CONF.zm-new" "$AB_FREE_CONF.macs"
 	return 0
 }
@@ -19116,7 +19711,12 @@ adblock_action() {
 			_ab_stats_unplug
 			_ab_stats_cron off
 			_ab_stats_wipe
+			# скачанное и служебное: списки, домены TG WS Proxy, отметка набора DNS, сведения о версиях списков;
+			# остаются только настройки — выбранный список, белый список, устройства без блокировки
 			rm -rf "$AB_DIR/src"
+			rm -f "$AB_TG_LIST" "$AB_DNS_STAMP" "$JOBS_DIR"/adblock.watch "$JOBS_DIR"/adblock.old "$JOBS_DIR"/adblock.allow "$JOBS_DIR"/adblock.conf.new* \
+				"$JOBS_DIR"/adblock.*.dl "$JOBS_DIR"/adblock.*.dl.dec "$JOBS_DIR"/adblock.*.dom "$JOBS_DIR"/ab.exempt.*
+			[ -f "$AB_SET" ] && sed -i -e '/^[nvt]_[a-z]*=/d' -e '/^count=/d' -e '/^updated=/d' -e '/^errat=/d' "$AB_SET"
 			_ab_cron_sync
 			/etc/init.d/dnsmasq restart >/dev/null 2>&1
 			# dnsmasq мог в эту секунду сам перезапускаться и вернуть копию — проверяем и добиваем
@@ -19307,6 +19907,8 @@ case "$cmd" in
 	system_toggle_ipv6)                         system_toggle_ipv6 ;;
 	system_toggle_flow_offloading_fix)           system_toggle_flow_offloading_fix ;;
 	system_uninstall_panel)                        system_uninstall_panel "$1" ;;
+	purge_scan)                                    purge_scan ;;
+	purge_run)                                     purge_run "$1" ;;
 	zm_cleanup_status)                             zm_cleanup_status ;;
 	zm_cleanup)                                    zm_cleanup "$1" ;;
 	zm_refs_heal)                                  zm_refs_heal "$1" ;;
@@ -19347,7 +19949,10 @@ case "$cmd" in
 	doh_bootstrap_set)                    doh_bootstrap_set "$1" ;;
 	doh_force_set)                        doh_force_set "$1" ;;
 	doh_failover_set)                     doh_failover_set "$1" ;;
+	doh_own_set)                          doh_own_set "$1" ;;
 	doh_watch)                            doh_watch ;;
+	dns_net_set)                          dns_net_set "$1" ;;
+	dns_net_gone)                         dns_net_gone ;;
 	test_status)                          test_status ;;
 	test_action)                          test_action "$1" "$2" ;;
 	test_results)                         test_results "$1" ;;
@@ -20155,9 +20760,11 @@ function cmd_device_setup() {
 	/* fully_routed_ips в старых настройках — это уже «весь трафик устройства» в новой схеме: переносить нечего */
 	let fixfirst = s(c.get(CFG, "settings", "zm_dev_fix")) != "1";
 	migrated = repair_device_migration(c);
-	/* Старый список meta (вся Meta) — это четыре пункта: Meta, Instagram, Facebook и WhatsApp. */
+	/* Старый список meta (вся Meta) — это четыре пункта: Meta, Instagram, Facebook и WhatsApp. Перенос со старых
+	 * версий панели — один раз, вместе с переводом ниже (флаг zm_meta_v4). Потом Meta в Community Lists — выбор
+	 * человека: это обычный список NetShift (itdoginfo), панель его не трогает и списки вместо него не дописывает. */
 	let split_meta = false;
-	for (let x in sections(c, "section")) {
+	if (s(c.get(CFG, "settings", "zm_meta_v4")) != "1") for (let x in sections(c, "section")) {
 		let cl = uniq(words(x.community_lists));
 		if (index(cl, "meta") < 0) continue;
 		/* только дописываем: остальные списки секции и их порядок не трогаем */
@@ -22375,6 +22982,8 @@ list_methods() {
 	json_add_object "system_toggle_ipv6";          json_close_object
 	json_add_object "system_toggle_flow_offloading_fix"; json_close_object
 	json_add_object "system_uninstall_panel";      json_add_string "mode" "string"; json_close_object
+	json_add_object "purge_scan";                  json_close_object
+	json_add_object "purge_run";                   json_add_string "value" "string"; json_close_object
 	json_add_object "zm_cleanup_status";           json_close_object
 	json_add_object "zm_cleanup";                  json_close_object
 	json_add_object "sysinfo_run";                 json_close_object
@@ -22411,6 +23020,8 @@ list_methods() {
 	json_add_object "doh_bootstrap_set";      json_add_string "value" "string"; json_close_object
 	json_add_object "doh_force_set";          json_add_string "mode" "string"; json_close_object
 	json_add_object "doh_failover_set";       json_add_string "value" "string"; json_close_object
+	json_add_object "doh_own_set";            json_add_string "value" "string"; json_close_object
+	json_add_object "dns_net_set";            json_add_string "value" "string"; json_close_object
 	json_add_object "test_status";             json_close_object
 	json_add_object "test_action";             json_add_string "action" "string"; json_add_string "mode" "string"; json_close_object
 	json_add_object "zapret_opt_set";          json_add_string "opt" "string"; json_close_object
@@ -22494,6 +23105,8 @@ call_method() {
 		system_toggle_ipv6)            "$BACKEND" system_toggle_ipv6 ;;
 		system_toggle_flow_offloading_fix) "$BACKEND" system_toggle_flow_offloading_fix ;;
 		system_uninstall_panel)        json_get_var mode mode; "$BACKEND" system_uninstall_panel "$mode" ;;
+		purge_scan)                    "$BACKEND" purge_scan ;;
+		purge_run)                     json_get_var value value; "$BACKEND" purge_run "$value" ;;
 		zm_cleanup_status)             "$BACKEND" zm_cleanup_status ;;
 		zm_cleanup)                    "$BACKEND" zm_cleanup ;;
 		sysinfo_run)                   "$BACKEND" sysinfo_run ;;
@@ -22530,6 +23143,8 @@ call_method() {
 		doh_bootstrap_set)       json_get_var value value; "$BACKEND" doh_bootstrap_set "$value" ;;
 		doh_force_set)           json_get_var mode mode; "$BACKEND" doh_force_set "$mode" ;;
 		doh_failover_set)        json_get_var value value; "$BACKEND" doh_failover_set "$value" ;;
+		doh_own_set)             json_get_var value value; "$BACKEND" doh_own_set "$value" ;;
+		dns_net_set)             json_get_var value value; "$BACKEND" dns_net_set "$value" ;;
 		test_status)             "$BACKEND" test_status ;;
 		test_action)             json_get_var action action; json_get_var mode mode; printf '%s' "$mode" | "$BACKEND" test_action "$action" @stdin ;;
 		zapret_opt_set)          json_get_var opt opt;         "$BACKEND" zapret_opt_set "$opt" ;;
@@ -22634,6 +23249,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"test_results",
 					"zm_update_status",
 					"zm_cleanup_status",
+					"purge_scan",
 					"mixomo_status",
 					"mixomo_proxies",
 					"mixomo_config_get",
@@ -22684,6 +23300,8 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"doh_bootstrap_set",
 					"doh_force_set",
 					"doh_failover_set",
+					"doh_own_set",
+					"dns_net_set",
 					"hosts_replace_geohide",
 					"hosts_reset",
 					"hosts_file_set",
@@ -22699,6 +23317,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"system_toggle_flow_offloading_fix",
 					"system_uninstall_panel",
 					"zm_cleanup",
+					"purge_run",
 					"mirror_set",
 					"exclusions_toggle",
 					"exclusions_clear",
@@ -22959,6 +23578,8 @@ var callSystemToggleFlowOffloadingFix = zmDeclare({ object: 'zapret-manager', me
 var callSystemUninstallPanel = zmDeclare({ object: 'zapret-manager', method: 'system_uninstall_panel', params: ['mode'], expect: {} });
 var callZmCleanupStatus = zmDeclare({ object: 'zapret-manager', method: 'zm_cleanup_status', expect: {} });
 var callZmCleanup = zmDeclare({ object: 'zapret-manager', method: 'zm_cleanup', expect: {} });
+var callPurgeScan = zmDeclare({ object: 'zapret-manager', method: 'purge_scan', expect: {} });
+var callPurgeRun = zmDeclare({ object: 'zapret-manager', method: 'purge_run', params: ['value'], expect: {} });
 var callSysinfoRun = zmDeclare({ object: 'zapret-manager', method: 'sysinfo_run', expect: {} });
 var callSysinfoGet = zmDeclare({ object: 'zapret-manager', method: 'sysinfo_get', expect: {} });
 var callMirrorStatus = zmDeclare({ object: 'zapret-manager', method: 'mirror_status', expect: {} });
@@ -23011,6 +23632,8 @@ var callDohSet = zmDeclare({ object: 'zapret-manager', method: 'doh_set', params
 var callDohBootstrapSet = zmDeclare({ object: 'zapret-manager', method: 'doh_bootstrap_set', params: ['value'], expect: {} });
 var callDohForceSet = zmDeclare({ object: 'zapret-manager', method: 'doh_force_set', params: ['mode'], expect: {} });
 var callDohFailoverSet = zmDeclare({ object: 'zapret-manager', method: 'doh_failover_set', params: ['value'], expect: {} });
+var callDohOwnSet = zmDeclare({ object: 'zapret-manager', method: 'doh_own_set', params: ['value'], expect: {} });
+var callDnsNetSet = zmDeclare({ object: 'zapret-manager', method: 'dns_net_set', params: ['value'], expect: {} });
 var callTestStatus = zmDeclare({ object: 'zapret-manager', method: 'test_status', expect: {} });
 var callTestAction = zmDeclare({ object: 'zapret-manager', method: 'test_action', params: ['action', 'mode'], expect: {} });
 var callTestResults = zmDeclare({ object: 'zapret-manager', method: 'test_results', params: ['mode'], expect: {} });
@@ -24774,6 +25397,8 @@ return baseclass.extend({
 	systemUninstallPanel: callSystemUninstallPanel,
 	zmCleanupStatus: callZmCleanupStatus,
 	zmCleanup: callZmCleanup,
+	purgeScan: callPurgeScan,
+	purgeRun: callPurgeRun,
 	sysinfoRun: callSysinfoRun,
 	sysinfoGet: callSysinfoGet,
 	mirrorStatus: callMirrorStatus,
@@ -24807,6 +25432,8 @@ return baseclass.extend({
 	dohBootstrapSet: callDohBootstrapSet,
 	dohForceSet: callDohForceSet,
 	dohFailoverSet: callDohFailoverSet,
+	dohOwnSet: callDohOwnSet,
+	dnsNetSet: callDnsNetSet,
 	testStatus: callTestStatus,
 	testAction: bigArg2(callTestAction),
 	zapretOptSet: callZapretOptSet,
@@ -25255,14 +25882,20 @@ var PROVIDERS = [
 	{ id: 'geohide_eu', label: 'GeoHide EU', url: 'https://eu.geohide.ru/dns-query' },
 	{ id: 'geohide_us', label: 'GeoHide US', url: 'https://us.geohide.ru/dns-query' },
 	{ id: 'malw', label: 'MALW', url: 'https://dns.malw.link/dns-query' },
-	{ id: 'zapretmoe', label: 'zapret.moe', url: 'https://dns.zapret.moe/dns-query' }
+	{ id: 'zapretmoe', label: 'zapret.moe', url: 'https://dns.zapret.moe/dns-query' },
+	{ id: 'controld', label: 'Control D', url: 'https://freedns.controld.com/p0', boot: '76.76.2.0, 76.76.10.0' },
+	{ id: 'dns4eu', label: 'DNS4EU', url: 'https://unfiltered.joindns4.eu/dns-query', boot: '86.54.11.100, 86.54.11.200' }
 ];
 var BOOT_STD = '1.1.1.1, 8.8.8.8';
 var OWN_RE = /^https:\/\/[A-Za-z0-9.-]+\.[A-Za-z0-9-]+(:\d{1,5})?(\/[A-Za-z0-9._~%\/+=&?-]*)?$/;
 var INTRO = 'Шифрованный DNS для всей сети: интернет-провайдер не видит и не подменяет запросы устройств.';
+var DNSM_URL = '/cgi-bin/luci/admin/services/dns-manager';
+var OWN_MAX = 12;
+/* названия своих серверов из списка «Свои»: адрес → название */
+var OWN_NAMES = {};
 
 var GROUPS = [
-	{ title: 'Обычные', hint: 'только шифрование, ничего не подменяют', ids: [ 'google', 'cloudflare', 'quad9' ] },
+	{ title: 'Обычные', hint: 'только шифрование, ничего не подменяют', ids: [ 'google', 'cloudflare', 'quad9', 'controld', 'dns4eu' ] },
 	{ title: 'С обходом геоблокировок', hint: 'открывают сервисы, закрытые для России', ids: [ 'xbox', 'comss', 'dnsai', 'geohide_ru', 'geohide_eu', 'geohide_us', 'malw', 'zapretmoe' ] },
 	{ title: 'Семейные', hint: 'блокируют опасные сайты, «Семейный» — ещё и взрослые', ids: [ 'yandex_safe', 'yandex_family' ] }
 ];
@@ -25276,7 +25909,7 @@ function isUrl(id) { return /^https:\/\//.test(id || ''); }
 
 function label(id) {
 	var p = prov(id);
-	return p ? p.label : isUrl(id) ? host(id) : '';
+	return p ? p.label : isUrl(id) ? (OWN_NAMES[id] || host(id)) : '';
 }
 
 function latClass(ms) {
@@ -25286,8 +25919,8 @@ function latClass(ms) {
 	return 'zm-lat-bad';
 }
 
-function seg(items, cur, pick) {
-	return E('div', { 'class': 'zm-seg' }, items.map(function(it) {
+function seg(items, cur, pick, cls) {
+	return E('div', { 'class': 'zm-seg' + (cls ? ' ' + cls : '') }, items.map(function(it) {
 		return E('div', { 'class': 'zm-seg-item' + (it.id === cur ? ' zm-active' : ''), 'click': function() { if (it.id !== cur) pick(it.id); } }, it.label);
 	}));
 }
@@ -25323,8 +25956,7 @@ return view.extend({
 		var probe = {}, probing = false, subs = {}, health = null, healthSeq = 0, own = [];
 		var svcBox = E('span', { 'class': 'zm-doh-svc' });
 		var probeBtn = E('button', { 'class': 'cbi-button', 'click': runProbe }, 'Проверить все');
-		var ownInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'spellcheck': 'false', 'autocapitalize': 'off', 'placeholder': 'Свой: https://dns.example.com/dns-query', 'style': 'flex:1; min-width:220px' });
-		ownInput.addEventListener('keydown', function(ev) { if (ev.key === 'Enter') { ev.preventDefault(); addOwn(); } });
+		var ownBusy = false;
 
 		/* Что стоит сейчас: сервер из списка или свой адрес */
 		function cur() {
@@ -25333,23 +25965,99 @@ return view.extend({
 			return l.length === 1 && !l[0].provider && isUrl(l[0].url) ? l[0].url : '';
 		}
 
+		/* «Свои»: сохранённые на роутере серверы, плюс те, что стоят сейчас или записаны в цепочку, но в список не попали */
 		function syncOwn() {
 			var c = cur(), f = data.failover || {};
-			if (isUrl(c) && own.indexOf(c) < 0) own.unshift(c);
-			(f.chain || []).concat(f.pref ? [ f.pref ] : []).forEach(function(u) { if (isUrl(u) && own.indexOf(u) < 0) own.push(u); });
+			own = [];
+			OWN_NAMES = {};
+			(data.own || []).forEach(function(o) {
+				if (!o || !isUrl(o.url) || own.indexOf(o.url) >= 0) return;
+				own.push(o.url);
+				if (o.name) OWN_NAMES[o.url] = o.name;
+			});
+			[ c ].concat(f.chain || [], f.pref ? [ f.pref ] : []).forEach(function(u) { if (isUrl(u) && own.indexOf(u) < 0) own.push(u); });
+		}
+		function ownSaved(u) { return (data.own || []).some(function(o) { return o && o.url === u; }); }
+
+		/* Список «Свои» сохраняется на роутере сразу — это список для выбора, а не настройка DNS.
+		 * Выбрать сервер основным или запасным — как любой другой, через плашку внизу. */
+		function ownCall(arg) {
+			ownBusy = true;
+			render();
+			return zm.dohOwnSet(arg).then(function(r) {
+				if (!r || r.error) throw new Error((r && r.error) || 'Роутер не ответил');
+				data.own = r.own || [];
+				if (r.failover) data.failover = r.failover;
+				return r;
+			}).catch(function(e) {
+				zm.toast(e && e.message || 'Роутер не ответил', 'error');
+				return null;
+			}).then(function(r) {
+				ownBusy = false;
+				syncOwn();
+				render();
+				return r;
+			});
 		}
 
-		function addOwn() {
-			var v = ownInput.value.trim(), i;
-			if (!v) return;
-			if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-			if (/^[A-Za-z0-9.-]+\.[A-Za-z0-9-]+$/.test(v)) v = 'https://' + v + '/dns-query';
-			if (!OWN_RE.test(v) || v.length > 200) { zm.toast('Нужна ссылка вида https://dns.example.com/dns-query или просто адрес сервера', 'warning'); return; }
-			for (i = 0; i < PROVIDERS.length; i++) if (PROVIDERS[i].url === v) { v = PROVIDERS[i].id; break; }
-			if (isUrl(v) && own.indexOf(v) < 0) own.push(v);
-			ownInput.value = '';
-			pickProv = v === cur() ? null : v;
-			render();
+		/* Добавить свой сервер; edit — адрес уже добавленного: тогда меняется только название */
+		function addOwn(edit) {
+			if (busy || ownBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+			if (!edit && (data.own || []).length >= OWN_MAX) { zm.toast('В списке «Свои» уже ' + OWN_MAX + ' серверов — уберите ненужный', 'warning'); return; }
+			function norm(v) {
+				v = String(v || '').trim();
+				if (/^[A-Za-z0-9.-]+\.[A-Za-z0-9-]+(:\d{1,5})?$/.test(v)) v = 'https://' + v + '/dns-query';
+				return v;
+			}
+			zm.dialog({
+				title: edit ? 'Свой сервер DoH' : 'Добавить свой сервер DoH',
+				intro: edit ? edit : '',
+				okText: edit ? 'Сохранить' : 'Добавить',
+				blocks: [
+					edit ? null : { type: 'input', id: 'url', title: 'Адрес', placeholder: 'https://dns.example.com/dns-query',
+						hint: 'Ссылка DoH-сервера. Можно указать только имя сервера — путь /dns-query подставится сам.' },
+					{ type: 'input', id: 'name', title: 'Название', value: edit ? (OWN_NAMES[edit] || '') : '', placeholder: 'например, Мой DNS',
+						hint: 'Необязательно, до 32 знаков. Без названия в списке будет имя сервера.' }
+				],
+				canOk: function(v) { return !!edit || !!String(v.url || '').trim(); }
+			}).then(function(v) {
+				if (!v) return;
+				var url = edit || norm(v.url), name = String(v.name || '').replace(/[\u0000-\u001f"\\<>]/g, '').replace(/\s+/g, ' ').trim().slice(0, 32).trim(), i;
+				if (!edit) {
+					if (!OWN_RE.test(url) || url.length > 200) { zm.toast('Адрес не подходит — нужна ссылка вида https://dns.example.com/dns-query', 'warning'); return; }
+					for (i = 0; i < PROVIDERS.length; i++) if (PROVIDERS[i].url === url) { zm.toast('Этот сервер уже есть в списке — ' + PROVIDERS[i].label, 'info'); return; }
+					if (ownSaved(url) && (OWN_NAMES[url] || '') === name) { zm.toast('Этот сервер уже есть в «Свои»', 'info'); return; }
+				} else if ((OWN_NAMES[url] || '') === name) return;
+				ownCall('add ' + url + (name ? ' ' + name : '')).then(function(r) {
+					if (!r) return;
+					if (edit) { zm.toast('Название сохранено', 'info'); return; }
+					zm.toast('«' + label(url) + '» добавлен в «Свои» — его можно выбрать основным или запасным', 'info');
+					probeOne(url);
+				});
+			});
+		}
+
+		function delOwn(u) {
+			if (busy || ownBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+			var f = data.failover || {}, inChain = (f.chain || []).indexOf(u) >= 0 || !!(foDraft && foDraft.chain.indexOf(u) >= 0);
+			if (u === cur()) { zm.toast('Сейчас DNS идёт через этот сервер — сначала выберите другой', 'warning'); return; }
+			if (u === f.pref && (f.fo || f.direct)) { zm.toast('Это основной сервер цепочки «Если сервер перестал отвечать» — сначала выберите другой', 'warning'); return; }
+			zm.dialog({ title: 'Убрать «' + label(u) + '» из своих?', danger: true, okText: 'Убрать',
+				blocks: [ { type: 'list', title: 'Что произойдёт', items: [ 'Сервер ' + host(u) + ' пропадёт из списка «Свои»' ].concat(inChain ? [ 'Из цепочки запасных он тоже уберётся' ] : []) } ]
+			}).then(function(v) {
+				if (!v) return;
+				ownCall('del ' + u).then(function(r) {
+					if (!r) return;
+					if (pickProv === u) pickProv = null;
+					if (foDraft) {
+						foDraft.chain = foDraft.chain.filter(function(x) { return x !== u; });
+						if (JSON.stringify(foDraft) === JSON.stringify(foSaved())) foDraft = null;
+					}
+					delete probe[u];
+					render();
+					zm.toast('Сервер убран из «Свои»', 'info');
+				});
+			});
 		}
 
 		function sub(id) {
@@ -25436,7 +26144,7 @@ return view.extend({
 			});
 		}
 		var bar = zm.saveBar({
-			onCancel: function() { pickProv = null; pickForce = null; foDraft = null; bootReset(); render(); },
+			onCancel: function() { pickProv = null; pickForce = null; foDraft = null; pickCanary = null; pickRu = null; bootReset(); render(); },
 			onSave: applyPick
 		});
 
@@ -25448,7 +26156,7 @@ return view.extend({
 			if (pickForce && pickForce !== curForce()) n++;
 			if (bootChanged()) n++;
 			if (foChanged()) n++;
-			return n;
+			return n + netPending();
 		}
 
 		function applyPick() {
@@ -25493,10 +26201,21 @@ return view.extend({
 					logLines.push('   ✓ Перехват DNS ' + (pickForce === 'off' ? 'выключен' : 'включён'));
 				});
 			});
+			if (netPending()) steps.push(function() {
+				var c = pickCanary !== null ? pickCanary : curCanary(), r = pickRu || curRu();
+				if (c !== curCanary()) logLines.push('   → ' + (c ? 'Включаем' : 'Выключаем') + ' «Не давать браузерам свой DNS»');
+				if (r !== curRu()) logLines.push('   → Российские сайты: ' + RU_TEXT[r]);
+				zm.renderLog(logEl, logLines.join('\n'));
+				return zm.dnsNetSet('canary=' + (c ? 1 : 0) + ' ru=' + r).then(function(res) {
+					if (!res || res.error) throw new Error((res && res.error) || 'Роутер не ответил');
+					if (res.net) data.net = res.net;
+					logLines.push('   ✓ Браузеры и российские сайты: настройки применены');
+				});
+			});
 			if (!steps.length) return;
 			busy = true;
 			bar.set(true, true);
-			var logLines = [ '==> Применяем настройки DNS over HTTPS' ];
+			var logLines = [ '==> Применяем настройки DNS' ];
 			logEl.classList.add('zm-show');
 			var chain = Promise.resolve();
 			steps.forEach(function(f) { chain = chain.then(function() { zm.renderLog(logEl, logLines.join('\n')); return f(); }); });
@@ -25509,7 +26228,7 @@ return view.extend({
 			}).then(function() {
 				zm.renderLog(logEl, logLines.join('\n'));
 				busy = false;
-				pickProv = null; pickForce = null; foDraft = null;
+				pickProv = null; pickForce = null; foDraft = null; pickCanary = null; pickRu = null;
 				refresh().then(function() { bootReset(); render(); });
 			});
 		}
@@ -25552,13 +26271,24 @@ return view.extend({
 		}
 
 		function render() {
-			hostsWarn.set(!!(data.installed && data.hosts_extra));
+			hostsWarn.set(!!(data.installed && data.hosts_extra && !data.dnsm));
 			card.innerHTML = '';
+			if (data.dnsm && !busy) {
+				zm.blockCard(card, 'DNS over HTTPS', INTRO, 'DNS на роутере настраивает DNS Manager — серверы DoH, перехват DNS и запасные серверы выбираются в нём. Панель эти настройки не меняет, чтобы две программы не переписывали друг друга.');
+				card.appendChild(E('div', { 'class': 'zm-actions' }, [ E('a', { 'class': 'cbi-button', 'href': DNSM_URL, 'target': '_blank', 'rel': 'noopener' }, 'Открыть DNS Manager') ]));
+				foCard.style.display = 'none';
+				forceCard.style.display = 'none';
+				netCard.style.display = 'none';
+				bar.set(false, false);
+				return;
+			}
 			if (!data.installed && data.forkozz && !busy) {
 				zm.blockCard(card, 'DNS over HTTPS', INTRO, 'Стоит Forkozz — он сам шифрует DNS. Чтобы поставить DoH, удалите Forkozz.');
 				if (logEl.classList.contains('zm-show')) card.appendChild(logEl);
 				renderForce();
-				bar.set(false, false);
+				renderNet();
+				var nf = pending();
+				bar.set(nf > 0 || busy, busy, nf ? 'Есть несохранённые изменения' : '');
 				return;
 			}
 			card.appendChild(E('h3', {}, 'DNS over HTTPS'));
@@ -25603,12 +26333,17 @@ return view.extend({
 			if (data.installed) {
 				card.appendChild(E('div', { 'class': 'zm-doh-head' }, [ E('h4', {}, 'Сервер'), probeBtn ]));
 				var curProv = pickProv || cur();
-				var nodes = function(ids) {
-					return E('div', { 'class': 'zm-nodes zm-nodes-3' }, ids.map(function(id) {
+				var tool = function(cls, title, text, fn) {
+					return E('button', { 'class': 'zm-doh-own-btn' + (cls ? ' ' + cls : ''), 'type': 'button', 'title': title, 'aria-label': title, 'disabled': busy || ownBusy ? '' : null,
+						'click': function(ev) { ev.stopPropagation(); fn(); } }, text);
+				};
+				var nodes = function(ids, mine) {
+					var tiles = ids.map(function(id) {
 						var p = prov(id);
 						paintProbe(id);
 						return E('div', {
-							'class': 'zm-node' + (curProv === id ? ' zm-active' : ''),
+							'class': 'zm-node' + (curProv === id ? ' zm-active' : '') + (mine ? ' zm-doh-own' : ''),
+							'title': mine ? id : null,
 							'click': function() {
 								if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
 								pickProv = id === cur() ? null : id;
@@ -25616,23 +26351,36 @@ return view.extend({
 							}
 						}, [
 							E('div', { 'class': 'zm-node-name' }, [ label(id) ]),
+							/* свои: переименовать и убрать; стоящий сейчас, но не сохранённый, — сохранить в список */
+							mine ? E('div', { 'class': 'zm-doh-own-tools' }, ownSaved(id) ? [
+								tool('', 'Изменить название', '✎', function() { addOwn(id); }),
+								tool('zm-doh-own-del', 'Убрать из своих', '✕', function() { delOwn(id); })
+							] : [
+								tool('zm-doh-own-save', 'Сохранить в «Свои»', '+', function() { if (!busy && !ownBusy) ownCall('add ' + id); })
+							]) : '',
 							E('div', { 'class': 'zm-node-foot' }, [ E('span', {}, [ (p ? p.url : id).replace(/^https:\/\//, '') ]), sub(id) ])
 						]);
-					}));
+					});
+					if (mine && (data.own || []).length < OWN_MAX) tiles.push(E('div', {
+						'class': 'zm-node zm-sec-add', 'role': 'button', 'tabindex': '0', 'title': 'Свой DoH-сервер',
+						'click': function() { addOwn(); },
+						'keydown': function(ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); addOwn(); } }
+					}, [ E('span', { 'class': 'zm-sec-add-text' }, ownBusy ? 'Сохраняем…' : '+ Добавить свой сервер') ]));
+					return E('div', { 'class': 'zm-nodes zm-nodes-3' }, tiles);
 				};
-				GROUPS.concat(own.length ? [ { title: 'Свои', hint: '', ids: own } ] : []).forEach(function(g) {
+				GROUPS.concat([ { title: 'Свои', hint: own.length ? 'выбираются основным и запасными так же, как серверы выше' : 'добавьте свой DoH-сервер — его можно будет выбрать и запасным', ids: own, mine: true } ]).forEach(function(g) {
 					card.appendChild(E('div', { 'class': 'zm-doh-group' }, [
 						E('div', { 'class': 'zm-doh-group-head' }, [ E('b', {}, g.title), E('span', { 'class': 'zm-hint' }, g.hint) ]),
-						nodes(g.ids)
+						nodes(g.ids, !!g.mine)
 					]));
 				});
-				card.appendChild(E('div', { 'class': 'zm-actions' }, [ ownInput, E('button', { 'class': 'cbi-button', 'click': addOwn }, 'Добавить') ]));
 				if (list.length > 1) card.appendChild(E('p', { 'class': 'zm-hint' }, 'Сейчас настроено несколько серверов сразу, поэтому ни один не выделен. Выбор заменит их одним.'));
 				renderBoot(curProv);
 			}
 			card.appendChild(logEl);
 			renderFo();
 			renderForce();
+			renderNet();
 			var n = pending();
 			bar.set(n > 0 || busy, busy, n ? 'Есть несохранённые изменения' : '');
 		}
@@ -25910,15 +26658,68 @@ return view.extend({
 				: 'Все устройства принудительно получают DNS через DoH, даже если в них вручную прописан другой DNS. Работает и вместе со Steer.'));
 		}
 
+		/* ---------- Браузеры и российские сайты ----------
+		 * Черновик, как всё на странице: применяется кнопкой на плашке внизу. */
+		var netCard = E('div', { 'class': 'zm-card', 'style': 'display:none' }), pickCanary = null, pickRu = null;
+		var RU_MODES = [ { id: 'off', label: 'Через DoH' }, { id: 'yandex', label: 'Яндекс DNS' }, { id: 'isp', label: 'DNS провайдера' } ];
+		var RU_TEXT = { off: 'через DoH, как все сайты', yandex: 'через Яндекс DNS', isp: 'через DNS провайдера' };
+		function net() { return data.net || {}; }
+		function curCanary() { return !!net().canary; }
+		function curRu() { return net().ru || 'off'; }
+		function netPending() {
+			var n = 0;
+			if (pickCanary !== null && pickCanary !== curCanary()) n++;
+			if (pickRu && pickRu !== curRu()) n++;
+			return n;
+		}
+		function renderNet() {
+			netCard.innerHTML = '';
+			netCard.style.display = data.dnsm ? 'none' : '';
+			if (data.dnsm) return;
+			var t = net(), auto = !!t.canary_doh && !curCanary(), can = pickCanary !== null ? pickCanary : curCanary(), ru = pickRu || curRu();
+			var isp = String(t.isp || '').split(',').filter(Boolean);
+			netCard.appendChild(E('h3', {}, 'Браузеры и российские сайты'));
+			netCard.appendChild(zm.swRow(can || auto, 'Не давать браузерам свой DNS', auto
+				? 'Уже включено: так работает «Перехват DNS устройств» в режиме «Авто».'
+				: 'Firefox и Частный узел iCloud (iCloud Private Relay) на iPhone и Mac умеют узнавать адреса сайтов в обход роутера — тогда для них не работают DoH роутера, блокировка рекламы и Steer. Роутер подскажет им так не делать.',
+				function() {
+					if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+					var v = !can;
+					pickCanary = v === curCanary() ? null : v;
+					render();
+				}, auto || busy));
+			if (can || auto) netCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Подсказку не слушают только браузеры, где свой DNS включили вручную (например, Firefox в режиме «Максимальная защита»).'));
+			/* российские сайты — только когда DNS идёт через DoH (или уже включено и его надо выключить) */
+			if (!(data.installed && !data.forkozz) && curRu() === 'off' && !pickRu) return;
+			netCard.appendChild(E('h4', { 'style': 'margin:18px 0 4px' }, 'Российские сайты — .ru, .su, .рф'));
+			netCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:0' }, 'У кого роутер узнаёт их адреса.'));
+			netCard.appendChild(E('div', { 'class': 'zm-actions' }, [ seg(RU_MODES, ru, function(v) {
+				if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+				if (v !== 'off' && data.forkozz) { zm.toast('Стоит Forkozz — он сам решает, куда идут запросы DNS', 'warning'); return; }
+				if (v === 'isp' && !isp.length) { zm.toast('Провайдер не выдал роутеру адреса DNS — выберите Яндекс DNS', 'warning'); return; }
+				pickRu = v === curRu() ? null : v;
+				render();
+			}, 'zm-seg-stack') ]));
+			netCard.appendChild(E('p', { 'class': 'zm-hint' }, ru === 'yandex'
+				? 'Адреса сайтов в .ru, .su и .рф роутер узнаёт у Яндекс DNS (77.88.8.8, 77.88.8.1) — российские сайты открываются с ближайших к вам серверов. Эти запросы идут без шифрования, остальные — через DoH.'
+				: ru === 'isp'
+				? 'Адреса сайтов в .ru, .su и .рф — у DNS провайдера' + (isp.length ? ' (' + isp.join(', ') + ')' : '') + '. Провайдер видит, какие российские сайты открываются, остальные запросы идут через DoH. Сменит провайдер адреса DNS — панель обновит их сама.'
+				: 'Все сайты — через сервер DoH. Зарубежный сервер иногда отдаёт адреса российских сайтов не в России: Госуслуги, банки и онлайн-кинотеатры могут открываться медленнее или не пускать.'));
+			if (curRu() !== 'off' && (data.forkozz || !data.installed)) netCard.appendChild(E('p', { 'class': 'zm-hint zm-ab-warn' }, data.forkozz
+				? 'Стоит Forkozz — он сам решает, куда идут запросы DNS. Выберите «Через DoH», чтобы российские сайты не шли мимо него.'
+				: 'DoH не установлен — выберите «Через DoH», чтобы российские сайты шли через обычный DNS роутера.'));
+		}
+
 		syncOwn();
 		render();
 		checkHealth();
 		/* DoH уже стоит — показываем предупреждение один раз, чтобы человек знал, что делать при поломке */
-		if (data.installed) setTimeout(function() { if (document.body.contains(wrap)) dohWarn(true); }, 600);
+		if (data.installed && !data.dnsm) setTimeout(function() { if (document.body.contains(wrap)) dohWarn(true); }, 600);
 		wrap.appendChild(hostsWarn);
 		wrap.appendChild(card);
 		wrap.appendChild(foCard);
 		wrap.appendChild(forceCard);
+		wrap.appendChild(netCard);
 		wrap.appendChild(bar);
 		return wrap;
 	}
@@ -26999,7 +27800,7 @@ return view.extend({
 					? 'Пока туннель не работает, выбранные сервисы не открываются совсем — мимо туннеля, через провайдера, они не пойдут. Остальной интернет работает как обычно.'
 					: 'Пока туннель не работает, выбранные сервисы идут через провайдера, как без Steer: что не заблокировано — откроется, но ваш настоящий адрес будет виден.'));
 				if (data.doh) {
-					var DOHN = { cloudflare: 'Cloudflare', google: 'Google', quad9: 'Quad9', xbox: 'XBOX', comss: 'Comss', dnsai: 'DNS-AI', yandex_family: 'Яндекс Семейный', yandex_safe: 'Яндекс Безопасный', geohide_ru: 'GeoHide RU', geohide_eu: 'GeoHide EU', geohide_us: 'GeoHide US', malw: 'MALW', zapretmoe: 'zapret.moe', multi: 'несколько серверов', other: 'свой сервер' };
+					var DOHN = { cloudflare: 'Cloudflare', google: 'Google', quad9: 'Quad9', xbox: 'XBOX', comss: 'Comss', dnsai: 'DNS-AI', yandex_family: 'Яндекс Семейный', yandex_safe: 'Яндекс Безопасный', geohide_ru: 'GeoHide RU', geohide_eu: 'GeoHide EU', geohide_us: 'GeoHide US', malw: 'MALW', zapretmoe: 'zapret.moe', controld: 'Control D', dns4eu: 'DNS4EU', multi: 'несколько серверов', other: 'свой сервер' };
 					mainCard.appendChild(row('Шифрованный DNS', E('span', { 'style': 'display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap' }, [
 						E('span', {}, 'DNS over HTTPS · ' + (DOHN[data.doh] || data.doh)),
 						badge('zm-ok', 'работает')
@@ -29284,7 +30085,7 @@ return view.extend({
 				title: 'Выключить блокировку рекламы?', danger: true, okText: 'Выключить',
 				blocks: [ { type: 'list', title: 'Что произойдёт', items: [
 					'Реклама и трекеры снова будут загружаться на всех устройствах',
-					'Скачанные списки удалятся с роутера; белый список и настройки останутся',
+					'Скачанные списки и статистика удалятся с роутера; белый список и настройки останутся',
 					'dnsmasq перезапустится — на пару секунд пропадут ответы DNS'
 				] } ]
 			}).then(function(v) {
@@ -29393,10 +30194,12 @@ return view.extend({
 				});
 				var devList = E('div', { 'class': 'zm-ab-rank' }, [ E('h4', {}, 'Кто спрашивает больше всего') ]);
 				st.devs.forEach(function(d) {
+					/* имя устройства; адрес IPv6 длинный и пугает — для устройства без имени пишем, что это за адрес */
+					var v6 = /:/.test(d.ip || ''), who = (d.name || 'Устройство без имени') + (d.ip && !v6 ? ' · ' + d.ip : '');
 					devList.appendChild(E('div', { 'class': 'zm-ab-rank-row' }, [
 						E('div', { 'class': 'zm-ab-rank-main' }, [
-							E('div', { 'class': 'zm-ab-rank-line' }, [ E('span', { 'class': 'zm-ab-rank-name' }, d.name ? d.name + ' · ' + d.ip : d.ip), E('span', { 'class': 'zm-ab-rank-n' }, num(d.q)) ]),
-							E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'заблокировано ' + num(d.b) + ' (' + pct(d.b, d.q) + '%)')
+							E('div', { 'class': 'zm-ab-rank-line' }, [ E('span', { 'class': 'zm-ab-rank-name', 'title': [ d.name, d.ip ].filter(Boolean).join(' · ') }, who), E('span', { 'class': 'zm-ab-rank-n' }, num(d.q)) ]),
+							E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, (!d.name && v6 ? 'в сети по IPv6 · ' : '') + 'заблокировано ' + num(d.b) + ' (' + pct(d.b, d.q) + '%)')
 						])
 					]));
 				});
@@ -29405,7 +30208,7 @@ return view.extend({
 				box.appendChild(E('p', { 'class': 'zm-hint' }, 'Запросов пока нет — первые цифры появятся через пару минут после включения.'));
 			}
 			box.appendChild(E('div', { 'class': 'zm-ab-stats-foot' }, [
-				E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'Устройства из «Без блокировки» в статистику не входят.'),
+				E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'Устройства из «Без блокировки» и служебные запросы самого роутера в статистику не входят.'),
 				E('button', { 'class': 'cbi-button', 'disabled': statsBusy || busy ? '' : null, 'click': function() { statsSet(false); } }, statsBusy ? 'Выключаем…' : 'Выключить статистику')
 			]));
 			return box;
@@ -29418,7 +30221,7 @@ return view.extend({
 				: data.on ? badge('zm-bad', 'список не подключён')
 				: badge('zm-off', 'выключена');
 			heroCard.appendChild(E('div', { 'class': 'zm-ab-head' }, [ E('h3', {}, 'Блокировка рекламы'), st ]));
-			heroCard.appendChild(E('p', { 'class': 'zm-hint zm-ab-lead' }, 'Реклама, трекеры и счётчики отсекаются прямо в DNS роутера — сразу для всех устройств в сети: телефонов, телевизоров, приставок, без программ на них. Списки HaGeZi обновляются сами каждый день.'));
+			heroCard.appendChild(E('p', { 'class': 'zm-hint zm-ab-lead' }, 'Реклама, трекеры и счётчики отсекаются прямо в DNS роутера. Списки HaGeZi обновляются сами каждый день.'));
 
 			if (data.error) {
 				heroCard.appendChild(E('div', { 'class': 'zm-refresh-banner zm-show zm-block-banner' }, [ E('span', {}, 'Не удалось узнать состояние: ' + data.error) ]));
@@ -32375,6 +33178,45 @@ html.zm-theme-dark .zm-tile:not(.zm-active):not(.zm-tile-off) {
 .zm-doh-group-head { display: flex; align-items: baseline; gap: 2px 10px; flex-wrap: wrap; font-size: 13px; }
 .zm-doh-group-head .zm-hint { margin: 0; }
 .zm-doh-group .zm-node { min-height: 0; gap: 6px; }
+.zm-doh-group .zm-node.zm-sec-add { min-height: 58px; }
+.zm-doh-own .zm-node-name { padding-right: 52px; }
+.zm-doh-own-tools { position: absolute; top: 6px; right: 6px; display: flex; gap: 2px; }
+.zm-doh-own-btn { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; margin: 0; border: 0; border-radius: 6px; background: transparent; color: inherit; font-size: 12px; line-height: 1; cursor: pointer; opacity: .45; transition: opacity .15s, background .15s, color .15s; }
+.zm-doh-own:hover .zm-doh-own-btn, .zm-doh-own-btn:focus-visible { opacity: .8; }
+.zm-doh-own-btn:hover { opacity: 1; background: rgba(127,127,127,.16); }
+.zm-doh-own-btn.zm-doh-own-del:hover { color: #cf222e; background: rgba(207,34,46,.1); }
+.zm-doh-own-btn.zm-doh-own-save:hover { color: #1a7f37; background: rgba(26,127,55,.12); }
+.zm-doh-own-btn[disabled] { opacity: .2 !important; cursor: default; background: transparent !important; }
+@media (hover: none) { .zm-doh-own-btn { opacity: .7; } }
+/* Система → Очистка и удаление */
+.zm-rm-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 4px 0 6px; }
+.zm-rm-tile { display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 14px 16px; border-radius: 14px; border: 1px solid rgba(127,127,127,.22); background: rgba(127,127,127,.05); }
+.zm-rm-tile.zm-rm-danger { border-color: rgba(207,34,46,.45); }
+.zm-rm-title { font-size: 14px; }
+.zm-rm-danger .zm-rm-title { color: #cf222e; }
+html.zm-theme-dark .zm-rm-danger .zm-rm-title { color: #ff7b72; }
+.zm-rm-text { margin: 0 !important; flex: 1 1 auto; }
+.zm-rm-btn { margin-top: 6px; }
+.zm-rm-btn .cbi-button { margin: 0 !important; }
+.zm-pg { margin-top: 16px; padding-top: 14px; border-top: 1px dashed rgba(127,127,127,.35); }
+.zm-pg-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
+.zm-pg-head > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.zm-pg-group { margin-top: 14px; }
+.zm-pg-group-title { font-size: 12px; font-weight: 600; opacity: .7; margin-bottom: 4px; }
+.zm-pg-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; border: 1px solid transparent; cursor: pointer; }
+.zm-pg-row + .zm-pg-row { border-top-color: rgba(127,127,127,.15); }
+.zm-pg-row:hover { background: rgba(127,127,127,.06); }
+.zm-pg-row.zm-pg-on { background: rgba(207,34,46,.06); }
+.zm-pg-check { width: 16px; height: 16px; margin: 0; cursor: pointer; accent-color: #cf222e; }
+.zm-pg-main { display: flex; flex-direction: column; min-width: 0; }
+.zm-pg-name { font-size: 13.5px; font-weight: 600; }
+.zm-pg-sub { font-size: 12px; opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zm-pg-tools { margin-top: 12px; }
+.zm-pg-note { margin: 12px 0 0; flex-direction: column; align-items: flex-start; gap: 4px; }
+.zm-pg-go .cbi-input-text { flex: 1 1 180px; max-width: 260px; text-transform: uppercase; }
+@media (max-width: 480px) { .zm-pg-row { grid-template-columns: 22px minmax(0, 1fr); } .zm-pg-row .zm-badge { grid-column: 2; justify-self: start; } .zm-pg-sub { white-space: normal; } .zm-pg-go .cbi-input-text { max-width: none; } }
+/* выбор в три пункта на узком экране — столбиком, а не с переносом одного пункта на вторую строку */
+@media (max-width: 480px) { .zm-seg.zm-seg-stack { flex-direction: column; width: 100%; } .zm-seg.zm-seg-stack .zm-seg-item { text-align: center; } }
 .zm-doh-svc { display: inline-flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; min-width: 0; }
 /* цепочка запасных DoH-серверов */
 .zm-fo-chain { position: relative; display: flex; flex-direction: column; gap: 10px; margin: 16px 0 4px; }
@@ -33612,7 +34454,8 @@ return view.extend({
 				} else {
 					autoNote = '';
 					if (/^tz:/.test(value)) tzOpen = false;
-					zm.toast(value === 'ntp' ? (r.sync === 'http' ? 'Время взято с сайтов — NTP у провайдера закрыт' : 'Время синхронизировано') : 'Часовой пояс установлен', 'info');
+					if (/^ntpsrv:/.test(value)) zm.toast((r.ntpsrv === 'ip' ? 'Серверы времени — по IP-адресам' : 'Серверы времени — стандартные') + (r.sync ? ', время синхронизировано' : ', но время пока не синхронизировалось'), r.sync ? 'info' : 'warning');
+					else zm.toast(value === 'ntp' ? (r.sync === 'http' ? 'Время взято с сайтов — NTP у провайдера закрыт' : 'Время синхронизировано') : 'Часовой пояс установлен', 'info');
 				}
 				renderTime();
 			}).catch(function() { timeBusy = ''; zm.toast('Роутер не ответил', 'error'); renderTime(); });
@@ -33631,6 +34474,7 @@ return view.extend({
 				])
 			]));
 			if (autoNote) timeCard.appendChild(E('p', { 'class': 'zm-hint' }, autoNote));
+			renderNtpSrv();
 			if (timeData.time && new Date(timeData.time * 1000).getFullYear() < 2024) timeCard.appendChild(E('p', { 'class': 'zm-hint' }, '⚠ Время на роутере неверное — нажмите «Определить автоматически», иначе расписания не сработают.'));
 			if (tzOpen) {
 				var list = ZONES.slice();
@@ -33644,6 +34488,29 @@ return view.extend({
 					} }, [ E('b', {}, z.city), E('span', {}, z.off + (on ? ' · выбран' : '')) ]);
 				})));
 			}
+		}
+		/* Серверы точного времени: стандартные (по именам, через DNS) или по IP-адресам — работают и без DNS */
+		var NTP_SRV = [ { id: 'std', label: 'Стандартные' }, { id: 'ip', label: 'По IP-адресам' } ];
+		function renderNtpSrv() {
+			var cur = timeData.ntp_preset || 'none', lock = !!timeData.dnsm || !!timeBusy;
+			timeCard.appendChild(E('div', { 'class': 'zm-row', 'style': 'margin-top:12px; flex-wrap:wrap; gap:8px 12px' }, [
+				E('span', { 'class': 'zm-label' }, 'Серверы времени'),
+				E('div', { 'class': 'zm-seg' + (lock ? ' zm-seg-busy' : '') }, NTP_SRV.map(function(it) {
+					return E('div', { 'class': 'zm-seg-item' + (it.id === cur ? ' zm-active' : ''), 'click': function() {
+						if (it.id === cur || lock) return;
+						timeDo('ntpsrv:' + it.id, 'ntpsrv', it.id === 'ip' ? 'Ставим серверы времени по IP-адресам' : 'Ставим стандартные серверы времени');
+					} }, it.label);
+				}))
+			]));
+			timeCard.appendChild(E('p', { 'class': 'zm-hint' }, timeData.dnsm
+				? 'Серверы времени настраивает DNS Manager — меняйте их в нём.'
+				: cur === 'ip'
+				? 'ВНИИФТРИ, Cloudflare и Google по IP-адресам — время синхронизируется, даже если DNS на роутере не отвечает.'
+				: cur === 'std'
+				? 'pool.ntp.org — роутер находит их через DNS. Не отвечает DNS (например, сервер DoH) — время не синхронизируется, а без точного времени не работают DoH и HTTPS. С DNS over HTTPS лучше «По IP-адресам».'
+				: cur === 'own'
+				? 'Сейчас стоят свои серверы: ' + String(timeData.ntp_servers || '').split(' ').join(', ') + '. Выбор заменит их.'
+				: 'Серверы времени не заданы — выберите, какие использовать.'));
 		}
 		if (timeData.time) { clockBase = timeData.time; clockAt = Date.now(); }
 		renderTime();
@@ -33794,91 +34661,195 @@ return view.extend({
 			if (k < 1024) return k + ' КБ';
 			return (k / 1024).toFixed(k < 10240 ? 1 : 0) + ' МБ';
 		}
-		var cleanCard = E('div', { 'class': 'zm-card' }, [
-			E('h3', {}, 'Очистка Zapret Manager'),
-			E('p', { 'class': 'zm-hint' }, 'Удаляет с роутера временные файлы и мусор панели: журналы операций, результаты тестов стратегий Zapret и ByeTube, недокачанные архивы, кэш списков невыбранных сервисов, сведения о новых версиях, собранную системную информацию и остатки прошлых версий. Настройки, установленные программы и списки, которыми пользуются правила Steer и Splify 2, не трогает.'),
-			E('div', { 'class': 'zm-actions' }, [
-				E('button', {
-					'class': 'cbi-button cbi-button-action',
-					'click': function() {
-						if (cleanBusy) { zm.toast('Очистка уже идёт', 'warning'); return; }
-						cleanBusy = true;
-						cleanLog.classList.add('zm-show');
-						zm.renderLog(cleanLog, '==> Удаляем временные файлы и мусор панели');
-						zm.zmCleanup().then(function(res) {
-							cleanBusy = false;
-							if (!res || res.error) {
-								var why = (res && res.error) || 'роутер не ответил';
-								zm.renderLog(cleanLog, '==> Очистка не выполнена: ' + why);
-								zm.toast(why, 'error');
-								return;
-							}
-							var lines = [ '==> Удаляем временные файлы и мусор панели',
-								'   ✓ Удалено файлов и папок: ' + (parseInt(res.removed, 10) || 0),
-								'   ✓ Освобождено на флеше: ' + fmtKb(res.freed_flash_kb),
-								'   ✓ Освобождено в ОЗУ: ' + fmtKb(Math.max(parseInt(res.freed_tmp_kb, 10) || 0, parseInt(res.freed_mem_kb, 10) || 0)) ];
-							if ((parseInt(res.refs_missing, 10) || 0) > 0)
-								lines.push('!! Правилам ядра steer не хватает файлов списков: ' + res.refs_missing + '. Очистка их не трогала — запустите обновление панели (команда zmw) при работающем интернете, списки скачаются заново');
-							lines.push('==> Готово');
-							zm.renderLog(cleanLog, lines.join('\n'));
-							zm.toast('Очистка выполнена', 'info');
-						}).catch(function() {
-							cleanBusy = false;
-							zm.renderLog(cleanLog, '==> Очистка не выполнена: роутер не ответил');
-							zm.toast('Роутер не ответил', 'error');
-						});
-					}
-				}, 'Очистить')
-			]),
-			cleanLog
-		]);
-		wrap.appendChild(cleanCard);
-
+		/* ---------- Очистка и удаление: три уровня — от безопасного к полному ---------- */
 		var uninstallLog = E('pre', { 'class': 'zm-log' });
-		var uninstallCard = E('div', { 'class': 'zm-card' }, [
-			E('h3', {}, 'Удалить Zapret Manager'),
-			E('p', { 'class': 'zm-hint' },
-				'Уберёт саму панель — приложение в LuCI и Web UI. Всё, что ставилось через неё (Zapret, Steer, Forkozz, ' +
-				'Mixomo и остальное), останется на роутере и продолжит работать. Остановится то, что делает сама панель: ' +
-				'блокировка рекламы, автопереключение DoH, ночной автоподбор стратегии и автообновления. Настройки панели ' +
-				'можно сохранить — при повторной установке всё вернётся само.'
-			),
-			E('div', { 'class': 'zm-actions' }, [
-				E('button', {
-					'class': 'cbi-button cbi-button-remove',
-					'click': function() {
-						zm.dialog({ title: 'Удалить Zapret Manager?', danger: true, okText: 'Удалить панель',
-							blocks: [ { type: 'list', title: 'Что произойдёт', items: function(v) { return [
-								'Удалится панель — приложение в LuCI и Web UI',
-								'Zapret, Steer, Forkozz, Mixomo и остальное останутся и продолжат работать',
-								'Выключится то, что делает сама панель: блокировка рекламы, автопереключение DoH, ночной автоподбор стратегии, автообновления списков и прокси, автоподбор WARP и подписки Steer',
-								v.keep ? 'Настройки панели останутся на роутере: поставите панель снова — блокировка рекламы и расписания включатся сами'
-									: 'Настройки панели удалятся вместе с ней: блокировку рекламы и расписания придётся настраивать заново'
-							]; } },
-							{ type: 'switch', id: 'keep', value: true, label: 'Сохранить настройки панели',
-								hint: 'Блокировка рекламы (списки, белый список, статистика), предупреждения и расписания. Займут немного места на флеше — в основном списки рекламы. Выключите, если удаляете панель насовсем.' },
-							{ type: 'note', kind: 'warn', text: 'Панель придётся ставить заново. Эта страница сразу станет недоступна.' } ]
-						}).then(function(v) {
-						if (!v) return;
-						uninstallLog.classList.add('zm-show');
-						zm.renderLog(uninstallLog, '==> Удаляем панель Zapret Manager');
-						zm.toast('Удаляем панель Zapret Manager', 'warning');
-						zm.systemUninstallPanel(v.keep ? 'keep' : 'wipe').then(function(res) {
-							if (res.error) { zm.renderLog(uninstallLog, '==> ОШИБКА: ' + res.error); zm.toast(res.error, 'error'); return; }
-							zm.renderLog(uninstallLog, '==> Готово. Панель удалена, страница больше не будет отвечать. Выходим из панели');
-							zm.toast('Панель Zapret Manager удалена', 'info');
-							setTimeout(function() { location.href = L.url('admin/logout'); }, 2500);
-						}).catch(function() {
-							zm.renderLog(uninstallLog, '==> Готово (соединение прервано — это ожидаемо, панель уже удалена). Выходим из панели');
-							setTimeout(function() { location.href = L.url('admin/logout'); }, 2500);
-						});
-						});
-					}
-				}, 'Удалить панель')
+		var doClean = function() {
+			if (cleanBusy) { zm.toast('Очистка уже идёт', 'warning'); return; }
+			cleanBusy = true;
+			cleanLog.classList.add('zm-show');
+			zm.renderLog(cleanLog, '==> Удаляем временные файлы и мусор панели');
+			zm.zmCleanup().then(function(res) {
+				cleanBusy = false;
+				if (!res || res.error) {
+					var why = (res && res.error) || 'роутер не ответил';
+					zm.renderLog(cleanLog, '==> Очистка не выполнена: ' + why);
+					zm.toast(why, 'error');
+					return;
+				}
+				var lines = [ '==> Удаляем временные файлы и мусор панели',
+					'   ✓ Удалено файлов и папок: ' + (parseInt(res.removed, 10) || 0),
+					'   ✓ Освобождено на флеше: ' + fmtKb(res.freed_flash_kb),
+					'   ✓ Освобождено в ОЗУ: ' + fmtKb(Math.max(parseInt(res.freed_tmp_kb, 10) || 0, parseInt(res.freed_mem_kb, 10) || 0)) ];
+				if ((parseInt(res.refs_missing, 10) || 0) > 0)
+					lines.push('!! Правилам ядра steer не хватает файлов списков: ' + res.refs_missing + '. Очистка их не трогала — запустите обновление панели (команда zmw) при работающем интернете, списки скачаются заново');
+				lines.push('==> Готово');
+				zm.renderLog(cleanLog, lines.join('\n'));
+				zm.toast('Очистка выполнена', 'info');
+			}).catch(function() {
+				cleanBusy = false;
+				zm.renderLog(cleanLog, '==> Очистка не выполнена: роутер не ответил');
+				zm.toast('Роутер не ответил', 'error');
+			});
+		};
+		var doUninstall = function() {
+			zm.dialog({ title: 'Удалить Zapret Manager?', danger: true, okText: 'Удалить панель',
+				blocks: [ { type: 'list', title: 'Что произойдёт', items: function(v) { return [
+					'Удалится панель — приложение в LuCI и Web UI',
+					'Zapret, Steer, Forkozz, Mixomo и остальное останутся и продолжат работать',
+					'Выключится то, что делает сама панель: блокировка рекламы, автопереключение DoH, ночной автоподбор стратегии, автообновления списков и прокси, автоподбор WARP и подписки Steer',
+					v.keep ? 'Настройки панели останутся на роутере: поставите панель снова — блокировка рекламы и расписания включатся сами'
+						: 'Настройки панели удалятся вместе с ней: блокировку рекламы и расписания придётся настраивать заново'
+				]; } },
+				{ type: 'switch', id: 'keep', value: true, label: 'Сохранить настройки панели',
+					hint: 'Блокировка рекламы (списки, белый список, статистика), предупреждения и расписания. Займут немного места на флеше — в основном списки рекламы. Выключите, если удаляете панель насовсем.' },
+				{ type: 'note', kind: 'warn', text: 'Панель придётся ставить заново. Эта страница сразу станет недоступна.' } ]
+			}).then(function(v) {
+			if (!v) return;
+			uninstallLog.classList.add('zm-show');
+			zm.renderLog(uninstallLog, '==> Удаляем панель Zapret Manager');
+			zm.toast('Удаляем панель Zapret Manager', 'warning');
+			zm.systemUninstallPanel(v.keep ? 'keep' : 'wipe').then(function(res) {
+				if (res.error) { zm.renderLog(uninstallLog, '==> ОШИБКА: ' + res.error); zm.toast(res.error, 'error'); return; }
+				zm.renderLog(uninstallLog, '==> Готово. Панель удалена, страница больше не будет отвечать. Выходим из панели');
+				zm.toast('Панель Zapret Manager удалена', 'info');
+				setTimeout(function() { location.href = L.url('admin/logout'); }, 2500);
+			}).catch(function() {
+				zm.renderLog(uninstallLog, '==> Готово (соединение прервано — это ожидаемо, панель уже удалена). Выходим из панели');
+				setTimeout(function() { location.href = L.url('admin/logout'); }, 2500);
+			});
+			});
+		};
+		function rmTile(cls, title, text, btn) {
+			return E('div', { 'class': 'zm-rm-tile' + (cls ? ' ' + cls : '') }, [ E('b', { 'class': 'zm-rm-title' }, title), E('p', { 'class': 'zm-hint zm-rm-text' }, text), E('div', { 'class': 'zm-rm-btn' }, [ btn ]) ]);
+		}
+		var pgBox = E('div', { 'class': 'zm-pg', 'style': 'display:none' }), pgLog = E('pre', { 'class': 'zm-log' });
+		var pgData = null, pgSel = {}, pgBusy = false, pgScanning = false, pgOpen = false, pgErr = '';
+		var pgBtn = E('button', { 'class': 'cbi-button cbi-button-remove', 'click': function() { pgOpen = !pgOpen; pgBtn.textContent = pgOpen ? 'Скрыть' : 'Выбрать, что удалить'; pgBox.style.display = pgOpen ? '' : 'none'; if (pgOpen && !pgData && !pgScanning) pgScan(true); else pgRender(); } }, 'Выбрать, что удалить');
+		var rmCard = E('div', { 'class': 'zm-card' }, [
+			E('h3', {}, 'Очистка и удаление'),
+			E('p', { 'class': 'zm-hint', 'style': 'margin-top:-6px' }, 'Выберите, насколько глубоко чистить.'),
+			E('div', { 'class': 'zm-rm-tiles' }, [
+				rmTile('', 'Очистить мусор', 'Журналы операций, результаты тестов, недокачанные архивы, кэш списков и остатки прошлых версий. Настройки, программы и нужные списки не трогает.',
+					E('button', { 'class': 'cbi-button cbi-button-action', 'click': doClean }, 'Очистить')),
+				rmTile('', 'Удалить панель', 'Только приложение в LuCI и Web UI. Zapret, Steer, Forkozz и остальное останутся и продолжат работать. Настройки панели можно сохранить.',
+					E('button', { 'class': 'cbi-button cbi-button-remove', 'click': doUninstall }, 'Удалить панель')),
+				rmTile('zm-rm-danger', 'Полное удаление', 'Всё, что ставила панель: программы, пакеты, файлы, настройки, правила и задания — вместе с хвостами, даже если программа уже удалена.', pgBtn)
 			]),
-			uninstallLog
+			cleanLog,
+			uninstallLog,
+			pgBox
 		]);
-		wrap.appendChild(uninstallCard);
+		wrap.appendChild(rmCard);
+
+		/* ---------- Полное удаление ---------- */
+		var PG_GROUPS = [ [ 'block', 'Обход блокировок' ], [ 'vpn', 'VPN и прокси' ], [ 'dns', 'DNS и сеть' ], [ 'tools', 'Инструменты' ], [ 'panel', 'Сама панель' ] ];
+		var PG_STATE = { installed: [ 'zm-ok', 'установлен' ], tails: [ 'zm-warn', 'хвосты' ], clean: [ 'zm-off', 'чисто' ] };
+		var pgWord = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'spellcheck': 'false', 'autocomplete': 'off', 'placeholder': 'УДАЛИТЬ', 'aria-label': 'Подтверждение: введите слово УДАЛИТЬ' });
+		var pgGo = E('button', { 'class': 'cbi-button cbi-button-remove', 'click': pgRun }, 'Удалить выбранное');
+		pgWord.addEventListener('input', pgPaintGo);
+		function pgItems() { return (pgData && pgData.items) || []; }
+		function pgIds() { return pgItems().filter(function(it) { return pgSel[it.id]; }).map(function(it) { return it.id; }); }
+		function pgWordOk() { return pgWord.value.trim().toUpperCase() === 'УДАЛИТЬ'; }
+		function pgPaintGo() {
+			var n = pgIds().length;
+			pgGo.textContent = pgBusy ? 'Удаляем…' : 'Удалить выбранное' + (n ? ' (' + n + ')' : '');
+			pgGo.disabled = pgBusy || !n || !pgWordOk() || !!(pgData && pgData.busy);
+		}
+		function pgScan(first) {
+			pgScanning = true; pgErr = '';
+			pgRender();
+			zm.purgeScan().then(function(r) {
+				pgScanning = false;
+				if (!r || r.error || !r.items) { pgErr = (r && r.error) || 'роутер не ответил'; pgRender(); return; }
+				pgData = r;
+				/* сначала отмечено всё, что есть на роутере; сама панель — только по выбору */
+				if (first) { pgSel = {}; r.items.forEach(function(it) { if (it.state !== 'clean' && it.id !== 'panel') pgSel[it.id] = true; }); }
+				pgRender();
+			}, function() { pgScanning = false; pgErr = 'роутер не ответил'; pgRender(); });
+		}
+		function pgMark(how) {
+			if (pgBusy) return;
+			pgSel = {};
+			pgItems().forEach(function(it) { if (how === 'all' || (how === 'found' && it.state !== 'clean' && it.id !== 'panel')) pgSel[it.id] = true; });
+			pgRender();
+		}
+		function pgRow(it) {
+			var on = !!pgSel[it.id], st = PG_STATE[it.state] || PG_STATE.clean;
+			var sub = it.items.length ? it.items.slice(0, 3).join(' · ') + (it.n > 3 ? ' · ещё ' + (it.n - 3) : '')
+				: 'на роутере ничего не найдено — удаление всё равно пройдёт по списку';
+			var box = E('input', { 'type': 'checkbox', 'class': 'zm-pg-check', 'aria-label': it.title });
+			box.checked = on; box.disabled = pgBusy;
+			var row = E('label', { 'class': 'zm-pg-row' + (on ? ' zm-pg-on' : '') + (it.id === 'panel' ? ' zm-pg-self' : '') }, [
+				box,
+				E('span', { 'class': 'zm-pg-main' }, [ E('span', { 'class': 'zm-pg-name' }, it.title), E('span', { 'class': 'zm-pg-sub', 'title': it.items.join('\n') }, sub) ]),
+				E('span', { 'class': 'zm-badge ' + st[0] }, [ E('span', { 'class': 'zm-dot' }), it.id === 'panel' ? 'эта панель' : st[1] ])
+			]);
+			box.addEventListener('change', function() { pgSel[it.id] = box.checked; pgRender(); });
+			return row;
+		}
+		function pgRender() {
+			if (!pgOpen) return;
+			pgBox.innerHTML = '';
+			var items = pgItems(), cnt = { installed: 0, tails: 0, clean: 0 };
+			items.forEach(function(it) { if (it.id !== 'panel') cnt[it.state] = (cnt[it.state] || 0) + 1; });
+			pgBox.appendChild(E('div', { 'class': 'zm-pg-head' }, [
+				E('div', {}, [ E('h4', { 'style': 'margin:0' }, 'Полное удаление'),
+					E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, pgScanning ? 'Проверяем роутер…' : pgErr ? 'Проверка не удалась: ' + pgErr
+						: pgData ? 'Стоит: ' + cnt.installed + ' · с хвостами: ' + cnt.tails + ' · чисто: ' + cnt.clean : '') ]),
+				E('button', { 'class': 'cbi-button', 'disabled': pgScanning || pgBusy ? '' : null, 'click': function() { pgScan(false); } }, pgScanning ? 'Проверяем…' : 'Проверить снова')
+			]));
+			if (!pgData) { if (pgLog.classList.contains('zm-show')) pgBox.appendChild(pgLog); return; }
+			if (pgData.busy && !pgBusy) pgBox.appendChild(E('p', { 'class': 'zm-hint zm-ab-warn' }, 'Сейчас идёт операция «' + pgData.busy + '» — дождитесь её окончания и нажмите «Проверить снова».'));
+			PG_GROUPS.forEach(function(g) {
+				var list = items.filter(function(it) { return it.group === g[0]; });
+				if (!list.length) return;
+				pgBox.appendChild(E('div', { 'class': 'zm-pg-group' }, [ E('div', { 'class': 'zm-pg-group-title' }, g[1]) ].concat(list.map(pgRow))));
+			});
+			pgBox.appendChild(E('div', { 'class': 'zm-actions zm-pg-tools' }, [
+				E('button', { 'class': 'cbi-button', 'disabled': pgBusy ? '' : null, 'click': function() { pgMark('found'); } }, 'Отметить найденное'),
+				E('button', { 'class': 'cbi-button', 'disabled': pgBusy ? '' : null, 'click': function() { pgMark('all'); } }, 'Отметить всё'),
+				E('button', { 'class': 'cbi-button', 'disabled': pgBusy ? '' : null, 'click': function() { pgMark('none'); } }, 'Снять все')
+			]));
+			var notes = [ 'Сеть, Wi‑Fi и пакеты OpenWrt не трогаются — удаляется только то, что ставила панель. Свои записи в настройках DNS и hosts остаются.' ];
+			if (pgSel.panel) notes.push('Панель удалится последней — после этого страница перестанет открываться. Вернуть её — команда установки или zmw.');
+			pgBox.appendChild(E('div', { 'class': 'zm-refresh-banner zm-show zm-pg-note', 'role': 'note' }, notes.map(function(t) { return E('span', {}, t); })));
+			pgBox.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin:12px 0 6px' }, 'Для подтверждения введите слово УДАЛИТЬ'));
+			pgWord.disabled = pgBusy;
+			pgBox.appendChild(E('div', { 'class': 'zm-actions zm-pg-go' }, [ pgWord, pgGo ]));
+			pgPaintGo();
+			pgBox.appendChild(pgLog);
+		}
+		function pgRun() {
+			var ids = pgIds();
+			if (pgBusy || !ids.length || !pgWordOk()) return;
+			pgBusy = true; pgRender();
+			pgLog.classList.add('zm-show');
+			var lines = [ '==> Полное удаление' ];
+			zm.renderLog(pgLog, lines.join('\n'));
+			zm.purgeRun(ids.join(',')).then(function(res) {
+				if (!res || res.error || !res.started) throw new Error((res && res.error) || 'роутер не ответил');
+				zm.toast('Полное удаление запущено', 'warning');
+				zm.pollJob('purge', pgLog, function(ok) {
+					pgBusy = false;
+					if (ids.indexOf('panel') >= 0) {
+						zm.toast('Всё выбранное удалено, панель удаляется', 'info');
+						setTimeout(function() { location.href = L.url('admin/logout'); }, 4000);
+						return;
+					}
+					zm.toast(ok ? 'Всё выбранное удалено' : 'Удаление закончилось, но кое-что осталось — смотрите журнал', ok ? 'info' : 'warning');
+					pgWord.value = '';
+					pgScan(false);
+				});
+			}).catch(function(e) {
+				pgBusy = false;
+				/* панель удаляла саму себя — роутер перестал отвечать: это ожидаемо */
+				if (ids.indexOf('panel') >= 0 && pgLog.textContent.indexOf('панель удаляется') >= 0) { setTimeout(function() { location.href = L.url('admin/logout'); }, 3000); return; }
+				lines.push('==> ОШИБКА: ' + (e && e.message || 'роутер не ответил'));
+				zm.renderLog(pgLog, lines.join('\n'));
+				zm.toast(e && e.message || 'Роутер не ответил', 'error');
+				pgRender();
+			});
+		}
 
 		/* «Спасибо»: сверху благодарность авторам и всем пользователям, ниже по кнопке — авторы по разделам.
 		 * g — раздел: zm (сама панель), block, vpn, tg, dns, other. */
@@ -39339,7 +40310,7 @@ function buildShell() {
 		nav.appendChild(a);
 	});
 
-	/* одна строка: «Модель · OpenWrt 24.10.4»; архитектура и прочее — во всплывающей подсказке */
+	/* одна строка — модель роутера; версия OpenWrt и архитектура — во всплывающей подсказке */
 	deviceEl = E('div', { 'class': 'zmw-device' }, [
 		E('span', { 'class': 'zmw-device-model' }, [ 'Роутер' ]),
 		E('span', { 'class': 'zmw-device-sub' }, [ '' ])
@@ -39566,7 +40537,7 @@ function loadShellInfo() {
 		if (!i || i.error) return;
 		deviceEl.firstChild.textContent = String(i.model || 'Роутер').replace(/\s*\(.*\)\s*$/, '') || i.model;
 		deviceEl.title = [ i.model, i.openwrt ? 'OpenWrt ' + i.openwrt : '', i.arch ].filter(Boolean).join('\n');
-		deviceEl.children[1].textContent = i.openwrt ? ' · OpenWrt ' + i.openwrt : '';
+		deviceEl.children[1].textContent = '';
 	}).catch(function () {});
 	callUpd().then(function (u) {
 		if (!u || u.error) return;
@@ -40627,6 +41598,11 @@ html[data-theme="retro"] #zmw-view .zm-tg-link-card { background: #ffffff; color
 
 #zmw-view .zm-ab-panel { gap: 18px; }
 #zmw-view .zm-ab-tile { background: var(--surface-2); border-color: var(--border); }
+#zmw-view .zm-rm-tile { background: var(--surface-2); border-color: var(--border); }
+#zmw-view .zm-rm-tile.zm-rm-danger { border-color: rgba(239,68,68,.45); }
+#zmw-view .zm-pg { border-top-color: var(--border); }
+#zmw-view .zm-pg-name { color: var(--text); }
+#zmw-view .zm-pg-sub, #zmw-view .zm-pg-group-title { color: var(--text-2); opacity: 1; }
 #zmw-view .zm-ab-stats-off { border-color: var(--border-2); }
 #zmw-view .zm-ab-rank-row { border-top-color: var(--border); }
 #zmw-view .zm-ab-bar { background: var(--surface-2); }
@@ -41538,7 +42514,10 @@ fi
 
 if [ -x /usr/bin/netshift ] && [ -f /usr/lib/netshift/constants.sh ]; then
 	_zmi_say "Сверяем настройки Forkozz с новой версией панели"
-	if /opt/zapret-manager-luci/backend.sh forkop_device_setup apply >/dev/null 2>&1; then _zmi_ok "Настройки Forkozz в порядке"
+	if [ ! -f /usr/lib/netshift/zm-managed ] && { _zmi_has netshift || _zmi_has luci-app-netshift; }; then
+		# NetShift поставлен пакетом, а не через Forkozz, — его настройки ведёт человек, панель их не меняет
+		_zmi_ok "NetShift стоит отдельным пакетом — его настройки панель не трогает"
+	elif /opt/zapret-manager-luci/backend.sh forkop_device_setup apply >/dev/null 2>&1; then _zmi_ok "Настройки Forkozz в порядке"
 	else _zmi_warn "Сверить не удалось — откройте вкладку Forkozz и нажмите «Перезапустить»"; fi
 fi
 
