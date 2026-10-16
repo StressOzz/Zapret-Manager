@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 3.27
+# Version: 3.28
 ZM_VERSION_EOF
 set -e
 
@@ -1196,7 +1196,9 @@ zm_watch() {
 	rpcd_watch
 	_test_recover >/dev/null 2>&1
 	_zm_net_orphan && _zm_net_restore force >/dev/null 2>&1
-	if ! _fk_installed || [ -f "$FK_MARK" ] || ! _fk_foreign; then
+	# NetShift стоит пакетом — это NetShift человека (Forkozz при установке пакеты убирает), даже если от прежнего
+	# Forkozz осталась метка zm-managed: пакет её не удаляет. Его файлы и настройки панель не трогает.
+	if ! _fk_installed || ! _fk_foreign; then
 		# без папки /etc/sing-box движок собирает конфиг, но не может его положить — sing-box падает без конфига
 		_fk_installed && [ ! -d /etc/sing-box ] && mkdir -p /etc/sing-box
 		_fk_watch
@@ -16454,6 +16456,8 @@ _fk_ucj() {
 
 _fk_device_setup() {
 	local res
+	# NetShift пакетом — настройки и движок ведёт человек: ни переносов, ни правок движка
+	_fk_foreign && { echo '{"ok":true,"changed":false,"foreign":true}'; return 0; }
 	res="$(_fk_ucj device_setup)" || { echo "$res"; return 1; }
 	if [ "$1" = apply ] && [ "$(printf '%s' "$res" | jsonfilter -e '@.changed')" = true ] && _fk_up; then
 		do_fk_service apply
@@ -20754,8 +20758,17 @@ function repair_device_migration(c) {
 	return fixed;
 }
 
+/* Настройки писала панель (Forkozz): в них есть её поля zm_*. Настройки, сделанные в самом NetShift, переносы
+ * не трогают — Meta и прочее в них выбрал человек. */
+function panel_conf(c) {
+	let r = false;
+	c.foreach(CFG, null, (x) => { for (let k in keys(x)) if (substr(k, 0, 3) == "zm_") r = true; });
+	return r;
+}
+
 function cmd_device_setup() {
 	let patched = patch_device_engine(), c = cursor(), migrated = false;
+	if (!panel_conf(c)) { out({ ok: true, changed: patched, migrated: false, foreign: true }); return; }
 	let v2 = s(c.get(CFG, "settings", "zm_dev_v2")) == "1";
 	/* fully_routed_ips в старых настройках — это уже «весь трафик устройства» в новой схеме: переносить нечего */
 	let fixfirst = s(c.get(CFG, "settings", "zm_dev_fix")) != "1";
@@ -42514,8 +42527,9 @@ fi
 
 if [ -x /usr/bin/netshift ] && [ -f /usr/lib/netshift/constants.sh ]; then
 	_zmi_say "Сверяем настройки Forkozz с новой версией панели"
-	if [ ! -f /usr/lib/netshift/zm-managed ] && { _zmi_has netshift || _zmi_has luci-app-netshift; }; then
-		# NetShift поставлен пакетом, а не через Forkozz, — его настройки ведёт человек, панель их не меняет
+	if _zmi_has netshift || _zmi_has luci-app-netshift; then
+		# NetShift поставлен пакетом, а не через Forkozz (Forkozz пакеты убирает), — его настройки ведёт человек,
+		# панель их не меняет, даже если от прежнего Forkozz осталась метка zm-managed
 		_zmi_ok "NetShift стоит отдельным пакетом — его настройки панель не трогает"
 	elif /opt/zapret-manager-luci/backend.sh forkop_device_setup apply >/dev/null 2>&1; then _zmi_ok "Настройки Forkozz в порядке"
 	else _zmi_warn "Сверить не удалось — откройте вкладку Forkozz и нажмите «Перезапустить»"; fi
