@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 3.28
+# Version: 3.29
 ZM_VERSION_EOF
 set -e
 
@@ -19397,7 +19397,7 @@ _ab_stats_fold() {
 # Сводка за последние ЧАСЫ (1 или 24) или за всё время (all): запросы, заблокировано, устройства,
 # что блокируется чаще и кто спрашивает больше. Всё время = итоги на флеше + ещё не сложенные часы.
 _ab_stats_json() {
-	local per="${1:-24}" from f h list="" since s1
+	local per="${1:-24}" from f h list="" since s1 via
 	case "$per" in 1|24|all) ;; *) per=24 ;; esac
 	since="$(_ab_get stats_since 0)"
 	if [ "$per" = all ]; then
@@ -19423,7 +19423,10 @@ _ab_stats_json() {
 	fi
 	mkdir -p "$AB_STATS_DIR"
 	_ab_devmap > "$AB_STATS_DIR/devmap.$$"
-	awk -v per="$([ "$per" = all ] && echo 0 || echo "$per")" -v since="${since:-0}" -v mf="$AB_STATS_DIR/devmap.$$" "$AB_KEY_AWK"'
+	# Кто пересылает DNS устройств в dnsmasq с самого роутера: тогда их запросы приходят «от роутера»
+	via=""
+	stl_running 2>/dev/null && via="Steer"
+	awk -v per="$([ "$per" = all ] && echo 0 || echo "$per")" -v since="${since:-0}" -v mf="$AB_STATS_DIR/devmap.$$" -v via="$via" "$AB_KEY_AWK"'
 		function js(v) { gsub(/[\\"]/, "", v); gsub(/[\001-\037]/, "", v); return v }
 		BEGIN { abmap(mf) }
 		$1 == "T" { T += $2 } $1 == "B" { B += $2 } $1 == "D" { D[$2] += $3 }
@@ -19435,8 +19438,11 @@ _ab_stats_json() {
 			if ($2 != "r" && $2 !~ /^[mn]:/ && (!(k in IP) || (IP[k] ~ /:/ && $2 ~ /\./))) IP[k] = $2
 		}
 		END {
-			# служебные запросы самого роутера — не устройство сети
-			T -= C["r"]; B -= X["r"]; if (T < 0) T = 0; if (B < 0) B = 0; delete C["r"]; delete X["r"]
+			# Запросы «от роутера». Обычно это его служебные запросы (время, обновления) — их немного, и это не
+			# устройство сети. Но если DNS устройств пересылает программа на самом роутере (Steer), все запросы сети
+			# приходят от него: больше половины — значит, это пересылка. Тогда они считаются, одной строкой «вся сеть».
+			rq = C["r"] + 0; relay = rq > 0 && rq * 2 >= T
+			if (!relay) { T -= rq; B -= X["r"]; if (T < 0) T = 0; if (B < 0) B = 0; delete C["r"]; delete X["r"] }
 			# имя и адрес: сейчас (аренды, соседи), иначе — запомненные при подсчёте (W)
 			for (k in C) {
 				m = k ~ /^m:/ ? substr(k, 3) : ""
@@ -19449,11 +19455,12 @@ _ab_stats_json() {
 			for (k in C) if (k ~ /^m:/ && NAME[k] != "") NM[NAME[k]] = k
 			nn = 0; for (k in C) if (k ~ /^n:/ && (NAME[k] in NM)) L[++nn] = k
 			for (i = 1; i <= nn; i++) { k = L[i]; t = NM[NAME[k]]; C[t] += C[k]; X[t] += X[k]; if (ADDR[t] == "") ADDR[t] = ADDR[k]; delete C[k] }
-			nc = 0; for (k in C) nc++
-			printf "{\"on\":true,\"period\":%d,\"since\":%d,\"total\":%d,\"blocked\":%d,\"clients\":%d,\"top\":[", per, since, T, B, nc
+			if (relay) { NAME["r"] = ""; ADDR["r"] = "" }
+			nc = 0; for (k in C) if (k != "r") nc++
+			printf "{\"on\":true,\"period\":%d,\"since\":%d,\"total\":%d,\"blocked\":%d,\"clients\":%d,\"relay\":%s,\"via\":\"%s\",\"top\":[", per, since, T, B, nc, relay ? "true" : "false", js(via)
 			for (j = 0; j < 10; j++) { best = ""; bn = 0; for (k in D) if (D[k] > bn) { bn = D[k]; best = k } if (best == "") break; printf "%s{\"d\":\"%s\",\"n\":%d}", (j ? "," : ""), js(best), bn; delete D[best] }
 			printf "],\"devs\":["
-			for (j = 0; j < 6; j++) { best = ""; bn = 0; for (k in C) if (C[k] > bn) { bn = C[k]; best = k } if (best == "") break; printf "%s{\"ip\":\"%s\",\"name\":\"%s\",\"q\":%d,\"b\":%d}", (j ? "," : ""), js(ADDR[best]), js(NAME[best]), bn, X[best] + 0; delete C[best] }
+			for (j = 0; j < 6; j++) { best = ""; bn = 0; for (k in C) if (C[k] > bn) { bn = C[k]; best = k } if (best == "") break; printf "%s{\"ip\":\"%s\",\"name\":\"%s\",\"q\":%d,\"b\":%d%s}", (j ? "," : ""), js(ADDR[best]), js(NAME[best]), bn, X[best] + 0, best == "r" ? ",\"relay\":true" : ""; delete C[best] }
 			printf "]}\n"
 		}' $list /dev/null
 	rm -f "$AB_STATS_DIR/devmap.$$"
@@ -30166,6 +30173,8 @@ return view.extend({
 				return box;
 			}
 			var st = stats || { total: 0, blocked: 0, clients: 0, top: [], devs: [] };
+			/* DNS устройств пересылает программа на роутере (Steer): роутер видит их запросы вместе, одной строкой */
+			var relayBy = st.via ? 'через ' + st.via : 'через роутер';
 			var seg = E('div', { 'class': 'zm-seg zm-ab-stats-seg', 'role': 'radiogroup', 'aria-label': 'Период' });
 			[ [ 1, 'За час' ], [ 24, 'За сутки' ], [ 'all', 'За всё время' ] ].forEach(function(o) {
 				var on = statsPer === o[0];
@@ -30190,7 +30199,8 @@ return view.extend({
 				tile('q', 'DNS-запросы', num(st.total), statsPer === 1 ? 'за последний час' : statsPer === 'all' ? 'за всё время' : 'за сутки'),
 				tile('b', 'Заблокировано', num(st.blocked), 'реклама и трекеры'),
 				tile('p', 'Процент блокировки', pct(st.blocked, st.total) + '%', 'от всех запросов'),
-				tile('d', 'Устройства', num(st.clients), 'спрашивали DNS')
+				st.relay && !st.clients ? tile('d', 'Устройства', 'вся сеть', 'DNS идёт ' + relayBy)
+					: tile('d', 'Устройства', num(st.clients), st.relay ? 'и остальные — ' + relayBy : 'спрашивали DNS')
 			]));
 			if (stats && (st.top.length || st.devs.length)) {
 				var topMax = st.top.length ? st.top[0].n : 1;
@@ -30208,10 +30218,11 @@ return view.extend({
 				var devList = E('div', { 'class': 'zm-ab-rank' }, [ E('h4', {}, 'Кто спрашивает больше всего') ]);
 				st.devs.forEach(function(d) {
 					/* имя устройства; адрес IPv6 длинный и пугает — для устройства без имени пишем, что это за адрес */
-					var v6 = /:/.test(d.ip || ''), who = (d.name || 'Устройство без имени') + (d.ip && !v6 ? ' · ' + d.ip : '');
+					var v6 = /:/.test(d.ip || ''), who = d.relay ? (st.clients ? 'Остальные устройства' : 'Вся сеть') + ' · ' + relayBy
+						: (d.name || 'Устройство без имени') + (d.ip && !v6 ? ' · ' + d.ip : '');
 					devList.appendChild(E('div', { 'class': 'zm-ab-rank-row' }, [
 						E('div', { 'class': 'zm-ab-rank-main' }, [
-							E('div', { 'class': 'zm-ab-rank-line' }, [ E('span', { 'class': 'zm-ab-rank-name', 'title': [ d.name, d.ip ].filter(Boolean).join(' · ') }, who), E('span', { 'class': 'zm-ab-rank-n' }, num(d.q)) ]),
+							E('div', { 'class': 'zm-ab-rank-line' }, [ E('span', { 'class': 'zm-ab-rank-name', 'title': d.relay ? 'Устройства спрашивают DNS ' + relayBy + ' — роутер видит их запросы вместе' : [ d.name, d.ip ].filter(Boolean).join(' · ') }, who), E('span', { 'class': 'zm-ab-rank-n' }, num(d.q)) ]),
 							E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, (!d.name && v6 ? 'в сети по IPv6 · ' : '') + 'заблокировано ' + num(d.b) + ' (' + pct(d.b, d.q) + '%)')
 						])
 					]));
@@ -30221,7 +30232,9 @@ return view.extend({
 				box.appendChild(E('p', { 'class': 'zm-hint' }, 'Запросов пока нет — первые цифры появятся через пару минут после включения.'));
 			}
 			box.appendChild(E('div', { 'class': 'zm-ab-stats-foot' }, [
-				E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'Устройства из «Без блокировки» и служебные запросы самого роутера в статистику не входят.'),
+				E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, st.relay
+					? (st.clients ? 'DNS части устройств' : 'DNS устройств') + ' проходит ' + relayBy + ', поэтому роутер видит их запросы вместе, а не по отдельности. Блокировка от этого не зависит и работает для всех. Устройства из «Без блокировки» в статистику не входят.'
+					: 'Устройства из «Без блокировки» и служебные запросы самого роутера в статистику не входят.'),
 				E('button', { 'class': 'cbi-button', 'disabled': statsBusy || busy ? '' : null, 'click': function() { statsSet(false); } }, statsBusy ? 'Выключаем…' : 'Выключить статистику')
 			]));
 			return box;
