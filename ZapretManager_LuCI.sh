@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 3.31
+# Version: 3.34
 ZM_VERSION_EOF
 set -e
 
@@ -43,6 +43,16 @@ for _zm_pid in /tmp/zapret-manager-luci/*.pid; do
 	fi
 done
 
+# панель как раз удаляется (кнопка «Удалить панель») — ждём: иначе удаление доделается после установки и сотрёт свежие файлы
+_zm_n=0
+while [ -f /tmp/zm_uninstall_panel.sh ] && ps w 2>/dev/null | grep -q '[z]m_uninstall_panel\.sh'; do
+	[ "$_zm_n" = 0 ] && _zmi_step "Панель сейчас удаляется — ждём окончания"
+	if [ "$_zm_n" -ge 60 ]; then
+		echo -e "${YELLOW}Удаление панели не закончилось за минуту — запустите установку чуть позже${NC}"
+		exit 1
+	fi
+	sleep 1; _zm_n=$((_zm_n + 1))
+done
 _zmi_ok "Можно ставить"
 _zmi_say "Убираем файлы прежней версии панели"
 if [ -s /tmp/zapret-manager-luci/resolv.conf.zm-bak ]; then
@@ -1528,6 +1538,7 @@ do_remove_zapret() {
 	crontab -l 2>/dev/null | awk '{ l = tolower($0) } l ~ /zapret/ && l !~ /zapret-manager|zapret2/ { next } { print }' | crontab - 2>/dev/null
 	sed -i "\\|$ZA_TAG|d" "$CRON_FILE" 2>/dev/null
 	echo "   ✓ Задания Zapret убраны из расписания"
+	_zm_rm_listed zapret || rc=1
 	/etc/init.d/firewall reload >/dev/null 2>&1
 	_zm_rm_done "$rc" "Zapret"
 }
@@ -1642,6 +1653,7 @@ do_remove_zapret2() {
 	_zm_wipe /etc/config/zapret2 /etc/config/zapret2-opkg /etc/config/zapret2.apk-new /opt/zapret2 /etc/init.d/zapret2 /etc/rc.d/*zapret2 /etc/hotplug.d/*/*zapret2 /tmp/zapret2* &&
 		echo "   ✓ Файлы удалены, остатков нет" || rc=1
 	_zm_cron_drop 'zapret2' 'Zapret2'
+	_zm_rm_listed zapret2 || rc=1
 	/etc/init.d/firewall reload >/dev/null 2>&1
 	_zm_rm_done "$rc" "Zapret2"
 }
@@ -2720,7 +2732,7 @@ hosts_file_set() {
 	local content="$1"
 	[ -n "$content" ] || { echo '{"error":"пустой файл — сохранение отменено"}'; return 1; }
 	[ "$(printf '%s' "$content" | wc -c)" -gt "$HOSTS_EDIT_MAX" ] && { echo '{"error":"файл слишком большой для редактора"}'; return 1; }
-	cp "$HOSTS_FILE" "$HOSTS_FILE.bak" 2>/dev/null
+	cp "$HOSTS_FILE" "$HOSTS_FILE.zm-bak" 2>/dev/null
 	printf '%s' "$content" > "$HOSTS_FILE"
 	[ -n "$(tail -c 1 "$HOSTS_FILE" 2>/dev/null)" ] && echo >> "$HOSTS_FILE"
 	/etc/init.d/dnsmasq restart >/dev/null 2>&1
@@ -3066,6 +3078,10 @@ system_toggle_flow_offloading_fix() {
 		return
 	fi
 	sed -i 's/meta l4proto { tcp, udp } flow offload @ft;/meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;/' "$template"
+	if ! grep -q 'ct original packets ge 30 flow offload @ft;' "$template"; then
+		echo '{"error":"в шаблоне firewall4 нет ожидаемой строки flow offload — исправление не применилось, ничего не изменено"}'
+		return 1
+	fi
 	fw4 restart >/dev/null 2>&1
 	printf '{"ok":true,"flow_offloading_fix":true}\n'
 }
@@ -3361,8 +3377,8 @@ ZM_PATHS="$ZM_OPT /usr/libexec/rpcd/zapret-manager \
 	/tmp/zm-run.* /tmp/zm-wait.* /tmp/zm-quiet.* /tmp/zm-pkg.* /tmp/zm-rpc.* /tmp/zm_update_install.log \
 	/tmp/zm-rpcd-plugin.stamp /tmp/zm-rpcd-slow /tmp/zm-zash /tmp/zm-doh-failover.* /tmp/zm-doh.* /tmp/zm-dohfo.* \
 	/tmp/zm-adblock-stats /tmp/zm-fk-* /tmp/zm-backup-*.tar.gz /var/run/dnsmasq/zm-queries.log \
-	/etc/hosts.zmtmp /etc/hosts.zmdrop \
-	/www/zm /www/zm-webui.html /etc/zm-warp-own.conf /usr/bin/zmw"
+	/etc/hosts.zmtmp /etc/hosts.zmdrop /etc/hosts.zm-bak \
+	/www/zm /www/zm-webui.html /etc/zm-warp-own.conf /usr/bin/zmw /usr/bin/zms"
 zm_try=0
 while :; do
 	rm -rf $ZM_PATHS 2>/dev/null
@@ -3374,6 +3390,8 @@ while :; do
 	sleep 1
 done
 [ -s /etc/zm-steer/owned ] || rm -rf /usr/share/zm-redbtn
+# Steer панелью не поставлен — в /etc/zm-steer только кеш каталога и настройки страницы: без сохранения настроек убираем
+[ -z "$ZM_SAVE" ] && [ ! -s /etc/zm-steer/owned ] && rm -rf /etc/zm-steer
 if grep -q '/opt/zapret-manager-luci/backend.sh' /etc/crontabs/root 2>/dev/null; then
 	sed -i '\#/opt/zapret-manager-luci/backend.sh#d' /etc/crontabs/root
 	/etc/init.d/cron restart >/dev/null 2>&1
@@ -3436,30 +3454,39 @@ _pg_inst() {
 		*) return 1 ;;
 	esac
 }
+# /etc/zm-steer, в котором только кеш каталога списков, а Forkozz стоит, — это каталог Forkozz, а не хвост Steer
+_pg_st_dir() {
+	if [ ! -s "$ST_OWNED" ] && _fk_installed && [ -z "$(ls -A "$ST_DIR" 2>/dev/null | grep -vxE 'services\.remote|catalog\.(idx|meta|url|off|err)')" ]; then return 0; fi
+	echo "$ST_DIR"
+}
 # Что может остаться: путь (можно со *), pkg:пакет, nft:таблица, cron:метка (# zm-…), cronrx:слово, uci:настройка,
 # dnsconf:файл в папках dnsmasq. Только фиксированные строки отсюда — ничего не собирается из ввода.
 _pg_trace() {
 	case "$1" in
-		zapret) echo "pkg:luci-i18n-zapret-ru pkg:luci-app-zapret pkg:zapret /opt/zapret /etc/config/zapret /etc/config/zapret-opkg /etc/init.d/zapret /etc/rc.d/*[0-9]zapret /etc/firewall.zapret /etc/hotplug.d/*/*zapret nft:zapret cron:zm-autobest $ZO_RKN_FLAG $ZO_USER_FLAG $ZA_MODE_FILE $ZA_LAST $ZA_TS $ZA_TIME_FILE $TEST_BACKUP $ZC_FILE $ZC_BAK $ZC_AFTER $YV_OFF_FLAG $DV_OFF_FLAG $TEST_DIR $TEST_CUSTOM_FILE" ;;
-		zapret2) echo "pkg:luci-i18n-zapret2-ru pkg:luci-app-zapret2 pkg:zapret2 /opt/zapret2 /etc/config/zapret2 /etc/config/zapret2-opkg /etc/init.d/zapret2 /etc/rc.d/*zapret2 /etc/hotplug.d/*/*zapret2 nft:zapret2 cronrx:zapret2" ;;
+		zapret) echo "pkg:luci-i18n-zapret-ru pkg:luci-app-zapret pkg:zapret /opt/zapret /etc/config/zapret /etc/config/zapret-opkg /etc/init.d/zapret /etc/rc.d/*[0-9]zapret /etc/firewall.zapret /etc/hotplug.d/*/*zapret /etc/config/zapret.apk-new /tmp/zapret $(_zm_luci_files zapret) nft:zapret cron:zm-autobest $ZO_RKN_FLAG $ZO_USER_FLAG $ZA_MODE_FILE $ZA_LAST $ZA_TS $ZA_TIME_FILE $TEST_BACKUP $ZC_FILE $ZC_BAK $ZC_AFTER $YV_OFF_FLAG $DV_OFF_FLAG $TEST_DIR $TEST_CUSTOM_FILE" ;;
+		zapret2) echo "pkg:luci-i18n-zapret2-ru pkg:luci-app-zapret2 pkg:zapret2 /opt/zapret2 /etc/config/zapret2 /etc/config/zapret2-opkg /etc/init.d/zapret2 /etc/rc.d/*zapret2 /etc/hotplug.d/*/*zapret2 /etc/config/zapret2.apk-new /tmp/zapret2* $(_zm_luci_files zapret2) nft:zapret2 cronrx:zapret2" ;;
 		bytetube)
-			echo "pkg:byedpi /usr/bin/bytetube /etc/config/bytetube /etc/init.d/bytetube /etc/rc.d/*bytetube /usr/libexec/bytetube /usr/share/bytetube /etc/bytetube /etc/hotplug.d/firewall/90-bytetube /usr/share/nftables.d/chain-pre/forward/50-bytetube.nft /var/etc/bytetube /var/run/bytetube.started /tmp/bytetube-test /lib/upgrade/keep.d/bytetube /tmp/dhcp.ytb.bak dnsconf:bytetube.conf cronrx:bytetube"
+			echo "pkg:byedpi /usr/bin/ciadpi /etc/init.d/byedpi /etc/rc.d/*byedpi /etc/config/byedpi /etc/config/byedpi-opkg /usr/bin/bytetube /etc/config/bytetube /etc/init.d/bytetube /etc/rc.d/*bytetube /usr/libexec/bytetube /usr/share/bytetube /etc/bytetube /etc/hotplug.d/firewall/90-bytetube /usr/share/nftables.d/chain-pre/forward/50-bytetube.nft /var/etc/bytetube /var/run/bytetube.started /tmp/bytetube-test /lib/upgrade/keep.d/bytetube /tmp/dhcp.ytb.bak dnsconf:bytetube.conf cronrx:bytetube"
 			# hev-socks5-tunnel нужен и Mixomo — пока Mixomo стоит, пакет его
-			_mx_installed || echo "pkg:hev-socks5-tunnel /etc/config/hev-socks5-tunnel /etc/init.d/hev-socks5-tunnel /etc/hev-socks5-tunnel" ;;
-		steer) echo "$ST_DIR $ST_TGWS_WARP $ST_WARP_OWN_KEEP cron:zm-steer cron:zm-wfix cron:zm-subupd cron:zm-subping" ;;
+			_mx_installed || echo "pkg:hev-socks5-tunnel /usr/bin/hev-socks5-tunnel /etc/config/hev-socks5-tunnel /etc/config/hev-socks5-tunnel-opkg /etc/init.d/hev-socks5-tunnel /etc/rc.d/*hev-socks5-tunnel /etc/hev-socks5-tunnel" ;;
+		steer) echo "$(_pg_st_dir) $ST_TGWS_WARP $ST_WARP_OWN_KEEP cron:zm-steer cron:zm-wfix cron:zm-subupd cron:zm-subping" ;;
 		forkozz)
-			echo "pkg:luci-i18n-netshift-ru pkg:luci-app-netshift pkg:netshift /usr/bin/netshift /usr/lib/netshift /etc/netshift /etc/init.d/netshift /etc/rc.d/*netshift /etc/config/netshift /etc/config/netshift-opkg $FK_EXT_FAIL $ZM_STATE_DIR/fk.zash.fail $ZM_STATE_DIR/fk.watch $FK_SERIAL_DIR /tmp/zm-fk-* /tmp/netshift-sbext.* nft:$FK_NFT cronrx:netshift"
+			echo "pkg:luci-i18n-netshift-ru pkg:luci-app-netshift pkg:netshift $FK_FILES $(_fk_naive_own) $FK_MARK $FK_EXT_FAIL $FK_DEPS_OWN $ZM_STATE_DIR/fk.zash.fail $ZM_STATE_DIR/fk.watch $ZM_STATE_DIR/fk.dnsfo $ZM_STATE_DIR/latest.netshift $FK_SB_OWN nft:$FK_NFT cronrx:netshift"
 			# sing-box ставил Forkozz; нужен другой программе (podkop, passwall…) — остаётся
-			[ -z "$(_fk_sb_users)" ] && echo "pkg:sing-box-tiny pkg:sing-box pkg:sing-box-extended /usr/bin/sing-box /etc/init.d/sing-box /etc/sing-box /etc/config/sing-box" ;;
-		mixomo) echo "$MIHOMO_BIN $MIHOMO_DIR /tmp/mihomo* /tmp/zashboard /tmp/zashboard.zip /tmp/metacubexd /tmp/metacubexd.tgz /etc/init.d/mihomo /etc/rc.d/*mihomo pkg:magitrickle /etc/magitrickle /etc/init.d/magitrickle /etc/config/magitrickle nft:magitrickle uci:network.Mihomo uci:firewall.Mihomo uci:firewall.lan_to_Mihomo cronrx:mihomo cronrx:magitrickle" ;;
-		awg) echo "pkg:luci-i18n-amneziawg-ru pkg:luci-app-amneziawg pkg:luci-proto-amneziawg pkg:amneziawg-tools pkg:kmod-amneziawg $AWG_DIR /usr/bin/awg /usr/bin/awg-quick /lib/netifd/proto/amneziawg.sh" ;;
+			[ -z "$(_fk_sb_users)" ] && echo "pkg:sing-box-tiny pkg:sing-box pkg:sing-box-extended /usr/bin/sing-box /usr/bin/.sing-box.zm-keep /etc/init.d/sing-box /etc/rc.d/*sing-box /etc/sing-box /etc/config/sing-box /etc/config/sing-box-opkg /etc/config/sing-box.apk-new /var/run/sing-box /tmp/sing-box /usr/share/sing-box /usr/lib/libcronet.so /usr/libexec/sing-box-core /etc/sing-box-version.cache" ;;
+		mixomo) echo "$MIHOMO_BIN $MIHOMO_DIR /tmp/mihomo* /tmp/zashboard /tmp/zashboard.zip /tmp/metacubexd /tmp/metacubexd.tgz /etc/init.d/mihomo /etc/rc.d/*mihomo pkg:magitrickle /etc/magitrickle /etc/init.d/magitrickle /etc/rc.d/*magitrickle /etc/config/magitrickle /etc/config/magitrickle-opkg /usr/bin/magitrickle* /usr/sbin/magitrickle* /var/run/magitrickle* nft:magitrickle uci:network.Mihomo uci:firewall.Mihomo uci:firewall.lan_to_Mihomo cronrx:mihomo cronrx:magitrickle"
+			# hev-socks5-tunnel нужен и ByeTube — пока ByeTube стоит, пакет его
+			_bt_installed || echo "pkg:hev-socks5-tunnel /usr/bin/hev-socks5-tunnel /etc/config/hev-socks5-tunnel /etc/config/hev-socks5-tunnel-opkg /etc/init.d/hev-socks5-tunnel /etc/rc.d/*hev-socks5-tunnel /etc/hev-socks5-tunnel" ;;
+		awg) echo "pkg:luci-i18n-amneziawg-ru pkg:luci-app-amneziawg pkg:luci-proto-amneziawg pkg:amneziawg-tools pkg:kmod-amneziawg $AWG_DIR /usr/bin/awg /usr/bin/awg-quick /lib/netifd/proto/amneziawg.sh /lib/modules/*/amneziawg.ko /etc/modules.d/*amneziawg* $AWG_KMOD_MANUAL $(_zm_luci_files amneziawg)" ;;
 		tgproxy) echo "pkg:tg-ws-proxy /usr/bin/tg-ws-proxy /etc/init.d/tg-ws-proxy /etc/tg-ws-proxy /etc/tg-ws-proxy.conf /etc/config/tg-ws-proxy $TG_BIN_GO $TG_BIN_GO.new $TG_INIT_GO $TG_BIN_RS $TG_INIT_RS $TG_SECRET_RS_FILE $TG_VER_GO_FILE $TG_VER_RS_FILE /etc/config/tg-ws-proxy-rs $TG_WATCH_FLAG /tmp/tg-ws-proxy.ipk /tmp/tg-ws-proxy.apk /etc/rc.d/*tg-ws-proxy* cron:zm-tg-auto cronrx:tg-ws-proxy" ;;
 		stgws) echo "pkg:tgws /etc/init.d/tgws /usr/sbin/tgws /usr/sbin/stgws /etc/config/tgws /etc/rc.d/*tgws* /var/lib/tgws /var/lib/stgws nft:tgws nft:stgws cronrx:tgws" ;;
-		terminal) echo "pkg:luci-i18n-ttyd-ru pkg:luci-app-ttyd pkg:ttyd /usr/bin/ttyd /etc/config/ttyd /etc/init.d/ttyd /etc/rc.d/*ttyd" ;;
+		terminal) echo "pkg:luci-i18n-ttyd-ru pkg:luci-app-ttyd pkg:ttyd /usr/bin/ttyd /etc/config/ttyd /etc/config/ttyd-opkg /etc/config/ttyd.apk-new /etc/init.d/ttyd /etc/rc.d/*ttyd $(_zm_luci_files ttyd)" ;;
 		adblock) echo "$AB_DIR $AB_STATS_DIR $AB_STATS_LOG dnsconf:zm-adblock.conf dnsconf:zm-adblock-stats.conf nft:zm_adblock_free /var/run/zm-adblock-free.pid /var/etc/zm-adblock-free.conf /var/etc/zm-adblock-free.conf.macs cron:zm-adblock cron:zm-abstats" ;;
-		doh) echo "pkg:luci-i18n-https-dns-proxy-ru pkg:luci-app-https-dns-proxy pkg:https-dns-proxy /etc/config/https-dns-proxy /etc/init.d/https-dns-proxy /etc/rc.d/*https-dns-proxy /etc/config/https-dns-proxy-opkg /etc/config/https-dns-proxy.apk-new /etc/config/https-dns-proxy.zm-prev $DOH_FORCE_MODE_FILE $DOH_BOOT_FILE $DOH_FO_FILE $DOH_OWN_FILE $DOH_FO_STATE $DOH_FO_EVENTS /tmp/zm-doh-failover.lock cron:zm-dohwatch" ;;
+		doh) echo "pkg:luci-i18n-https-dns-proxy-ru pkg:luci-app-https-dns-proxy pkg:https-dns-proxy /usr/sbin/https-dns-proxy /etc/uci-defaults/*https-dns-proxy* $(_zm_luci_files https-dns-proxy) /etc/config/https-dns-proxy /etc/init.d/https-dns-proxy /etc/rc.d/*https-dns-proxy /etc/config/https-dns-proxy-opkg /etc/config/https-dns-proxy.apk-new /etc/config/https-dns-proxy.zm-prev $DOH_FORCE_MODE_FILE $DOH_BOOT_FILE $DOH_FO_FILE $DOH_OWN_FILE $DOH_FO_STATE $DOH_FO_EVENTS /tmp/zm-doh-failover.lock cron:zm-dohwatch" ;;
 		dnsnet) echo "$DN_FILE $DN_OWN" ;;
-		panel) echo "/opt/zapret-manager-luci /www/zm /www/zm-webui.html /usr/libexec/rpcd/zapret-manager /www/luci-static/resources/view/zapret-manager /usr/share/zm-redbtn /usr/bin/zmw /usr/bin/zms uci:uhttpd.zmweb cronrx:/opt/zapret-manager-luci/backend.sh" ;;
+		# резервная копия от редактора hosts (прежние версии писали её в /etc/hosts.bak)
+		hosts) echo "$HOSTS_FILE.zm-bak $HOSTS_FILE.bak" ;;
+		panel) echo "/opt/zapret-manager-luci /www/zm /www/zm-webui.html /usr/libexec/rpcd/zapret-manager /usr/share/rpcd/acl.d/luci-app-zapret-manager.json /usr/share/luci/menu.d/luci-app-zapret-manager.json /www/luci-static/resources/view/zapret-manager /www/luci-static/resources/zapret-manager /www/luci-static/resources/bytetube /www/luci-static/resources/view/bytetube /usr/share/zm-redbtn /usr/bin/zmw /usr/bin/zms uci:uhttpd.zmweb cronrx:/opt/zapret-manager-luci/backend.sh" ;;
 	esac
 }
 # hosts: блоки панели (вкладка «Hosts») и hosts, заменённый целиком на GeoHide или dns.malw.link
@@ -4187,6 +4214,26 @@ _zm_pkg_purge() {
 	return 1
 }
 
+# Файлы LuCI-приложения по имени (luci-app-ИМЯ, luci-proto-ИМЯ, перевод): удаляются, даже если пакета в
+# списке установленных уже нет, а файлы остались
+_zm_luci_files() {
+	local n
+	for n in "$@"; do
+		printf '%s ' "/www/luci-static/resources/view/$n" "/www/luci-static/resources/$n" "/www/luci-static/resources/protocol/$n.js" \
+			"/usr/share/luci/menu.d/luci-app-$n.json" "/usr/share/luci/menu.d/luci-proto-$n.json" \
+			"/usr/share/rpcd/acl.d/luci-app-$n.json" "/usr/share/rpcd/acl.d/luci-proto-$n.json" \
+			"/usr/libexec/rpcd/luci.$n" "/usr/share/rpcd/ucode/luci.$n" "/usr/lib/lua/luci/i18n/$n.*.lmo"
+	done
+}
+# Всё из перечня полного удаления раздела (файлы и папки) — его стирает и обычное «Удалить»,
+# есть признаки установки или нет
+_zm_rm_listed() {
+	local t l=""
+	for t in $(_pg_trace "$1"); do case "$t" in /*) l="$l $t" ;; esac; done
+	# shellcheck disable=SC2086
+	_zm_wipe $l
+}
+
 _zm_pkg_wipe() {
 	local p rc=0
 	for p; do _zm_pkg_purge "$p" || rc=1; done
@@ -4753,6 +4800,7 @@ do_tgws_remove() {
 	_zm_wipe /etc/*tgws* /var/lib/*tgws* /var/lock/*tgws* /etc/rc.d/*tgws* /etc/init.d/*tgws* /usr/sbin/*tgws* /usr/bin/*tgws* /etc/config/*tgws* &&
 		echo "   ✓ Файлы, правила файрвола и настройки удалены" || rc=1
 	_zm_cron_drop 'tgws' "sTGWS"
+	_zm_rm_listed stgws || rc=1
 	_zm_rm_done "$rc" "sTGWS"
 }
 
@@ -6270,7 +6318,7 @@ do_mixomo_remove() {
 		uci commit hev-socks5-tunnel 2>/dev/null
 	else
 		_zm_pkg_purge hev-socks5-tunnel || rc=1
-		_zm_wipe /etc/config/hev-socks5-tunnel /etc/config/hev-socks5-tunnel-opkg /etc/init.d/hev-socks5-tunnel /etc/rc.d/*hev-socks5-tunnel || rc=1
+		_zm_wipe /etc/config/hev-socks5-tunnel /etc/config/hev-socks5-tunnel-opkg /etc/init.d/hev-socks5-tunnel /etc/rc.d/*hev-socks5-tunnel /usr/bin/hev-socks5-tunnel || rc=1
 	fi
 	_zm_wipe /etc/hev-socks5-tunnel || rc=1
 
@@ -6297,6 +6345,7 @@ do_mixomo_remove() {
 	_zm_wipe /etc/magitrickle /etc/init.d/magitrickle /etc/rc.d/*magitrickle /etc/config/magitrickle /var/run/magitrickle* || rc=1
 
 	_zm_cron_drop 'mihomo|magitrickle' "Mixomo"
+	_zm_rm_listed mixomo || rc=1
 	/etc/init.d/dnsmasq restart >/dev/null 2>&1
 	_zm_after_remove "Mixomo"
 	_zm_rm_done "$rc" "Mixomo"
@@ -8589,17 +8638,16 @@ do_bytetube_purge() {
 	ZM_NO_AFTER=1 do_bytetube_uninstall || rc=1
 	echo "==> Удаляем пакет byedpi"
 	_zm_svc_off byedpi
-	$DELETE byedpi
-	_pkg_is_installed byedpi && rc=1
+	killall ciadpi >/dev/null 2>&1
+	_zm_pkg_purge byedpi || rc=1
 	if _mx_installed; then
 		echo "==> hev-socks5-tunnel используется Mixomo — пакет оставляем"
 	else
 		echo "==> Удаляем пакет hev-socks5-tunnel"
 		_zm_svc_off hev-socks5-tunnel
-		$DELETE hev-socks5-tunnel
-		_pkg_is_installed hev-socks5-tunnel && rc=1
-		rm -rf /etc/hev-socks5-tunnel
+		_zm_pkg_purge hev-socks5-tunnel || rc=1
 	fi
+	_zm_rm_listed bytetube && echo "   ✓ Файлы ByeTube, byedpi$(_mx_installed || echo " и hev-socks5-tunnel") удалены" || rc=1
 	_zm_after_remove "ByeTube"
 	if [ "$rc" = 0 ]; then echo "==> Готово: ByeTube удалён полностью, остатков нет"; _zm_rb_note; return 0; fi
 	ZM_RB_NOTE=""
@@ -8737,6 +8785,7 @@ do_doh_remove() {
 	uci -q commit firewall
 	/etc/init.d/firewall reload >/dev/null 2>&1
 	_zm_cron_drop 'https-dns-proxy' "DoH"
+	_zm_rm_listed doh || rc=1
 	if [ "$(_dn_get ru off)" != off ]; then
 		echo "==> Российские сайты снова идут через обычный DNS роутера"
 		_dn_put ru off
@@ -13098,7 +13147,8 @@ steer_status() {
 		[ "$dohn" -gt 1 ] && doh=multi
 		[ "$dohn" -ge 1 ] && [ -z "$doh" ] && doh=other
 	fi
-	_st_cat_bg
+	# каталог нужен Steer и Forkozz; пока ни один не стоит, ничего не качаем и не пишем в /etc/zm-steer
+	{ _st_installed || _fk_installed; } && _st_cat_bg
 	[ -n "$(_st_wfix_min)" ] && _st_wfix_cron
 	sel=" $(_st_sel | tr '\n' ' ') "
 	local cust=0
@@ -15137,6 +15187,7 @@ do_awg_remove() {
 	[ -d /sys/module/amneziawg ] && _zm_reboot_hint "AmneziaWG удалён, но его модуль ядра ещё загружен. Перезагрузите роутер, чтобы он выгрузился."
 	sed -i -E '/^pkg (kmod-amneziawg|amneziawg-tools|luci-proto-amneziawg|luci-app-amneziawg|luci-i18n-amneziawg-ru)$/d' "$ST_OWNED" 2>/dev/null
 	_zm_wipe "$AWG_DIR" /usr/bin/awg /usr/bin/awg-quick /lib/netifd/proto/amneziawg.sh || rc=1
+	_zm_rm_listed awg || rc=1
 	# WARP.conf (кнопка «Получить WARP.conf»): нужен ещё только Mixomo — без него удаляем, как это делает Mixomo
 	if [ -s "$MIXOMO_WARP_CONF" ]; then
 		if _mx_installed; then echo "   · $MIXOMO_WARP_CONF оставляем — он нужен Mixomo"; else rm -f "$MIXOMO_WARP_CONF"; fi
@@ -16093,6 +16144,7 @@ do_term_remove() {
 	local rc=0
 	_zm_pkg_wipe luci-i18n-ttyd-ru luci-app-ttyd ttyd || rc=1
 	_zm_wipe /etc/config/ttyd /etc/config/ttyd-opkg /etc/config/ttyd.apk-new /etc/init.d/ttyd /etc/rc.d/*ttyd || rc=1
+	_zm_rm_listed terminal || rc=1
 	rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null
 	_term_installed && rc=1
 	_zm_rm_done "$rc" "Терминал"
@@ -16188,6 +16240,13 @@ FK_SB_OWN="$ZM_STATE_DIR/netshift.singbox"
 FK_DEPS="ca-bundle kmod-inet-diag kmod-tun curl jq ucode ucode-mod-fs ucode-mod-uci kmod-nft-tproxy coreutils-base64 bind-dig ip-full"
 FK_NFT="NetShiftTable"
 FK_SB_PKGS="sing-box sing-box-tiny sing-box-extended podkop-engine podkop-engine-full"
+# пакеты из FK_DEPS, которые поставил сам Forkozz (их не было на роутере), — при удалении они уходят вместе с ним
+FK_DEPS_OWN="$ZM_STATE_DIR/netshift.deps"
+# всё, что оставляют движок NetShift и панель для Forkozz, кроме sing-box (его — _fk_sb_purge)
+FK_FILES="/usr/lib/netshift /usr/lib/netshift.zm-old /etc/netshift /usr/bin/netshift /etc/init.d/netshift /etc/rc.d/*netshift /etc/config/netshift /etc/config/netshift-opkg /etc/config/netshift-070 /etc/config/netshift.apk-new \
+/etc/init.d/netshift-naive /etc/rc.d/*netshift-naive /var/run/netshift* /var/lock/netshift* /tmp/netshift* /tmp/local-ruleset.json /tmp/local-ruleset.srs /tmp/sing-box-config.json /tmp/sing-box/rulesets /tmp/sing-box/subscription* \
+/www/luci-static/resources/view/netshift /usr/share/luci/menu.d/luci-app-netshift.json /usr/share/rpcd/acl.d/luci-app-netshift.json \
+/tmp/zm-fk-* /tmp/zm-zash /tmp/zm-zash.zip"
 
 _fk_say() { echo "==> $*"; }
 _fk_installed() { [ -x /usr/bin/netshift ] && [ -f /usr/lib/netshift/constants.sh ]; }
@@ -16472,11 +16531,8 @@ _fk_sb_purge() {
 	v="$(_fk_sb_ver)"
 	var="$(_fk_sb_var)"
 	for p in $FK_SB_PKGS; do _pkg_is_installed "$p" && had="$had $p"; done
-	if [ -z "$v" ] && [ -z "$had" ] && [ ! -e /usr/bin/sing-box ] && [ ! -e /etc/init.d/sing-box ]; then
-		_fk_say "sing-box не установлен — удалять нечего"
-		return 0
-	fi
-	_fk_say "Удаляем sing-box${v:+ $v}${var:+ ($(_fk_sb_name "$var"))}"
+	# удаляем по полному перечню всегда — даже если признаков sing-box на роутере не видно
+	_fk_say "Удаляем sing-box${v:+ $v}${var:+ ($(_fk_sb_name "$var"))} — все варианты, файлы, настройки и кэш"
 	echo "   → Останавливаем sing-box и убираем из автозапуска"
 	if [ -x /etc/init.d/sing-box ]; then
 		/etc/init.d/sing-box stop >/dev/null 2>&1
@@ -16490,7 +16546,7 @@ _fk_sb_purge() {
 	ZM_PKG_QUIET=1
 	for p in $had; do _zm_pkg_purge "$p"; done
 	ZM_PKG_QUIET=""
-	if _zm_wipe /usr/bin/sing-box /etc/sing-box /etc/config/sing-box /etc/config/sing-box-opkg /var/run/sing-box /tmp/sing-box /usr/share/sing-box /etc/init.d/sing-box \
+	if _zm_wipe /usr/bin/sing-box /etc/sing-box /etc/config/sing-box /etc/config/sing-box-opkg /etc/config/sing-box.apk-new /var/run/sing-box /tmp/sing-box /usr/share/sing-box /etc/init.d/sing-box \
 		/usr/lib/libcronet.so /usr/libexec/sing-box-core /etc/sing-box-version.cache /etc/netshift/core-version.cache \
 		/usr/bin/.sing-box.zm-keep /etc/rc.d/*sing-box /etc/rc.d/*podkop-engine /etc/init.d/podkop-engine /usr/libexec/podkop-engine "$FK_SB_OWN" &&
 		[ -z "$(_fk_sb_pkg)" ] && [ -z "$(_fk_sb_ver)" ]; then
@@ -17248,6 +17304,8 @@ do_fk_install() {
 		_fk_say "Ставим недостающие пакеты:$need"
 		$INSTALL $need
 		for p in $need; do _pkg_is_installed "$p" || { echo "ОШИБКА: не установился пакет $p"; return 1; }; done
+		mkdir -p "$ZM_STATE_DIR"
+		for p in $need; do grep -qx "$p" "$FK_DEPS_OWN" 2>/dev/null || echo "$p" >> "$FK_DEPS_OWN"; done
 	fi
 
 	{ [ "$mode" = update ] || [ "$fresh" = 1 ]; } && tag="$(ZM_VER_FORCE=1 _zm_cached netshift _fk_latest_fetch)"
@@ -17489,19 +17547,25 @@ do_fk_remove() {
 	echo "   ✓ DNS роутера работает как обычно — интернет идёт напрямую"
 	[ -n "$tun" ] && _fk_tunnels_off "$tmode" $tun
 	_fk_say "Удаляем файлы, настройки и кэш Forkozz"
+	# клиент NaiveProxy, который движок ставит сам для ссылок naive+https://
+	if [ -x /etc/init.d/netshift-naive ]; then
+		_zm_run 30 /etc/init.d/netshift-naive stop >/dev/null 2>&1
+		/etc/init.d/netshift-naive disable >/dev/null 2>&1
+	fi
+	_fk_bg_stop
 	_zm_pkg_wipe luci-i18n-netshift-ru luci-app-netshift netshift || rc=1
 	sed -i '/netshift/d' /etc/sysupgrade.conf 2>/dev/null
 	if grep -q 'netshift' "$CRON_FILE" 2>/dev/null; then
 		sed -i '/netshift/d' "$CRON_FILE"
 		/etc/init.d/cron restart >/dev/null 2>&1
 	fi
-	_zm_wipe /usr/lib/netshift /usr/lib/netshift.zm-old /etc/netshift /tmp/netshift* /tmp/sing-box/rulesets /tmp/sing-box/subscription* "$JOBS_DIR/netshift-src" \
-		/www/luci-static/resources/view/netshift /usr/share/luci/menu.d/luci-app-netshift.json /usr/share/rpcd/acl.d/luci-app-netshift.json \
-		/usr/bin/netshift /etc/init.d/netshift /etc/rc.d/*netshift /etc/config/netshift /etc/config/netshift-opkg /etc/config/netshift-070 /var/run/netshift* \
-		"$FK_MARK" "$ZM_STATE_DIR/latest.netshift" "$ZM_STATE_DIR"/fk.sub.* "$ZM_STATE_DIR"/fk.fell* "$ZM_STATE_DIR"/fk.home.* "$ZM_STATE_DIR/fk.dnsfo" "$ZM_STATE_DIR/fk.watch" "$FK_EXT_FAIL" "$JOBS_DIR/netshift.conf.bak" \
-		"$JOBS_DIR"/fk.heal* "$JOBS_DIR/forkop-svc.out" "$JOBS_DIR/forkop-sb.json" &&
+	# shellcheck disable=SC2086
+	_zm_wipe $FK_FILES "$JOBS_DIR/netshift-src" $(_fk_naive_own) \
+		"$FK_MARK" "$ZM_STATE_DIR/latest.netshift" "$ZM_STATE_DIR"/fk.sub.* "$ZM_STATE_DIR"/fk.fell* "$ZM_STATE_DIR"/fk.home.* "$ZM_STATE_DIR/fk.dnsfo" "$ZM_STATE_DIR/fk.watch" "$ZM_STATE_DIR/fk.zash.fail" "$FK_EXT_FAIL" "$JOBS_DIR/netshift.conf.bak" \
+		"$JOBS_DIR"/fk.heal* "$JOBS_DIR"/fk-* "$JOBS_DIR"/fkdns.* "$JOBS_DIR/forkop-svc.out" "$JOBS_DIR/forkop-sb.json" "$JOBS_DIR/forkop-lists.out" &&
 		echo "   ✓ Файлы, настройки, кэш и задания расписания удалены" || rc=1
 	if [ "$sbmode" = keep ]; then _fk_sb_park; else _fk_sb_purge || rc=1; fi
+	_fk_deps_purge
 	if [ "$awg" = remove ] && _awg_installed; then
 		_fk_say "Удаляем AmneziaWG — больше он нигде не используется"
 		ZM_NO_NETCHECK=1 do_awg_remove all || rc=1
@@ -17511,15 +17575,56 @@ do_fk_remove() {
 	_zm_rm_done "$rc" "Forkozz"
 }
 
+# Фоновые проверки панели для Forkozz (сторож, авто по пингу, резервный выход) — до удаления их файлов
+_fk_bg_stop() {
+	local f p
+	for f in "$FK_GUARD_PID" /tmp/zm-fk-pingloop.*/pid; do
+		p="$(cat "$f" 2>/dev/null)"
+		case "$p" in ''|*[!0-9]*) continue ;; esac
+		[ "$p" != "$$" ] && kill "$p" 2>/dev/null
+	done
+	return 0
+}
+# /usr/bin/naive — если его скачал движок, а не поставил пакет naiveproxy
+_fk_naive_own() {
+	[ -e /usr/bin/naive ] || return 0
+	_pkg_is_installed naiveproxy && return 0
+	echo /usr/bin/naive
+}
+# Пакеты, которые поставил Forkozz (их список — FK_DEPS_OWN). Удаляются без принуждения: нужен другим
+# пакетам — менеджер пакетов его оставит; нужен другим разделам панели — не трогаем вовсе.
+_fk_deps_purge() {
+	local p keep left="" gone="" list
+	# пакеты, которые нужны только Forkozz, — даже если панель не помнит, что ставила их
+	list="$(cat "$FK_DEPS_OWN" 2>/dev/null) jq bind-dig coreutils-base64 kmod-inet-diag"
+	_fk_say "Удаляем пакеты, которые ставил Forkozz"
+	for p in $(printf '%s\n' $list | awk '!s[$0]++'); do
+		_pkg_is_installed "$p" || continue
+		keep=""
+		case "$p" in
+			curl|ca-bundle|ucode|ucode-mod-fs|ucode-mod-uci|ip-full) keep="нужен самой панели и LuCI" ;;
+			kmod-tun) _mx_installed && keep="нужен Mixomo"; [ -z "$keep" ] && _bt_installed && keep="нужен ByeTube" ;;
+			kmod-nft-tproxy) _mx_installed && keep="нужен Mixomo" ;;
+		esac
+		if [ -n "$keep" ]; then echo "   · $p оставляем — $keep"; left="$left $p"; continue; fi
+		if [ "$PKG" = apk ]; then _zm_run 180 apk del "$p" >/dev/null 2>&1
+		else _zm_run 180 opkg remove --autoremove "$p" >/dev/null 2>&1; fi
+		_zm_pkg_unlock
+		if _pkg_is_installed "$p"; then echo "   · $p оставляем — он нужен другим пакетам"; left="$left $p"
+		else gone="$gone $p"; fi
+	done
+	[ -n "$gone" ] && echo "   ✓ Удалены:$gone"
+	[ -z "$gone$left" ] && echo "   ✓ Таких пакетов на роутере нет"
+	# что оставили — уже не «пакеты Forkozz»: больше их не трогаем
+	rm -f "$FK_DEPS_OWN"
+	return 0
+}
+
 do_fk_sb_remove() {
 	_fk_installed && { echo "ОШИБКА: Forkozz установлен — без sing-box он не работает. Сначала удалите Forkozz"; return 1; }
 	local u
 	u="$(_fk_sb_users)"
 	[ -n "$u" ] && { echo "ОШИБКА: sing-box нужен другим программам ($u) — удалять его нельзя"; return 1; }
-	if [ -z "$(_fk_sb_ver)" ] && [ -z "$(_fk_sb_pkg)" ] && [ ! -e /usr/bin/sing-box ] && [ ! -e /etc/init.d/sing-box ]; then
-		_fk_say "Готово: sing-box уже не установлен — удалять нечего"
-		return 0
-	fi
 	_fk_sb_purge || return 1
 	rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null
 	_fk_say "Готово: sing-box удалён полностью, остатков нет"
@@ -18929,12 +19034,18 @@ _ab_install() {
 		return 1
 	fi
 	rm -f "$bak"
+	# прежний список сохраняем до записи: запись может не пройти уже в первой папке
+	for d in $dirs; do [ -s "$d/$AB_NAME" ] && { cp -f "$d/$AB_NAME" "$bak" 2>/dev/null && had=1; break; }; done
 	for d in $dirs; do
-		[ "$had" = 0 ] && [ -s "$d/$AB_NAME" ] && { cp -f "$d/$AB_NAME" "$bak" 2>/dev/null && had=1; }
 		mkdir -p "$d" && cp -f "$new" "$d/$AB_NAME.zm-tmp" && mv -f "$d/$AB_NAME.zm-tmp" "$d/$AB_NAME" || {
-			echo "ОШИБКА: не хватило места в памяти роутера для списка"
+			echo "ОШИБКА: не хватило места в памяти роутера для списка — возвращаем прежнее состояние"
 			rm -f "$d/$AB_NAME.zm-tmp"
-			for d in $dirs; do rm -f "$d/$AB_NAME"; done
+			for d in $dirs; do
+				if [ "$had" = 1 ] && [ -s "$bak" ]; then cp -f "$bak" "$d/$AB_NAME" 2>/dev/null || rm -f "$d/$AB_NAME"
+				else rm -f "$d/$AB_NAME"; fi
+			done
+			rm -f "$bak"
+			/etc/init.d/dnsmasq restart >/dev/null 2>&1
 			return 1
 		}
 		_ab_stats_on && _ab_stats_text > "$d/$AB_STATS_CONF"
@@ -23896,6 +24007,18 @@ function swRow(on, label, hint, click, disabled) {
 	]);
 }
 
+/* Web UI переходит между страницами без перезагрузки (меняется #/страница) — окна, открытые поверх страницы,
+ * закрываются как «Отмена», иначе остаются висеть над другой страницей. В LuCI переход перезагружает страницу. */
+var _dlgOpen = [];
+function _dlgRoute() { return String(location.hash || '').replace(/^#\/?/, '').split(/[/?]/)[0]; }
+function dlgTrack(close, val) { _dlgOpen.push({ close: close, val: val, route: _dlgRoute() }); }
+function dlgDone(close) { _dlgOpen = _dlgOpen.filter(function(it) { return it.close !== close; }); }
+window.addEventListener('hashchange', function() {
+	if (!document.body || !document.body.classList.contains('zmw-body')) return;
+	var r = _dlgRoute();
+	_dlgOpen.slice().forEach(function(it) { if (it.route !== r) { try { it.close(it.val); } catch (e) {} } });
+});
+
 function dialog(o) {
 	o = o || {};
 	return new Promise(function(done) {
@@ -23903,6 +24026,7 @@ function dialog(o) {
 		(o.blocks || []).forEach(function(b) { if (b && b.id) vals[b.id] = b.value; });
 
 		function close(res) {
+			dlgDone(close);
 			document.removeEventListener('keydown', onKey);
 			if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
 			done(res);
@@ -23969,6 +24093,7 @@ function dialog(o) {
 		draw();
 		document.addEventListener('keydown', onKey);
 		document.body.appendChild(wrap);
+		dlgTrack(close, null);
 		/* фокус: в поле ввода, иначе на кнопку подтверждения — Enter сразу подтверждает, Esc отменяет */
 		setTimeout(function() { try { (o._focus || okBtn).focus(); if (o._focus) o._focus.select(); } catch (e) {} }, 0);
 	});
@@ -24769,6 +24894,7 @@ function warnDialog(o) {
 		var wrap, okBtn, prevFocus = document.activeElement, id = 'zm-wd-' + Date.now();
 		var cb = E('input', { 'type': 'checkbox', 'id': id });
 		function close(go) {
+			dlgDone(close);
 			document.removeEventListener('keydown', onKey, true);
 			if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
 			document.documentElement.classList.remove('zm-wn-lock');
@@ -24799,6 +24925,7 @@ function warnDialog(o) {
 		sync();
 		document.documentElement.classList.add('zm-wn-lock');
 		document.body.appendChild(wrap);
+		dlgTrack(close, false);
 		document.addEventListener('keydown', onKey, true);
 		setTimeout(function() { try { wrap.querySelector('.zm-wn').focus({ preventScroll: true }); } catch (e) {} }, 0);
 	});
@@ -24829,6 +24956,7 @@ function tsWarn(o) {
 		var wrap, okBtn, prevFocus = document.activeElement;
 		var cb = E('input', { 'type': 'checkbox', 'id': 'zm-ts-agree' });
 		function close(go) {
+			dlgDone(close);
 			document.removeEventListener('keydown', onKey, true);
 			if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
 			document.documentElement.classList.remove('zm-wn-lock');
@@ -24868,6 +24996,7 @@ function tsWarn(o) {
 		sync();
 		document.documentElement.classList.add('zm-wn-lock');
 		document.body.appendChild(wrap);
+		dlgTrack(close, false);
 		document.addEventListener('keydown', onKey, true);
 		setTimeout(function() { try { wrap.querySelector('.zm-wn').focus({ preventScroll: true }); } catch (e) {} }, 0);
 	});
