@@ -20336,6 +20336,21 @@ function bypass_info(c) {
 	return { domains: domain_lines(m), subnets: subnet_lines(m) };
 }
 
+function legacy_bypass_info(c) {
+	let r = [];
+	c.foreach(CFG, "section", (m) => {
+		if (m[".name"] == BYPASS || s(m.connection_type) != "exclusion") return;
+		push(r, {
+			name: m[".name"], label: sec_label(m, false), enabled: s(m.disabled) != "1",
+			domains: domain_lines(m), subnets: subnet_lines(m),
+			community: rawlist(m.community_lists),
+			lists: uniq([ ...rawlist(m.local_domain_lists), ...rawlist(m.local_subnet_lists),
+				...rawlist(m.remote_domain_lists), ...rawlist(m.remote_subnet_lists) ])
+		});
+	});
+	return r;
+}
+
 function devices() {
 	let r = [], seen = {};
 	for (let l in split(s(fs.readfile(LEASES)), "\n")) {
@@ -20936,6 +20951,7 @@ function cmd_get(want) {
 		enabled: sec == main || s(m.disabled) != "1",
 		sections: sec_list(c, p),
 		bypass: bypass_info(c),
+		legacy_bypass: legacy_bypass_info(c),
 		exists: m[".type"] != null && sec_configured(m),
 		mode: mode == "json" ? "links" : mode,
 		links: sec_links(m),
@@ -37068,6 +37084,21 @@ return view.extend({
 			bypCard.appendChild(taByS);
 			bypCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Например, 203.0.113.10 или 203.0.113.0/24 — по одному на строку.'));
 			bypCard.appendChild(E('p', { 'class': 'zm-hint' }, 'После сохранения устройства могут ещё пару минут помнить старый адрес сайта — если сайт всё ещё идёт через VPN, очистите DNS-кэш или перезапустите браузер. Проверить, куда пойдёт сайт, можно в «Куда пойдёт запрос» на вкладке «Подключение».'));
+			((cfg && cfg.legacy_bypass) || []).forEach(function(x) {
+				var details = E('details', {}, [
+					E('summary', {}, 'Секция NetShift: ' + x.label + ' (' + x.name + ') — ' + (x.enabled ? 'включена' : 'выключена')),
+					E('p', { 'class': 'zm-hint' }, 'Сохранённая секция исключений NetShift. Только просмотр: поля выше управляют отдельными исключениями Forkozz и не изменяют эту секцию. Состояние секции и её настройки сохранены.')
+				]);
+				[
+					[ 'Домены', x.domains ], [ 'IP-адреса и подсети', x.subnets ],
+					[ 'Community-списки', x.community ], [ 'Локальные и удалённые списки', x.lists ]
+				].forEach(function(item) {
+					if (!(item[1] || []).length) return;
+					details.appendChild(E('h4', {}, item[0]));
+					details.appendChild(E('textarea', { 'class': 'cbi-input-textarea', 'readonly': '', 'rows': Math.min(8, item[1].length), 'style': 'width:100%', 'aria-label': item[0] + ' — ' + x.name }, item[1].join('\n')));
+				});
+				bypCard.appendChild(details);
+			});
 		}
 
 		function devCard(card, key, title, hint) {
