@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 3.43
+# Version: 3.44
 ZM_VERSION_EOF
 set -e
 
@@ -68,6 +68,7 @@ _zmi_ok "Готово"
 _zmi_say "Записываем файлы панели"
 mkdir -p /opt/zapret-manager-luci
 chmod 0755 /opt/zapret-manager-luci
+_zm_old_ver="$(sed -n 's/^ZM_VERSION="\([0-9][0-9.]*\)"$/\1/p' /opt/zapret-manager-luci/backend.sh 2>/dev/null | head -n 1)"
 cat > '/opt/zapret-manager-luci/backend.sh.zm-new' << 'ZM_INSTALLER_EOF'
 #!/bin/sh
 umask 022
@@ -162,6 +163,7 @@ else
 fi
 
 esc() {
+	case "$1" in *[!A-Za-z0-9\ ._:/@+=,%-]*) ;; *) printf '%s' "$1"; return 0 ;; esac
 	printf '%s' "$1" | tr -d '\000-\010\013\014\016-\037' | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g; s/\r/\\r/g' | tr '\n' ' '
 }
 
@@ -1692,7 +1694,7 @@ _do_install_zapret2_core() {
 
 	echo "==> Настраиваем стратегии"
 	mkdir -p /opt/zapret2/init.d/openwrt/custom.d
-	wget -q --timeout=20 -U "Mozilla/5.0" -O /opt/zapret2/init.d/openwrt/custom.d/50-discord_media.sh \
+	_nochange_fetch /opt/zapret2/init.d/openwrt/custom.d/50-discord_media.sh \
 		"${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/50-discord_media.sh" \
 		|| echo "!! Не удалось загрузить 50-discord_media.sh"
 	if _nochange_in /etc/config/zapret2; then echo "   · Стратегия Zapret2 помечена #nochange — оставляем как есть"
@@ -1769,6 +1771,8 @@ _nochange_guard() {
 	return 1
 }
 
+_zm_dl_sane() { [ -s "$1" ] && ! head -c 1024 "$1" | grep -qiE '<(!doctype|html|head|body)'; }
+
 _nochange_fetch() {
 	local f="$1" url="$2" tmp="$1.zm-new"
 	if _nochange_in "$f"; then
@@ -1776,7 +1780,7 @@ _nochange_fetch() {
 		return 0
 	fi
 	mkdir -p "$(dirname "$f")"
-	if wget -q --timeout=20 -U "Mozilla/5.0" -O "$tmp" "$url" 2>/dev/null && [ -s "$tmp" ]; then mv -f "$tmp" "$f"
+	if wget -q --timeout=20 -U "Mozilla/5.0" -O "$tmp" "$url" 2>/dev/null && _zm_dl_sane "$tmp"; then mv -f "$tmp" "$f"
 	else rm -f "$tmp"; return 1; fi
 }
 
@@ -2151,10 +2155,12 @@ do_add_fake_flow() {
 	for f in stun2.bin quic_initial_tencent_com.bin quic_initial_steamcommunity_com.bin \
 		tls_clienthello_sochi_park.bin quic_initial_4pda_to.bin quic_initial_5ka_ru.bin \
 		tls_clienthello_5ka_ru.bin quic_initial_rutube_ru.bin; do
-		if [ ! -f "/opt/zapret/files/fake/$f" ]; then
+		if [ ! -s "/opt/zapret/files/fake/$f" ]; then
 			[ "$msg" = 0 ] && { echo "==> Скачиваем дополнительные fake-файлы"; msg=1; }
-			wget -q --timeout=20 -U "Mozilla/5.0" -O "/opt/zapret/files/fake/$f" "${FLOWSEAL_FAKE_RAW}/$f" \
-				|| echo "!! Не удалось загрузить файл $f"
+			rm -f "/opt/zapret/files/fake/$f.zmdl"
+			if wget -q --timeout=20 -U "Mozilla/5.0" -O "/opt/zapret/files/fake/$f.zmdl" "${FLOWSEAL_FAKE_RAW}/$f" 2>/dev/null \
+				&& _zm_dl_sane "/opt/zapret/files/fake/$f.zmdl"; then mv -f "/opt/zapret/files/fake/$f.zmdl" "/opt/zapret/files/fake/$f"
+			else rm -f "/opt/zapret/files/fake/$f.zmdl"; echo "!! Не удалось загрузить файл $f"; fi
 		fi
 	done
 }
@@ -4060,7 +4066,7 @@ zapret_list_restore() {
 	mkdir -p "$(dirname "$f")"
 	rm -f "$tmp"
 	wget -q --timeout=20 -U "Mozilla/5.0" -O "$tmp" "$EXCLUDE_URL" 2>/dev/null
-	if [ ! -s "$tmp" ]; then rm -f "$tmp"; echo '{"error":"не удалось скачать список исключений — текущий список не тронут"}'; return 1; fi
+	if ! _zm_dl_sane "$tmp"; then rm -f "$tmp"; echo '{"error":"не удалось скачать список исключений — текущий список не тронут"}'; return 1; fi
 	mv -f "$tmp" "$f"; chmod 644 "$f"
 	zapret_restart
 	zapret_list_get exclude
@@ -5754,6 +5760,72 @@ zm_update_status() {
 	if [ -z "$ZM_VER_FORCE" ] && [ "$(_ver_mode)" != open ]; then latest="$(ZM_VER_LOCAL=1 _zm_cached_first panel _zm_panel_latest)"
 	else latest="$(_zm_cached_first panel _zm_panel_latest)"; fi
 	printf '{"current":"%s","latest":"%s","newer":%s}\n' "$(esc "$ZM_VERSION")" "$(esc "$latest")" "$(_zm_newer "$latest" && echo true || echo false)"
+}
+
+ZM_CL_FILE="/opt/zapret-manager-luci/CHANGELOG.md"
+ZM_CL_PENDING="$ZM_STATE_DIR/cl.pending"
+ZM_CL_URLS="${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/CHANGELOG.md https://cdn.jsdelivr.net/gh/StressOzz/Zapret-Manager@main/CHANGELOG.md"
+
+_zm_cl_get() {
+	local out="$1" u
+	for u in $ZM_CL_URLS; do
+		rm -f "$out"
+		_zm_gh_get "$u" "$out" "" 12 && _zm_dl_sane "$out" && [ "$(wc -c < "$out")" -le 262144 ] && return 0
+	done
+	rm -f "$out"
+	return 1
+}
+
+_zm_cl_top() {
+	if grep -q '^## ' "$1" 2>/dev/null; then
+		awk '/^## / { if (s) exit; s = 1 } s && !/^---[[:space:]]*$/' "$1"
+	else
+		grep -v '^---[[:space:]]*$' "$1"
+	fi | tr -d '\r' | head -n 80
+}
+
+_zm_cl_sync() {
+	local t="$ZM_CL_FILE.dl"
+	mkdir -p "$(dirname "$ZM_CL_FILE")"
+	if _zm_cl_get "$t"; then mv -f "$t" "$ZM_CL_FILE"; chmod 644 "$ZM_CL_FILE"; echo '{"ok":true}'
+	else rm -f "$t"; echo '{"ok":false}'; fi
+}
+
+zm_changelog() {
+	local mode="$1" f blk="" ver="" date="" from="" pending=false
+	case "$mode" in
+		local)
+			[ -f "$ZM_CL_PENDING" ] || { printf '{"pending":false,"current":"%s"}\n' "$(esc "$ZM_VERSION")"; return 0; }
+			pending=true
+			from="$(head -n 1 "$ZM_CL_PENDING" | tr -cd '0-9.')"
+			f="$ZM_CL_FILE" ;;
+		remote)
+			f="$JOBS_DIR/changelog.md"
+			if [ ! -s "$f" ] || [ -n "$(find "$f" -mmin +10 2>/dev/null)" ]; then
+				mkdir -p "$JOBS_DIR"
+				if _zm_cl_get "$f.dl"; then mv -f "$f.dl" "$f"; else rm -f "$f.dl"; fi
+			fi
+			[ -s "$f" ] || { echo '{"error":"не удалось скачать список изменений с GitHub"}'; return 1; } ;;
+		all)
+			f="$JOBS_DIR/changelog.md"
+			if [ ! -s "$f" ] || [ -n "$(find "$f" -mmin +10 2>/dev/null)" ]; then
+				mkdir -p "$JOBS_DIR"
+				if _zm_cl_get "$f.dl"; then mv -f "$f.dl" "$f"; else rm -f "$f.dl"; fi
+			fi
+			blk=github
+			[ -s "$f" ] || { f="$ZM_CL_FILE"; blk=local; }
+			[ -s "$f" ] || { echo '{"error":"список изменений не загрузился: нет связи с GitHub, а сохранённой копии на роутере пока нет"}'; return 1; }
+			printf '{"current":"%s","source":"%s","text":"%s"}\n' "$(esc "$ZM_VERSION")" "$blk" \
+				"$(esc_ml "$(grep -v '^---[[:space:]]*$' "$f" | tr -d '\r' | head -n 600)")"
+			return 0 ;;
+		seen) rm -f "$ZM_CL_PENDING"; echo '{"ok":true}'; return 0 ;;
+		*) echo '{"error":"неизвестный режим"}'; return 1 ;;
+	esac
+	[ -s "$f" ] && blk="$(_zm_cl_top "$f")"
+	ver="$(printf '%s\n' "$blk" | sed -n '/[^[:space:]]/{p;q;}' | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1)"
+	date="$(printf '%s\n' "$blk" | sed -n '/[^[:space:]]/{p;q;}' | grep -oE '[0-9]{2}\.[0-9]{2}\.[0-9]{4}' | head -n 1)"
+	printf '{"pending":%s,"from":"%s","current":"%s","version":"%s","date":"%s","text":"%s"}\n' \
+		"$pending" "$(esc "$from")" "$(esc "$ZM_VERSION")" "$(esc "$ver")" "$(esc "$date")" "$(esc_ml "$blk")"
 }
 
 _zm_update_fetch() {
@@ -8735,6 +8807,7 @@ _doh_provider_of() {
 		https://geohide.ru/*|https://dns.geohide.ru*) echo geohide_ru ;;
 		https://dns.malw.link/*) echo malw ;;
 		https://dns.zapret.moe/*) echo zapretmoe ;;
+		https://d.webshiftvpn.ru/*) echo webshift ;;
 		https://freedns.controld.com/p0) echo controld ;;
 		https://unfiltered.joindns4.eu/*) echo dns4eu ;;
 		*) echo "" ;;
@@ -8845,6 +8918,7 @@ _doh_url_of() {
 		geohide_us)    echo "https://us.geohide.ru/dns-query" ;;
 		malw)          echo "https://dns.malw.link/dns-query" ;;
 		zapretmoe)     echo "https://dns.zapret.moe/dns-query" ;;
+		webshift)      echo "https://d.webshiftvpn.ru/dns-query" ;;
 		controld)      echo "https://freedns.controld.com/p0" ;;
 		dns4eu)        echo "https://unfiltered.joindns4.eu/dns-query" ;;
 		https://*)
@@ -9024,7 +9098,7 @@ _doh_apply() {
 		echo "	option resolver_url '$url'"
 		[ -n "$bootstrap" ] && echo "	option bootstrap_dns '$bootstrap'"
 		echo "	option listen_port '5053'"
-	} > "$_doh_file"
+	} > "$_doh_file.zmtmp" && mv -f "$_doh_file.zmtmp" "$_doh_file"
 	/etc/init.d/https-dns-proxy enable >/dev/null 2>&1
 	/etc/init.d/https-dns-proxy reload >/dev/null 2>&1
 	/etc/init.d/https-dns-proxy restart >/dev/null 2>&1
@@ -9071,7 +9145,7 @@ _doh_name() {
 	case "$1" in
 		google) echo Google ;; cloudflare) echo Cloudflare ;; quad9) echo Quad9 ;; xbox) echo XBOX ;; comss) echo Comss ;; dnsai) echo DNS-AI ;; bezmezhau) echo Bezmezhau ;;
 		yandex_family) echo "Яндекс Семейный" ;; yandex_safe) echo "Яндекс Безопасный" ;; geohide_ru) echo "GeoHide RU" ;; geohide_eu) echo "GeoHide EU" ;;
-		geohide_us) echo "GeoHide US" ;; malw) echo MALW ;; zapretmoe) echo zapret.moe ;;
+		geohide_us) echo "GeoHide US" ;; malw) echo MALW ;; zapretmoe) echo zapret.moe ;; webshift) echo WebShift ;;
 		controld) echo "Control D" ;; dns4eu) echo DNS4EU ;;
 		https://*) _doh_own_title "$1" | grep . || printf '%s' "$1" | sed 's#^https://\([^/]*\).*#\1#' ;; *) echo "$1" ;;
 	esac
@@ -18723,6 +18797,7 @@ eu.geohide.ru
 us.geohide.ru
 dns.malw.link
 dns.zapret.moe
+d.webshiftvpn.ru
 freedns.controld.com
 unfiltered.joindns4.eu
 ZM_AB_DNS_EOF
@@ -19469,7 +19544,7 @@ ZM_MULTI_EOF
 	n=0
 	while [ "$n" -lt "$i" ]; do
 		f="$d/$n"
-		if [ -s "$f" ] && [ "$(head -c 1 "$f")" = "{" ] && [ "$(tail -c 2 "$f" | tr -d '\n\r ')" = "}" ]; then
+		if [ -s "$f" ] && [ "$(head -c 1 "$f")" = "{" ] && case "$(tail -c 8 "$f" | tr -d '\n\r\t ')" in *"}") true ;; *) false ;; esac; then
 			printf '%s' "$sep"; cat "$f"
 		else
 			printf '%s{"__fail":true}' "$sep"
@@ -19583,6 +19658,9 @@ case "$cmd" in
 	system_time_set)                      system_time_set "$1" ;;
 	zm_update_status)                     zm_update_status ;;
 	zm_update_action)                     zm_update_action ;;
+	zm_changelog)                         case "$1" in local|remote|all) zm_changelog "$1" ;; *) echo '{"error":"неизвестный режим"}' ;; esac ;;
+	zm_changelog_seen)                    zm_changelog seen ;;
+	zm_changelog_sync)                    _zm_cl_sync ;;
 	mixomo_status)                        mixomo_status ;;
 	mixomo_action)                        mixomo_action "$1" ;;
 	mixomo_config_get)                    mixomo_config_get ;;
@@ -22468,6 +22546,8 @@ list_methods() {
 	json_add_object "test_results";            json_add_string "mode" "string"; json_close_object
 	json_add_object "zm_update_status";        json_close_object
 	json_add_object "zm_update_action";        json_close_object
+	json_add_object "zm_changelog";            json_add_string "mode" "string"; json_close_object
+	json_add_object "zm_changelog_seen";       json_close_object
 	json_add_object "mixomo_status";           json_close_object
 	json_add_object "mixomo_action";           json_add_string "action" "string"; json_close_object
 	json_add_object "mixomo_config_get";       json_close_object
@@ -22593,6 +22673,8 @@ call_method() {
 		test_results)            json_get_var mode mode; "$BACKEND" test_results "$mode" ;;
 		zm_update_status)        "$BACKEND" zm_update_status ;;
 		zm_update_action)        "$BACKEND" zm_update_action ;;
+		zm_changelog)            json_get_var mode mode;       "$BACKEND" zm_changelog "$mode" ;;
+		zm_changelog_seen)       "$BACKEND" zm_changelog_seen ;;
 		mixomo_status)           "$BACKEND" mixomo_status ;;
 		mixomo_action)           json_get_var action action; "$BACKEND" mixomo_action "$action" ;;
 		mixomo_config_get)       "$BACKEND" mixomo_config_get ;;
@@ -22693,6 +22775,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"test_status",
 					"test_results",
 					"zm_update_status",
+					"zm_changelog",
 					"purge_scan",
 					"mixomo_status",
 					"mixomo_proxies",
@@ -22776,6 +22859,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"zapret_opt_set",
 					"system_time_set",
 					"zm_update_action",
+					"zm_changelog_seen",
 					"mixomo_action",
 					"mixomo_config_set",
 					"mixomo_subscription_set",
@@ -23085,6 +23169,8 @@ var callZapretOptSet = zmDeclare({ object: 'zapret-manager', method: 'zapret_opt
 var callSystemTimeSet = zmDeclare({ object: 'zapret-manager', method: 'system_time_set', params: ['value'], expect: {} });
 var callZmUpdateStatus = zmDeclare({ object: 'zapret-manager', method: 'zm_update_status', expect: {} });
 var callZmUpdateAction = zmDeclare({ object: 'zapret-manager', method: 'zm_update_action', expect: {} });
+var callZmChangelog = zmDeclare({ object: 'zapret-manager', method: 'zm_changelog', params: ['mode'], expect: {} });
+var callZmChangelogSeen = zmDeclare({ object: 'zapret-manager', method: 'zm_changelog_seen', expect: {} });
 function zmUpdateNotify(u) {
 	if (!u || u.error || !u.current) return;
 	try { window.dispatchEvent(new CustomEvent('zm:update', { detail: { current: u.current, latest: u.latest || '', newer: u.newer } })); } catch (e) {}
@@ -23252,10 +23338,124 @@ function flagFont() {
 	document.head.appendChild(s);
 }
 
+var CL_HISTORY = 'https://github.com/StressOzz/Zapret-Manager/blob/main/CHANGELOG.md';
+var CL_KINDS = { '➕': [ 'new', 'Новое' ], '⚡': [ 'imp', 'Улучшено' ], '🐞': [ 'fix', 'Исправлено' ], '🗑': [ 'del', 'Убрано' ] };
+function clParse(text) {
+	var secs = [], cur = null;
+	function sec(title) { cur = { title: title, items: [] }; secs.push(cur); }
+	String(text || '').split('\n').forEach(function(line, i) {
+		var l = line.replace(/\*\*|`/g, '').replace(/\s+$/, ''), kind = null, k, m;
+		if (!l.trim() || /^-{3,}$/.test(l.trim()) || /^##\s/.test(l)) return;
+		if ((m = /^###\s+(.+)$/.exec(l))) { sec(m[1].trim()); return; }
+		var item = /^\s*[-*+]\s+/.test(l);
+		l = l.replace(/^\s*[-*+]\s+/, '').trim();
+		for (k in CL_KINDS) if (l.indexOf(k) === 0) { kind = CL_KINDS[k]; l = l.slice(k.length).replace(/^[️\s]+/, ''); break; }
+		if (!item && !kind && l.length <= 40 && i > 0 && (!cur || cur.items.length || !cur.title)) { sec(l); return; }
+		if (!item && !kind && i === 0) return;
+		if (!cur) sec('');
+		cur.items.push({ kind: kind, text: l });
+	});
+	return secs.filter(function(s) { return s.items.length; });
+}
+function changelogDialog(o) {
+	return new Promise(function(resolve) {
+		var wrap, prevFocus = document.activeElement, id = 'zm-cl-' + Date.now();
+		var blocks = o.blocks || [ { version: o.version, date: o.date, text: o.text } ];
+		function close(go) {
+			dlgDone(close);
+			document.removeEventListener('keydown', onKey, true);
+			if (wrap && wrap.parentNode) wrap.parentNode.removeChild(wrap);
+			document.documentElement.classList.remove('zm-wn-lock');
+			try { if (prevFocus && prevFocus.focus) prevFocus.focus({ preventScroll: true }); } catch (e) {}
+			resolve(!!go);
+		}
+		function onKey(ev) { if (ev.key === 'Escape') { ev.preventDefault(); close(false); } }
+		var body = [];
+		blocks.forEach(function(b) {
+			var secs = clParse(b.text);
+			if (!secs.length) return;
+			if (b.version) body.push(E('div', { 'class': 'zm-cl-ver' }, [ b.version, b.date ? E('small', {}, b.date) : '',
+				o.current && b.version === o.current && blocks.length > 1 ? E('span', { 'class': 'zm-cl-cur' }, 'установлена') : '' ]));
+			secs.forEach(function(s) {
+				if (s.title) body.push(E('div', { 'class': 'zm-cl-sec' }, s.title));
+				body.push(E('ul', { 'class': 'zm-wn-list' }, s.items.map(function(it) {
+					return E('li', { 'class': it.kind ? '' : 'zm-cl-plain' }, [ it.kind ? E('span', { 'class': 'zm-cl-tag zm-cl-' + it.kind[0] }, it.kind[1]) : '', E('div', {}, it.text) ]);
+				})));
+			});
+		});
+		var btns = o.onUpdate
+			? [ E('button', { 'class': 'cbi-button', 'click': function() { close(false); } }, 'Позже'),
+				E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() { close(true); o.onUpdate(); } }, 'Обновить панель') ]
+			: [ E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() { close(true); } }, o.okText || 'Понятно') ];
+		wrap = E('div', { 'class': 'zm-dlg-wrap zm-wn-wrap', 'role': 'dialog', 'aria-modal': 'true', 'aria-labelledby': id,
+			'click': function(ev) { if (ev.target === wrap) close(false); } }, [
+			E('div', { 'class': 'zm-card zm-dlg zmw-modal zm-wn zm-wn-info zm-cl', 'tabindex': '-1' }, [
+				E('div', { 'class': 'zm-wn-body' }, [
+					E('div', { 'class': 'zm-wn-head' }, [ E('h3', { 'id': id }, o.title) ]),
+					o.lead ? E('p', { 'class': 'zm-wn-lead' }, o.lead) : ''
+				].concat(body)),
+				E('div', { 'class': 'zm-actions zm-dlg-actions zm-wn-foot zm-cl-foot' + (o.noLink ? ' zm-cl-foot-solo' : '') }, [
+					o.noLink ? '' : E('a', { 'class': 'zm-cl-all', 'href': CL_HISTORY, 'target': '_blank', 'rel': 'noreferrer' }, 'Вся история изменений'),
+					E('div', { 'class': 'zm-cl-btns' }, btns)
+				])
+			])
+		]);
+		document.documentElement.classList.add('zm-wn-lock');
+		document.body.appendChild(wrap);
+		dlgTrack(close, false);
+		document.addEventListener('keydown', onKey, true);
+		setTimeout(function() { try { wrap.querySelector('.zm-wn').focus({ preventScroll: true }); } catch (e) {} }, 0);
+	});
+}
+function clBlocks(text) {
+	var out = [], cur = null;
+	String(text || '').split('\n').forEach(function(l) {
+		if (/^##\s/.test(l)) {
+			cur = { version: (/\d+\.\d+(?:\.\d+)?/.exec(l) || [ '' ])[0], date: (/\d{2}\.\d{2}\.\d{4}/.exec(l) || [ '' ])[0], lines: [ l ] };
+			out.push(cur);
+		} else {
+			if (!cur) { cur = { version: '', date: '', lines: [] }; out.push(cur); }
+			cur.lines.push(l);
+		}
+	});
+	return out.map(function(b) {
+		if (!b.version) { var f = b.lines.filter(function(x) { return x.trim(); })[0] || ''; b.version = (/\d+\.\d+(?:\.\d+)?/.exec(f) || [ '' ])[0]; }
+		return { version: b.version, date: b.date, text: b.lines.join('\n') };
+	});
+}
+function changelogShow(mode, o) {
+	o = o || {};
+	return callZmChangelog(mode).then(function(r) {
+		if (mode === 'all') {
+			if (!r || r.error || !r.text) { toast(r && r.error ? r.error : 'Не удалось получить список изменений', 'warning'); return false; }
+			return changelogDialog({ title: 'Список изменений', blocks: clBlocks(r.text), current: r.current, okText: 'Закрыть', noLink: true,
+				lead: r.source === 'local' ? 'GitHub недоступен — показана копия, сохранённая при установке.' : '' });
+		}
+		if (!r || r.error) { if (mode === 'remote') toast(r && r.error ? r.error : 'Не удалось получить список изменений', 'warning'); return false; }
+		if (mode === 'remote') {
+			if (!r.text || (o.want && r.version !== o.want)) { toast('Список изменений для версии ' + (o.want || '') + ' ещё не опубликован', 'info'); return false; }
+			return changelogDialog({ title: 'Что изменится в ' + r.version, lead: 'Сейчас установлена ' + (o.current || r.current) + '. Настройки после обновления сохранятся.',
+				version: r.version, date: r.date, text: r.text, onUpdate: o.onUpdate });
+		}
+		if (!r.pending) return false;
+		var match = r.text && r.version === r.current;
+		return changelogDialog({ title: 'Что нового в Zapret Manager ' + r.current,
+			lead: r.from ? 'Панель обновлена: ' + r.from + ' → ' + r.current + (match ? '' : '. Список изменений не загрузился — его можно открыть на GitHub.') : '',
+			version: r.version, date: r.date, text: match ? r.text : '' }).then(function() { callZmChangelogSeen().catch(function() {}); });
+	}).catch(function() { return false; });
+}
+var _clAuto = false;
+function changelogAuto() {
+	if (_clAuto) return;
+	_clAuto = true;
+	setTimeout(function() { changelogShow('local'); }, 700);
+}
+
 function injectCss() {
 	cacheGuard();
 	try { flagFont(); } catch (e) {}
 	detectMissingThemeVar();
+	changelogAuto();
 	if (document.getElementById('zm-css')) return;
 	var l = document.createElement('link');
 	l.id = 'zm-css';
@@ -24847,6 +25047,7 @@ return baseclass.extend({
 	systemTimeSet: callSystemTimeSet,
 	testResults: callTestResults,
 	zmUpdateStatus: callZmUpdateStatus,
+	changelogShow: changelogShow,
 	zmUpdateAction: callZmUpdateAction,
 	zmUpdateNotify: zmUpdateNotify,
 	zmUpdateFromVersions: zmUpdateFromVersions,
@@ -24954,7 +25155,6 @@ return view.extend({
 	},
 
 	render: function(all) {
-		var view = this;
 		var data = all[0], dohData = all[1], hostsData = all[2], sysData = all[3];
 		var sysInfo = all[4] || {};
 		var zmUpdate = all[5] || {};
@@ -25244,6 +25444,10 @@ return view.extend({
 			if (!zmUpdate.latest || zmUpdate.latest === zmUpdate.current || zmUpdate.newer === false) return;
 			updateEl.appendChild(zm.floatBanner(E('div', { 'class': 'zm-refresh-banner zm-show' }, [
 				E('span', {}, [ 'Доступна новая версия панели Zapret Manager: ' + zmUpdate.latest + ' (у вас установлена ' + zmUpdate.current + ').' ]),
+				E('button', { 'class': 'cbi-button zm-cl-link', 'type': 'button', 'click': function() {
+					var upd = this.parentNode.querySelector('.cbi-button-positive');
+					zm.changelogShow('remote', { want: zmUpdate.latest, current: zmUpdate.current, onUpdate: upd ? function() { upd.click(); } : null });
+				} }, 'Что изменится'),
 				E('button', {
 					'class': 'cbi-button cbi-button-positive',
 					'click': function() {
@@ -25278,8 +25482,6 @@ return view.extend({
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/dashboard.js'
 
-mkdir -p /www/luci-static/resources/view/zapret-manager
-chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/doh.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -25301,19 +25503,20 @@ var PROVIDERS = [
 	{ id: 'geohide_us', label: 'GeoHide US', url: 'https://us.geohide.ru/dns-query' },
 	{ id: 'malw', label: 'MALW', url: 'https://dns.malw.link/dns-query' },
 	{ id: 'zapretmoe', label: 'zapret.moe', url: 'https://dns.zapret.moe/dns-query' },
+	{ id: 'webshift', label: 'WebShift', url: 'https://d.webshiftvpn.ru/dns-query' },
 	{ id: 'controld', label: 'Control D', url: 'https://freedns.controld.com/p0', boot: '76.76.2.0, 76.76.10.0' },
 	{ id: 'dns4eu', label: 'DNS4EU', url: 'https://unfiltered.joindns4.eu/dns-query', boot: '86.54.11.100, 86.54.11.200' }
 ];
 var BOOT_STD = '1.1.1.1, 8.8.8.8';
 var OWN_RE = /^https:\/\/[A-Za-z0-9.-]+\.[A-Za-z0-9-]+(:\d{1,5})?(\/[A-Za-z0-9._~%\/+=&?-]*)?$/;
-var INTRO = 'Шифрованный DNS для всей сети: интернет-провайдер не видит и не подменяет запросы устройств.';
+var INTRO = 'Шифрованный DNS для всей сети: интернет-провайдер не видит DNS-запросы устройств и не может их подменить.';
 var DNSM_URL = '/cgi-bin/luci/admin/services/dns-manager';
 var OWN_MAX = 12;
 var OWN_NAMES = {};
 
 var GROUPS = [
 	{ title: 'Обычные', hint: 'только шифрование, ничего не подменяют', ids: [ 'google', 'cloudflare', 'quad9', 'controld', 'dns4eu' ] },
-	{ title: 'С обходом геоблокировок', hint: 'открывают сервисы, закрытые для России', ids: [ 'xbox', 'comss', 'dnsai', 'bezmezhau', 'geohide_ru', 'geohide_eu', 'geohide_us', 'malw', 'zapretmoe' ] },
+	{ title: 'С обходом геоблокировок', hint: 'открывают сервисы, закрытые для России', ids: [ 'xbox', 'comss', 'dnsai', 'bezmezhau', 'geohide_ru', 'geohide_eu', 'geohide_us', 'malw', 'zapretmoe', 'webshift' ] },
 	{ title: 'Семейные', hint: 'блокируют опасные сайты, «Семейный» — ещё и взрослые', ids: [ 'yandex_safe', 'yandex_family' ] }
 ];
 
@@ -26609,10 +26812,6 @@ cat > '/www/luci-static/resources/view/zapret-manager/terminal.js' << 'ZM_INSTAL
 'require zapret-manager.common as zm';
 var E = (function(raw) { return function() { var a = Array.prototype.slice.call(arguments), i = a.length - 1; if (i >= 1 && (typeof a[i] === 'string' || typeof a[i] === 'number')) a[i] = [ String(a[i]) ]; return raw.apply(null, a); }; })(window.E);
 
-function badge(cls, text) {
-	return E('span', { 'class': 'zm-badge ' + cls }, [ E('span', { 'class': 'zm-dot' }), text ]);
-}
-
 return view.extend({
 	load: function() {
 		zm.injectCss();
@@ -27189,7 +27388,7 @@ return view.extend({
 					? 'Пока туннель не работает, выбранные сервисы не открываются совсем — мимо туннеля, через провайдера, они не пойдут. Остальной интернет работает как обычно.'
 					: 'Пока туннель не работает, выбранные сервисы идут через провайдера, как без Steer: что не заблокировано — откроется, но ваш настоящий адрес будет виден.'));
 				if (data.doh) {
-					var DOHN = { cloudflare: 'Cloudflare', google: 'Google', quad9: 'Quad9', xbox: 'XBOX', comss: 'Comss', dnsai: 'DNS-AI', bezmezhau: 'Bezmezhau', yandex_family: 'Яндекс Семейный', yandex_safe: 'Яндекс Безопасный', geohide_ru: 'GeoHide RU', geohide_eu: 'GeoHide EU', geohide_us: 'GeoHide US', malw: 'MALW', zapretmoe: 'zapret.moe', controld: 'Control D', dns4eu: 'DNS4EU', multi: 'несколько серверов', other: 'свой сервер' };
+					var DOHN = { cloudflare: 'Cloudflare', google: 'Google', quad9: 'Quad9', xbox: 'XBOX', comss: 'Comss', dnsai: 'DNS-AI', bezmezhau: 'Bezmezhau', yandex_family: 'Яндекс Семейный', yandex_safe: 'Яндекс Безопасный', geohide_ru: 'GeoHide RU', geohide_eu: 'GeoHide EU', geohide_us: 'GeoHide US', malw: 'MALW', zapretmoe: 'zapret.moe', webshift: 'WebShift', controld: 'Control D', dns4eu: 'DNS4EU', multi: 'несколько серверов', other: 'свой сервер' };
 					mainCard.appendChild(row('Шифрованный DNS', E('span', { 'style': 'display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap' }, [
 						E('span', {}, 'DNS over HTTPS · ' + (DOHN[data.doh] || data.doh)),
 						badge('zm-ok', 'работает')
@@ -29030,8 +29229,6 @@ opal.google.com
 ZM_INSTALLER_EOF
 chmod 0644 /usr/share/zm-redbtn/svc/instagram_extra.lst /usr/share/zm-redbtn/svc/whatsapp_extra.lst /usr/share/zm-redbtn/svc/google_ai_extra.lst /usr/share/zm-redbtn/svc/geoblock_extra.lst
 
-mkdir -p /www/luci-static/resources/view/zapret-manager
-chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/hosts.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -29385,8 +29582,6 @@ return view.extend({
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/hosts.js'
 
-mkdir -p /www/luci-static/resources/view/zapret-manager
-chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/adblock.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -30024,8 +30219,6 @@ return view.extend({
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/adblock.js'
 
-mkdir -p /www/luci-static/resources/view/zapret-manager
-chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/mixomo.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -30052,7 +30245,6 @@ return view.extend({
 	},
 
 	render: function(all) {
-		var view = this;
 		var data = all[0];
 		var warpData = all[1] || {};
 		var wrap = E('div', { 'class': 'zm-wrap' });
@@ -30675,8 +30867,6 @@ return view.extend({
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/mixomo.js'
 
-mkdir -p /www/luci-static/resources/view/zapret-manager
-chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/strategy.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -30752,7 +30942,6 @@ return view.extend({
 	},
 
 	render: function(all) {
-		var view = this;
 		var statusData = all[0], vListData = all[1], testData = all[2], ytInitialData = all[3], gameData = all[4], discordData = all[5], exclusionsData = all[6];
 		var latestVersion = (all[7] && all[7].version) || '';
 		var wrap = E('div', { 'class': 'zm-wrap' });
@@ -32291,8 +32480,6 @@ return view.extend({
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/strategy.js'
 
-mkdir -p /www/luci-static/resources/view/zapret-manager
-chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/zapret2.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -32411,8 +32598,6 @@ return view.extend({
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/zapret2.js'
 
-mkdir -p /www/luci-static/resources/view/zapret-manager
-chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/style.css' << 'ZM_INSTALLER_EOF'
 .zm-wrap { display: flex; flex-direction: column; gap: 16px; max-width: 1100px; }
 
@@ -33680,11 +33865,38 @@ html.zm-theme-dark .zm-mon-ptable thead th { background: #1c2128; }
 .zm-watch-t .zm-hint { margin: 0; }
 .zm-watch-idle .zm-watch-t { opacity: .6; }
 @media (max-width: 600px) { .zm-watch-item { flex-direction: column; align-items: flex-start; } }
+
+.zm-cl-ver { display: flex; align-items: baseline; gap: 8px; margin: 4px 2px 8px; font-size: 14px; font-weight: 700; }
+.zm-cl-ver small { font-size: 12.5px; font-weight: 500; opacity: .6; }
+.zm-cl-sec { margin: 12px 2px 6px; font-size: 13px; font-weight: 700; opacity: .85; }
+.zm-wn-list + .zm-cl-ver { margin-top: 20px; padding-top: 14px; border-top: 1px solid rgba(127,127,127,.2); }
+.zm-cl-cur { align-self: center; font-size: 11px; font-weight: 700; line-height: 1; padding: 4px 8px; border-radius: 999px; background: var(--grad-soft, rgba(37,99,235,.12)); color: var(--a1, #2563eb); }
+.zm-wn.zm-cl .zm-wn-list li { grid-template-columns: 86px minmax(0, 1fr); align-items: baseline; gap: 10px; }
+.zm-wn.zm-cl .zm-wn-list li.zm-cl-plain { grid-template-columns: minmax(0, 1fr); }
+.zm-wn.zm-cl .zm-wn-list li .zm-cl-tag { justify-self: start; opacity: 1; font-size: 11px; font-weight: 700; line-height: 1; padding: 4px 8px; border-radius: 999px; white-space: nowrap; }
+.zm-wn.zm-cl .zm-wn-list li .zm-cl-new { background: rgba(22,163,74,.16); color: #15803d; }
+.zm-wn.zm-cl .zm-wn-list li .zm-cl-imp { background: rgba(124,58,237,.13); color: #6d28d9; }
+.zm-wn.zm-cl .zm-wn-list li .zm-cl-fix { background: rgba(37,99,235,.13); color: #1d4ed8; }
+.zm-wn.zm-cl .zm-wn-list li .zm-cl-del { background: rgba(100,116,139,.16); color: #475569; }
+html.zm-theme-dark .zm-wn.zm-cl .zm-wn-list li .zm-cl-new { background: rgba(74,222,128,.14); color: #4ade80; }
+html.zm-theme-dark .zm-wn.zm-cl .zm-wn-list li .zm-cl-imp { background: rgba(167,139,250,.16); color: #c4b5fd; }
+html.zm-theme-dark .zm-wn.zm-cl .zm-wn-list li .zm-cl-fix { background: rgba(96,165,250,.15); color: #93c5fd; }
+html.zm-theme-dark .zm-wn.zm-cl .zm-wn-list li .zm-cl-del { background: rgba(148,163,184,.16); color: #cbd5e1; }
+.zm-cl-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.zm-cl-all { font-size: 13px; font-weight: 600; color: var(--a1, #2563eb); text-decoration: none; }
+.zm-cl-all:hover { text-decoration: underline; }
+.zm-cl-btns { display: flex; gap: 8px; }
+.zm-cl-foot.zm-cl-foot-solo { justify-content: flex-end; }
+.zm-refresh-banner .zm-cl-link, .zm-refresh-banner .zm-cl-link:hover { background: transparent !important; border: 0 !important; box-shadow: none !important; color: var(--a1, #2563eb) !important; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; padding: 0 6px !important; transform: none !important; }
+@media (max-width: 600px) {
+	.zm-wn.zm-cl .zm-wn-list li { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+	.zm-cl-foot { flex-direction: column-reverse; align-items: stretch; }
+	.zm-cl-all { text-align: center; padding: 4px 0; }
+	.zm-cl-btns .cbi-button { flex: 1 1 0; }
+}
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/style.css'
 
-mkdir -p /www/luci-static/resources/view/zapret-manager
-chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/system.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -33711,7 +33923,6 @@ return view.extend({
 
 	render: function(data) {
 		var sysData = data[0], mirrorData = data[1];
-		var view = this;
 		var wrap = E('div', { 'class': 'zm-wrap' });
 		var netEl = E('div', {}, [ E('p', { 'class': 'zm-hint' }, 'Нажмите «Проверить», чтобы протестировать IPv4/IPv6') ]);
 
@@ -34132,6 +34343,19 @@ return view.extend({
 		zm.versions('').then(function(r) { verD = r || {}; renderVer(); verPoll(); }).catch(function() { verD = { mode: 'day' }; renderVer(); });
 		wrap.appendChild(verCard);
 
+		var clBusy = false;
+		wrap.appendChild(E('div', { 'class': 'zm-card' }, [
+			E('h3', {}, 'Список изменений'),
+			E('p', { 'class': 'zm-hint', 'style': 'margin-top:0' }, 'Что нового в каждой версии Zapret Manager. Список берётся с GitHub, а если он недоступен — показывается копия, сохранённая на роутере при установке.'),
+			E('div', { 'class': 'zm-actions' }, [
+				E('button', { 'class': 'cbi-button cbi-button-action', 'click': function(ev) {
+					if (clBusy) return;
+					var btn = ev.currentTarget; clBusy = true; btn.disabled = true;
+					zm.changelogShow('all').then(function() { clBusy = false; btn.disabled = false; }, function() { clBusy = false; btn.disabled = false; });
+				} }, 'Открыть список изменений')
+			])
+		]));
+
 		var watchCard = E('div', { 'class': 'zm-card zm-watch' }), watchD = null, watchBusy = false;
 		function watchBadge(cls, text) { return E('span', { 'class': 'zm-badge ' + cls }, [ E('span', { 'class': 'zm-dot' }), text ]); }
 		function watchAgo(d) {
@@ -34433,6 +34657,7 @@ return view.extend({
 			{ g: 'dns', product: 'DNS-AI (DoH)', author: 'команда DNS-AI', url: 'https://dns-ai.ru' },
 			{ g: 'dns', product: 'Bezmezhau DNS (DoH)', author: 'Bezmezhau Team', url: 'https://bezmezhau.com' },
 			{ g: 'dns', product: 'zapret.moe (DoH)', author: 'zapret.moe', url: 'https://zapret.moe' },
+			{ g: 'dns', product: 'WebShift DNS (DoH)', author: 'WebShift DNS (DoH)' },
 			{ g: 'dns', product: 'dns-blocklists (блокировка рекламы, TIF)', author: 'hagezi', url: 'https://github.com/hagezi/dns-blocklists' },
 			{ g: 'dns', product: 'ad-filter (реклама для sing-box)', author: 'zxc-rv', url: 'https://github.com/zxc-rv/ad-filter' },
 			{ g: 'dns', product: 'domain-list-community', author: 'v2fly', url: 'https://github.com/v2fly/domain-list-community' },
@@ -34494,8 +34719,6 @@ return view.extend({
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/system.js'
 
-mkdir -p /www/luci-static/resources/view/zapret-manager
-chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/monitor.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -35216,8 +35439,6 @@ return view.extend({
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/monitor.js'
 
-mkdir -p /www/luci-static/resources/view/zapret-manager
-chmod 0755 /www/luci-static/resources/view/zapret-manager
 cat > '/www/luci-static/resources/view/zapret-manager/tgproxy.js' << 'ZM_INSTALLER_EOF'
 'use strict';
 'require view';
@@ -35271,7 +35492,6 @@ return view.extend({
 	},
 
 	render: function(all) {
-		var view = this;
 		var data = all[0];
 		var tgwsData = all[1] || {};
 		var wrap = E('div', { 'class': 'zm-wrap' });
@@ -35679,7 +35899,8 @@ var DNS_CAT = {
 		{ id: 'geohide_eu', name: 'GeoHide EU', value: 'https://eu.geohide.ru/dns-query', boot: '77.88.8.8' },
 		{ id: 'geohide_us', name: 'GeoHide US', value: 'https://us.geohide.ru/dns-query', boot: '77.88.8.8' },
 		{ id: 'malw', name: 'MALW', value: 'https://dns.malw.link/dns-query', boot: '77.88.8.8', alias: [ 'dns.malw.link' ] },
-		{ id: 'zapretmoe', name: 'zapret.moe', value: 'https://dns.zapret.moe/dns-query', boot: '77.88.8.8', alias: [ 'dns.zapret.moe' ] }
+		{ id: 'zapretmoe', name: 'zapret.moe', value: 'https://dns.zapret.moe/dns-query', boot: '77.88.8.8', alias: [ 'dns.zapret.moe' ] },
+		{ id: 'webshift', name: 'WebShift', value: 'https://d.webshiftvpn.ru/dns-query', boot: '77.88.8.8', alias: [ 'd.webshiftvpn.ru' ] }
 	],
 	dot: [
 		{ id: 'quad9', name: 'Quad9', value: 'dns.quad9.net', boot: '9.9.9.9', alias: [ '9.9.9.9' ] },
@@ -40491,7 +40712,7 @@ function dustStart() {
 		raf = 0;
 		if (document.hidden) return;
 		ctx.clearRect(0, 0, w, h);
-		var i, j, d, dx, dy, dist, pull, base = 'rgba(' + rgb.join(',') + ',', la = dk ? 0.42 : 0.34, da = dk ? 0.8 : 0.7;
+		var i, j, d, dx, dy, dist, pull, base = 'rgba(' + rgb.join(',') + ',', la = dk ? 0.42 : 0.4, da = dk ? 0.8 : 0.78;
 		ctx.lineWidth = 1;
 		for (i = 0; i < dots.length; i++) {
 			d = dots[i];
@@ -40575,8 +40796,26 @@ function closeThemeMenu() {
 	if (!themeMenuEl) return;
 	themeMenuEl.remove();
 	themeMenuEl = null;
+	themeMenuBtn = null;
+	window.removeEventListener('resize', placeThemeMenu);
 	document.removeEventListener('click', themeMenuOutside, true);
 	document.removeEventListener('keydown', themeMenuKey, true);
+}
+var themeMenuBtn = null;
+function placeThemeMenu() {
+	var m = themeMenuEl, b = themeMenuBtn, pad = 8, vw, vh, r, w, top, left;
+	if (!m) return;
+	vw = document.documentElement.clientWidth || window.innerWidth;
+	vh = window.innerHeight;
+	r = b && b.isConnected ? b.getBoundingClientRect() : { top: 0, bottom: 56, right: vw - pad };
+	m.style.right = 'auto';
+	m.style.width = vw <= 480 ? (vw - pad * 2) + 'px' : '';
+	w = m.offsetWidth;
+	left = vw <= 480 ? pad : Math.min(Math.max(pad, Math.round(r.right - w)), vw - w - pad);
+	top = Math.round(r.bottom + 8);
+	m.style.left = Math.max(pad, left) + 'px';
+	m.style.top = top + 'px';
+	m.style.maxHeight = Math.max(200, vh - top - pad) + 'px';
 }
 function themeMenuOutside(e) { if (themeMenuEl && !themeMenuEl.contains(e.target) && !(e.target.closest && e.target.closest('.zmw-theme-toggle'))) closeThemeMenu(); }
 function themeMenuKey(e) { if (e.key === 'Escape') closeThemeMenu(); }
@@ -40638,14 +40877,12 @@ function toggleTheme(ev) {
 		}, [ icon(t.ico), E('span', {}, [ t.name ]), E('span', { 'class': 'zmw-theme-mark' }) ]);
 	}
 	document.body.appendChild(themeMenuEl);
-	if (btn) {
-		var r = btn.getBoundingClientRect();
-		themeMenuEl.style.top = Math.round(r.bottom + 8) + 'px';
-		themeMenuEl.style.right = Math.max(8, Math.round(window.innerWidth - r.right)) + 'px';
-	}
+	themeMenuBtn = btn || null;
+	placeThemeMenu();
 	setTimeout(function () {
 		document.addEventListener('click', themeMenuOutside, true);
 		document.addEventListener('keydown', themeMenuKey, true);
+		window.addEventListener('resize', placeThemeMenu);
 	}, 0);
 }
 
@@ -40775,10 +41012,7 @@ function buildShell() {
 		nav,
 		E('div', { 'class': 'zmw-side-foot' }, [
 			deviceEl,
-			memEl,
-			E('div', { 'class': 'zmw-side-links' }, [
-				E('a', { 'href': luciUrl(), 'target': '_blank', 'rel': 'noreferrer' }, [ icon('external'), 'Открыть LuCI' ])
-			])
+			memEl
 		])
 	]);
 
@@ -40843,6 +41077,17 @@ function fmtSize(b) {
 	return (b >= 100 || i === 0 ? Math.round(b) : b.toFixed(1).replace(/\.0$/, '')) + ' ' + u[i];
 }
 var memRows = {};
+function memInsert(r) {
+	var before = null;
+	Object.keys(memRows).forEach(function (k) { var o = memRows[k]; if (o !== r && o.el.parentNode && o.order > r.order && (!before || o.order < before.order)) before = o; });
+	memEl.insertBefore(r.el, before ? before.el : null);
+}
+function fmtPair(used, total) {
+	var a = fmtSize(used), b = fmtSize(total), ua = a.split(' ')[1], ub = b.split(' ')[1];
+	if (ua && ua === ub) return a.split(' ')[0] + ' / ' + b;
+	if (isFinite(used) && used >= 10 * 1024) a = a.replace(/\.\d+ /, ' ');
+	return a + ' / ' + b;
+}
 function memRow(key, label, used, total) {
 	var pct = total > 0 ? Math.max(0, Math.min(100, used / total * 100)) : 0;
 	var r = memRows[key];
@@ -40853,17 +41098,15 @@ function memRow(key, label, used, total) {
 				E('div', { 'class': 'zmw-mem-bar' }, [ E('i') ])
 			])
 		};
-		r.order = key === 'temp' ? -1 : key === 'ram' ? 0 : key === 'flash' ? 1 : 2;
-		var before = null;
-		Object.keys(memRows).forEach(function (k) { var o = memRows[k]; if (o !== r && o.el.parentNode && o.order > r.order && (!before || o.order < before.order)) before = o; });
-		memEl.insertBefore(r.el, before ? before.el : null);
+		r.order = key === 'ram' ? 0 : key === 'flash' ? 1 : 2;
+		memInsert(r);
 	}
-	r.el.querySelector('.zmw-mem-val').textContent = fmtSize(used) + ' из ' + fmtSize(total);
+	r.el.querySelector('.zmw-mem-val').textContent = fmtPair(used, total);
 	var bar = r.el.querySelector('i');
 	bar.style.width = pct.toFixed(1) + '%';
 	r.el.classList.toggle('zmw-mem-hi', pct >= 85);
 	r.el.classList.toggle('zmw-mem-mid', pct >= 65 && pct < 85);
-	r.el.title = label + ': занято ' + Math.round(pct) + '%';
+	r.el.title = label + ': занято ' + fmtSize(used) + ' из ' + fmtSize(total) + ' (' + Math.round(pct) + '%)';
 }
 function tempRow(t) {
 	var r = memRows.temp;
@@ -40871,11 +41114,11 @@ function tempRow(t) {
 		r = memRows.temp = {
 			order: -1,
 			el: E('div', { 'class': 'zmw-mem-row' }, [
-				E('div', { 'class': 'zmw-mem-head' }, [ E('span', { 'class': 'zmw-mem-label' }, [ 'Температура ЦП' ]), E('span', { 'class': 'zmw-mem-val' }) ]),
+				E('div', { 'class': 'zmw-mem-head' }, [ E('span', { 'class': 'zmw-mem-label' }, [ 'Температура' ]), E('span', { 'class': 'zmw-mem-val' }) ]),
 				E('div', { 'class': 'zmw-mem-bar' }, [ E('i') ])
 			])
 		};
-		memEl.insertBefore(r.el, memEl.firstChild);
+		memInsert(r);
 	}
 	r.el.querySelector('.zmw-mem-val').textContent = t + ' °C';
 	r.el.querySelector('i').style.width = Math.max(0, Math.min(100, t)).toFixed(0) + '%';
@@ -40888,15 +41131,13 @@ function loadRow(pct) {
 	var r = memRows.load;
 	if (!r) {
 		r = memRows.load = {
-			order: -0.5,
+			order: -2,
 			el: E('div', { 'class': 'zmw-mem-row' }, [
 				E('div', { 'class': 'zmw-mem-head' }, [ E('span', { 'class': 'zmw-mem-label' }, [ 'Нагрузка ЦП' ]), E('span', { 'class': 'zmw-mem-val' }) ]),
 				E('div', { 'class': 'zmw-mem-bar' }, [ E('i') ])
 			])
 		};
-		var before = null;
-		Object.keys(memRows).forEach(function (k) { var o = memRows[k]; if (o !== r && o.el.parentNode && o.order > r.order && (!before || o.order < before.order)) before = o; });
-		memEl.insertBefore(r.el, before ? before.el : null);
+		memInsert(r);
 	}
 	pct = Math.max(0, Math.min(100, pct));
 	r.el.querySelector('.zmw-mem-val').textContent = pct + '%';
@@ -41579,7 +41820,7 @@ html[data-theme="dark"] .zmw-brand-name b, html[data-theme="depth"] .zmw-brand-n
 .zmw-nav-dot.zmw-stop { background: var(--bad-dot); box-shadow: 0 0 0 3px var(--bad-bg), 0 0 10px var(--bad-dot); animation: zmw-blink 1.6s ease-in-out infinite; }
 @keyframes zmw-blink { 50% { opacity: .45; } }
 
-.zmw-side-foot { display: flex; flex-direction: column; gap: 9px; padding: 14px 6px 0; margin-top: 12px; border-top: 1px solid var(--border); }
+.zmw-side-foot { display: flex; flex-direction: column; gap: 7px; padding: 10px 6px 8px; margin-top: 12px; border-top: 1px solid var(--border); }
 .zmw-pill {
 	display: flex; align-items: center; gap: 10px;
 	padding: 8px 12px; border-radius: 12px; text-decoration: none;
@@ -41598,19 +41839,10 @@ html[data-theme="dark"] .zmw-brand-name b, html[data-theme="depth"] .zmw-brand-n
 	70% { box-shadow: 0 0 0 8px rgba(16,185,129,0); }
 	100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
 }
-.zmw-device { padding: 2px 6px 9px; border-bottom: 1px dashed var(--border); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; line-height: 1.35; }
+.zmw-device { padding: 0 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; line-height: 1.35; }
 .zmw-device-sub:empty { display: none; }
 .zmw-device-model { font-weight: 650; color: var(--text); }
 .zmw-device-sub { font-size: 12px; color: var(--muted); }
-.zmw-side-links { display: flex; gap: 6px; }
-.zmw-side-links a {
-	flex: 1; box-sizing: border-box; height: 32px; padding: 0 10px !important; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-	border-radius: 9px; border: 1px solid var(--border); background: transparent;
-	font-size: 12px; font-weight: 600; line-height: 1; white-space: nowrap; text-decoration: none; color: var(--text-2);
-	transition: background .15s, color .15s, border-color .15s;
-}
-.zmw-side-links a:hover { background: var(--surface-2); border-color: var(--border-2); color: var(--text); }
-.zmw-side-links .zmw-i { width: 14px; height: 14px; flex-shrink: 0; }
 .zmw-mem { display: flex; flex-direction: column; gap: 9px; padding: 2px 6px; }
 .zmw-mem:empty { display: none; }
 .zmw-mem-head { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; margin-bottom: 4px; }
@@ -41620,6 +41852,16 @@ html[data-theme="dark"] .zmw-brand-name b, html[data-theme="depth"] .zmw-brand-n
 .zmw-mem-bar i { display: block; height: 100%; width: 0; border-radius: 6px; background: var(--grad); transition: width .6s cubic-bezier(.2,.8,.2,1); }
 .zmw-mem-mid .zmw-mem-bar i { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
 .zmw-mem-hi .zmw-mem-bar i { background: linear-gradient(90deg, #ef4444, #f87171); }
+.zmw-side .zmw-mem { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-auto-rows: 1fr; gap: 5px; padding: 0; }
+.zmw-side .zmw-mem:empty { display: none; }
+.zmw-side .zmw-mem-row:last-child:nth-child(odd) { grid-column: 1 / -1; }
+html[data-theme="matrix"] .zmw-side .zmw-mem-val { font-size: 11px; letter-spacing: -.02em; }
+.zmw-side .zmw-mem-row { min-width: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 5px 8px 6px; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); }
+.zmw-side .zmw-mem-head { flex-direction: column; gap: 0; margin-bottom: 4px; }
+.zmw-side .zmw-mem-label { font-size: 11px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zmw-side .zmw-mem-val { font-size: 12px; line-height: 1.3; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.zmw-side .zmw-mem-bar { height: 4px; }
+html.zm-dust-on .zmw-side .zmw-mem-row { background: transparent; }
 #zmw-view .zm-meter .zmw-mem-head { font-size: 13px; margin-bottom: 6px; align-items: baseline; }
 #zmw-view .zm-meter .zmw-mem-label { font-weight: 500; }
 .zmw-credit { font-size: 11.5px; color: var(--muted); text-align: center; opacity: .7; }
@@ -42552,7 +42794,7 @@ html[data-theme="retro"] .zmw-nav-item:hover { background: #d4d0c8; }
 html[data-theme="retro"] .zmw-nav-item.zmw-active { background: #000080; color: #ffffff; }
 html[data-theme="retro"] .zmw-nav-item.zmw-active::before { display: none; }
 html[data-theme="retro"] .zmw-nav-item.zmw-active .zmw-nav-ico { color: #ffffff; }
-html[data-theme="retro"] .zmw-nav-ico, html[data-theme="retro"] .zmw-side-links a { border-radius: 0; }
+html[data-theme="retro"] .zmw-nav-ico { border-radius: 0; }
 html[data-theme="retro"] #zmw-view .zm-seg { border-radius: 0; background: #ffffff; border-top: 2px solid #808080; border-left: 2px solid #808080; border-right: 2px solid #ffffff; border-bottom: 2px solid #ffffff; }
 html[data-theme="retro"] #zmw-view .zm-seg-item, html[data-theme="retro"] #zmw-view .zm-route-chip { border-radius: 0; }
 html[data-theme="retro"] #zmw-view .zm-ab-chip, html[data-theme="retro"] #zmw-view .zm-chip { border-radius: 0; }
@@ -42679,7 +42921,7 @@ html[data-theme="micro"] .zmw-title { font-family: "Onest", sans-serif; color: #
 html[data-theme="micro"] .zmw-sub, html[data-theme="micro"] .zmw-foot { color: #5a6377; }
 html[data-theme="micro"] .zmw-side { background: #ffffff; border-right: 1px solid #e3e6ee; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; color: #151a26; }
 html[data-theme="micro"] .zmw-brand-name, html[data-theme="micro"] .zmw-mem-row { color: #151a26; }
-html[data-theme="micro"] .zmw-nav-group, html[data-theme="micro"] .zmw-brand-sub, html[data-theme="micro"] .zmw-mem-label, html[data-theme="micro"] .zmw-side-links a { color: #5d6679; }
+html[data-theme="micro"] .zmw-nav-group, html[data-theme="micro"] .zmw-brand-sub, html[data-theme="micro"] .zmw-mem-label { color: #5d6679; }
 html[data-theme="micro"] .zmw-nav-item { color: #151a26; border-radius: 12px; }
 html[data-theme="micro"] .zmw-nav-item:hover { background: #f0f3fa; color: #151a26; }
 html[data-theme="micro"] .zmw-nav-item.zmw-active { background: #2d5bff; color: #ffffff; box-shadow: none; }
@@ -43118,6 +43360,31 @@ html.zm-dust-on[data-theme] .zmw-side { background-color: color-mix(in srgb, var
 @media (max-width: 960px) { html.zm-dust-on[data-theme] .zmw-side { background-color: var(--surface-solid); } }
 html.zm-dust-on[data-theme] .zmw-login-card { background-color: color-mix(in srgb, var(--surface-solid) 78%, transparent); background-image: none; }
 html.zm-dust-on[data-theme="matrix"] .zmw-login-card { background-color: rgba(0,10,3,.84); }
+html.zm-dust-on[data-theme="micro"], html.zm-dust-on[data-theme="light"], html.zm-dust-on[data-theme="ink"] { --zm-glass: 36%; }
+html.zm-dust-on:not(.zm-theme-dark) { --zm-glass-in: 44%; --zm-glass-in3: 52%; --zm-pan: var(--surface-2); --zm-pan3: var(--surface-3); }
+html.zm-dust-on[data-theme="ink"] { --zm-pan: #ffffff; }
+html.zm-dust-on[data-theme="bento"] { --zm-glass-in: 72%; --zm-glass-in3: 76%; }
+html.zm-dust-on[data-theme="retro"] { --zm-glass-in: 80%; --zm-glass-in3: 84%; }
+html.zm-dust-on:not(.zm-theme-dark)[data-theme] #zmw-view .zm-card :is(.zm-st-stat, .zm-awg-if, .zm-svc:not(.zm-svc-on), .zm-node:not(.zm-active), .zm-ab-tile, .zm-rm-tile, .zm-th-rows, .zm-fo-card, .zm-seg, .zm-tt-tile, .zm-tt-row, .zm-si-box, .zm-dom-panel, .zm-sb-left, .zm-lists-now, .zm-dns-item, .zm-link-row, .zm-ab-desc, .zm-hide-quick, .zm-current-banner.zm-current-empty) {
+	background-color: color-mix(in srgb, var(--zm-pan) var(--zm-glass-in), transparent);
+	backdrop-filter: none; -webkit-backdrop-filter: none;
+	transition: background-color .35s ease;
+}
+html.zm-dust-on:not(.zm-theme-dark)[data-theme] #zmw-view .zm-card :is(.zm-fk-tile, .zm-fk-chip:not(.zm-fk-chip-more), .zm-quota) {
+	background-color: color-mix(in srgb, var(--zm-pan3) var(--zm-glass-in3), transparent);
+}
+.zmw-theme-menu { overscroll-behavior: contain; box-sizing: border-box; }
+@media (max-width: 480px) {
+	.zmw-theme-menu { gap: 2px; padding: 6px; border-radius: 16px; }
+	.zmw-theme-opt { padding: 10px; }
+}
+@media (max-width: 420px) {
+	.zmw-top { padding: 10px 12px; gap: 6px; }
+	.zmw-top-actions { gap: 4px; }
+	.zmw-icon-btn { height: 34px; min-width: 34px; padding: 0 7px; }
+	.zmw-icon-btn .zmw-i { width: 18px; height: 18px; }
+	.zmw-title { font-size: 17px; }
+}
 ZM_INSTALLER_EOF
 cat > '/www/zm-webui.html' << 'ZM_INSTALLER_EOF'
 <!doctype html>
@@ -43214,6 +43481,13 @@ if [ -x /usr/bin/netshift ] && [ -f /usr/lib/netshift/constants.sh ] && ! _zmi_h
 	else _zmi_warn "Сверить не удалось — откройте вкладку Forkozz и нажмите «Перезапустить»"; fi
 fi
 
+if [ -n "$_zm_old_ver" ] && [ "$_zm_old_ver" != "$ZM_NEW_VER" ]; then
+	mkdir -p /opt/zapret-manager-luci/state
+	echo "$_zm_old_ver" > /opt/zapret-manager-luci/state/cl.pending 2>/dev/null || true
+fi
+case "$(/opt/zapret-manager-luci/backend.sh zm_changelog_sync 2>/dev/null || true)" in
+	*'"ok":true'*) _zmi_ok "Список изменений версии $ZM_NEW_VER загружен — панель покажет его при входе" ;;
+esac
 ( sleep 30; /opt/zapret-manager-luci/backend.sh zm_watch; /opt/zapret-manager-luci/backend.sh adblock_dns_sync ) >/dev/null 2>&1 </dev/null &
 _zmi_say "Убираем временные файлы и остатки прошлых версий"
 _zm_cl="$(/opt/zapret-manager-luci/backend.sh zm_cleanup install 2>/dev/null || true)"
