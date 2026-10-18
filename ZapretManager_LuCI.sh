@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 3.44
+# Version: 3.46
 ZM_VERSION_EOF
 set -e
 
@@ -5816,7 +5816,7 @@ zm_changelog() {
 			[ -s "$f" ] || { f="$ZM_CL_FILE"; blk=local; }
 			[ -s "$f" ] || { echo '{"error":"список изменений не загрузился: нет связи с GitHub, а сохранённой копии на роутере пока нет"}'; return 1; }
 			printf '{"current":"%s","source":"%s","text":"%s"}\n' "$(esc "$ZM_VERSION")" "$blk" \
-				"$(esc_ml "$(grep -v '^---[[:space:]]*$' "$f" | tr -d '\r' | head -n 600)")"
+				"$(esc_ml "$(grep -v '^---[[:space:]]*$' "$f" | tr -d '\r' | head -n 1500)")"
 			return 0 ;;
 		seen) rm -f "$ZM_CL_PENDING"; echo '{"ok":true}'; return 0 ;;
 		*) echo '{"error":"неизвестный режим"}'; return 1 ;;
@@ -8808,6 +8808,7 @@ _doh_provider_of() {
 		https://dns.malw.link/*) echo malw ;;
 		https://dns.zapret.moe/*) echo zapretmoe ;;
 		https://d.webshiftvpn.ru/*) echo webshift ;;
+		https://dns.dagami.ru/*) echo dagami ;;
 		https://freedns.controld.com/p0) echo controld ;;
 		https://unfiltered.joindns4.eu/*) echo dns4eu ;;
 		*) echo "" ;;
@@ -8919,6 +8920,7 @@ _doh_url_of() {
 		malw)          echo "https://dns.malw.link/dns-query" ;;
 		zapretmoe)     echo "https://dns.zapret.moe/dns-query" ;;
 		webshift)      echo "https://d.webshiftvpn.ru/dns-query" ;;
+		dagami)        echo "https://dns.dagami.ru/dns-query" ;;
 		controld)      echo "https://freedns.controld.com/p0" ;;
 		dns4eu)        echo "https://unfiltered.joindns4.eu/dns-query" ;;
 		https://*)
@@ -9145,7 +9147,7 @@ _doh_name() {
 	case "$1" in
 		google) echo Google ;; cloudflare) echo Cloudflare ;; quad9) echo Quad9 ;; xbox) echo XBOX ;; comss) echo Comss ;; dnsai) echo DNS-AI ;; bezmezhau) echo Bezmezhau ;;
 		yandex_family) echo "Яндекс Семейный" ;; yandex_safe) echo "Яндекс Безопасный" ;; geohide_ru) echo "GeoHide RU" ;; geohide_eu) echo "GeoHide EU" ;;
-		geohide_us) echo "GeoHide US" ;; malw) echo MALW ;; zapretmoe) echo zapret.moe ;; webshift) echo WebShift ;;
+		geohide_us) echo "GeoHide US" ;; malw) echo MALW ;; zapretmoe) echo zapret.moe ;; webshift) echo WebShift ;; dagami) echo Dagami ;;
 		controld) echo "Control D" ;; dns4eu) echo DNS4EU ;;
 		https://*) _doh_own_title "$1" | grep . || printf '%s' "$1" | sed 's#^https://\([^/]*\).*#\1#' ;; *) echo "$1" ;;
 	esac
@@ -9514,6 +9516,7 @@ _rb_list_src() {
 		svc_whatsapp.lst) echo "$ZM_LISTS_V2F/whatsapp" ;;
 		svc_whatsapp_extra.lst) echo "$RB_SHARE/svc/whatsapp_extra.lst" ;;
 		svc_google_ai_extra.lst) echo "$RB_SHARE/svc/google_ai_extra.lst" ;;
+		svc_tiktok_extra.lst) echo "$RB_SHARE/svc/tiktok_extra.lst" ;;
 		svc_geoblock_extra.lst) echo "$RB_SHARE/svc/geoblock_extra.lst" ;;
 		svc_v2meta.lst) echo "$ZM_LISTS_V2F/meta" ;;
 		svc_threads.lst) echo "$ZM_LISTS_V2F/threads" ;;
@@ -18798,6 +18801,7 @@ us.geohide.ru
 dns.malw.link
 dns.zapret.moe
 d.webshiftvpn.ru
+dns.dagami.ru
 freedns.controld.com
 unfiltered.joindns4.eu
 ZM_AB_DNS_EOF
@@ -25504,6 +25508,7 @@ var PROVIDERS = [
 	{ id: 'malw', label: 'MALW', url: 'https://dns.malw.link/dns-query' },
 	{ id: 'zapretmoe', label: 'zapret.moe', url: 'https://dns.zapret.moe/dns-query' },
 	{ id: 'webshift', label: 'WebShift', url: 'https://d.webshiftvpn.ru/dns-query' },
+	{ id: 'dagami', label: 'Dagami', url: 'https://dns.dagami.ru/dns-query' },
 	{ id: 'controld', label: 'Control D', url: 'https://freedns.controld.com/p0', boot: '76.76.2.0, 76.76.10.0' },
 	{ id: 'dns4eu', label: 'DNS4EU', url: 'https://unfiltered.joindns4.eu/dns-query', boot: '86.54.11.100, 86.54.11.200' }
 ];
@@ -25516,7 +25521,7 @@ var OWN_NAMES = {};
 
 var GROUPS = [
 	{ title: 'Обычные', hint: 'только шифрование, ничего не подменяют', ids: [ 'google', 'cloudflare', 'quad9', 'controld', 'dns4eu' ] },
-	{ title: 'С обходом геоблокировок', hint: 'открывают сервисы, закрытые для России', ids: [ 'xbox', 'comss', 'dnsai', 'bezmezhau', 'geohide_ru', 'geohide_eu', 'geohide_us', 'malw', 'zapretmoe', 'webshift' ] },
+	{ title: 'С обходом геоблокировок', hint: 'открывают сервисы, закрытые для России', ids: [ 'xbox', 'comss', 'dnsai', 'bezmezhau', 'geohide_ru', 'geohide_eu', 'geohide_us', 'malw', 'zapretmoe', 'webshift', 'dagami' ] },
 	{ title: 'Семейные', hint: 'блокируют опасные сайты, «Семейный» — ещё и взрослые', ids: [ 'yandex_safe', 'yandex_family' ] }
 ];
 
@@ -27388,7 +27393,7 @@ return view.extend({
 					? 'Пока туннель не работает, выбранные сервисы не открываются совсем — мимо туннеля, через провайдера, они не пойдут. Остальной интернет работает как обычно.'
 					: 'Пока туннель не работает, выбранные сервисы идут через провайдера, как без Steer: что не заблокировано — откроется, но ваш настоящий адрес будет виден.'));
 				if (data.doh) {
-					var DOHN = { cloudflare: 'Cloudflare', google: 'Google', quad9: 'Quad9', xbox: 'XBOX', comss: 'Comss', dnsai: 'DNS-AI', bezmezhau: 'Bezmezhau', yandex_family: 'Яндекс Семейный', yandex_safe: 'Яндекс Безопасный', geohide_ru: 'GeoHide RU', geohide_eu: 'GeoHide EU', geohide_us: 'GeoHide US', malw: 'MALW', zapretmoe: 'zapret.moe', webshift: 'WebShift', controld: 'Control D', dns4eu: 'DNS4EU', multi: 'несколько серверов', other: 'свой сервер' };
+					var DOHN = { cloudflare: 'Cloudflare', google: 'Google', quad9: 'Quad9', xbox: 'XBOX', comss: 'Comss', dnsai: 'DNS-AI', bezmezhau: 'Bezmezhau', yandex_family: 'Яндекс Семейный', yandex_safe: 'Яндекс Безопасный', geohide_ru: 'GeoHide RU', geohide_eu: 'GeoHide EU', geohide_us: 'GeoHide US', malw: 'MALW', zapretmoe: 'zapret.moe', webshift: 'WebShift', dagami: 'Dagami', controld: 'Control D', dns4eu: 'DNS4EU', multi: 'несколько серверов', other: 'свой сервер' };
 					mainCard.appendChild(row('Шифрованный DNS', E('span', { 'style': 'display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap' }, [
 						E('span', {}, 'DNS over HTTPS · ' + (DOHN[data.doh] || data.doh)),
 						badge('zm-ok', 'работает')
@@ -29124,7 +29129,7 @@ whatsapp|WhatsApp|svc_whatsapp.lst,svc_whatsapp_extra.lst||web.whatsapp.com|stat
 x|X (Twitter)|svc_twitter.lst|twitter_x.lst|x.com|twitter.com,abs.twimg.com,video.twimg.com||twitter
 github|GitHub|own_github.lst||github.com,raw.githubusercontent.com,objects.githubusercontent.com|codeload.github.com,api.github.com,ghcr.io||
 telegram|Telegram|svc_telegram.lst|telegram.lst|web.telegram.org|t.me,core.telegram.org,telegra.ph||telegram
-tiktok|TikTok||||||tiktok
+tiktok|TikTok|svc_tiktok_extra.lst|||||tiktok
 hdrezka|HDRezka||||||hdrezka
 google_meet|Google Meet||||||google_meet
 google_ai|Google AI (Gemini)|svc_google_ai_extra.lst|||||google_ai
@@ -29188,6 +29193,29 @@ flow.google.com
 opal.google
 opal.google.com
 ZM_INSTALLER_EOF
+cat > '/usr/share/zm-redbtn/svc/tiktok_extra.lst' << 'ZM_INSTALLER_EOF'
+ibyteimg.com
+byteimg.com
+byteeffecttos.com
+byteeffecttos-g.com
+bytegecko.com
+bytegecko-i18n.com
+byteoversea.net
+ipstatp.com
+sgpstatp.com
+isnssdk.com
+bytedapm.com
+ttlivecdn.com
+tiktokrow-cdn.com
+tiktokeu-cdn.com
+ttcdn-us.com
+tiktok-row.net
+ttoverseaus.net
+tiktokw.eu
+tiktok-minis.com
+tiktokminis.us
+tiktokglobalshopv.com
+ZM_INSTALLER_EOF
 cat > '/usr/share/zm-redbtn/svc/geoblock_extra.lst' << 'ZM_INSTALLER_EOF'
 gemini.google
 bard.google.com
@@ -29227,7 +29255,7 @@ flow.google.com
 opal.google
 opal.google.com
 ZM_INSTALLER_EOF
-chmod 0644 /usr/share/zm-redbtn/svc/instagram_extra.lst /usr/share/zm-redbtn/svc/whatsapp_extra.lst /usr/share/zm-redbtn/svc/google_ai_extra.lst /usr/share/zm-redbtn/svc/geoblock_extra.lst
+chmod 0644 /usr/share/zm-redbtn/svc/instagram_extra.lst /usr/share/zm-redbtn/svc/whatsapp_extra.lst /usr/share/zm-redbtn/svc/google_ai_extra.lst /usr/share/zm-redbtn/svc/tiktok_extra.lst /usr/share/zm-redbtn/svc/geoblock_extra.lst
 
 cat > '/www/luci-static/resources/view/zapret-manager/hosts.js' << 'ZM_INSTALLER_EOF'
 'use strict';
@@ -34657,7 +34685,8 @@ return view.extend({
 			{ g: 'dns', product: 'DNS-AI (DoH)', author: 'команда DNS-AI', url: 'https://dns-ai.ru' },
 			{ g: 'dns', product: 'Bezmezhau DNS (DoH)', author: 'Bezmezhau Team', url: 'https://bezmezhau.com' },
 			{ g: 'dns', product: 'zapret.moe (DoH)', author: 'zapret.moe', url: 'https://zapret.moe' },
-			{ g: 'dns', product: 'WebShift DNS (DoH)', author: 'WebShift DNS (DoH)' },
+			{ g: 'dns', product: 'WebShift DNS (DoH)', author: 'WebShift', url: 'https://dns.webshiftvpn.ru/' },
+			{ g: 'dns', product: 'Dagami DNS (DoH)', author: 'Dagami', url: 'https://dns.dagami.ru/' },
 			{ g: 'dns', product: 'dns-blocklists (блокировка рекламы, TIF)', author: 'hagezi', url: 'https://github.com/hagezi/dns-blocklists' },
 			{ g: 'dns', product: 'ad-filter (реклама для sing-box)', author: 'zxc-rv', url: 'https://github.com/zxc-rv/ad-filter' },
 			{ g: 'dns', product: 'domain-list-community', author: 'v2fly', url: 'https://github.com/v2fly/domain-list-community' },
@@ -35900,7 +35929,8 @@ var DNS_CAT = {
 		{ id: 'geohide_us', name: 'GeoHide US', value: 'https://us.geohide.ru/dns-query', boot: '77.88.8.8' },
 		{ id: 'malw', name: 'MALW', value: 'https://dns.malw.link/dns-query', boot: '77.88.8.8', alias: [ 'dns.malw.link' ] },
 		{ id: 'zapretmoe', name: 'zapret.moe', value: 'https://dns.zapret.moe/dns-query', boot: '77.88.8.8', alias: [ 'dns.zapret.moe' ] },
-		{ id: 'webshift', name: 'WebShift', value: 'https://d.webshiftvpn.ru/dns-query', boot: '77.88.8.8', alias: [ 'd.webshiftvpn.ru' ] }
+		{ id: 'webshift', name: 'WebShift', value: 'https://d.webshiftvpn.ru/dns-query', boot: '77.88.8.8', alias: [ 'd.webshiftvpn.ru' ] },
+		{ id: 'dagami', name: 'Dagami', value: 'https://dns.dagami.ru/dns-query', boot: '77.88.8.8', alias: [ 'dns.dagami.ru' ] }
 	],
 	dot: [
 		{ id: 'quad9', name: 'Quad9', value: 'dns.quad9.net', boot: '9.9.9.9', alias: [ '9.9.9.9' ] },
