@@ -5816,7 +5816,7 @@ zm_changelog() {
 			[ -s "$f" ] || { f="$ZM_CL_FILE"; blk=local; }
 			[ -s "$f" ] || { echo '{"error":"список изменений не загрузился: нет связи с GitHub, а сохранённой копии на роутере пока нет"}'; return 1; }
 			printf '{"current":"%s","source":"%s","text":"%s"}\n' "$(esc "$ZM_VERSION")" "$blk" \
-				"$(esc_ml "$(grep -v '^---[[:space:]]*$' "$f" | tr -d '\r' | head -n 1500)")"
+				"$(esc_ml "$(grep -v '^---[[:space:]]*$' "$f" | tr -d '\r' | head -n 600)")"
 			return 0 ;;
 		seen) rm -f "$ZM_CL_PENDING"; echo '{"ok":true}'; return 0 ;;
 		*) echo '{"error":"неизвестный режим"}'; return 1 ;;
@@ -34685,8 +34685,8 @@ return view.extend({
 			{ g: 'dns', product: 'DNS-AI (DoH)', author: 'команда DNS-AI', url: 'https://dns-ai.ru' },
 			{ g: 'dns', product: 'Bezmezhau DNS (DoH)', author: 'Bezmezhau Team', url: 'https://bezmezhau.com' },
 			{ g: 'dns', product: 'zapret.moe (DoH)', author: 'zapret.moe', url: 'https://zapret.moe' },
-			{ g: 'dns', product: 'WebShift DNS (DoH)', author: 'WebShift', url: 'https://dns.webshiftvpn.ru/' },
-			{ g: 'dns', product: 'Dagami DNS (DoH)', author: 'Dagami', url: 'https://dns.dagami.ru/' },
+			{ g: 'dns', product: 'WebShift DNS (DoH)', author: 'WebShift', url: 'https://dns.webshiftvpn.ru' },
+			{ g: 'dns', product: 'Dagami DNS (DoH)', author: 'Dagami', url: 'https://dns.dagami.ru' },
 			{ g: 'dns', product: 'dns-blocklists (блокировка рекламы, TIF)', author: 'hagezi', url: 'https://github.com/hagezi/dns-blocklists' },
 			{ g: 'dns', product: 'ad-filter (реклама для sing-box)', author: 'zxc-rv', url: 'https://github.com/zxc-rv/ad-filter' },
 			{ g: 'dns', product: 'domain-list-community', author: 'v2fly', url: 'https://github.com/v2fly/domain-list-community' },
