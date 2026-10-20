@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 3.96
+# Version: 3.97
 ZM_VERSION_EOF
 set -e
 
@@ -19134,6 +19134,9 @@ do_fk_service() {
 	_fk_ext_auto config "" norestart
 	_fk_naive_auto
 	_fk_log_default
+	if _fk_sub_fmt_auto; then
+		_zm_quiet "" /usr/bin/netshift subscription_update all || echo "!! Подписка в новом формате не обновилась — Forkozz возьмёт её при следующем обновлении"
+	fi
 	local lx; lx="$(_fk_log_ext)"
 	/etc/init.d/netshift enable >/dev/null 2>&1
 	_fk_fast_patch
@@ -19234,9 +19237,60 @@ do_fk_lists() {
 	_fk_say "Готово: списки обновлены"
 }
 
+_fk_sub_keys() {
+	jq -r '
+		def ap($a; $p): if $a == null or $p == null then empty else "\($a):\($p)" end;
+		if type == "object" and (.outbounds | type) == "array" and ((.outbounds[0].protocol // null) == null) then
+			[.outbounds[] | select(.type == "vless" or .type == "trojan" or .type == "shadowsocks" or .type == "hysteria2" or .type == "vmess" or .type == "tuic" or .type == "anytls")
+				| "\(.type)|" + ap(.server; .server_port)] | unique | .[]
+		else
+			[(if type == "array" then .[] else . end) | .outbounds[]? | select(type == "object")
+				| select(.protocol == "vless" or .protocol == "trojan" or .protocol == "shadowsocks" or .protocol == "hysteria")
+				| select((.streamSettings.sockopt.dialerProxy // "") == "")
+				| select(.protocol != "hysteria" or ((.streamSettings.hysteriaSettings.version // 0) == 2))
+				| (.settings // {}) as $s | ($s.vnext[0] // $s.servers[0] // $s) as $x
+				| (if .protocol == "hysteria" then "hysteria2" else .protocol end) + "|" + ap($x.address; $x.port)] | unique | .[]
+		end' 2>/dev/null
+}
+
+_fk_sub_fmt_auto() {
+	local sec url ver f sb xr ch="" d="$JOBS_DIR/fk-subfmt" mark n_sb n_xr miss extra
+	command -v jq >/dev/null 2>&1 || return 1
+	ver="$(sing-box version 2>/dev/null | head -n1 | awk '{print $3}')"
+	for sec in $(uci -q show netshift | sed -n "s/^netshift\.\([A-Za-z0-9_]*\)\.subscription_url=.*/\1/p" | sort -u); do
+		case "$(uci -q get "netshift.$sec.subscription_format_preference")" in ''|auto) ;; *) continue ;; esac
+		[ -z "$(uci -q get "netshift.$sec.subscription_user_agent")" ] || continue
+		[ "$(uci -q get "netshift.$sec.proxy_config_type")" = subscription ] || continue
+		url="$(uci -q get "netshift.$sec.subscription_url")"
+		case "$url" in *' '*) continue ;; esac
+		case "$url" in http://*|https://*) ;; *) continue ;; esac
+		mark="$ZM_STATE_DIR/fk.subfmt.$sec"
+		[ "$1" = force ] || { [ -f "$mark" ] && [ "$(cat "$mark" 2>/dev/null)" = "$(printf '%s' "$url" | md5sum | cut -c1-16)" ] && [ -z "$(find "$mark" -mmin +1440 2>/dev/null)" ] && continue; }
+		rm -rf "$d"; mkdir -p "$d"; : > "$d/sb"; : > "$d/xr"
+		curl -fsSL --compressed -m 15 -A "singbox/${ver:-1.12.0}" -o "$d/sb" "$url" 2>/dev/null
+		curl -fsSL --compressed -m 15 -A "Happ/1.0.0" -o "$d/xr" "$url" 2>/dev/null
+		_fk_sub_keys < "$d/sb" > "$d/sb.k"; _fk_sub_keys < "$d/xr" > "$d/xr.k"
+		mkdir -p "$ZM_STATE_DIR"; printf '%s' "$url" | md5sum | cut -c1-16 > "$mark"
+		n_sb="$(cut -d'|' -f2 "$d/sb.k" | sort -u | grep -c .)"; n_xr="$(cut -d'|' -f2 "$d/xr.k" | sort -u | grep -c .)"
+		[ "$n_sb" -gt 0 ] && [ "$n_xr" -gt "$n_sb" ] || { rm -rf "$d"; continue; }
+		miss="$(cut -d'|' -f2 "$d/sb.k" | sort -u | grep -vxF -f "$(cut -d'|' -f2 "$d/xr.k" | sort -u > "$d/xa"; echo "$d/xa")" | grep -c .)"
+		[ "$miss" = 0 ] || { rm -rf "$d"; continue; }
+		extra="$(cut -d'|' -f1 "$d/xr.k" | sort -u | grep -vxF -f "$(cut -d'|' -f1 "$d/sb.k" | sort -u > "$d/sa"; echo "$d/sa")" | tr '\n' ' ' | sed 's/ $//')"
+		uci set "netshift.$sec.subscription_format_preference=xray"
+		ch=1
+		echo "   ✓ $(uci -q get "netshift.$sec.zm_label" || echo "$sec"): сервер подписки в формате Happ отдаёт больше серверов ($n_xr против $n_sb${extra:+, в том числе $extra}) — формат подписки переключён на Happ"
+		logger -t zapret-manager "Forkozz: подписка секции $sec переключена на формат Happ ($n_xr серверов против $n_sb)"
+		rm -rf "$d"
+	done
+	[ -n "$ch" ] || return 1
+	uci commit netshift
+	return 0
+}
+
 do_fk_subs() {
 	_fk_installed || { echo "ОШИБКА: Forkozz не установлен"; return 1; }
 	_fk_say "Обновляем подписки"
+	_fk_sub_fmt_auto force
 	local lx; lx="$(_fk_log_ext)"
 	_fk_mlkem_patch
 	_fk_serial_patch
