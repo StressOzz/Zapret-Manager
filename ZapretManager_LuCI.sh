@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 3.95
+# Version: 3.96
 ZM_VERSION_EOF
 set -e
 
@@ -19867,7 +19867,17 @@ forkop_action() {
 			u="$(_fk_sb_users)"
 			[ -n "$u" ] && { printf '{"error":"%s"}\n' "$(esc "sing-box нужен другим программам ($u) — удалять его нельзя")"; return 1; }
 			job_start forkop do_fk_sb_remove ;;
-		diag)          _fk_ucj diag "$arg" ;;
+		diag)
+			b="$(_fk_ucj diag "$arg")" || { printf '%s\n' "$b"; return 1; }
+			u="$(_fk_src_checks)"
+			case "$b" in *'}') printf '%s,"extra":[%s]}\n' "${b%\}}" "$u" ;; *) printf '%s\n' "$b" ;; esac ;;
+		src_fix)
+			_job_running forkop && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
+			job_start forkop do_fk_src_fix ;;
+		tsc_clean)
+			_tsc_installed && { echo '{"error":"Tailscale установлен — его настройки убираются только вместе с ним (страница «Удалённый доступ» → «Удалить»)"}'; return 1; }
+			_job_running forkop && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
+			job_start forkop do_tsc_leftovers_clean ;;
 		secstate)      _fk_ucj secstate "$([ "$arg" = probe ] && echo probe)" ;;
 		servers)       _fk_ucj servers "$arg" ;;
 		latency)       _fk_ucj latency "$arg" ;;
@@ -19903,6 +19913,110 @@ forkop_action() {
 			case "$arg" in *'|'*) _fk_ucj select "${arg%%|*}" "${arg#*|}" ;; *) _fk_ucj select "" "$arg" ;; esac ;;
 		*) echo '{"error":"неизвестное действие"}' ;;
 	esac
+}
+
+_tsc_ip_rules_left() {
+	local f
+	for f in -4 -6; do ip "$f" rule show 2>/dev/null | grep -qE 'lookup 52( |$)|fwmark 0x80000/0xff0000' && return 0; done
+	return 1
+}
+
+_tsc_leftovers() {
+	local z lz
+	_tsc_installed && return 0
+	uci -q get netshift.settings.source_network_interfaces | tr ' ' '\n' | grep -qx "$TSC_DEV" && echo "Forkozz ждёт трафик с $TSC_DEV"
+	[ -f "$TSC_ON" ] && echo "панель считает удалённый доступ включённым"
+	uci -q get "network.$TSC_NET" >/dev/null && echo "интерфейс «$TSC_NET» в сети"
+	lz="$(_zm_lan_zone)"
+	z="$(_zm_zone_sec "$lz" 2>/dev/null)" && case " $(uci -q get "firewall.$z.network") " in *" $TSC_NET "*) echo "«$TSC_NET» в зоне «$lz»" ;; esac
+	uci -q get "firewall.$TSC_FW_RULE" >/dev/null && echo "правило firewall Allow-Tailscale"
+	_tsc_nft_left && echo "правила Tailscale в firewall (ts-*)"
+	_tsc_ip_rules_left && echo "правила маршрутизации Tailscale (таблица 52)"
+	[ -f "$TSC_LS_PREV" ] && echo "изменённая настройка DNS роутера (localservice)"
+	grep -qF "$TSC_CRON_TAG" "$CRON_FILE" 2>/dev/null && echo "сторож Tailscale в cron"
+	return 0
+}
+
+_fk_src_bad() {
+	local d
+	[ "$1" = "$TSC_DEV" ] && ! _tsc_installed && { echo tsc; return 0; }
+	[ -d "/sys/class/net/$1" ] || { echo miss; return 0; }
+	case "$(cat "/sys/class/net/$1/type" 2>/dev/null)" in 1|'') ;; *) [ "$1" = "$TSC_DEV" ] || { echo tun; return 0; } ;; esac
+	for d in $(uci -q show netshift 2>/dev/null | sed -n "s/^netshift\.[^.]*\.\(interface\|output_network_interface\)='\([^']*\)'$/\2/p"); do
+		[ "$d" = "$1" ] && { echo out; return 0; }
+	done
+	return 1
+}
+
+_fk_src_checks() {
+	local src d have="" bad="" sep="," k
+	src="$(uci -q get netshift.settings.source_network_interfaces)"
+	[ -n "$src" ] || src="br-lan"
+	for d in $src; do
+		if k="$(_fk_src_bad "$d")"; then
+			case "$k" in miss) bad="$bad; $d — такого интерфейса нет" ;; tsc) bad="$bad; $d — остался от удалённого Tailscale" ;; *) bad="$bad; $d — это туннель, а не домашняя сеть: трафик пойдёт по кругу" ;; esac
+		else have="$have $d"; fi
+	done
+	have="${have# }"; bad="${bad#; }"
+	if [ -z "$bad" ]; then
+		printf '{"verdict":"ok","what":"Откуда берёт трафик","why":"%s"}' "$(esc "$have")"
+	else
+		printf '{"verdict":"%s","what":"Откуда берёт трафик","why":"%s","fix":"src_fix"}' "$([ -z "$have" ] && echo fail || echo warn)" \
+			"$(esc "${have:+$have; }лишнее: $bad")"
+	fi
+	local left
+	left="$(_tsc_leftovers | tr '\n' ';' | sed 's/;$//; s/;/; /g')"
+	[ -n "$left" ] && printf '%s{"verdict":"fail","what":"Остатки удалённого доступа (Tailscale)","why":"%s","fix":"tsc_clean"}' "$sep" "$(esc "$left")"
+	return 0
+}
+
+do_fk_src_fix() {
+	local src d keep=""
+	echo "==> Проверяем, откуда Forkozz берёт трафик"
+	uci -q get netshift.settings >/dev/null || { echo "ОШИБКА: настроек Forkozz нет"; return 1; }
+	src="$(uci -q get netshift.settings.source_network_interfaces)"
+	[ -n "$src" ] || src="br-lan"
+	for d in $src; do
+		if _fk_src_bad "$d" >/dev/null; then echo "   ✓ Убираем $d"; else keep="$keep $d"; fi
+	done
+	[ -n "$keep" ] || { keep=" br-lan"; echo "   ✓ Других сетей не осталось — возвращаем домашнюю сеть по умолчанию: br-lan"; }
+	uci -q delete netshift.settings.source_network_interfaces
+	for d in $keep; do uci add_list netshift.settings.source_network_interfaces="$d"; done
+	uci commit netshift
+	echo "   ✓ Источники трафика:$keep"
+	if [ -x /etc/init.d/netshift ] && /etc/init.d/netshift enabled 2>/dev/null; then
+		echo "==> Перезапускаем Forkozz"
+		_zm_run 180 /etc/init.d/netshift restart >/dev/null 2>&1 || echo "!! Forkozz перезапустился с ошибкой — смотрите журнал"
+	fi
+	echo "==> Готово"
+}
+
+do_tsc_leftovers_clean() {
+	local f p
+	echo "==> Ищем остатки удалённого доступа (Tailscale)"
+	_tsc_installed && { echo "ОШИБКА: Tailscale установлен — удалите его на странице «Удалённый доступ»"; return 1; }
+	_tsc_leftovers | sed 's/^/   · /'
+	if uci -q get netshift.settings.source_network_interfaces | tr ' ' '\n' | grep -qx "$TSC_DEV"; then
+		uci -q del_list netshift.settings.source_network_interfaces="$TSC_DEV"
+		uci -q get netshift.settings.source_network_interfaces >/dev/null || uci add_list netshift.settings.source_network_interfaces="br-lan"
+		uci commit netshift
+		echo "   ✓ Forkozz: $TSC_DEV убран из источников трафика"
+	fi
+	rm -f "$TSC_DIR/forkozz.own"
+	for f in -4 -6; do
+		for p in $(ip "$f" rule show 2>/dev/null | grep -E 'lookup 52( |$)|fwmark 0x80000/0xff0000' | sed -n 's/^\([0-9]*\):.*/\1/p'); do
+			ip "$f" rule del pref "$p" 2>/dev/null
+		done
+		ip "$f" route flush table 52 >/dev/null 2>&1
+	done
+	_tsc_ip_rules_left || echo "   ✓ Правила маршрутизации Tailscale убраны"
+	_tsc_unsetup
+	rm -rf "$TSC_DIR"
+	if [ -n "$(_tsc_leftovers)" ]; then
+		echo "!! Осталось:"; _tsc_leftovers | sed 's/^/   · /'
+		return 1
+	fi
+	echo "==> Готово: остатков нет"
 }
 
 SI_OUT="$JOBS_DIR/sysinfo.json"
@@ -38877,13 +38991,13 @@ var WARN = {
 var ACT_TEXT = {
 	install: 'Устанавливаем Forkozz', update: 'Обновляем Forkozz', reinstall: 'Переустанавливаем Forkozz', remove: 'Удаляем Forkozz', stop: 'Выключаем Forkozz',
 	start: 'Включаем Forkozz', restart: 'Перезапускаем Forkozz', apply: 'Применяем настройки', lists: 'Обновляем списки сервисов',
-	subs: 'Обновляем серверы подписки', singbox: 'Меняем sing-box', singbox_reinstall: 'Переустанавливаем sing-box', singbox_remove: 'Удаляем sing-box'
+	subs: 'Обновляем серверы подписки', tsc_clean: 'Убираем остатки удалённого доступа', src_fix: 'Исправляем источники трафика', singbox: 'Меняем sing-box', singbox_reinstall: 'Переустанавливаем sing-box', singbox_remove: 'Удаляем sing-box'
 };
 
 var DONE_TEXT = {
 	install: 'Forkozz установлен', update: 'Forkozz обновлён', reinstall: 'Forkozz переустановлен', remove: 'Forkozz удалён', stop: 'Forkozz выключен',
 	start: 'Forkozz включён', restart: 'Forkozz перезапущен', apply: 'Настройки применены', lists: 'Списки сервисов обновлены',
-	subs: 'Серверы подписки обновлены', singbox: 'sing-box заменён', singbox_reinstall: 'sing-box переустановлен', singbox_remove: 'sing-box удалён'
+	subs: 'Серверы подписки обновлены', tsc_clean: 'Остатки удалённого доступа убраны', src_fix: 'Источники трафика исправлены', singbox: 'sing-box заменён', singbox_reinstall: 'sing-box переустановлен', singbox_remove: 'sing-box удалён'
 };
 
 function badge(cls, text) {
@@ -39229,7 +39343,7 @@ return view.extend({
 			servers = null;
 			if (ok) secProbed = false;
 			reload(function() {
-				if (ok && st.running && /^(apply|start|restart|update|install|reinstall|singbox|singbox_reinstall)$/.test(done)) runDiag(true);
+				if (ok && st.running && /^(apply|start|restart|update|install|reinstall|singbox|singbox_reinstall|tsc_clean|src_fix)$/.test(done)) runDiag(true);
 				if (pa && st.running && secLive()) {
 					zm.toast('Серверы обновлены — проверяем задержку', 'info');
 					setTimeout(testLatency, 2500);
@@ -41222,12 +41336,15 @@ return view.extend({
 			checkCard.appendChild(E('h3', {}, 'Проверка'));
 			checkCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Роутер проверит службу, sing-box, DNS и сервер каждой секции.'));
 			if (diag && diag.checks) {
-				var fails = diag.checks.filter(function(c) { return c.verdict === 'fail'; }).length, warns = diag.checks.filter(function(c) { return c.verdict === 'warn'; }).length;
+				var allChecks = diag.checks.concat(diag.extra || []);
+				var fails = allChecks.filter(function(c) { return c.verdict === 'fail'; }).length, warns = allChecks.filter(function(c) { return c.verdict === 'warn'; }).length;
 				checkCard.appendChild(chkRow(E('span', { 'class': 'zm-label' }, 'Итог'), fails ? badge('zm-bad', 'есть поломка') : warns ? badge('zm-warn', 'работает, есть замечания') : badge('zm-ok', 'всё в порядке')));
 				var CLS = { ok: 'zm-ok', warn: 'zm-warn', fail: 'zm-bad' }, TXT = { ok: 'ок', warn: 'внимание', fail: 'ошибка' };
-				diag.checks.forEach(function(c) {
+				var FIX_TEXT = { tsc_clean: 'Убрать остатки', src_fix: 'Убрать лишнее и перезапустить' };
+				allChecks.forEach(function(c) {
 					if (!CLS[c.verdict]) return;
-					checkCard.appendChild(chkRow(badge(CLS[c.verdict], TXT[c.verdict]), E('span', {}, [ String(c.what || '') + (c.why ? ' — ' + c.why : '') ])));
+					checkCard.appendChild(chkRow(badge(CLS[c.verdict], TXT[c.verdict]), E('span', {}, [ String(c.what || '') + (c.why ? ' — ' + c.why : ''),
+						FIX_TEXT[c.fix] ? E('div', { 'style': 'margin-top:6px' }, [ E('button', { 'class': 'cbi-button cbi-button-action', 'disabled': busy ? '' : null, 'click': function() { act(c.fix); } }, FIX_TEXT[c.fix]) ]) : '' ])));
 				});
 			}
 			checkCard.appendChild(E('div', { 'class': 'zm-actions' }, [
