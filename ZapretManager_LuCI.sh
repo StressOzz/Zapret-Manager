@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 3.93
+# Version: 3.95
 ZM_VERSION_EOF
 set -e
 
@@ -16644,24 +16644,31 @@ _tsc_zapret() {
 # Forkozz (netshift): трафик берётся только с интерфейсов из source_network_interfaces
 _tsc_fk_has() { uci -q get netshift.settings.source_network_interfaces | tr ' ' '\n' | grep -qx "$TSC_DEV"; }
 _tsc_fk() {
-	local cur ch=0 d
+	local cur ch=0 d own="$TSC_DIR/forkozz.own" orig want
 	uci -q get netshift.settings >/dev/null || return 0
 	cur="$(uci -q get netshift.settings.source_network_interfaces)"
 	case "$1" in
 		add)
 			_tsc_fk_has && return 0
-			if [ -z "$cur" ]; then
-				for d in $(_zm_lan_devs); do
-					[ "$d" = "$TSC_DEV" ] || uci add_list netshift.settings.source_network_interfaces="$d"
-				done
-			fi
+			mkdir -p "$TSC_DIR"
+			if uci -q get netshift.settings.source_network_interfaces >/dev/null; then orig="list $cur"; else orig="unset"; fi
+			[ -n "$cur" ] || uci add_list netshift.settings.source_network_interfaces="br-lan"
 			uci add_list netshift.settings.source_network_interfaces="$TSC_DEV"
-			mkdir -p "$TSC_DIR"; : > "$TSC_DIR/forkozz.own"; ch=1
+			printf 'orig=%s\nset=%s\n' "$orig" "$(uci -q get netshift.settings.source_network_interfaces)" > "$own"; ch=1
 			echo "   ✓ Forkozz: устройства Tailscale добавлены к домашней сети" ;;
 		del)
-			[ -f "$TSC_DIR/forkozz.own" ] || return 0
-			_tsc_fk_has && { uci -q del_list netshift.settings.source_network_interfaces="$TSC_DEV"; ch=1; }
-			rm -f "$TSC_DIR/forkozz.own" ;;
+			[ -f "$own" ] || return 0
+			orig="$(sed -n 's/^orig=//p' "$own")"; want="$(sed -n 's/^set=//p' "$own")"
+			if [ -n "$want" ] && [ "$cur" = "$want" ] && [ -n "$orig" ]; then
+				uci -q delete netshift.settings.source_network_interfaces
+				case "$orig" in list\ *) for d in ${orig#list }; do uci add_list netshift.settings.source_network_interfaces="$d"; done ;; esac
+				ch=1
+				echo "   ✓ Forkozz: источники трафика вернулись к прежним"
+			elif _tsc_fk_has; then
+				uci -q del_list netshift.settings.source_network_interfaces="$TSC_DEV"; ch=1
+				echo "   ✓ Forkozz: устройства Tailscale убраны из источников трафика"
+			fi
+			rm -f "$own" ;;
 	esac
 	[ "$ch" = 1 ] || return 0
 	uci commit netshift
@@ -16673,8 +16680,11 @@ _tsc_fk() {
 # со своими правилами firewall, их нужно перезапустить — иначе они пишут «работает», а сервисы
 # через них не открываются (проверено на роутере: помог перезапуск Forkozz).
 _tsc_kick_bypass() {
-	local l="$TSC_DIR/kick.lock"
+	local l="$TSC_DIR/kick.lock" w=0
 	mkdir -p "$TSC_DIR"
+	if [ "$1" = wait ]; then
+		while [ -d "$l" ] && [ "$w" -lt 120 ]; do sleep 2; w=$((w + 2)); done
+	fi
 	# перезапуск уже идёт (сторож и страница могли сработать одновременно) — второй не нужен;
 	# зависшую больше 10 минут блокировку снимаем
 	find "$TSC_DIR" -maxdepth 1 -name kick.lock -mmin +10 -exec rmdir {} \; 2>/dev/null
@@ -16828,7 +16838,7 @@ _tsc_unsetup() {
 		_term_set_mode home >/dev/null 2>&1
 		echo "   ✓ Терминал снова только для домашней сети"
 	fi
-	_tsc_kick_bypass
+	_tsc_kick_bypass wait
 	echo "   ✓ Сеть и firewall вернулись к прежнему виду"
 	return 0
 }
@@ -17100,7 +17110,7 @@ _tsc_route_ok() {
 		function ipn(a,  o) { if (split(a, o, ".") != 4) return -1; return ((o[1] * 256 + o[2]) * 256 + o[3]) * 256 + o[4] }
 		BEGIN { split(want, w, "/"); wa = ipn(w[1]); wm = (w[2] == "" ? 32 : w[2] + 0) }
 		$0 !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\/[0-9]+$/ { next }
-		{ split($0, r, "/"); m = r[2] + 0; if (m < 1 || m > wm) next; z = 2 ^ (32 - m); if (int(ipn(r[1]) / z) == int(wa / z)) { ok = 1; exit } }
+		{ split($0, r, "/"); m = r[2] + 0; if (m < 1 || m > wm) next; z = 1; for (i = m; i < 32; i++) z *= 2; if (int(ipn(r[1]) / z) == int(wa / z)) { ok = 1; exit } }
 		END { exit !ok }'
 }
 
@@ -29136,8 +29146,12 @@ return view.extend({
 		function renderIntro() {
 			var free = +data.free_kb || 0, need = +data.need_kb || 20480, low = free > 0 && free < need;
 			mainCard.appendChild(E('h3', {}, 'Удалённый доступ'));
-			mainCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:-6px' }, 'Работает на Tailscale. Телефон в любой сети — мобильный интернет, кафе, поездка — выходит в интернет через домашний роутер. С ним работают Zapret, Steer и sTGWS, как дома. Белый IP не нужен: телефон и роутер находят друг друга сами.'));
-			mainCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Всё ставится с GitHub: уменьшенная сборка Tailscale для OpenWrt и страница для LuCI. Сайт Tailscale из России не открывается, поэтому подключиться можно через Routerich — по ключу, без аккаунта.'));
+			mainCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:-6px' }, 'Работает на Tailscale. Телефон в любой сети — мобильный интернет, кафе, поездка — выходит в интернет через домашний роутер, и Zapret, Steer и sTGWS работают для него как дома.'));
+			mainCard.appendChild(E('div', { 'class': 'zm-refresh-banner zm-show', 'role': 'note', 'style': 'margin:12px 0 4px; font-size:14px' }, [ E('span', {}, [
+				E('b', {}, 'Не для новичков.'), ' Ставьте, только если знаете, как настраивается Tailscale: сервер, одобрение маршрутов, приложение на телефоне. Белые списки он не обходит — для них есть ',
+				E('a', { 'href': 'http://stresskvn.lol/', 'target': '_blank', 'rel': 'noreferrer' }, 'StressKVN'), '.'
+			]) ]));
+			mainCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Всё ставится с GitHub: уменьшенная сборка Tailscale для OpenWrt и страница для LuCI.'));
 			mainCard.appendChild(E('div', { 'class': 'zm-kv' }, [
 				row('Нужно', E('span', {}, 'около ' + Math.round(need / 1024) + ' МБ флеш-памяти')),
 				free ? row('Свободно', low ? badge('zm-warn', Math.round(free / 1024) + ' МБ — не хватает') : E('span', {}, Math.round(free / 1024) + ' МБ')) : E([])
@@ -43714,7 +43728,7 @@ var ROUTES = [
 	{ id: 'adblock', title: 'Блокировка рекламы', sub: 'Реклама, трекеры и фишинг — для всех устройств в сети', icon: 'adblock', group: 'Сеть', dot: 'adblock' },
 	{ id: 'doh', title: 'DNS over HTTPS', sub: 'Шифрованный DNS для всей сети', icon: 'globe', group: 'Сеть', dot: 'doh' },
 	{ id: 'awg', title: 'AmneziaWG', sub: 'Туннели AmneziaWG и WARP: установка, ключи, интерфейсы', icon: 'anarchy', group: 'Сеть', dot: 'awg' },
-	{ id: 'tailscale', title: 'Удалённый доступ', sub: 'Tailscale: телефон в любой сети — через домашний роутер', icon: 'phone', group: 'Сеть', dot: 'ts' },
+	{ id: 'tailscale', title: 'Удалённый доступ', sub: '', icon: 'phone', group: 'Сеть', dot: 'ts' },
 	{ id: 'terminal', title: 'Терминал', sub: 'Командная строка роутера в браузере (ttyd)', icon: 'terminal', group: 'Сеть', dot: 'term' },
 	{ id: 'system', title: 'Система', sub: 'Параметры роутера, зеркала и обслуживание', icon: 'cpu', group: 'Сервис' },
 	{ id: 'monitor', title: 'Монитор ресурсов', sub: 'Процессор, память, температура и процессы', icon: 'activity', group: 'Сервис' }
@@ -44198,7 +44212,8 @@ function route(force) {
 	Object.keys(navLinks).forEach(function (k) { navLinks[k].classList.toggle('zmw-active', k === id); });
 	try { var al = navLinks[id], nv = al && al.parentNode; if (nv && nv.scrollHeight > nv.clientHeight) { var t = al.offsetTop - nv.offsetTop, h = al.offsetHeight; if (t < nv.scrollTop) nv.scrollTop = t - 8; else if (t + h > nv.scrollTop + nv.clientHeight) nv.scrollTop = t + h - nv.clientHeight + 8; } } catch (e) {}
 	titleEl.textContent = r.title;
-	subEl.textContent = r.sub;
+	subEl.textContent = r.sub || '';
+	subEl.hidden = !r.sub;
 	document.title = r.title + ' · Zapret Manager';
 
 	poll._reset();
