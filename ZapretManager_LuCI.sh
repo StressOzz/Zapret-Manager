@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 3.89
+# Version: 3.90
 ZM_VERSION_EOF
 set -e
 
@@ -2247,20 +2247,29 @@ strategy_set_v() {
 
 _flowseal_file() { echo "$JOBS_DIR/flowseal_strategies.txt"; }
 
+# fake-файлы Flowseal, которых нет в пакете zapret (ACTIVE_*.bin — заглушки Windows-версии, не нужны)
+FLOWSEAL_FAKES="stun2.bin quic_initial_4pda_to.bin quic_initial_5ka_ru.bin quic_initial_lemana_pro.bin \
+quic_initial_rutube_ru.bin quic_initial_steam_chat_com.bin quic_initial_steamcommunity_com.bin \
+quic_initial_steamstatic_com.bin quic_initial_tencent_com.bin tls_clienthello_4pda_to.bin \
+tls_clienthello_5ka_ru.bin tls_clienthello_awswaf_com.bin tls_clienthello_max_ru.bin \
+tls_clienthello_sochi_park.bin tls_clienthello_steam_chat_com.bin tls_clienthello_steamstatic_com.bin \
+tls_clienthello_teamspeak_com.bin tls_clienthello_www_sferum_ru.bin"
+
 do_add_fake_flow() {
 	[ -d /opt/zapret ] || return 0
 	[ -f "$CONF" ] || return 0
-	local f msg=0
-	for f in stun2.bin quic_initial_tencent_com.bin quic_initial_steamcommunity_com.bin \
-		tls_clienthello_sochi_park.bin quic_initial_4pda_to.bin quic_initial_5ka_ru.bin \
-		tls_clienthello_5ka_ru.bin quic_initial_rutube_ru.bin; do
-		if [ ! -s "/opt/zapret/files/fake/$f" ]; then
-			[ "$msg" = 0 ] && { echo "==> Скачиваем дополнительные fake-файлы"; msg=1; }
-			rm -f "/opt/zapret/files/fake/$f.zmdl"
-			if wget -q --timeout=20 -U "Mozilla/5.0" -O "/opt/zapret/files/fake/$f.zmdl" "${FLOWSEAL_FAKE_RAW}/$f" 2>/dev/null \
-				&& _zm_dl_sane "/opt/zapret/files/fake/$f.zmdl"; then mv -f "/opt/zapret/files/fake/$f.zmdl" "/opt/zapret/files/fake/$f"
-			else rm -f "/opt/zapret/files/fake/$f.zmdl"; echo "!! Не удалось загрузить файл $f"; fi
-		fi
+	local d=/opt/zapret/files/fake f msg=0 extra=""
+	mkdir -p "$d"
+	# плюс всё, на что ссылаются уже загруженные стратегии Flowseal
+	[ -s "$(_flowseal_file)" ] && extra=$(grep -oE "$d/[A-Za-z0-9_.-]+\.bin" "$(_flowseal_file)" | sed "s|^$d/||" | sort -u)
+	for f in $FLOWSEAL_FAKES $extra; do
+		case "$f" in ACTIVE_*) continue ;; esac
+		[ -s "$d/$f" ] && continue
+		[ "$msg" = 0 ] && { echo "==> Скачиваем недостающие fake-файлы"; msg=1; }
+		rm -f "$d/$f.zmdl"
+		if wget -q --timeout=20 -U "Mozilla/5.0" -O "$d/$f.zmdl" "${FLOWSEAL_FAKE_RAW}/$f" 2>/dev/null \
+			&& _zm_dl_sane "$d/$f.zmdl"; then mv -f "$d/$f.zmdl" "$d/$f"
+		else rm -f "$d/$f.zmdl"; echo "!! Не удалось загрузить файл $f"; fi
 	done
 }
 
@@ -2307,20 +2316,11 @@ do_flowseal_download() {
 	sed -i 's|"%LISTS%list-google.txt"|/opt/zapret/ipset/zapret-hosts-google.txt|g' "$out"
 	sed -i 's/--new[[:space:]]\^/--new/g' "$out"
 
-	sed -i 's|"%BIN%tls_clienthello_www_google_com.bin"|/opt/zapret/files/fake/tls_clienthello_www_google_com.bin|g' "$out"
-	sed -i 's|"%BIN%tls_clienthello_sochi_park.bin"|/opt/zapret/files/fake/tls_clienthello_sochi_park.bin|g' "$out"
-	sed -i 's|"%BIN%stun.bin"|/opt/zapret/files/fake/stun.bin|g' "$out"
-	sed -i 's|"%BIN%tls_clienthello_4pda_to.bin"|/opt/zapret/files/fake/4pda.bin|g' "$out"
-	sed -i 's|"%BIN%quic_initial_www_google_com.bin"|/opt/zapret/files/fake/quic_initial_www_google_com.bin|g' "$out"
-	sed -i 's|"%BIN%stun2.bin"|/opt/zapret/files/fake/stun2.bin|g' "$out"
-	sed -i 's|"%BIN%quic_initial_tencent_com.bin"|/opt/zapret/files/fake/quic_initial_tencent_com.bin|g' "$out"
-	sed -i 's|"%BIN%quic_initial_steamcommunity_com.bin"|/opt/zapret/files/fake/quic_initial_steamcommunity_com.bin|g' "$out"
-	sed -i 's|"%BIN%quic_initial_4pda_to.bin"|/opt/zapret/files/fake/quic_initial_4pda_to.bin|g' "$out"
+	# ACTIVE_*.bin — заглушки Windows-версии (winws подставляет туда активный fake), на роутере — реальные файлы
 	sed -i 's|"%BIN%ACTIVE_DISCORD_UDP.bin"|/opt/zapret/files/fake/quic_initial_steamcommunity_com.bin|g' "$out"
 	sed -i 's|"%BIN%ACTIVE_GAME_UDP.bin"|/opt/zapret/files/fake/quic_initial_4pda_to.bin|g' "$out"
-	sed -i 's|"%BIN%tls_clienthello_max_ru.bin"|/opt/zapret/files/fake/tls_clienthello_www_onetrust_com.bin|g' "$out"
-	sed -i 's|"%BIN%quic_initial_5ka_ru.bin"|/opt/zapret/files/fake/quic_initial_5ka_ru.bin|g' "$out"
-	sed -i 's|"%BIN%quic_initial_rutube_ru.bin"|/opt/zapret/files/fake/quic_initial_rutube_ru.bin|g' "$out"
+	# остальные fake — под теми же именами в /opt/zapret/files/fake (недостающие докачиваются ниже)
+	sed -i 's|"%BIN%\([A-Za-z0-9_.-]*\.bin\)"|/opt/zapret/files/fake/\1|g; s|%BIN%\([A-Za-z0-9_.-]*\.bin\)|/opt/zapret/files/fake/\1|g' "$out"
 	sed -i 's|\^!|/opt/zapret/files/fake/tls_clienthello_www_google_com.bin|g' "$out"
 
 	sed -i "s|%GameFilterTCP%|$PORTS_TCP|g" "$out"
@@ -2330,9 +2330,30 @@ do_flowseal_download() {
 	sed -i '/^[[:space:]]*$/d' "$out"
 	sed -i '/^--new$/ { N; /^--new\n$/d; }' "$out"
 
+	local left
+	left=$(grep -oE '%[A-Za-z_]+%' "$out" | sort -u | tr '\n' ' ')
+	[ -n "$left" ] && echo "!! В стратегиях остались неизвестные плейсхолдеры: $left"
+
+	if [ -d /opt/zapret ]; then
+		echo "==> Добавляем fake-файлы из архива Flowseal"
+		mkdir -p /opt/zapret/files/fake
+		local fb fn
+		for fb in "$base"/bin/*.bin; do
+			[ -s "$fb" ] || continue
+			fn=$(basename "$fb")
+			case "$fn" in ACTIVE_*) continue ;; esac
+			if [ ! -s "/opt/zapret/files/fake/$fn" ]; then cp -f "$fb" "/opt/zapret/files/fake/$fn"
+			else case " $FLOWSEAL_FAKES " in *" $fn "*) cmp -s "$fb" "/opt/zapret/files/fake/$fn" 2>/dev/null || cp -f "$fb" "/opt/zapret/files/fake/$fn" ;; esac; fi
+		done
+	fi
+
 	rm -rf "$tmp" "$zip"
 
 	do_add_fake_flow
+
+	local miss
+	miss=$(grep -oE '/opt/zapret/files/fake/[A-Za-z0-9_.-]+\.bin' "$out" | sort -u | while read -r fb; do [ -s "$fb" ] || printf '%s ' "${fb##*/}"; done)
+	[ -n "$miss" ] && [ -d /opt/zapret ] && echo "!! Нет fake-файлов: $miss— стратегии с ними работать не будут"
 
 	echo "==> Готово, стратегий: $(grep -c '^#' "$out")"
 }
@@ -9346,10 +9367,10 @@ _doh_fo_event() {
 _doh_fo_on() { [ "$(_doh_fo_get fo 0)" = 1 ] || [ "$(_doh_fo_get direct 0)" = 1 ]; }
 _doh_name() {
 	case "$1" in
-		google) echo Google ;; cloudflare) echo Cloudflare ;; quad9) echo Quad9 ;; xbox) echo XBOX ;; comss) echo Comss ;; dnsai) echo DNS-AI ;; bezmezhau) echo Bezmezhau ;;
-		cloudflare_sec) echo "Cloudflare · Без вирусов" ;; cloudflare_fam) echo "Cloudflare · Семейный" ;; quad9_open) echo "Quad9 · Без фильтра" ;;
-		controld_sec) echo "Control D · Без вирусов" ;; controld_fam) echo "Control D · Семейный" ;; dns4eu_sec) echo "DNS4EU · Защитный" ;; dns4eu_fam) echo "DNS4EU · Детский" ;;
-		yandex) echo "Яндекс" ;; yandex_family) echo "Яндекс · Семейный" ;; yandex_safe) echo "Яндекс · Безопасный" ;; geohide_ru) echo "GeoHide RU" ;; geohide_eu) echo "GeoHide EU" ;;
+		google) echo Google ;; cloudflare) echo Cloudflare ;; quad9) echo "Quad9 · Защита от угроз" ;; xbox) echo XBOX ;; comss) echo Comss ;; dnsai) echo DNS-AI ;; bezmezhau) echo Bezmezhau ;;
+		cloudflare_sec) echo "Cloudflare · Защита от угроз" ;; cloudflare_fam) echo "Cloudflare · Семейный фильтр" ;; quad9_open) echo "Quad9 · Без фильтрации" ;;
+		controld_sec) echo "Control D · Защита от угроз" ;; controld_fam) echo "Control D · Семейный фильтр" ;; dns4eu_sec) echo "DNS4EU · Защита от угроз" ;; dns4eu_fam) echo "DNS4EU · Семейный фильтр" ;;
+		yandex) echo "Яндекс" ;; yandex_family) echo "Яндекс · Семейный фильтр" ;; yandex_safe) echo "Яндекс · Защита от угроз" ;; geohide_ru) echo "GeoHide RU" ;; geohide_eu) echo "GeoHide EU" ;;
 		geohide_us) echo "GeoHide US" ;; malw) echo MALW ;; zapretmoe) echo zapret.moe ;; webshift) echo WebShift ;; dagami) echo Dagami ;;
 		controld) echo "Control D" ;; dns4eu) echo DNS4EU ;;
 		https://*) _doh_own_title "$1" | grep . || printf '%s' "$1" | sed 's#^https://\([^/]*\).*#\1#' ;; *) echo "$1" ;;
@@ -27169,24 +27190,24 @@ cat > '/www/luci-static/resources/view/zapret-manager/doh.js' << 'ZM_INSTALLER_E
 'require zapret-manager.common as zm';
 var E = (function(raw) { return function() { var a = Array.prototype.slice.call(arguments), i = a.length - 1; if (i >= 1 && (typeof a[i] === 'string' || typeof a[i] === 'number')) a[i] = [ String(a[i]) ]; return raw.apply(null, a); }; })(window.E);
 
-// k — тип сервера: plain — только шифрование, safe — защита от вирусов, family — ещё и взрослые сайты, geo — обход геоблокировок.
+// k — тип сервера: plain — только шифрование, safe — защита от угроз, family — защита от угроз и сайтов для взрослых, geo — обход геоблокировок.
 // v — название варианта внутри «папки» провайдера (FAMS). Адреса сверены с документацией провайдеров.
 var PROVIDERS = [
 	{ id: 'google', label: 'Google', url: 'https://dns.google/dns-query', boot: '8.8.8.8, 8.8.4.4', k: 'plain' },
-	{ id: 'cloudflare', label: 'Cloudflare', v: 'Без фильтра', url: 'https://cloudflare-dns.com/dns-query', boot: '1.1.1.1, 1.0.0.1', k: 'plain' },
-	{ id: 'cloudflare_sec', label: 'Cloudflare · Без вирусов', v: 'Без вирусов', url: 'https://security.cloudflare-dns.com/dns-query', boot: '1.1.1.2, 1.0.0.2', k: 'safe' },
-	{ id: 'cloudflare_fam', label: 'Cloudflare · Семейный', v: 'Семейный', url: 'https://family.cloudflare-dns.com/dns-query', boot: '1.1.1.3, 1.0.0.3', k: 'family' },
-	{ id: 'quad9_open', label: 'Quad9 · Без фильтра', v: 'Без фильтра', url: 'https://dns10.quad9.net/dns-query', boot: '9.9.9.10, 149.112.112.10', k: 'plain' },
-	{ id: 'quad9', label: 'Quad9', v: 'Без вирусов', url: 'https://dns.quad9.net/dns-query', boot: '9.9.9.9, 149.112.112.112', k: 'safe' },
-	{ id: 'controld', label: 'Control D', v: 'Без фильтра', url: 'https://freedns.controld.com/p0', boot: '76.76.2.0, 76.76.10.0', k: 'plain' },
-	{ id: 'controld_sec', label: 'Control D · Без вирусов', v: 'Без вирусов', url: 'https://freedns.controld.com/p1', boot: '76.76.2.1, 76.76.10.1', k: 'safe' },
-	{ id: 'controld_fam', label: 'Control D · Семейный', v: 'Семейный', url: 'https://freedns.controld.com/family', boot: '76.76.2.4, 76.76.10.4', k: 'family' },
-	{ id: 'dns4eu', label: 'DNS4EU', v: 'Без фильтра', url: 'https://unfiltered.joindns4.eu/dns-query', boot: '86.54.11.100, 86.54.11.200', k: 'plain' },
-	{ id: 'dns4eu_sec', label: 'DNS4EU · Защитный', v: 'Защитный', url: 'https://protective.joindns4.eu/dns-query', boot: '86.54.11.1, 86.54.11.201', k: 'safe' },
-	{ id: 'dns4eu_fam', label: 'DNS4EU · Детский', v: 'Детский', url: 'https://child.joindns4.eu/dns-query', boot: '86.54.11.12, 86.54.11.212', k: 'family' },
-	{ id: 'yandex', label: 'Яндекс', v: 'Базовый', url: 'https://common.dot.dns.yandex.net/dns-query', boot: '77.88.8.8, 77.88.8.1', k: 'plain' },
-	{ id: 'yandex_safe', label: 'Яндекс · Безопасный', v: 'Безопасный', url: 'https://safe.dot.dns.yandex.net/dns-query', boot: '77.88.8.88, 77.88.8.2', k: 'safe' },
-	{ id: 'yandex_family', label: 'Яндекс · Семейный', v: 'Семейный', url: 'https://family.dot.dns.yandex.net/dns-query', boot: '77.88.8.7, 77.88.8.3', k: 'family' },
+	{ id: 'cloudflare', label: 'Cloudflare', v: 'Без фильтрации', url: 'https://cloudflare-dns.com/dns-query', boot: '1.1.1.1, 1.0.0.1', k: 'plain' },
+	{ id: 'cloudflare_sec', label: 'Cloudflare · Защита от угроз', v: 'Защита от угроз', url: 'https://security.cloudflare-dns.com/dns-query', boot: '1.1.1.2, 1.0.0.2', k: 'safe' },
+	{ id: 'cloudflare_fam', label: 'Cloudflare · Семейный фильтр', v: 'Семейный фильтр', url: 'https://family.cloudflare-dns.com/dns-query', boot: '1.1.1.3, 1.0.0.3', k: 'family' },
+	{ id: 'quad9_open', label: 'Quad9 · Без фильтрации', v: 'Без фильтрации', url: 'https://dns10.quad9.net/dns-query', boot: '9.9.9.10, 149.112.112.10', k: 'plain' },
+	{ id: 'quad9', label: 'Quad9 · Защита от угроз', v: 'Защита от угроз', url: 'https://dns.quad9.net/dns-query', boot: '9.9.9.9, 149.112.112.112', k: 'safe' },
+	{ id: 'controld', label: 'Control D', v: 'Без фильтрации', url: 'https://freedns.controld.com/p0', boot: '76.76.2.0, 76.76.10.0', k: 'plain' },
+	{ id: 'controld_sec', label: 'Control D · Защита от угроз', v: 'Защита от угроз', url: 'https://freedns.controld.com/p1', boot: '76.76.2.1, 76.76.10.1', k: 'safe' },
+	{ id: 'controld_fam', label: 'Control D · Семейный фильтр', v: 'Семейный фильтр', url: 'https://freedns.controld.com/family', boot: '76.76.2.4, 76.76.10.4', k: 'family' },
+	{ id: 'dns4eu', label: 'DNS4EU', v: 'Без фильтрации', url: 'https://unfiltered.joindns4.eu/dns-query', boot: '86.54.11.100, 86.54.11.200', k: 'plain' },
+	{ id: 'dns4eu_sec', label: 'DNS4EU · Защита от угроз', v: 'Защита от угроз', url: 'https://protective.joindns4.eu/dns-query', boot: '86.54.11.1, 86.54.11.201', k: 'safe' },
+	{ id: 'dns4eu_fam', label: 'DNS4EU · Семейный фильтр', v: 'Семейный фильтр', url: 'https://child.joindns4.eu/dns-query', boot: '86.54.11.12, 86.54.11.212', k: 'family' },
+	{ id: 'yandex', label: 'Яндекс', v: 'Без фильтрации', url: 'https://common.dot.dns.yandex.net/dns-query', boot: '77.88.8.8, 77.88.8.1', k: 'plain' },
+	{ id: 'yandex_safe', label: 'Яндекс · Защита от угроз', v: 'Защита от угроз', url: 'https://safe.dot.dns.yandex.net/dns-query', boot: '77.88.8.88, 77.88.8.2', k: 'safe' },
+	{ id: 'yandex_family', label: 'Яндекс · Семейный фильтр', v: 'Семейный фильтр', url: 'https://family.dot.dns.yandex.net/dns-query', boot: '77.88.8.7, 77.88.8.3', k: 'family' },
 	{ id: 'xbox', label: 'XBOX', url: 'https://xbox-dns.ru/dns-query', k: 'geo' },
 	{ id: 'comss', label: 'Comss', url: 'https://dns.comss.one/dns-query', k: 'geo' },
 	{ id: 'dnsai', label: 'DNS-AI', url: 'https://dns.dns-ai.ru/dns-query', k: 'geo' },
@@ -27215,11 +27236,11 @@ var FAMS = {
 	yandex: { label: 'Яндекс', ids: [ 'yandex', 'yandex_safe', 'yandex_family' ] },
 	geohide: { label: 'GeoHide', ids: [ 'geohide_ru', 'geohide_eu', 'geohide_us' ] }
 };
-var VAR_TEXT = { plain: 'только шифрование', safe: 'блокирует вредоносные и фишинговые сайты', family: 'ещё и сайты для взрослых' };
+var VAR_TEXT = { plain: 'только шифрование', safe: 'блокирует вредоносные и фишинговые сайты', family: 'блокирует угрозы и сайты для взрослых' };
 
 // ids — плитки: провайдер-«папка» (ключ FAMS) или отдельный сервер
 var GROUPS = [
-	{ title: 'Без подмены', hint: 'только шифрование; у Cloudflare, Quad9, Control D, DNS4EU и Яндекса есть варианты с защитой от вирусов и семейным фильтром', ids: [ 'google', 'cloudflare', 'quad9', 'controld', 'dns4eu', 'yandex' ] },
+	{ title: 'Без подмены', hint: 'только шифрование; у Cloudflare, Quad9, Control D, DNS4EU и Яндекса есть варианты «Защита от угроз» и «Семейный фильтр»', ids: [ 'google', 'cloudflare', 'quad9', 'controld', 'dns4eu', 'yandex' ] },
 	{ title: 'С обходом геоблокировок', hint: 'открывают сервисы, закрытые для России', ids: [ 'xbox', 'comss', 'dnsai', 'bezmezhau', 'geohide', 'malw', 'zapretmoe', 'webshift', 'dagami' ] }
 ];
 function famIds(key) { return FAMS[key] ? FAMS[key].ids : [ key ]; }
@@ -27696,7 +27717,7 @@ return view.extend({
 								'click': function() { pick(id); },
 								'keydown': function(ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pick(id); } }
 							}, [
-								E('div', { 'class': 'zm-node-name' }, [ (p.k === 'safe' ? '🛡 ' : p.k === 'family' ? '👪 ' : '') + p.v ]),
+								E('div', { 'class': 'zm-node-name' }, [ p.v ]),
 								E('div', { 'class': 'zm-doh-var-desc' }, p.d || VAR_TEXT[p.k] || ''),
 								E('div', { 'class': 'zm-node-foot' }, [ E('span', {}, [ p.url.replace(/^https:\/\//, '') ]), sub(id) ])
 							]);
@@ -27790,7 +27811,7 @@ return view.extend({
 
 		var foCard = E('div', { 'class': 'zm-card', 'style': 'display:none' }), foDraft = null, foPicking = false, foLats = {};
 		var FO_MAX = 3;
-		var KIND_TEXT = { plain: 'Обычный — только шифрование', safe: 'Защита от вирусов', geo: 'С обходом геоблокировок', family: 'Семейный фильтр', own: 'Свой сервер' };
+		var KIND_TEXT = { plain: 'Без фильтрации — только шифрование', safe: 'Защита от угроз', geo: 'С обходом геоблокировок', family: 'Семейный фильтр', own: 'Свой сервер' };
 		function at(ts) {
 			if (!ts) return '';
 			var d = new Date(ts * 1000), n = new Date(), p = function(x) { return (x < 10 ? '0' : '') + x; };
@@ -27937,8 +27958,8 @@ return view.extend({
 			chain.forEach(function(id, i) {
 				var k = kind(id), isNow = live && f.mode !== 'direct' && now === id, warn = '';
 				if (mk === 'geo' && k !== 'geo') warn = '⚠ Не обходит геоблокировки: пока работает он, ChatGPT, Gemini и другие закрытые для России сервисы могут не открываться';
-				else if (mk === 'family' && k !== 'family') warn = k === 'safe' ? '⚠ Без семейного фильтра: пока работает он, взрослые сайты не блокируются' : '⚠ Без семейного фильтра: пока работает он, опасные и взрослые сайты не блокируются';
-				else if (mk === 'safe' && k !== 'safe' && k !== 'family') warn = '⚠ Без защиты от вирусов: пока работает он, опасные сайты не блокируются';
+				else if (mk === 'family' && k !== 'family') warn = k === 'safe' ? '⚠ Без семейного фильтра: пока работает он, взрослые сайты не блокируются' : '⚠ Без семейного фильтра: пока работает он, вредоносные и взрослые сайты не блокируются';
+				else if (mk === 'safe' && k !== 'safe' && k !== 'family') warn = '⚠ Без защиты от угроз: пока работает он, вредоносные и фишинговые сайты не блокируются';
 				box.appendChild(foStep(String(i + 2), isNow ? 'zm-fo-now' : '', [
 					E('div', { 'class': 'zm-fo-name' }, [ foSelect(id, main, used, i + 2), isNow ? foTag('сейчас работает', 'zm-fo-tag-now') : '' ]),
 					E('div', { 'class': 'zm-fo-sub' + (warn ? ' zm-fo-warn' : '') }, warn || KIND_TEXT[k])
@@ -29797,7 +29818,7 @@ return view.extend({
 				mainCard.appendChild(row('Через туннель', E('span', {}, [ n ? n + ' ' + plural(n, 'сервис', 'сервиса', 'сервисов') : (dAll ? 'сервисы не выбраны' : 'ничего не выбрано'),
 					dAll ? ' · весь трафик ' + dAll + ' ' + plural(dAll, 'устройства', 'устройств', 'устройств') : '' ].join(''))));
 				if (data.doh) {
-					var DOHN = { cloudflare: 'Cloudflare', google: 'Google', quad9: 'Quad9', xbox: 'XBOX', comss: 'Comss', dnsai: 'DNS-AI', bezmezhau: 'Bezmezhau', yandex: 'Яндекс', yandex_family: 'Яндекс · Семейный', yandex_safe: 'Яндекс · Безопасный', cloudflare_sec: 'Cloudflare · Без вирусов', cloudflare_fam: 'Cloudflare · Семейный', quad9_open: 'Quad9 · Без фильтра', controld_sec: 'Control D · Без вирусов', controld_fam: 'Control D · Семейный', dns4eu_sec: 'DNS4EU · Защитный', dns4eu_fam: 'DNS4EU · Детский', geohide_ru: 'GeoHide RU', geohide_eu: 'GeoHide EU', geohide_us: 'GeoHide US', malw: 'MALW', zapretmoe: 'zapret.moe', webshift: 'WebShift', dagami: 'Dagami', controld: 'Control D', dns4eu: 'DNS4EU', multi: 'несколько серверов', other: 'свой сервер' };
+					var DOHN = { cloudflare: 'Cloudflare', google: 'Google', quad9: 'Quad9 · Защита от угроз', xbox: 'XBOX', comss: 'Comss', dnsai: 'DNS-AI', bezmezhau: 'Bezmezhau', yandex: 'Яндекс', yandex_family: 'Яндекс · Семейный фильтр', yandex_safe: 'Яндекс · Защита от угроз', cloudflare_sec: 'Cloudflare · Защита от угроз', cloudflare_fam: 'Cloudflare · Семейный фильтр', quad9_open: 'Quad9 · Без фильтрации', controld_sec: 'Control D · Защита от угроз', controld_fam: 'Control D · Семейный фильтр', dns4eu_sec: 'DNS4EU · Защита от угроз', dns4eu_fam: 'DNS4EU · Семейный фильтр', geohide_ru: 'GeoHide RU', geohide_eu: 'GeoHide EU', geohide_us: 'GeoHide US', malw: 'MALW', zapretmoe: 'zapret.moe', webshift: 'WebShift', dagami: 'Dagami', controld: 'Control D', dns4eu: 'DNS4EU', multi: 'несколько серверов', other: 'свой сервер' };
 					mainCard.appendChild(row('Шифрованный DNS', E('span', { 'style': 'display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap' }, [
 						E('span', {}, 'DNS over HTTPS · ' + (DOHN[data.doh] || data.doh)),
 						badge('zm-ok', 'работает')
@@ -38464,8 +38485,8 @@ var DNS_CAT = {
 		{ id: 'cloudflare', name: 'Cloudflare', value: 'https://cloudflare-dns.com/dns-query', boot: '1.1.1.1', alias: [ '1.1.1.1', 'cloudflare-dns.com', 'https://1.1.1.1/dns-query' ] },
 		{ id: 'google', name: 'Google', value: 'https://dns.google/dns-query', boot: '8.8.8.8', alias: [ '8.8.8.8', 'dns.google', 'https://8.8.8.8/dns-query' ] },
 		{ id: 'yandex', name: 'Яндекс', value: 'https://common.dot.dns.yandex.net/dns-query', boot: '77.88.8.8' },
-		{ id: 'yandex_safe', name: 'Яндекс Безопасный', value: 'https://safe.dot.dns.yandex.net/dns-query', boot: '77.88.8.88' },
-		{ id: 'yandex_family', name: 'Яндекс Семейный', value: 'https://family.dot.dns.yandex.net/dns-query', boot: '77.88.8.7' },
+		{ id: 'yandex_safe', name: 'Яндекс · Защита от угроз', value: 'https://safe.dot.dns.yandex.net/dns-query', boot: '77.88.8.88' },
+		{ id: 'yandex_family', name: 'Яндекс · Семейный фильтр', value: 'https://family.dot.dns.yandex.net/dns-query', boot: '77.88.8.7' },
 		{ id: 'comss', name: 'Comss', value: 'https://dns.comss.one/dns-query', boot: '77.88.8.8', alias: [ 'dns.comss.one' ] },
 		{ id: 'xbox', name: 'XBOX', value: 'https://xbox-dns.ru/dns-query', boot: '77.88.8.8' },
 		{ id: 'dnsai', name: 'DNS-AI', value: 'https://dns.dns-ai.ru/dns-query', boot: '77.88.8.8' },
@@ -38485,8 +38506,8 @@ var DNS_CAT = {
 		{ id: 'cloudflare', name: 'Cloudflare', value: '1.1.1.1', boot: '1.1.1.1', alias: [ 'one.one.one.one', '1dot1dot1dot1.cloudflare-dns.com' ] },
 		{ id: 'google', name: 'Google', value: 'dns.google', boot: '8.8.8.8', alias: [ '8.8.8.8' ] },
 		{ id: 'yandex', name: 'Яндекс', value: 'common.dot.dns.yandex.net', boot: '77.88.8.8' },
-		{ id: 'yandex_safe', name: 'Яндекс Безопасный', value: 'safe.dot.dns.yandex.net', boot: '77.88.8.88' },
-		{ id: 'yandex_family', name: 'Яндекс Семейный', value: 'family.dot.dns.yandex.net', boot: '77.88.8.7' },
+		{ id: 'yandex_safe', name: 'Яндекс · Защита от угроз', value: 'safe.dot.dns.yandex.net', boot: '77.88.8.88' },
+		{ id: 'yandex_family', name: 'Яндекс · Семейный фильтр', value: 'family.dot.dns.yandex.net', boot: '77.88.8.7' },
 		{ id: 'comss', name: 'Comss', value: 'dns.comss.one', boot: '77.88.8.8' },
 		{ id: 'bezmezhau', name: 'Bezmezhau', value: 'dns.bezmezhau.com', boot: '77.88.8.8' }
 	],
@@ -38495,8 +38516,8 @@ var DNS_CAT = {
 		{ id: 'cloudflare', name: 'Cloudflare', value: '1.1.1.1', boot: '1.1.1.1' },
 		{ id: 'google', name: 'Google', value: '8.8.8.8', boot: '8.8.8.8' },
 		{ id: 'yandex', name: 'Яндекс', value: '77.88.8.8', boot: '77.88.8.8' },
-		{ id: 'yandex_safe', name: 'Яндекс Безопасный', value: '77.88.8.88', boot: '77.88.8.88' },
-		{ id: 'yandex_family', name: 'Яндекс Семейный', value: '77.88.8.7', boot: '77.88.8.7' }
+		{ id: 'yandex_safe', name: 'Яндекс · Защита от угроз', value: '77.88.8.88', boot: '77.88.8.88' },
+		{ id: 'yandex_family', name: 'Яндекс · Семейный фильтр', value: '77.88.8.7', boot: '77.88.8.7' }
 	]
 };
 
