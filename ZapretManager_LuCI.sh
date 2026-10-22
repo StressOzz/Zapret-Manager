@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.20
+# Version: 4.21
 ZM_VERSION_EOF
 set -e
 
@@ -11001,7 +11001,6 @@ _rb_list_src() {
 		svc_whatsapp_extra.lst) echo "$RB_SHARE/svc/whatsapp_extra.lst" ;;
 		svc_google_ai_extra.lst) echo "$RB_SHARE/svc/google_ai_extra.lst" ;;
 		svc_tiktok_extra.lst) echo "$RB_SHARE/svc/tiktok_extra.lst" ;;
-		svc_geoblock_extra.lst) echo "$RB_SHARE/svc/geoblock_extra.lst" ;;
 		svc_v2meta.lst) echo "$ZM_LISTS_V2F/meta" ;;
 		svc_threads.lst) echo "$ZM_LISTS_V2F/threads" ;;
 		svc_oculus.lst) echo "$ZM_LISTS_V2F/oculus" ;;
@@ -34786,7 +34785,7 @@ cloudfront|Amazon CloudFront||||||cloudfront
 digitalocean|DigitalOcean||||||digitalocean
 hetzner|Hetzner||||||hetzner
 ovh|OVH||||||ovh
-geoblock|Геоблок|svc_geoblock_extra.lst|||||geoblock
+geoblock|Геоблок||||||geoblock
 block|Заблокированные сайты||||||block
 news|Новости||||||news
 anime|Аниме||||||anime
@@ -34862,46 +34861,8 @@ tiktok-minis.com
 tiktokminis.us
 tiktokglobalshopv.com
 ZM_INSTALLER_EOF
-cat > '/usr/share/zm-redbtn/svc/geoblock_extra.lst' << 'ZM_INSTALLER_EOF'
-gemini.google
-bard.google.com
-aistudio.google.com
-makersuite.google.com
-generativelanguage.googleapis.com
-geller-pa.googleapis.com
-aisandbox-pa.googleapis.com
-speechs3proto2-pa.googleapis.com
-clients6.google.com
-notebooklm.google
-notebooklm.google.com
-labs.google
-gemini.google.com
-robinfrontend-pa.googleapis.com
-proactivebackend-pa.googleapis.com
-signaler-pa.clients6.google.com
-waa-pa.clients6.google.com
-geminiweb-pa.clients6.google.com
-geminiweb-pa.clients.google.com
-gemini.gstatic.com
-ai.studio
-assistant-s3-pa.googleapis.com
-assistantfrontend-pa.googleapis.com
-taskassist-pa.googleapis.com
-lamssettings-pa.googleapis.com
-searchnotifications-pa.googleapis.com
-cloudaicompanion.googleapis.com
-cloudcode-pa.googleapis.com
-daily-cloudcode-pa.googleapis.com
-aicode.googleapis.com
-notebooklm-pa.googleapis.com
-notebooklm.googleapis.com
-labs.google.com
-flow.google
-flow.google.com
-opal.google
-opal.google.com
-ZM_INSTALLER_EOF
-chmod 0644 /usr/share/zm-redbtn/svc/instagram_extra.lst /usr/share/zm-redbtn/svc/whatsapp_extra.lst /usr/share/zm-redbtn/svc/google_ai_extra.lst /usr/share/zm-redbtn/svc/tiktok_extra.lst /usr/share/zm-redbtn/svc/geoblock_extra.lst
+rm -f /usr/share/zm-redbtn/svc/geoblock_extra.lst /opt/zapret-manager-luci/lists/svc_geoblock_extra.lst
+chmod 0644 /usr/share/zm-redbtn/svc/instagram_extra.lst /usr/share/zm-redbtn/svc/whatsapp_extra.lst /usr/share/zm-redbtn/svc/google_ai_extra.lst /usr/share/zm-redbtn/svc/tiktok_extra.lst
 
 cat > '/www/luci-static/resources/view/zapret-manager/hosts.js' << 'ZM_INSTALLER_EOF'
 'use strict';
