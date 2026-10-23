@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.22
+# Version: 4.24
 ZM_VERSION_EOF
 set -e
 
@@ -1560,6 +1560,9 @@ zapret_restart() {
 	[ -s "$ZC_FILE" ] && _zc_drop
 	_yv_ipid_sync
 	_zo_doh_sync
+	if [ -n "$(_fake_missing)" ]; then
+		if [ -n "$ZM_JOB_LOG" ]; then _fake_ensure; else _zm_run 25 _fake_ensure >/dev/null 2>&1; fi
+	fi
 	chmod -R a+rX /opt/zapret/ipset /opt/zapret/files 2>/dev/null
 	[ -x /opt/zapret/sync_config.sh ] && /opt/zapret/sync_config.sh >/dev/null 2>&1
 	/etc/init.d/zapret restart >/dev/null 2>&1
@@ -1575,6 +1578,7 @@ _strat_label() {
 	{ _zc_has || [ -s "$ZC_FILE" ]; } && s="${s:+$s }Custom"
 	# стратегию правили вручную и убрали строки-названия (#v7 и т.п.) — она есть, просто своя
 	[ -z "$s" ] && _nfq_opt_body | grep -q -- '^[[:space:]]*--' && s="своя"
+	_zo_wss_on && s="${s:+$s }wssize"
 	printf '%s' "$s"
 }
 
@@ -2334,6 +2338,50 @@ do_add_fake_flow() {
 	done
 }
 
+# fake-файлы, на которые ссылается стратегия (или файл со стратегиями), но которых нет на роутере
+ZAPRET_FAKE_RAW="${GH_MAIN}/bol-van/zapret/raw/refs/heads/master/files/fake"
+FAKE_FAIL="$JOBS_DIR/fake_fail"
+_fake_missing() {
+	local f d=/opt/zapret/files/fake
+	grep -oE "$d/[A-Za-z0-9_.-]+\.bin" "${1:-$CONF}" 2>/dev/null | sort -u | while read -r f; do
+		case "${f##*/}" in ACTIVE_*) continue ;; esac
+		[ -s "$f" ] || echo "${f##*/}"
+	done
+}
+_fake_fetch() {
+	local d=/opt/zapret/files/fake u
+	mkdir -p "$d"
+	for u in "$FLOWSEAL_FAKE_RAW" "$ZAPRET_FAKE_RAW"; do
+		rm -f "$d/$1.zmdl"
+		if wget -q --timeout=10 -U "Mozilla/5.0" -O "$d/$1.zmdl" "$u/$1" 2>/dev/null && _zm_dl_sane "$d/$1.zmdl"; then
+			mv -f "$d/$1.zmdl" "$d/$1"; chmod a+r "$d/$1" 2>/dev/null; return 0
+		fi
+	done
+	rm -f "$d/$1.zmdl"
+	return 1
+}
+# Докачивает недостающие fake-файлы. Если файл недавно уже не скачался — сеть снова не ждём 10 минут
+_fake_ensure() {
+	local f t now miss
+	[ -d /opt/zapret ] || return 0
+	miss="$(_fake_missing "$1")"
+	[ -n "$miss" ] || return 0
+	now="$(date +%s)"
+	mkdir -p "$JOBS_DIR"
+	for f in $miss; do
+		t="$(awk -v f="$f" '$1 == f { t = $2 } END { print t }' "$FAKE_FAIL" 2>/dev/null)"
+		if [ -n "$t" ] && [ $((now - t)) -lt 600 ]; then echo "!! Нет fake-файла $f — стратегия с ним может не работать"; continue; fi
+		if _fake_fetch "$f"; then
+			echo "   ✓ Докачан fake-файл $f"
+			[ -f "$FAKE_FAIL" ] && awk -v f="$f" '$1 != f' "$FAKE_FAIL" > "$FAKE_FAIL.t" && mv -f "$FAKE_FAIL.t" "$FAKE_FAIL"
+		else
+			echo "$f $now" >> "$FAKE_FAIL"
+			echo "!! Не удалось скачать fake-файл $f — стратегия с ним может не работать"
+		fi
+	done
+	return 0
+}
+
 do_flowseal_download() {
 	_ensure_deps
 	local out zip tmp attempt=1 max_attempts=5 dst
@@ -2489,7 +2537,19 @@ do_yv_download() {
 	local out; out="$(_yv_file)"
 	echo "==> Скачиваем список стратегий для YouTube"
 	curl -fsSL --connect-timeout 8 --max-time 15 "$STR_URL" -o "$out" || { echo "ОШИБКА скачивания"; return 1; }
+	grep -qx '#Yv28' "$out" || { [ -n "$(tail -c 1 "$out")" ] && echo >> "$out"; _yv_builtin >> "$out"; }
+	[ -d /opt/zapret ] && [ -n "$(_fake_missing "$out")" ] && { echo "==> Докачиваем fake-файлы для стратегий YouTube"; _fake_ensure "$out"; }
 	echo "==> Готово, стратегий: $(grep -c '^#Yv' "$out")"
+}
+
+# Стратегии YouTube, которые панель добавляет сама, если их ещё нет в скачанном списке
+_yv_builtin() {
+	printf '%s\n' "#Yv28" "--filter-tcp=443" "--hostlist=/opt/zapret/ipset/zapret-hosts-google.txt" \
+		"--dpi-desync=fake,multidisorder" "--dpi-desync-split-seqovl=midsld-4" \
+		"--dpi-desync-split-pos=2,midsld+3,sniext+2,endhost-2,midsld-3,host+1,-10" "--dpi-desync-fooling=ts" \
+		"--dpi-desync-repeats=23" "--dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_www_sferum_ru.bin" \
+		"--dpi-desync-fake-tls=/opt/zapret/files/fake/stun2.bin" "--dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_www_sferum_ru.bin" \
+		"--dpi-desync-fake-tls=/opt/zapret/files/fake/stun.bin" "--dpi-desync-fake-http=/opt/zapret/files/fake/tls_clienthello_max_ru.bin"
 }
 
 strategy_list_youtube() {
@@ -6217,10 +6277,21 @@ _test_run_set() {
 
 _test_domain_urls() {
 	local d h
-	for d in $(cat "$TEST_DIR/domain_list" 2>/dev/null); do
+	for d in $(cat "$TEST_DIR/${1:-domain_list}" 2>/dev/null); do
 		h="$(printf '%s' "$d" | sed -E 's#^[a-zA-Z]+://##; s#[/?#].*##')"
 		[ -n "$h" ] && printf '%s|https://%s/\n' "$h" "$h"
 	done
+}
+
+_test_hl_inject() {
+	local csv
+	csv="$(tr -s ' \n' ',,' < "$TEST_DIR/custom_dom_list" 2>/dev/null | sed 's/^,*//; s/,*$//')"
+	[ -n "$csv" ] || { cat "$1"; return 0; }
+	awk -v D="--hostlist-domains=$csv" '
+		function flush(   i) { for (i = 1; i <= n; i++) print b[i]; if (hl) print D; n = 0; hl = 0 }
+		$0 == "--new" { flush(); print; next }
+		{ b[++n] = $0; if ($0 ~ /^--hostlist(-domains|-auto)?=/) hl = 1 }
+		END { flush() }' "$1"
 }
 
 do_test_run() {
@@ -6268,6 +6339,10 @@ do_test_run() {
 			urls="$(_test_domain_urls)"
 			[ -n "$urls" ] || { echo "ОШИБКА: не указаны домены"; return 1; }
 			;;
+		custom_dom)
+			urls="$(_test_domain_urls custom_dom_list)"
+			[ -n "$urls" ] || { echo "ОШИБКА: не указаны домены"; return 1; }
+			;;
 		*)
 			local urls_file="$TEST_DIR/urls.txt"
 			echo "==> Собираем список сайтов"
@@ -6284,6 +6359,7 @@ do_test_run() {
 
 	local cand="$TEST_DIR/candidates.txt" cmode="$mode"
 	[ "$mode" = domain ] && cmode=v_flowseal
+	[ "$mode" = custom_dom ] && cmode=custom
 	echo "==> Собираем стратегии"
 	_test_build_candidates "$cmode" "$cand"
 	if [ ! -s "$cand" ]; then
@@ -6294,6 +6370,7 @@ do_test_run() {
 	local total_str
 	total_str=$(grep -c '^#' "$cand")
 	echo "==> Стратегий: $total_str, адресов: $total_domains"
+	[ "$mode" = custom_dom ] && grep -qE '^--hostlist(-domains|-auto)?=' "$cand" && echo "==> В стратегиях есть списки сайтов — на время теста ваши сайты добавляются в них"
 	_test_detail_domains "$detail" "$urls"
 
 	echo "==> Контрольный тест: Zapret выключен"
@@ -6311,6 +6388,7 @@ do_test_run() {
 		else sed -n "${start},$((next-1))p" "$cand" > "$TEST_DIR/block.txt"; fi
 		name=$(head -n1 "$TEST_DIR/block.txt")
 		name="${name#\#}"
+		[ "$mode" = custom_dom ] && _test_hl_inject "$TEST_DIR/block.txt" > "$TEST_DIR/block.hl" && mv -f "$TEST_DIR/block.hl" "$TEST_DIR/block.txt"
 		echo "==> [$cur/$total_str] $name"
 		_test_apply_block "$(cat "$TEST_DIR/block.txt")"
 		zapret_restart
@@ -6340,8 +6418,9 @@ test_action() {
 	case "$action" in
 		start)
 			case "$mode" in
-				domain:*)
-					for d in $(printf '%s' "${mode#domain:}" | tr ',;' '  '); do
+				domain:*|custom_dom:*)
+					case "$mode" in custom_dom:*) grep -q '^#' "$TEST_CUSTOM_FILE" 2>/dev/null || { echo '{"error":"список своих стратегий пуст — добавьте их и сохраните"}'; return 1; } ;; esac
+					for d in $(printf '%s' "${mode#*:}" | tr ',;' '  '); do
 						h="$(printf '%s' "$d" | sed -E 's#^[a-zA-Z]+://##; s#[/?#].*##' | tr 'A-Z' 'a-z')"
 						printf '%s' "$h" | grep -qE '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$' || { printf '{"error":"%s"}\n' "$(esc "не похоже на домен: $d")"; return 1; }
 						doms="$doms $h"
@@ -6349,8 +6428,10 @@ test_action() {
 					doms="$(printf '%s\n' $doms | awk '!s[$0]++' | head -n 30 | tr '\n' ' ')"
 					[ -n "${doms# }" ] || { echo '{"error":"введите хотя бы один домен"}'; return 1; }
 					mkdir -p "$TEST_DIR"
-					printf '%s\n' $doms > "$TEST_DIR/domain_list"
-					mode=domain
+					case "$mode" in
+						custom_dom:*) printf '%s\n' $doms > "$TEST_DIR/custom_dom_list"; mode=custom_dom ;;
+						*) printf '%s\n' $doms > "$TEST_DIR/domain_list"; mode=domain ;;
+					esac
 					;;
 				v|flowseal|v_flowseal|youtube|current) ;;
 				custom|custom_yt)
@@ -6379,7 +6460,7 @@ test_action() {
 			;;
 		clear)
 			case "$mode" in
-				v|flowseal|v_flowseal|youtube|current|domain|custom|custom_yt) rm -f "$(_test_results_file "$mode")" "$(_test_detail_file "$mode")" ;;
+				v|flowseal|v_flowseal|youtube|current|domain|custom|custom_yt|custom_dom) rm -f "$(_test_results_file "$mode")" "$(_test_detail_file "$mode")" ;;
 				*) rm -f "$TEST_DIR"/results_*.txt "$TEST_DIR"/detail_*.txt ;;
 			esac
 			printf '{"ok":true}\n'
@@ -6393,11 +6474,12 @@ test_status() {
 	_test_recover
 	_test_running && running="true"
 	[ -f "$TEST_MODE_FILE" ] && mode=$(cat "$TEST_MODE_FILE")
-	for m in v flowseal v_flowseal youtube current domain custom custom_yt; do
+	for m in v flowseal v_flowseal youtube current domain custom custom_yt custom_dom; do
 		has="$has,\"has_results_$m\":$([ -s "$(_test_results_file "$m")" ] && echo true || echo false)"
 	done
 	_za_running && mode=auto
-	printf '{"running":%s,"mode":"%s","domains":"%s"%s,"custom":"%s","auto":%s,%s}\n' "$running" "$(esc "$mode")" "$(esc "$(cat "$TEST_DIR/domain_list" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')")" "$has" \
+	printf '{"running":%s,"mode":"%s","domains":"%s","custom_domains":"%s"%s,"custom":"%s","auto":%s,%s}\n' "$running" "$(esc "$mode")" "$(esc "$(cat "$TEST_DIR/domain_list" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')")" \
+		"$(esc "$(cat "$TEST_DIR/custom_dom_list" 2>/dev/null | tr '\n' ' ' | sed 's/ $//')")" "$has" \
 		"$(esc_ml "$(cat "$TEST_CUSTOM_FILE" 2>/dev/null)")" "$(_za_json)" "$(_zt_json)"
 }
 
@@ -11317,6 +11399,7 @@ _rb_list_src() {
 		telegram.lst) echo "$ZM_LISTS_ITD/Subnets/IPv4/telegram.lst" ;;
 		discord.lst) echo "$ZM_LISTS_ITD/Subnets/IPv4/discord.lst" ;;
 		twitter_x.lst) echo "$ZM_LISTS_ITD/Subnets/IPv4/twitter.lst" ;;
+		meta.lst) echo "$ZM_LISTS_ITD/Subnets/IPv4/meta.lst" ;;
 		own_github.lst) echo "${GH_RAW}/v2fly/domain-list-community/master/data/github" ;;
 		*) return 1 ;;
 	esac
@@ -11468,10 +11551,13 @@ _stl_say() { echo "==> $*"; }
 _st_onfail() { [ "$(cat /etc/zm-steer/onfail 2>/dev/null)" = drop ] && echo drop || echo direct; }
 _st_dnsmode() { [ "$(cat /etc/zm-steer/dns.mode 2>/dev/null)" = router ] && echo router || echo tun; }
 _st_realip() { [ "$(cat /etc/zm-steer/realip.mode 2>/dev/null)" = off ] && echo off || echo on; }
+# Сколько секунд минимум steer помнит адрес сервиса после DNS-ответа (dns.cache_ttl.min); 0 — как в DNS
+_st_cttl() { local v; v="$(cat /etc/zm-steer/dns.ttlmin 2>/dev/null)"; case "$v" in 300|900|3600) echo "$v" ;; *) echo 0 ;; esac; }
 _st_dnsopt_save() {
 	mkdir -p /etc/zm-steer
 	rm -f /etc/zm-steer/realip
 	case "$1" in
+		cttl) if [ "$2" = 0 ]; then rm -f /etc/zm-steer/dns.ttlmin; else echo "$2" > /etc/zm-steer/dns.ttlmin; fi ;;
 		dnsmode) if [ "$2" = router ]; then echo router > /etc/zm-steer/dns.mode; else rm -f /etc/zm-steer/dns.mode; fi ;;
 		realip) if [ "$2" = off ]; then echo off > /etc/zm-steer/realip.mode; else rm -f /etc/zm-steer/realip.mode; fi ;;
 	esac
@@ -11853,6 +11939,11 @@ _stl_spec() {
 		done
 		dnsj="\"dns\":{\"upstreams\":{$dnsj,\"zm_dir_ya\":{\"url\":\"https://common.dot.dns.yandex.net/dns-query\",\"ips\":[\"77.88.8.8\",\"77.88.8.1\"]}}},"
 	fi
+	t="$(_st_cttl)"
+	if [ "$t" != 0 ] && [ -z "$ZM_STL_NOCTTL" ]; then
+		if [ -n "$dnsj" ]; then dnsj="\"dns\":{\"cache_ttl\":{\"min\":$t},${dnsj#\"dns\":\{}"
+		else dnsj="\"dns\":{\"cache_ttl\":{\"min\":$t}},"; fi
+	fi
 	printf '{"version":2,%s"lan":{"devices":[%s]},%s"lists":{%s},"outputs":{%s},"rules":[%s]}\n' "$dnsj" "${lan:-\"br-lan\"}" "$clients" "$lists" "$outs" "$rules"
 }
 
@@ -11874,8 +11965,15 @@ stl_apply() {
 	mkdir -p "$STL_ETC" "$STL_TMP"
 	_stl_spec "$1" > "$new" || { rm -f "$new"; echo "ОШИБКА: в настройке нет ни одного списка"; return 1; }
 	_stl_say "Проверяем правила: $(grep -o '"out":' "$new" | wc -l | tr -d ' ')"
-	if ! err="$(_stl_check "$new")"; then
-		if grep -q '"zm_tun' "$new" && ( ZM_STL_NODNS=1; _stl_spec "$1" ) > "$new" && err="$(_stl_check "$new")"; then
+	local ck=0 noct=""
+	err="$(_stl_check "$new")" && ck=1
+	[ "$ck" = 0 ] && grep -q '"cache_ttl"' "$new" && noct=1
+	if [ -n "$noct" ] && ( ZM_STL_NOCTTL=1; _stl_spec "$1" ) > "$new" && err="$(_stl_check "$new")"; then
+		ck=1
+		_stl_say "Ядро steer не знает настройку «Помнить адреса сервисов» — правила применены без неё. Обновите ядро steer"
+	fi
+	if [ "$ck" = 0 ]; then
+		if grep -q '"zm_tun' "$new" && ( ZM_STL_NODNS=1; [ -n "$noct" ] && ZM_STL_NOCTTL=1; _stl_spec "$1" ) > "$new" && err="$(_stl_check "$new")"; then
 			_stl_say "Ядро steer не умеет DNS через туннель — правила применены без него. Обновите ядро steer, чтобы адреса сервисов узнавались через туннель"
 		else
 			rm -f "$new"
@@ -12278,7 +12376,7 @@ _st_devs_json() {
 steer_devices() {
 	local lan t="$ST_RUN/devs.$$"
 	mkdir -p "$ST_RUN"
-	lan=" $(_zm_lan_devs) "
+	lan=" $(_st_lan_devs) "
 	{
 		[ -f /tmp/dhcp.leases ] && awk '{ print "L", tolower($2), $3, $4 }' /tmp/dhcp.leases
 		uci -q -X show dhcp 2>/dev/null | awk -F= '
@@ -12788,6 +12886,7 @@ _st_secs_fw() {
 	done
 	[ "$ch" = 1 ] && { uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1; }
 	if [ -n "$zl" ] || [ "$(uci -q get "firewall.$ST_WARP_ZONE")" = zone ]; then _st_warp_zone; fi
+	_st_lan_fw
 	return 0
 }
 _st_ext_zoneless() {
@@ -14860,6 +14959,8 @@ do_steer_dnsopt() {
 		dnsmode:*) _rb_say "Адреса выбранных сервисов узнаются через туннель — как при полном VPN" ;;
 		realip:on) _rb_say "Точно по IP: роутер отдаёт настоящие адреса выбранных сервисов" ;;
 		realip:*) _rb_say "Точно по IP выключено: роутер отдаёт подменные адреса" ;;
+		cttl:0) _rb_say "Адреса сервисов помнятся столько, сколько разрешает DNS" ;;
+		cttl:*) _rb_say "Адреса сервисов помнятся не меньше $(($2 / 60)) мин — приложения, которые долго держат адрес, не уходят мимо туннеля" ;;
 	esac
 	_st_respec
 	_rb_say "Готово"
@@ -15039,6 +15140,7 @@ do_steer_remove() {
 	[ -n "$keptif" ] && _rb_warn "Туннели$keptif оставлены — они записаны в правилах ядра steer, которые ведёт $foreign"
 	_st_ext_release_fwd
 	for p in $(sed -n 's/^fw \(zmsec_[A-Za-z0-9_]*\)$/\1/p' "$ST_OWNED" 2>/dev/null); do uci -q delete "firewall.$p"; uci commit firewall; done
+	_st_lan_fw_drop
 	if [ -z "$keptif" ] && _st_owns "fw $ST_WARP_ZONE"; then
 		uci -q delete "firewall.$ST_WARP_ZONE"
 		uci -q delete "firewall.${ST_WARP_ZONE}_fwd"
@@ -15202,10 +15304,10 @@ steer_status() {
 	if [ "$vup" = true ] && [ "$vexit" = vpn ] && [ "$off" = false ]; then
 		_st_vpn_live; case $? in 0) vlive=true ;; 1) vlive=false ;; esac
 	fi
-	printf '{"running":%s,"phase":"%s","blocker":"%s","installed":%s,"stopped":%s,"version":"%s","steer_running":%s,"channels":%s,"warp_up":%s,"warp_colo":"%s","warp_host":"%s","warp_port":"%s","warp_hs_age":"%s","warp_rx":%s,"warp_tx":%s,"autorestart":"%s","dns_conflict":%s,"doh":"%s","doh_mode":"%s","exit":"%s","vpn_up":%s,"vpn_live":%s,"has_sub":%s,"sub_label":"%s","latest":"%s","ext":%s,"warp_on":%s,"warp_mode":"%s","warp_iface":"%s","warp_pick":"%s","onfail":"%s","warp_own_saved":%s,"tunnels":%s,"warp_active":"%s","catalog":%s,"wfix":%s,"lists_via":%s,"failopen":%s,"warp_failed":%s,"hosts_extra":%s,"dnsmode":"%s","realip":"%s","devices":[%s],"services":[%s],"main_name":"%s","main_off":%s,"sec_max":%s,"sec_vpn_max":%s,"sections":[%s]}\n' \
+	printf '{"running":%s,"phase":"%s","blocker":"%s","installed":%s,"stopped":%s,"version":"%s","steer_running":%s,"channels":%s,"warp_up":%s,"warp_colo":"%s","warp_host":"%s","warp_port":"%s","warp_hs_age":"%s","warp_rx":%s,"warp_tx":%s,"autorestart":"%s","dns_conflict":%s,"doh":"%s","doh_mode":"%s","exit":"%s","vpn_up":%s,"vpn_live":%s,"has_sub":%s,"sub_label":"%s","latest":"%s","ext":%s,"warp_on":%s,"warp_mode":"%s","warp_iface":"%s","warp_pick":"%s","onfail":"%s","warp_own_saved":%s,"tunnels":%s,"warp_active":"%s","catalog":%s,"wfix":%s,"lists_via":%s,"failopen":%s,"warp_failed":%s,"hosts_extra":%s,"dnsmode":"%s","realip":"%s","cttl":%s,"devices":[%s],"services":[%s],"main_name":"%s","main_off":%s,"sec_max":%s,"sec_vpn_max":%s,"sections":[%s]}\n' \
 		"$running" "$(esc "$phase")" "$(esc "$blk")" "$installed" "$off" "$(esc "$ver")" "$run" "${chans:-0}" "$warp_up" "$(esc "$colo")" \
 		"$(esc "$host")" "$(esc "$port")" "$age" "${rx:-0}" "${tx:-0}" "$(_st_cron_get)" "$dns" "$doh" "$(_doh_force_mode)" \
-		"$vexit" "$vup" "$vlive" "$vsub" "$(esc "$(_st_sub_label)")" "$(esc "$latest")" "$ext" "$won" "$(_st_warp_modename)" "$(esc "$(_st_ext_if)")" "$(_st_warp_pick)" "$(_st_onfail)" "$(_st_own_saved && echo true || echo false)" "$(_st_tunnels_json)" "$active" "$(_st_cat_json)" "$(_st_wfix_json)" "$([ -f "$ST_DIR/lists.via" ] && echo true || echo false)" "$failed" "$wfail" "$(_hosts_extra)" "$(_st_dnsmode)" "$(_st_realip)" "$(_st_devs_json)" "$svc" "$(esc "$(_st_sec_name main)")" "$(_st_sec_off main && echo true || echo false)" "$ST_SEC_MAX" "$ST_SEC_VPN_MAX" "$(_st_secs_json)"
+		"$vexit" "$vup" "$vlive" "$vsub" "$(esc "$(_st_sub_label)")" "$(esc "$latest")" "$ext" "$won" "$(_st_warp_modename)" "$(esc "$(_st_ext_if)")" "$(_st_warp_pick)" "$(_st_onfail)" "$(_st_own_saved && echo true || echo false)" "$(_st_tunnels_json)" "$active" "$(_st_cat_json)" "$(_st_wfix_json)" "$([ -f "$ST_DIR/lists.via" ] && echo true || echo false)" "$failed" "$wfail" "$(_hosts_extra)" "$(_st_dnsmode)" "$(_st_realip)" "$(_st_cttl)" "$(_st_devs_json)" "$svc" "$(esc "$(_st_sec_name main)")" "$(_st_sec_off main && echo true || echo false)" "$ST_SEC_MAX" "$ST_SEC_VPN_MAX" "$(_st_secs_json)"
 }
 
 _st_active_if() {
@@ -16939,7 +17041,7 @@ _st_sec_kind_check() {
 }
 
 steer_action() {
-	local action="$1" mode="$2" w
+	local action="$1" mode="$2" w d
 	case "$action" in sec_add|sec_name|sec_kind|sec_del|sec_off) steer_sec_action "$action" "$mode"; return ;; esac
 	case "$mode" in
 		"~s"[2-9]"~"*)
@@ -16953,7 +17055,7 @@ steer_action() {
 	esac
 	case "$action" in diag|wfix_tick|explain) ;; *) rm -f "$ST_VPN_PROBE" ;; esac
 	case "$action" in
-		install|apply|start|stop|remove|warp_restart|warp_endpoint|warp_recreate|lists|engine|warp_setup|warp_fix|warp_fixkeys|warp_own|warp_mode|warp_iface|ext_pick|warp_pick|onfail|dnsmode|realip)
+		install|apply|start|stop|remove|warp_restart|warp_endpoint|warp_recreate|lists|engine|warp_setup|warp_fix|warp_fixkeys|warp_own|warp_mode|warp_iface|ext_pick|warp_pick|onfail|dnsmode|realip|cttl|lan_set)
 			_st_running && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
 			case "$action" in warp_iface|ext_pick|warp_restart|warp_mode|warp_own) _job_alive awg && { echo '{"error":"на вкладке AmneziaWG идёт операция — дождитесь её окончания"}'; return 1; } ;; esac
 			[ "$action" = remove ] || [ -z "$(_st_blocker)" ] || { echo '{"error":"ядро steer сейчас настраивает не Zapret Manager — панель его не трогает"}'; return 1; }
@@ -16992,14 +17094,31 @@ steer_action() {
 					_st_warp_ext || { echo '{"error":"Steer сейчас работает не через интерфейс AmneziaWG"}'; return 1; }
 					[ "$(uci -q get "network.$(_awg_peer_sec "$(_st_ext_if)").public_key")" = "$AWG_WARP_PEER" ] || { echo '{"error":"подбор точки входа есть только для туннелей WARP"}'; return 1; }
 					job_start steer do_steer_ext_pick ;;
-				dnsmode|realip)
+				dnsmode|realip|cttl)
 					if [ "$action" = dnsmode ]; then
 						case "$mode" in tun|router) ;; *) echo '{"error":"неизвестный режим"}'; return 1 ;; esac
+					elif [ "$action" = cttl ]; then
+						case "$mode" in 0|300|900|3600) ;; *) echo '{"error":"неизвестный срок"}'; return 1 ;; esac
 					else
 						case "$mode" in on|off) ;; *) echo '{"error":"неизвестный режим"}'; return 1 ;; esac
 					fi
 					if _st_installed && [ ! -f "$ST_OFF" ] && _st_owns "steer-spec"; then job_start steer do_steer_dnsopt "$action" "$mode"
 					else _st_dnsopt_save "$action" "$mode"; printf '{"ok":true,"saved":true}\n'
+					fi ;;
+				lan_set)
+					w=""
+					for d in $(printf '%s' "$mode" | tr ',;' '  '); do
+						printf '%s' "$d" | grep -qE '^[A-Za-z0-9._-]{1,15}$' || { printf '{"error":"%s"}\n' "$(esc "неверное имя сети: $d")"; return 1; }
+						case " $(_zm_lan_devs) " in *" $d "*) continue ;; esac
+						case " $w " in *" $d "*) ;; *) w="$w $d" ;; esac
+					done
+					[ "$(echo $w | wc -w)" -le "$ST_LAN_MAX" ] || { echo "{\"error\":\"не больше $ST_LAN_MAX дополнительных сетей\"}"; return 1; }
+					mkdir -p "$ST_DIR"
+					if [ -n "$w" ]; then printf '%s\n' $w > "$ST_LAN_EXTRA"; else rm -f "$ST_LAN_EXTRA"; fi
+					if _st_installed && [ ! -f "$ST_OFF" ] && _st_owns "steer-spec"; then job_start steer do_steer_lanset
+					else
+						[ -n "$w" ] || _st_lan_fw_drop
+						printf '{"ok":true,"saved":true}\n'
 					fi ;;
 				onfail)
 					case "$mode" in drop|direct) ;; *) echo '{"error":"неизвестный режим"}'; return 1 ;; esac
@@ -17135,6 +17254,7 @@ steer_action() {
 			printf '{"ok":true}\n'
 			;;
 		autorestart) _st_cron_set "$mode" ;;
+		lan_list) steer_lan_list ;;
 		lists_via)
 			mkdir -p "$ST_DIR"
 			if [ "$mode" = on ]; then touch "$ST_DIR/lists.via"; else rm -f "$ST_DIR/lists.via"; fi
@@ -19077,10 +19197,134 @@ _tsc_steer_kick() {
 }
 
 _st_lan_devs() {
-	local out
+	local out d
 	out="$(_zm_lan_devs)"
 	if [ -f "$TSC_ON" ]; then case " $out " in *" $TSC_DEV "*) ;; *) out="$out $TSC_DEV" ;; esac; fi
+	for d in $(_st_lan_extra); do
+		[ -d "/sys/class/net/$d" ] || continue
+		case " $out " in *" $d "*) ;; *) out="$out $d" ;; esac
+	done
 	echo $out
+}
+
+# Дополнительные сети для Steer (#1180): устройства вроде br-lan1 из других зон firewall,
+# трафик которых тоже идёт по правилам Steer. Список — в $ST_LAN_EXTRA, по устройству в строке.
+ST_LAN_EXTRA="$ST_DIR/lan.extra"
+ST_LAN_MAX=8
+_st_lan_extra() { [ -s "$ST_LAN_EXTRA" ] || return 0; tr -s ' \t\r' '\n\n\n' < "$ST_LAN_EXTRA" 2>/dev/null | grep -E '^[A-Za-z0-9._-]{1,15}$' | awk '!x[$0]++'; }
+_st_net_dev() {
+	local d
+	d="$(ifstatus "$1" 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)"
+	[ -n "$d" ] || d="$(ifstatus "$1" 2>/dev/null | jsonfilter -e '@.device' 2>/dev/null)"
+	[ -n "$d" ] || d="$(uci -q get "network.$1.device")"
+	echo "$d"
+}
+_st_dev_zone() {
+	local z n
+	for z in $(uci -q -X show firewall | sed -n "s/^firewall\.\([^.=]*\)=zone\$/\1/p"); do
+		case " $(uci -q get "firewall.$z.device") " in *" $1 "*) uci -q get "firewall.$z.name"; return 0 ;; esac
+	done
+	for n in $(uci -q -X show network | sed -n 's/^network\.\([^.=]*\)=interface$/\1/p'); do
+		[ "$(_st_net_dev "$n")" = "$1" ] && _zm_zone_of_net "$n" && return 0
+	done
+	return 1
+}
+# Зоны, куда Steer ведёт трафик домашней сети: свои зоны туннелей и зоны интерфейсов секций
+_st_out_zones() {
+	local i z lz wz
+	lz="$(_zm_lan_zone)"; wz="$(_zm_wan_zone)"
+	[ "$(uci -q get "firewall.$ST_WARP_ZONE")" = zone ] && echo "$ST_WARP_ZONE"
+	[ "$(uci -q get "firewall.$ST_VPN_ZONE")" = zone ] && echo "$ST_VPN_ZONE"
+	{ _st_secs_ifaces; _st_warp_ext && echo "$ST_WIF1"; } 2>/dev/null | while read -r i; do
+		[ -n "$i" ] || continue
+		z="$(_zm_zone_of_net "$i")"
+		[ -n "$z" ] && [ "$z" != "$lz" ] && [ "$z" != "$wz" ] && echo "$z"
+	done
+}
+# Пропускаем трафик дополнительных сетей в зоны туннелей Steer — как уже пропущена домашняя сеть
+_st_lan_fw() {
+	local d z lz dz r keep="" ch=0 zs="" outs
+	lz="$(_zm_lan_zone)"
+	for d in $(_st_lan_extra); do
+		[ -d "/sys/class/net/$d" ] || { _rb_warn "Сети $d сейчас нет на роутере — Steer её пропускает"; continue; }
+		case " $(_zm_lan_devs) " in *" $d "*) continue ;; esac
+		z="$(_st_dev_zone "$d")"
+		if [ -z "$z" ]; then _rb_warn "$d не входит ни в одну зону firewall — туннели Steer для неё могут быть закрыты. Добавьте её интерфейс в зону (Сеть → Межсетевой экран)"; continue; fi
+		[ "$z" = "$lz" ] && continue
+		case " $zs " in *" $z "*) ;; *) zs="$zs $z" ;; esac
+	done
+	outs="$(_st_out_zones | awk '!x[$0]++')"
+	for z in $zs; do
+		for dz in $outs; do
+			[ "$dz" = "$z" ] && continue
+			r="zmlan_$(printf '%s_%s' "$z" "$dz" | tr -c 'A-Za-z0-9_' '_')"
+			_st_fwd_has "$z" "$dz" "$r" && continue
+			keep="$keep $r"
+			[ "$(uci -q get "firewall.$r.src")" = "$z" ] && [ "$(uci -q get "firewall.$r.dest")" = "$dz" ] && continue
+			uci -q delete "firewall.$r"
+			uci set "firewall.$r=forwarding"
+			uci set "firewall.$r.src=$z"
+			uci set "firewall.$r.dest=$dz"
+			_st_own "fw $r"
+			ch=1
+			_rb_say "Разрешаем сети из зоны «$z» ходить в зону «$dz» — туннель Steer"
+		done
+	done
+	for r in $(sed -n 's/^fw \(zmlan_[A-Za-z0-9_]*\)$/\1/p' "$ST_OWNED" 2>/dev/null); do
+		case " $keep " in *" $r "*) continue ;; esac
+		uci -q delete "firewall.$r"
+		sed -i "\\|^fw $r\$|d" "$ST_OWNED" 2>/dev/null
+		ch=1
+	done
+	[ "$ch" = 1 ] && { uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1; }
+	return 0
+}
+_st_lan_fw_drop() {
+	local r ch=0
+	for r in $(sed -n 's/^fw \(zmlan_[A-Za-z0-9_]*\)$/\1/p' "$ST_OWNED" 2>/dev/null); do
+		uci -q delete "firewall.$r"; sed -i "\\|^fw $r\$|d" "$ST_OWNED" 2>/dev/null; ch=1
+	done
+	[ "$ch" = 1 ] && { uci commit firewall; /etc/init.d/firewall reload >/dev/null 2>&1; }
+	return 0
+}
+steer_lan_list() {
+	local base extra n d z wz seen="" sep="" pr
+	base=" $(_zm_lan_devs) "
+	extra=" $(_st_lan_extra | tr '\n' ' ') "
+	wz="$(_zm_wan_zone)"
+	printf '{"lan_zone":"%s","max":%s,"items":[' "$(esc "$(_zm_lan_zone)")" "$ST_LAN_MAX"
+	for n in $(uci -q -X show network | sed -n 's/^network\.\([^.=]*\)=interface$/\1/p'); do
+		[ "$n" = loopback ] && continue
+		pr="$(uci -q get "network.$n.proto")"
+		case "$pr" in dhcp|dhcpv6|pppoe|pppoa|3g|qmi|ncm|mbim|modemmanager|wwan|wireguard|amneziawg|openvpn|none) continue ;; esac
+		d="$(_st_net_dev "$n")"
+		case "$d" in ''|@*|lo) continue ;; esac
+		[ -d "/sys/class/net/$d" ] || continue
+		[ "$(cat "/sys/class/net/$d/type" 2>/dev/null)" = 1 ] || continue
+		case " $seen " in *" $d "*) continue ;; esac
+		z="$(_zm_zone_of_net "$n")"
+		[ -n "$z" ] || z="$(_st_dev_zone "$d")"
+		case "$z" in "$wz"|"$ST_WARP_ZONE"|"$ST_VPN_ZONE") continue ;; esac
+		seen="$seen $d"
+		printf '%s{"dev":"%s","net":"%s","zone":"%s","auto":%s,"on":%s}' "$sep" "$(esc "$d")" "$(esc "$n")" "$(esc "$z")" \
+			"$(case "$base" in *" $d "*) echo true ;; *) echo false ;; esac)" "$(case "$extra" in *" $d "*) echo true ;; *) echo false ;; esac)"
+		sep=","
+	done
+	for d in $extra; do
+		case " $seen " in *" $d "*) continue ;; esac
+		printf '%s{"dev":"%s","net":"","zone":"","auto":false,"on":true,"missing":true}' "$sep" "$(esc "$d")"
+		sep=","
+	done
+	printf ']}\n'
+}
+do_steer_lanset() {
+	_st_phase rules
+	rm -f "$ST_STOP_FLAG"
+	if [ -s "$ST_LAN_EXTRA" ]; then _rb_say "Steer обслуживает и дополнительные сети: $(_st_lan_extra | tr '\n' ' ' | sed 's/ $//')"
+	else _rb_say "Steer обслуживает только домашнюю сеть"; fi
+	_st_secs_fw
+	_st_respec
+	_rb_say "Готово"
 }
 
 # Файл входа Tailscale должен лежать на флеш-памяти: в /tmp он пропадает при перезагрузке,
@@ -24222,7 +24466,8 @@ const PKG_LISTS = {
 	"svc_facebook.lst": V2F_RAW + "/facebook",
 	"svc_messenger.lst": V2F_RAW + "/messenger",
 	"svc_whatsapp.lst": V2F_RAW + "/whatsapp",
-	"svc_whatsapp_extra.lst": PKG_LOCAL_DIR + "whatsapp_extra.lst"
+	"svc_whatsapp_extra.lst": PKG_LOCAL_DIR + "whatsapp_extra.lst",
+	"meta.lst": ITD_RAW + "/Subnets/IPv4/meta.lst"
 };
 const SCHEMES = /^(vless|vmess|trojan|ss|socks4|socks4a|socks5|hysteria2|hy2):\/\/[^ \t\r\n]+$/i;
 const SCHEMES_NAIVE = /^naive\+(https|quic):\/\/[^ \t\r\n@]+@[^ \t\r\n]+$/i;
@@ -32940,6 +33185,39 @@ return view.extend({
 			})) ]);
 		}
 
+		var lanInfo = null, lanLoading = false;
+		function loadLan() {
+			if (lanLoading) return;
+			lanLoading = true;
+			zm.steerAction('lan_list', '').then(function(r) {
+				lanLoading = false;
+				if (r && !r.error && Array.isArray(r.items)) { lanInfo = r; renderSet(); }
+			}).catch(function() { lanLoading = false; });
+		}
+		function lanToggle(dev) {
+			if (busy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
+			var on = [], was = false;
+			(lanInfo.items || []).forEach(function(x) { if (x.auto) return; if (x.dev === dev) { was = x.on; if (!x.on) on.push(x.dev); } else if (x.on) on.push(x.dev); });
+			if (on.length > (lanInfo.max || 8)) { zm.toast('Не больше ' + (lanInfo.max || 8) + ' дополнительных сетей', 'warning'); return; }
+			act('lan_set', on.join(' '), was ? 'Сеть ' + dev + ' больше не идёт через Steer' : 'Сеть ' + dev + ' теперь идёт через Steer', function(ok) { if (ok) { lanInfo = null; loadLan(); } });
+		}
+		function lanBlock() {
+			if (!lanInfo) { loadLan(); return null; }
+			var items = lanInfo.items || [], extra = items.filter(function(x) { return !x.auto; });
+			if (!extra.length) return null;
+			var home = items.filter(function(x) { return x.auto; }).map(function(x) { return x.dev; });
+			var box = E('div', { 'class': 'zm-st-lan' }, [
+				E('div', { 'class': 'zm-row' }, [ E('span', { 'class': 'zm-label' }, 'Сети роутера') ]),
+				E('p', { 'class': 'zm-hint', 'style': 'margin-top:-4px' }, 'Домашняя сеть' + (home.length ? ' (' + home.join(', ') + ')' : '') + ' идёт через Steer всегда. Включите другие сети, если их устройства тоже должны ходить по правилам Steer, — сами сети останутся отделены друг от друга.')
+			]);
+			extra.forEach(function(x) {
+				var sub = x.missing ? 'Такой сети сейчас нет на роутере — выключите, если она больше не нужна.'
+					: [ x.net ? 'интерфейс «' + x.net + '»' : '', x.zone ? 'зона «' + x.zone + '»' : 'без зоны firewall' ].filter(Boolean).join(', ') + (x.on && x.zone && x.zone !== lanInfo.lan_zone ? '. Steer сам разрешит этой зоне выход в свои туннели.' : '');
+				box.appendChild(zm.swRow(!!x.on, x.dev, sub, function() { lanToggle(x.dev); }, busy));
+			});
+			return box;
+		}
+
 		function renderSet() {
 			setCard.innerHTML = '';
 			if (!data.installed || data.blocker) return;
@@ -32969,6 +33247,18 @@ return view.extend({
 			setCard.appendChild(E('p', { 'class': 'zm-hint' }, ripOn
 				? 'В туннель идёт всё, что ведёт на адреса сервиса, — так работают и приложения, которые запоминают адреса. Иногда за компанию уходят соседние сайты. Рекомендуется.'
 				: 'В туннель идёт только то, что открыто по имени сайта. Некоторые приложения могут работать не полностью.'));
+			var ct = +data.cttl || 0;
+			setCard.appendChild(seg('Помнить адреса', [
+				[ ct === 0, 'Как в DNS', function() { act('cttl', '0', 'Адреса сервисов помнятся столько, сколько разрешает DNS'); } ],
+				[ ct === 300, '5 мин', function() { act('cttl', '300', 'Адреса сервисов помнятся не меньше 5 минут'); } ],
+				[ ct === 900, '15 мин', function() { act('cttl', '900', 'Адреса сервисов помнятся не меньше 15 минут'); } ],
+				[ ct === 3600, '1 ч', function() { act('cttl', '3600', 'Адреса сервисов помнятся не меньше часа'); } ]
+			]));
+			setCard.appendChild(E('p', { 'class': 'zm-hint' }, ct
+				? 'Адрес сервиса остаётся в туннеле не меньше ' + (ct >= 3600 ? 'часа' : ct / 60 + ' минут') + ' после DNS-ответа. Помогает, если приложение (Instagram, YouTube) подвисает раз в минуту: оно держит адрес дольше, чем живёт DNS-ответ, и уходило мимо туннеля.'
+				: 'Адрес сервиса живёт в туннеле столько, сколько разрешает DNS-ответ (часто минуту). Если приложение подвисает — поставьте 5 или 15 минут.'));
+			var lb = lanBlock();
+			if (lb) setCard.appendChild(lb);
 			setCard.appendChild(zm.swRow(!!data.lists_via, 'Скачивать списки через туннель', 'Если GitHub у провайдера не открывается. Не ответит туннель — скачаются напрямую.', function() {
 				if (busy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
 				var on = !data.lists_via;
@@ -35252,10 +35542,10 @@ mkdir -p /usr/share/zm-redbtn
 cat > '/usr/share/zm-redbtn/services.conf' << 'ZM_INSTALLER_EOF'
 youtube|YouTube|svc_youtube.lst||www.youtube.com,youtubei.googleapis.com,manifest.googlevideo.com|youtu.be,i.ytimg.com,i9.ytimg.com,yt3.ggpht.com,yt4.ggpht.com,jnn-pa.googleapis.com,signaler-pa.youtube.com,yt3.googleusercontent.com,rr4---sn-4g5e6nze.googlevideo.com,rr4---sn-5go7yner.googlevideo.com,rr5---sn-n8v7knez.googlevideo.com,rr2---sn-q4fl6ndl.googlevideo.com,rr1---sn-q4fl6n6y.googlevideo.com,rr14---sn-n8v7kn7r.googlevideo.com,rr4---sn-jvhnu5g-c35d.googlevideo.com,rr1---sn-gvnuxaxjvh-jx3z.googlevideo.com,rr12---sn-gvnuxaxjvh-bvwz.googlevideo.com,rr1---sn-ug5onuxaxjvh-n8v6.googlevideo.com||youtube
 discord|Discord|svc_discord.lst|discord.lst|discord.com,gateway.discord.gg,updates.discord.com|cdn.discordapp.com,media.discordapp.net||discord
-meta|Meta (Threads, Quest, AI)|svc_v2meta.lst,svc_threads.lst,svc_oculus.lst||www.meta.com,www.threads.com|meta.ai,www.oculus.com||
-instagram|Instagram|svc_instagram.lst,svc_instagram_extra.lst||www.instagram.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com||
-facebook|Facebook|svc_facebook.lst,svc_messenger.lst||www.facebook.com|m.facebook.com,www.messenger.com||
-whatsapp|WhatsApp|svc_whatsapp.lst,svc_whatsapp_extra.lst||web.whatsapp.com|static.whatsapp.net,mmg.whatsapp.net||
+meta|Meta (Threads, Quest, AI)|svc_v2meta.lst,svc_threads.lst,svc_oculus.lst|meta.lst|www.meta.com,www.threads.com|meta.ai,www.oculus.com||
+instagram|Instagram|svc_instagram.lst,svc_instagram_extra.lst|meta.lst|www.instagram.com|i.instagram.com,graph.instagram.com,scontent.cdninstagram.com||
+facebook|Facebook|svc_facebook.lst,svc_messenger.lst|meta.lst|www.facebook.com|m.facebook.com,www.messenger.com||
+whatsapp|WhatsApp|svc_whatsapp.lst,svc_whatsapp_extra.lst|meta.lst|web.whatsapp.com|static.whatsapp.net,mmg.whatsapp.net||
 x|X (Twitter)|svc_twitter.lst|twitter_x.lst|x.com|twitter.com,abs.twimg.com,video.twimg.com||twitter
 github|GitHub|own_github.lst||github.com,raw.githubusercontent.com,objects.githubusercontent.com|codeload.github.com,api.github.com,ghcr.io||
 telegram|Telegram|svc_telegram.lst|telegram.lst|web.telegram.org|t.me,core.telegram.org,telegra.ph||telegram
@@ -37148,9 +37438,9 @@ var TABS = [
 
 var TEST_MODE_LABELS = {
 	v: 'v1–v10', flowseal: 'Flowseal', v_flowseal: 'v + Flowseal', youtube: 'YouTube', current: 'Текущая', domain: 'По домену',
-	custom: 'Свои', custom_yt: 'Свои · YouTube', auto: 'Автоподбор'
+	custom: 'Свои', custom_yt: 'Свои · YouTube', custom_dom: 'Свои · ваши сайты', auto: 'Автоподбор'
 };
-var TEST_RESULT_MODES = ['current', 'domain', 'v', 'flowseal', 'v_flowseal', 'youtube', 'custom', 'custom_yt'];
+var TEST_RESULT_MODES = ['current', 'domain', 'v', 'flowseal', 'v_flowseal', 'youtube', 'custom', 'custom_yt', 'custom_dom'];
 var ZONE_RU = { 'Europe/Kaliningrad': 'Калининград', 'Europe/Moscow': 'Москва', 'Europe/Samara': 'Самара', 'Asia/Yekaterinburg': 'Екатеринбург', 'Asia/Omsk': 'Омск', 'Asia/Krasnoyarsk': 'Красноярск',
 	'Asia/Irkutsk': 'Иркутск', 'Asia/Yakutsk': 'Якутск', 'Asia/Vladivostok': 'Владивосток', 'Asia/Magadan': 'Магадан', 'Asia/Kamchatka': 'Камчатка', 'UTC': 'UTC' };
 var AUTO_MODES = [ { id: 'v', label: 'v1–v10' }, { id: 'flowseal', label: 'Flowseal' }, { id: 'v_flowseal', label: 'v + Flowseal' }, { id: 'youtube', label: 'Только YouTube' } ];
@@ -37622,9 +37912,12 @@ return view.extend({
 				{ id: 'domain', title: 'По домену', sub: 'Все стратегии v и Flowseal на ваших сайтах. Через пробел, до 30 штук.', domain: true },
 				{ id: 'main', title: 'Стратегии v и Flowseal', sub: 'Выберите, что перебирать, и нажмите «Проверить». Проверка идёт по списку заблокированных сайтов.', choice: [ { id: 'v', label: 'v1–v10' }, { id: 'flowseal', label: 'Flowseal' }, { id: 'v_flowseal', label: 'v + Flowseal' } ] },
 				{ id: 'youtube', title: 'YouTube', sub: 'Перебирает стратегии Yv на адресах YouTube.', buttons: [ { mode: 'youtube', label: 'Проверить' } ] },
-				{ id: 'custom', title: 'Свои стратегии', sub: 'Ваш список стратегий: на заблокированных сайтах или на YouTube. Список хранится в /root/custom_test.txt — так же, как в консольном Zapret Manager.', custom: true }
+				{ id: 'custom', title: 'Свои стратегии', sub: 'Ваш список стратегий: на заблокированных сайтах, на YouTube или на ваших сайтах. Список хранится в /root/custom_test.txt — так же, как в консольном Zapret Manager.', custom: true }
 			];
-			var customPick = 'custom', customOpen = false, customText = testData.custom || '';
+			var customPick = /^custom(_yt|_dom)?$/.test(testData.mode || '') ? testData.mode : 'custom', customOpen = false, customText = testData.custom || '';
+			var cdomInput = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'placeholder': 'Ваши сайты через пробел: x.com discord.com', 'style': 'flex:1 1 100%; min-width:0' });
+			cdomInput.value = testData.custom_domains || '';
+			cdomInput.addEventListener('keydown', function(ev) { if (ev.key === 'Enter') startCustomDom(); });
 			var customEl = E('textarea', { 'class': 'zm-config-editor', 'spellcheck': 'false', 'wrap': 'off', 'placeholder': '#Моя1\n--filter-tcp=443\n--dpi-desync=fake\n#Моя2\n--filter-tcp=443\n--dpi-desync=multidisorder' });
 			customEl.value = customText;
 			var customBar = zm.editorBar(customEl, {
@@ -37672,12 +37965,15 @@ return view.extend({
 					if (t.custom) {
 						var cn = customCount();
 						ctl = E('div', { 'class': 'zm-tt-ctl' }, [
-							E('div', { 'class': 'zm-seg' }, [ { id: 'custom', label: 'Сайты' }, { id: 'custom_yt', label: 'YouTube' } ].map(function(c) {
-								return E('div', { 'class': 'zm-seg-item' + (c.id === customPick ? ' zm-active' : ''), 'click': function() { if (!busy && c.id !== customPick) { customPick = c.id; renderLaunch(); } } }, c.label);
+							E('div', { 'class': 'zm-seg' }, [ { id: 'custom', label: 'Заблокированные' }, { id: 'custom_yt', label: 'YouTube' }, { id: 'custom_dom', label: 'Ваши сайты' } ].map(function(c) {
+								return E('div', { 'class': 'zm-seg-item' + (c.id === customPick ? ' zm-active' : ''), 'click': function() { if (!busy && c.id !== customPick) { customPick = c.id; renderLaunch(); if (c.id === 'custom_dom' && !cdomInput.value) cdomInput.focus(); } } }, c.label);
 							})),
+							customPick === 'custom_dom' ? cdomInput : E([]),
+							customPick === 'custom_dom' ? E('p', { 'class': 'zm-hint', 'style': 'flex:1 1 100%; margin:0' }, 'До 30 сайтов. Если стратегия работает по списку сайтов (--hostlist), на время теста ваши сайты добавляются в этот список.') : E([]),
 							E('button', { 'class': 'cbi-button', 'click': function() { customOpen = !customOpen; if (customOpen) customBar.reset(customText); renderCustomCard(); renderLaunch(); } }, customOpen ? 'Скрыть список' : (cn ? 'Список · ' + cn : 'Добавить стратегии')),
-							E('button', { 'class': 'cbi-button cbi-button-positive', 'disabled': busy || !cn ? '' : null, 'click': function() { doStart(customPick); } }, 'Проверить')
+							E('button', { 'class': 'cbi-button cbi-button-positive', 'disabled': busy || !cn ? '' : null, 'click': function() { if (customPick === 'custom_dom') startCustomDom(); else doStart(customPick); } }, 'Проверить')
 						]);
+						cdomInput.disabled = busy;
 					} else if (t.domain) {
 						ctl = E('div', { 'class': 'zm-tt-ctl' }, [ domInput, E('button', { 'class': 'cbi-button cbi-button-positive', 'disabled': busy ? '' : null, 'click': startDomain }, 'Проверить') ]);
 						domInput.disabled = busy;
@@ -37693,8 +37989,8 @@ return view.extend({
 							return E('button', { 'class': 'cbi-button' + (i === t.buttons.length - 1 ? ' cbi-button-positive' : ''), 'disabled': busy ? '' : null, 'click': function() { doStart(b.mode); } }, b.label);
 						}));
 					}
-					var run = busy && (curMode === t.id || (t.id === 'main' && /^(v|flowseal|v_flowseal)$/.test(curMode)) || (t.id === 'custom' && curMode === 'custom_yt'));
-					var had = t.id === 'main' ? (status.has_results_v || status.has_results_flowseal || status.has_results_v_flowseal) : t.id === 'custom' ? (status.has_results_custom || status.has_results_custom_yt) : status['has_results_' + t.id];
+					var run = busy && (curMode === t.id || (t.id === 'main' && /^(v|flowseal|v_flowseal)$/.test(curMode)) || (t.id === 'custom' && /^custom_(yt|dom)$/.test(curMode)));
+					var had = t.id === 'main' ? (status.has_results_v || status.has_results_flowseal || status.has_results_v_flowseal) : t.id === 'custom' ? (status.has_results_custom || status.has_results_custom_yt || status.has_results_custom_dom) : status['has_results_' + t.id];
 					return E('div', { 'class': 'zm-tt-tile' + (run ? ' zm-tt-active' : '') + (t.custom ? ' zm-tt-wide' : '') }, [
 						E('div', { 'class': 'zm-tt-head' }, [ E('b', {}, t.title), run ? zm.badge(true, 'идёт', '') : (had ? E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'есть результат') : E([])) ]),
 						E('p', { 'class': 'zm-hint' }, t.sub),
@@ -37826,10 +38122,17 @@ return view.extend({
 				doStart('domain:' + v.replace(/[\s,;]+/g, ' '));
 			}
 
+			function startCustomDom() {
+				var v = cdomInput.value.trim();
+				if (!customCount()) { zm.toast('Сначала добавьте свои стратегии', 'warning'); return; }
+				if (!v) { zm.toast('Введите хотя бы один свой сайт', 'warning'); cdomInput.focus(); return; }
+				doStart('custom_dom:' + v.replace(/[\s,;]+/g, ' '));
+			}
+
 			function doStart(mode) {
 				if (busy) { zm.toast('Дождитесь окончания текущего теста', 'warning'); return; }
 				busy = true;
-				curMode = /^domain:/.test(mode) ? 'domain' : mode;
+				curMode = /^(domain|custom_dom):/.test(mode) ? mode.replace(/:.*$/, '') : mode;
 				renderLaunch();
 				zm.toast('Запускаем тест…', 'warning');
 				zm.testAction('start', mode).then(function(res) {
@@ -37901,7 +38204,7 @@ return view.extend({
 				zm.testResults(mode).then(function(res) {
 					resData[mode] = parse(res || {});
 					openRows = {};
-					if (mode === 'current' || mode === 'domain') resData[mode].rows.forEach(function(r, i) { if (mode === 'current' || i === 0) openRows[mode + ':' + r.name] = true; });
+					if (mode === 'current' || mode === 'domain' || mode === 'custom_dom') resData[mode].rows.forEach(function(r, i) { if (mode === 'current' || i === 0) openRows[mode + ':' + r.name] = true; });
 					renderResults();
 				}).catch(function() { renderResults(); });
 			}
@@ -37926,7 +38229,7 @@ return view.extend({
 
 			function applyStrategy(mode, name) {
 				var call;
-				if (mode === 'custom' || mode === 'custom_yt') {
+				if (mode === 'custom' || mode === 'custom_yt' || mode === 'custom_dom') {
 					var block = customBlock(name);
 					if (!block) { zm.toast('Стратегии «' + name + '» уже нет в вашем списке', 'warning'); return; }
 					return tsGate('text:' + block, function() {
@@ -38011,6 +38314,7 @@ return view.extend({
 					if (st.strategy) kv('Сейчас стоит', st.strategy);
 					if (tot) kv('Адресов', String(tot));
 					if (mode === 'domain' && status.domains) kv('Сайты', status.domains);
+					if (mode === 'custom_dom' && status.custom_domains) kv('Сайты', status.custom_domains);
 					L.push('');
 					if (d.control) { kv('Без Zapret', d.control.ok + ' / ' + d.control.tot + ' (' + pct(d.control) + ')'); L.push(''); }
 					L.push(resPad('№', 4) + resPad('Стратегия', w) + 'Открылось');
@@ -38033,7 +38337,7 @@ return view.extend({
 					var m = /(\d{1,2})\.(\d{1,2})\.(\d{4})\D+(\d{1,2}):(\d{2})/.exec(String(d.ts || '')), p2 = function(n) { return ('0' + n).slice(-2); };
 					var stamp = m ? m[3] + '-' + p2(m[2]) + '-' + p2(m[1]) + '_' + p2(m[4]) + '-' + m[5] : now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) + '_' + p2(now.getHours()) + '-' + p2(now.getMinutes());
 					var who = String(si.model || si.hostname || 'router').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'router';
-					var what = { v_flowseal: 'v+flowseal', custom_yt: 'custom-youtube' }[mode] || String(mode).replace(/[^A-Za-z0-9+.-]+/g, '-');
+					var what = { v_flowseal: 'v+flowseal', custom_yt: 'custom-youtube', custom_dom: 'custom-sites' }[mode] || String(mode).replace(/[^A-Za-z0-9+.-]+/g, '-');
 					var a = E('a', { 'href': URL.createObjectURL(new Blob([ '\ufeff' + L.join('\r\n') + '\r\n' ], { type: 'text/plain;charset=utf-8' })), 'download': who + '_' + stamp + '_zapret-test-' + what + '.txt', 'style': 'display:none' });
 					document.body.appendChild(a);
 					a.click();
@@ -38081,6 +38385,7 @@ return view.extend({
 				if (resMode !== 'current') meta.push(rows.length + ' ' + (rows.length % 10 === 1 && rows.length % 100 !== 11 ? 'стратегия' : rows.length % 10 >= 2 && rows.length % 10 <= 4 && (rows.length % 100 < 12 || rows.length % 100 > 14) ? 'стратегии' : 'стратегий'));
 				if (total) meta.push(total + ' адр.');
 				if (resMode === 'domain' && status.domains) meta.push(status.domains);
+				if (resMode === 'custom_dom' && status.custom_domains) meta.push(status.custom_domains);
 				resCard.appendChild(E('p', { 'class': 'zm-hint zm-tt-meta' }, [ meta.join(' · ') ]));
 				var list = E('div', { 'class': 'zm-tt-list' });
 				if (d.control) list.appendChild(rowEl(resMode, d.control, 0, null, true));
