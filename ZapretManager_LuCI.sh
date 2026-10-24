@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.47
+# Version: 4.53
 ZM_VERSION_EOF
 set -e
 
@@ -1390,6 +1390,9 @@ _fk_watch() {
 	wait=$((120 * (1 << (n > 4 ? 4 : n))))
 	[ $((now - last)) -lt "$wait" ] && return 0
 	logger -t zapret-manager "Forkozz включён, но sing-box или его правила не работают — перезапускаем (попытка $((n + 1)))"
+	# sing-box упал, не скачав набор правил при запуске (часто — после перезагрузки роутера: кэш наборов в /tmp),
+	# — перед перезапуском включаем их загрузку через VPN, если она выключена
+	_fk_sb_alive || ( FK_LOGMARK=""; _fk_say() { :; }; _fk_rs_check recent >/dev/null 2>&1 )
 	mkdir -p "$ZM_STATE_DIR"
 	echo "$((n + 1)) $now" > "$f"
 	_zm_run 180 /etc/init.d/netshift restart >/dev/null 2>&1
@@ -1555,6 +1558,7 @@ zm_watch() {
 	_ab_watch
 	_dn_watch
 	_zo_doh_follow
+	_doh_boot_fill
 	return 0
 }
 
@@ -10975,6 +10979,7 @@ doh_status() {
 	local installed="false" current="" running=false force=false list="" sep="" i url port prov n=0 provs=""
 	_doh_legacy_fix
 	_doh_pkg && installed="true"
+	[ "$installed" = true ] && _doh_boot_fill
 	[ "$installed" = true ] && _doh_fo_on && ! grep -qF "$DOH_FO_CRON" "$CRON_FILE" 2>/dev/null && _doh_fo_cron on
 	if [ -f "$_doh_file" ]; then
 		i=0
@@ -10982,7 +10987,7 @@ doh_status() {
 			port="$(uci -q get "https-dns-proxy.@https-dns-proxy[$i].listen_port")"
 			[ -n "$port" ] || port=$((5053 + i))
 			prov="$(_doh_provider_of "$url")"
-			list="$list$sep{\"url\":\"$(esc "$url")\",\"port\":\"$(esc "$port")\",\"provider\":\"$prov\",\"bootstrap\":\"$(esc "$(uci -q get "https-dns-proxy.@https-dns-proxy[$i].bootstrap_dns")")\"}"
+			list="$list$sep{\"url\":\"$(esc "$url")\",\"port\":\"$(esc "$port")\",\"provider\":\"$prov\",\"bootstrap\":\"$(esc "$(uci -q get "https-dns-proxy.@https-dns-proxy[$i].bootstrap_dns")")\",\"boot_auto\":\"$(esc "$(_doh_boot_auto "$prov" "$url")")\",\"boot_dead\":$(grep -qxF "$url" "$DOH_BOOT_SKIP" 2>/dev/null && echo true || echo false)}"
 			sep=","; n=$((n + 1)); provs="$prov"
 			i=$((i + 1))
 			[ "$i" -gt 16 ] && break
@@ -10992,16 +10997,21 @@ doh_status() {
 	fi
 	/etc/init.d/https-dns-proxy running >/dev/null 2>&1 && running=true
 	[ -f "$DOH_STOP" ] && ! _doh_pkg && rm -f "$DOH_STOP"
-	printf '{"installed":%s,"stopped":%s,"current":"%s","running":%s,"force_dns":%s,"force_mode":"%s","resolvers":[%s],"steer_active":%s,"steer_installed":%s,"forkozz":%s,"fk_name":"%s","bootstrap_custom":"%s","hosts_extra":%s,"failover":%s,"dnsm":%s,"net":%s,"own":[%s],"zapret_doh":"%s"}\n' \
+	printf '{"installed":%s,"stopped":%s,"current":"%s","running":%s,"force_dns":%s,"force_mode":"%s","resolvers":[%s],"steer_active":%s,"steer_installed":%s,"forkozz":%s,"fk_name":"%s","bootstrap_custom":"%s","luci_boots":[%s],"hosts_extra":%s,"failover":%s,"dnsm":%s,"net":%s,"own":[%s],"zapret_doh":"%s"}\n' \
 		"$installed" "$([ -f "$DOH_STOP" ] && echo true || echo false)" "$(esc "$current")" "$running" "$force" "$(_doh_force_mode)" "$list" \
 		"$(_doh_steer_active && echo true || echo false)" \
 		"$(grep -qx 'engine' /etc/zm-steer/owned 2>/dev/null && stl_present && echo true || echo false)" \
-		"$(_fk_installed && echo true || echo false)" "$(_fk_name)" "$(esc "$(cat "$DOH_BOOT_FILE" 2>/dev/null)")" "$(_hosts_extra)" "$(_doh_fo_json)" \
+		"$(_fk_installed && echo true || echo false)" "$(_fk_name)" "$(esc "$(cat "$DOH_BOOT_FILE" 2>/dev/null)")" "$(_doh_luci_list | awk -F'\t' '{ printf "%s{\"t\":\"%s\",\"b\":\"%s\"}", (NR > 1 ? "," : ""), $1, $2 }')" "$(_hosts_extra)" "$(_doh_fo_json)" \
 		"$(_dnsm_present && echo true || echo false)" "$(_dn_json)" "$(_doh_own_json)" \
 		"$(if [ ! -x /etc/init.d/zapret ] || [ ! -f "$CONF" ]; then echo none; elif [ -f "$ZO_DOH_FLAG" ]; then echo on; else echo off; fi)"
 }
 
 DOH_BOOT_FILE="/opt/zapret-manager-luci/doh_bootstrap"
+# Bootstrap DNS https-dns-proxy, когда в его настройках адресов нет (DEFAULT_BOOTSTRAP в его службе:
+# Cloudflare + Google). В настройки панель его НЕ пишет — только для своей проверки серверов
+DOH_BOOT_DEF="1.1.1.1,1.0.0.1,8.8.8.8,8.8.4.4"
+# Список провайдеров LuCI https-dns-proxy: у каждого шаблон адреса и его Bootstrap DNS
+DOH_LUCI_PROV="/usr/share/https-dns-proxy/providers"
 
 _doh_boot_of() {
 	case "$1" in
@@ -11012,6 +11022,9 @@ _doh_boot_of() {
 		quad9) echo "9.9.9.9,149.112.112.112,2620:fe::fe,2620:fe::9" ;;
 		quad9_open) echo "9.9.9.10,149.112.112.10,2620:fe::10,2620:fe::fe:10" ;;
 		yandex) echo "77.88.8.8,77.88.8.1" ;;
+		# Comss: обычные DNS-серверы с официальной страницы comss.ru (page.php?id=7315). В LuCI https-dns-proxy
+		# у Comss записаны 92.38.152.163 и 93.115.24.204 — через них https-dns-proxy у пользователей не работает
+		comss) echo "83.220.169.155,212.109.195.93" ;;
 		yandex_family) echo "77.88.8.7,77.88.8.3" ;;
 		yandex_safe) echo "77.88.8.88,77.88.8.2" ;;
 		controld) echo "76.76.2.0,76.76.10.0" ;;
@@ -11021,6 +11034,199 @@ _doh_boot_of() {
 		dns4eu_sec) echo "86.54.11.1,86.54.11.201" ;;
 		dns4eu_fam) echo "86.54.11.12,86.54.11.212" ;;
 	esac
+}
+
+# Провайдеры LuCI https-dns-proxy: «шаблон<TAB>bootstrap_dns». Берём там же, где их берёт сам LuCI
+# (rpcd luci.https-dns-proxy, get_providers): собранный пакет кладёт всех провайдеров одним массивом в
+# /usr/share/https-dns-proxy/providers.json, а папки providers/ в нём нет; в исходниках — по файлу на провайдера.
+# В 4.50 читалась только папка, поэтому на роутере адреса Comss не находились. Разбор идёт по структуре JSON
+# (ключи только самого провайдера, не его params), работает и с отформатированным, и со сжатым в строку JSON
+DOH_LUCI_JSON="/usr/share/https-dns-proxy/providers.json"
+_doh_luci_list() {
+	local c=/tmp/zm-doh-luciprov.tsv src
+	if [ -s "$DOH_LUCI_JSON" ]; then src="$DOH_LUCI_JSON"
+	elif ls "$DOH_LUCI_PROV"/*.json >/dev/null 2>&1; then src="$DOH_LUCI_PROV"
+	else return 0; fi
+	if [ -f "$c" ] && [ "$c" -nt "$src" ] && [ -n "$(find "$c" -mmin -60 2>/dev/null)" ]; then cat "$c"; return 0; fi
+	if [ "$src" = "$DOH_LUCI_JSON" ]; then set -- "$src"; else set -- "$src"/*.json; fi
+	awk '
+		function flush() {
+			gsub(/[ \t]/, "", b)
+			if (t ~ /^https:\/\/[^ \t\\]*$/ && b ~ /^[0-9A-Fa-f.:,]+$/) print t "\t" b
+			t = ""; b = ""
+		}
+		FNR == 1 { d = 0; key = ""; want = 0 }
+		{
+			ln = $0; n = length(ln); i = 1
+			while (i <= n) {
+				c = substr(ln, i, 1)
+				if (c == "\"") {
+					r = substr(ln, i + 1)
+					if (!match(r, /^([^"\\]|\\.)*"/)) break
+					v = substr(r, 1, RLENGTH - 1); i += RLENGTH + 1
+					if (d != 1) continue
+					if (want) { if (key == "template") t = v; else b = v; want = 0; key = ""; continue }
+					r = substr(ln, i)
+					if (match(r, /^[ \t\r]*:/)) { key = v; i += RLENGTH; want = (key == "template" || key == "bootstrap_dns") }
+					continue
+				}
+				if (c == "{") { d++; if (d == 1) { t = ""; b = "" } }
+				else if (c == "}") { d--; if (d == 0) flush() }
+				if (c != " " && c != "\t" && c != "\r") want = 0
+				i++
+			}
+		}
+	' "$@" 2>/dev/null > "$c.$$" && mv -f "$c.$$" "$c"
+	cat "$c" 2>/dev/null
+}
+
+# Bootstrap DNS, который LuCI https-dns-proxy ставит этому адресу сервера ({option} в шаблоне — вариант сервера)
+_doh_luci_boot() {
+	local u="$1" t b pre suf mid
+	[ -n "$u" ] || return 0
+	_doh_luci_list | while IFS='	' read -r t b; do
+		case "$t" in
+			*"{option}"*)
+				pre="${t%%\{option\}*}"; suf="${t#*\{option\}}"
+				case "$u" in "$pre"*"$suf") ;; *) continue ;; esac
+				mid="${u#"$pre"}"; mid="${mid%"$suf"}"
+				case "$mid" in */*|*'?'*|*'#'*) continue ;; esac ;;
+			*) [ "$u" = "$t" ] || continue ;;
+		esac
+		echo "$b"; break
+	done
+}
+
+# Bootstrap «Авто» для сервера — ровно как в LuCI https-dns-proxy: адреса из его шаблона провайдера
+# (у Comss — 92.38.152.163, 93.115.24.204…). Нет LuCI-шаблона — адреса из таблицы панели (Яндекс и др.).
+# Нет и там — пусто: bootstrap_dns в настройки не пишется, https-dns-proxy сам решает, чем пользоваться
+# _doh_boot_auto ID|ССЫЛКА [ССЫЛКА]
+_doh_boot_auto() {
+	local u="$2" b
+	[ -n "$u" ] || u="$(_doh_url_of "$1" 2>/dev/null)"
+	b="$(_doh_boot_of "$1")"
+	[ -n "$b" ] || b="$(_doh_boot_of "$(_doh_provider_of "$u")")"
+	[ -n "$b" ] || b="$(_doh_luci_boot "$u")"
+	echo "$b"
+}
+
+# Имя сервера из ссылки DoH (https://ИМЯ[:порт]/…)
+_doh_url_host() { local h="${1#*://}"; h="${h%%/*}"; echo "${h%%:*}"; }
+
+# Какие из Bootstrap-адресов правда работают: через каждый (обычный DNS, порт 53) ищем имя DoH-сервера —
+# ровно то, что делает https-dns-proxy при запуске. Проверка параллельная, до 4 секунд. Печатает рабочие адреса
+# в исходном порядке (пусто — ни один не ответил). DoH-сервер, заданный IP-адресом, в bootstrap не нуждается
+# _doh_boot_live ССЫЛКА|ИМЯ СПИСОК
+_doh_boot_live() {
+	local host b d k=0 out="" pids=""
+	host="$(_doh_url_host "$1")"
+	case "$host" in *[!0-9.]*) ;; *) echo "$2"; return 0 ;; esac
+	[ -n "$2" ] || return 0
+	d="/tmp/zm-dohbl.$$.$(date +%s)"; mkdir -p "$d"
+	for b in $(printf '%s' "$2" | tr ',' ' '); do
+		k=$((k + 1)); [ "$k" -gt 8 ] && break
+		( _doh_t 4 nslookup -type=a "$host" "$b" 2>/dev/null | awk '
+			/^Name:/ { f = 1 }
+			f && /^Address/ { for (i = 2; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) { print "ok"; exit } }' > "$d/$k" ) &
+		pids="$pids $!"
+	done
+	# ждём только свои проверки (не чужие фоновые задачи панели)
+	wait $pids
+	k=0
+	for b in $(printf '%s' "$2" | tr ',' ' '); do
+		k=$((k + 1)); [ "$k" -gt 8 ] && break
+		[ -s "$d/$k" ] && out="$out${out:+,}$b"
+	done
+	rm -rf "$d"
+	echo "$out"
+}
+
+# Что записать в настройки: свои адреса пользователя, если заданы, иначе «Авто» (может быть пусто)
+_doh_boot_want() {
+	local b=""
+	[ -s "$DOH_BOOT_FILE" ] && b="$(head -n1 "$DOH_BOOT_FILE")"
+	[ -n "$b" ] || b="$(_doh_boot_auto "$1" "$2")"
+	echo "$b"
+}
+
+# Bootstrap DNS в /etc/config/https-dns-proxy приводим к адресам «Авто» для сервера (как при выборе в панели):
+# — у сервера нет bootstrap_dns, а свои адреса у провайдера есть — ставим их;
+# — стоят стандартные Cloudflare + Google от 4.49 или адреса из шаблона LuCI (у Comss они не работают) —
+#   меняем на адреса «Авто»; если тех нет или ни один не отвечает — убираем, https-dns-proxy берёт встроенные.
+# Адреса проверяются до записи (_doh_boot_live), после записи https-dns-proxy перезапускается и проверяется;
+# не заработал — возвращаем как было и сутки этот сервер не трогаем. Адреса, заданные вручную, не трогаем.
+# Всё долгое — в фоне, страница не ждёт
+DOH_BOOT_449="1.1.1.1,1.0.0.1,2606:4700:4700::1111,2606:4700:4700::1001,8.8.8.8,8.8.4.4,2001:4860:4860::8888,2001:4860:4860::8844"
+DOH_BOOT_SKIP="/tmp/zm-doh-bootfill.skip"   # адреса «Авто» не отвечают (или DNS с ними не заработал)
+DOH_BOOT_KEEP="/tmp/zm-doh-bootfill.keep"   # адреса из шаблона LuCI отвечают — оставлены
+_doh_boot_fill() {
+	local i=0 url cur want luci need="" ch="" lk=/tmp/zm-doh-bootfill.lock
+	[ -f "$_doh_file" ] && _doh_pkg || return 0
+	_dnsm_present && return 0
+	[ -s "$DOH_BOOT_FILE" ] && return 0
+	rm -f "$ZM_STATE_DIR/doh.bootfill.skip"
+	[ -n "$(find "$DOH_BOOT_SKIP" -mmin +1440 2>/dev/null)" ] && rm -f "$DOH_BOOT_SKIP"
+	[ -n "$(find "$DOH_BOOT_KEEP" -mmin +1440 2>/dev/null)" ] && rm -f "$DOH_BOOT_KEEP"
+	[ -d "$lk" ] && { [ -n "$(find "$lk" -maxdepth 0 -mmin +3 2>/dev/null)" ] || return 0; rmdir "$lk" 2>/dev/null; }
+	while url="$(uci -q get "https-dns-proxy.@https-dns-proxy[$i].resolver_url")"; do
+		cur="$(uci -q get "https-dns-proxy.@https-dns-proxy[$i].bootstrap_dns")"
+		luci="$(_doh_luci_boot "$url")"
+		if [ -z "$cur" ] || [ "$cur" = "$DOH_BOOT_449" ] || { [ -n "$luci" ] && [ "$cur" = "$luci" ]; }; then
+			want="$(_doh_boot_auto "$(_doh_provider_of "$url")" "$url")"
+			if [ "$want" != "$cur" ] && ! grep -qxF "$url" "$DOH_BOOT_SKIP" "$DOH_BOOT_KEEP" 2>/dev/null; then
+				if [ -n "$want" ]; then need="$need $i"
+				elif [ "$cur" = "$DOH_BOOT_449" ]; then
+					# своих адресов нет — без bootstrap_dns https-dns-proxy берёт те же Cloudflare + Google, перезапуск не нужен
+					uci -q delete "https-dns-proxy.@https-dns-proxy[$i].bootstrap_dns"; ch=1
+				fi
+			fi
+		fi
+		i=$((i + 1)); [ "$i" -gt 16 ] && break
+	done
+	[ -n "$ch" ] && uci -q commit https-dns-proxy
+	[ -n "$need" ] || return 0
+	mkdir "$lk" 2>/dev/null || return 0
+	(
+		ch=""; rs=""; port=""; urls=""
+		cp -p "$_doh_file" "$_doh_file.zm-bootfill" 2>/dev/null
+		for i in $need; do
+			url="$(uci -q get "https-dns-proxy.@https-dns-proxy[$i].resolver_url")" || continue
+			cur="$(uci -q get "https-dns-proxy.@https-dns-proxy[$i].bootstrap_dns")"
+			# адреса из шаблона LuCI, которые работают, не трогаем (сутки не перепроверяем)
+			if [ -n "$cur" ] && [ "$cur" != "$DOH_BOOT_449" ] && [ -n "$(_doh_boot_live "$url" "$cur")" ]; then
+				echo "$url" >> "$DOH_BOOT_KEEP"; continue
+			fi
+			want="$(_doh_boot_live "$url" "$(_doh_boot_auto "$(_doh_provider_of "$url")" "$url")")"
+			[ -n "$want" ] && [ "$want" = "$cur" ] && continue
+			if [ -n "$want" ]; then uci -q set "https-dns-proxy.@https-dns-proxy[$i].bootstrap_dns=$want"
+			else
+				# адреса провайдера не отвечают: ставить нечего, сутки не проверяем
+				echo "$url" >> "$DOH_BOOT_SKIP"
+				[ -n "$cur" ] || continue
+				uci -q delete "https-dns-proxy.@https-dns-proxy[$i].bootstrap_dns"
+			fi
+			ch=1; urls="$urls$url
+"
+			[ "${want:-$DOH_BOOT_449}" = "${cur:-$DOH_BOOT_449}" ] || rs=1
+			[ -n "$port" ] || port="$(uci -q get "https-dns-proxy.@https-dns-proxy[$i].listen_port")"; [ -n "$port" ] || port=$((5053 + i))
+		done
+		if [ -n "$ch" ]; then
+			uci -q commit https-dns-proxy
+			logger -t zapret-manager "DoH: Bootstrap DNS приведён к рабочим адресам провайдера"
+			if [ -n "$rs" ] && [ ! -f "$DOH_STOP" ] && /etc/init.d/https-dns-proxy running >/dev/null 2>&1; then
+				_zm_run 30 /etc/init.d/https-dns-proxy restart >/dev/null 2>&1
+				if ! _doh_wait_local "$port" && ! { sleep 3; _doh_wait_local "$port"; }; then
+					mv -f "$_doh_file.zm-bootfill" "$_doh_file"
+					printf '%s' "$urls" >> "$DOH_BOOT_SKIP"
+					_zm_run 30 /etc/init.d/https-dns-proxy restart >/dev/null 2>&1
+					logger -t zapret-manager "DoH: с новым Bootstrap DNS DNS не заработал — вернули прежние настройки"
+				fi
+			fi
+		fi
+		rm -f "$_doh_file.zm-bootfill"
+		rmdir "$lk" 2>/dev/null
+	) >/dev/null 2>&1 &
+	return 0
 }
 
 _doh_ip_ok() {
@@ -11049,7 +11255,7 @@ doh_bootstrap_set() {
 		i=0
 		while url="$(uci -q get "https-dns-proxy.@https-dns-proxy[$i].resolver_url")"; do
 			b="$out"
-			[ -n "$b" ] || b="$(_doh_boot_of "$(_doh_provider_of "$url")")"
+			[ -n "$b" ] || b="$(_doh_boot_live "$url" "$(_doh_boot_auto "$(_doh_provider_of "$url")" "$url")")"
 			if [ -n "$b" ]; then uci -q set "https-dns-proxy.@https-dns-proxy[$i].bootstrap_dns=$b"
 			else uci -q delete "https-dns-proxy.@https-dns-proxy[$i].bootstrap_dns"; fi
 			i=$((i + 1)); [ "$i" -gt 16 ] && break
@@ -11099,11 +11305,11 @@ _doh_url_of() {
 	esac
 }
 
+# Через какие DNS проверять сервер: как у https-dns-proxy — его Bootstrap DNS, а если его нет — Cloudflare + Google
 _doh_boots_for() {
-	local b=""
-	[ -s "$DOH_BOOT_FILE" ] && b="$(head -n1 "$DOH_BOOT_FILE")"
-	[ -n "$b" ] || b="$(_doh_boot_of "$1")"
-	echo "${b:-1.1.1.1,8.8.8.8}"
+	local b
+	b="$(_doh_boot_want "$1")"
+	echo "${b:-$DOH_BOOT_DEF}"
 }
 
 _doh_t() {
@@ -11112,11 +11318,23 @@ _doh_t() {
 	_zm_tmo "$s" "$@"
 }
 
+# Bootstrap-серверы для проверки: первый IPv4 и ещё один из другой сети (у стандартного списка — 1.1.1.1 и
+# 8.8.8.8, а не два адреса Cloudflare подряд), чтобы недоступность одного провайдера не валила проверку
+_doh_boot_pick() {
+	local b f="" s="" t=""
+	for b in $(printf '%s' "$1" | tr ',' ' '); do
+		case "$b" in *:*) continue ;; esac
+		if [ -z "$f" ]; then f="$b"
+		elif [ -z "$s" ] && [ "${b%%.*}" != "${f%%.*}" ]; then s="$b"
+		elif [ -z "$t" ]; then t="$b"; fi
+	done
+	echo $f ${s:-$t}
+}
+
 _doh_host_ips() {
 	local host="$1" b ips n=0
 	case "$host" in *[!0-9.]*) ;; *) echo "$host"; return 0 ;; esac
-	for b in $(printf '%s' "$2" | tr ',' ' '); do
-		case "$b" in *:*) continue ;; esac
+	for b in $(_doh_boot_pick "$2"); do
 		[ "$n" -ge 2 ] && break
 		n=$((n + 1))
 		ips="$(_doh_t 3 nslookup -type=a "$host" "$b" 2>/dev/null | awk '
@@ -11376,31 +11594,60 @@ doh_set() {
 	printf '%s\n' "$r"
 }
 
-_doh_apply() {
-	local provider="$1" url bootstrap="" n prev="" force
-	url="$(_doh_url_of "$provider")" || { echo '{"error":"адрес сервера не подходит — нужна ссылка вида https://…/dns-query"}'; return 1; }
-	bootstrap="$(_doh_boot_of "$provider")"
-	[ -s "$DOH_BOOT_FILE" ] && bootstrap="$(head -n1 "$DOH_BOOT_FILE")"
-	force="$(_doh_force_want)"
-	[ -f "$_doh_file" ] && cp -p "$_doh_file" "$_doh_file.zm-prev" 2>/dev/null && prev=1
+# Bootstrap DNS при смене сервера: свои адреса пользователя — как есть; адреса «Авто» сначала проверяются
+# (_doh_boot_live), в настройки идут только рабочие. Если ни один не ответил — bootstrap_dns не пишется.
+# Если DNS через https-dns-proxy с адресами «Авто» всё равно не заработал, пробуем ещё раз без них — и только
+# потом считаем, что не работает сам сервер
+_doh_write() {
 	{
-		_doh_main_text "$force"
+		_doh_main_text "$3"
 		echo ""
 		echo "config https-dns-proxy"
-		echo "	option resolver_url '$url'"
-		[ -n "$bootstrap" ] && echo "	option bootstrap_dns '$bootstrap'"
+		echo "	option resolver_url '$1'"
+		[ -n "$2" ] && echo "	option bootstrap_dns '$2'"
 		echo "	option listen_port '5053'"
 	} > "$_doh_file.zmtmp" && mv -f "$_doh_file.zmtmp" "$_doh_file"
+}
+
+_doh_apply() {
+	local provider="$1" url bootstrap="" auto="" live n prev="" force note=""
+	url="$(_doh_url_of "$provider")" || { echo '{"error":"адрес сервера не подходит — нужна ссылка вида https://…/dns-query"}'; return 1; }
+	if [ -s "$DOH_BOOT_FILE" ]; then bootstrap="$(head -n1 "$DOH_BOOT_FILE")"
+	else
+		auto="$(_doh_boot_auto "$provider" "$url")"
+		if [ -n "$auto" ]; then
+			live="$(_doh_boot_live "$url" "$auto")"
+			if [ -z "$live" ]; then note="адреса $(echo "$auto" | sed 's/,/, /g') не отвечают — Bootstrap DNS не задан, https-dns-proxy использует встроенные"
+			elif [ "$live" != "$auto" ]; then note="часть адресов не отвечает — оставили рабочие"; fi
+			bootstrap="$live"
+		fi
+	fi
+	force="$(_doh_force_want)"
+	[ -f "$_doh_file" ] && cp -p "$_doh_file" "$_doh_file.zm-prev" 2>/dev/null && prev=1
+	_doh_write "$url" "$bootstrap" "$force"
 	if [ -f "$DOH_STOP" ]; then
 		rm -f "$_doh_file.zm-prev"
-		printf '{"ok":true,"provider":"%s","stopped":true}\n' "$(esc "$provider")"
+		printf '{"ok":true,"provider":"%s","stopped":true,"bootstrap":"%s","boot_note":"%s"}\n' "$(esc "$provider")" "$(esc "$bootstrap")" "$(esc "$note")"
 		return 0
 	fi
 	/etc/init.d/https-dns-proxy enable >/dev/null 2>&1
 	/etc/init.d/https-dns-proxy reload >/dev/null 2>&1
 	/etc/init.d/https-dns-proxy restart >/dev/null 2>&1
 	/etc/init.d/dnsmasq restart >/dev/null 2>&1
-	if ! _doh_wait_local 5053; then
+	n=0
+	_doh_wait_local 5053 && n=1
+	if [ "$n" = 0 ] && [ -n "$auto" ] && [ -n "$bootstrap" ]; then
+		# с адресами «Авто» не поднялся — ещё раз без bootstrap_dns
+		_doh_write "$url" "" "$force"
+		/etc/init.d/https-dns-proxy restart >/dev/null 2>&1
+		if _doh_wait_local 5053; then
+			n=1
+			note="через адреса $(echo "$bootstrap" | sed 's/,/, /g') DNS не заработал — Bootstrap DNS не задан, https-dns-proxy использует встроенные"
+			bootstrap=""
+			logger -t zapret-manager "DoH: $(_doh_name "$provider") — $note"
+		fi
+	fi
+	if [ "$n" = 0 ]; then
 		if [ -n "$prev" ]; then
 			mv -f "$_doh_file.zm-prev" "$_doh_file"
 			/etc/init.d/https-dns-proxy restart >/dev/null 2>&1
@@ -11412,7 +11659,10 @@ _doh_apply() {
 		return 1
 	fi
 	rm -f "$_doh_file.zm-prev"
-	printf '{"ok":true,"provider":"%s"}\n' "$(esc "$provider")"
+	# отметка «адреса сервера не отвечают» — для подсказки на странице и чтобы фон их не перепроверял
+	if [ -f "$DOH_BOOT_SKIP" ]; then grep -vxF "$url" "$DOH_BOOT_SKIP" > "$DOH_BOOT_SKIP.$$"; mv -f "$DOH_BOOT_SKIP.$$" "$DOH_BOOT_SKIP"; fi
+	[ -n "$auto" ] && [ -z "$bootstrap" ] && echo "$url" >> "$DOH_BOOT_SKIP"
+	printf '{"ok":true,"provider":"%s","bootstrap":"%s","boot_note":"%s"}\n' "$(esc "$provider")" "$(esc "$bootstrap")" "$(esc "$note")"
 }
 
 DOH_FO_FILE="/opt/zapret-manager-luci/doh_failover"
@@ -11526,6 +11776,7 @@ doh_watch() {
 	_fk_installed && return 0
 	_dnsm_present && return 0
 	_doh_legacy_fix
+	_doh_boot_fill
 	mkdir "$lk" 2>/dev/null || { [ -n "$(find "$lk" -maxdepth 0 -mmin +5 2>/dev/null)" ] && rmdir "$lk" 2>/dev/null; return 0; }
 	mode="$(_doh_st_get mode normal)"
 	/etc/init.d/https-dns-proxy running >/dev/null 2>&1 && run=1
@@ -22295,7 +22546,8 @@ _fk_mlkem_core_ok() {
 
 
 _fk_log_mark() {
-	FK_LOGMARK="zm-lists-$$-$(date +%s)"
+	FK_MARKN=$((${FK_MARKN:-0} + 1))
+	FK_LOGMARK="zm-lists-$$-$(date +%s)-$FK_MARKN"
 	logger -t netshift "[info] $FK_LOGMARK" 2>/dev/null
 	FK_LOGSEEN=0
 }
@@ -22394,6 +22646,79 @@ _fk_lists_report() {
 	return 0
 }
 
+# sing-box при запуске сам скачивает удалённые наборы правил (.srs с GitHub) и, если хоть один не скачался,
+# завершается с FATAL «initial rule-set» — Forkozz целиком не работает. Кэш наборов правил sing-box держит в
+# /tmp, поэтому так бывает и после каждой перезагрузки роутера. Раньше панель обрезала это сообщение до
+# причины, а в конце всё равно писала «Готово: Forkozz работает».
+# _fk_rs_fatal — последняя такая ошибка этого запуска: «набор<TAB>ссылка<TAB>причина по-русски»
+# (recent — без отметки запуска: по последним записям журнала, для сторожа)
+_fk_rs_fatal() {
+	local m="$FK_LOGMARK"
+	if [ -z "$m" ]; then [ "$1" = recent ] || return 0; fi
+	logread 2>/dev/null | { if [ -n "$m" ]; then cat; else tail -n 400; fi; } |
+		awk -v m="$m" 'm != "" && !f { if (index($0, m)) f = 1; next } /sing-box/ && /initial rule-set/ { l = $0 } END { if (l != "") print l }' |
+		sed 's/\x1b\[[0-9;]*m//g' | awk '
+		function rsw(r) {
+			if (r ~ /deadline exceeded|i\/o timeout|[Tt]imeout|timed out/) return "сервер не ответил вовремя"
+			if (r ~ /connection reset|EOF|broken pipe|forcibly closed/) return "соединение оборвалось"
+			if (r ~ /connection refused/) return "сервер отказал в соединении"
+			if (r ~ /network is unreachable|no route to host|host is unreachable/) return "нет связи с сервером"
+			if (r ~ /no such host|lookup |server misbehaving/) return "не удалось узнать адрес сервера (DNS)"
+			if (r ~ /x509|certificate|tls: /) return "не установилось защищённое соединение"
+			if (r ~ /operation not permitted/) return "запрос заблокировал сам роутер: правила или туннель ещё не были готовы"
+			if (match(r, /(status|code)[: ]+[0-9][0-9][0-9]/)) return "сервер ответил ошибкой " substr(r, RSTART + RLENGTH - 3, 3)
+			return substr(r, 1, 160)
+		}
+		function rsbase(u) { sub(/[?#].*$/, "", u); sub(/^.*\//, "", u); return u }
+		{
+			t = ""; u = ""; r = ""
+			if (match($0, /initial rule-set: [^:]+:/)) t = substr($0, RSTART + 18, RLENGTH - 19)
+			if (match($0, /"https?:\/\/[^"]+"/)) { u = substr($0, RSTART + 1, RLENGTH - 2); r = substr($0, RSTART + RLENGTH); sub(/^:[ ]*/, "", r) }
+			else if (match($0, /initial rule-set: [^:]+: /)) r = substr($0, RSTART + RLENGTH)
+			print t "\t" u "\t" rsw(r)
+		}'
+}
+
+# Отвечает ли sing-box (Clash API): пока он качает наборы правил при запуске — нет
+_fk_clash_ok() { _zm_run 6 /usr/bin/netshift clash_api get_proxies 2>/dev/null | grep -q '"proxies"'; }
+
+# Ждём, пока sing-box закончит запуск: ответит или упадёт на наборе правил. 0 — ответил
+_fk_sb_settle() {
+	local i=0 max="${1:-60}"
+	while [ "$i" -lt "$max" ]; do
+		_fk_clash_ok && return 0
+		[ -n "$(_fk_rs_fatal)" ] && return 1
+		sleep 3; i=$((i + 3))
+	done
+	return 1
+}
+
+# Разбор ошибки «initial rule-set». 1 — такой ошибки нет. 0 — включили «Скачивать списки сервисов через VPN»
+# (sing-box будет качать наборы правил через подключение) — нужен перезапуск. 2 — ошибка есть, менять нечего
+_fk_rs_check() {
+	local rf t u r sec
+	rf="$(_fk_rs_fatal "$1")"
+	[ -n "$rf" ] || return 1
+	t="$(printf '%s' "$rf" | cut -f1)"; u="$(printf '%s' "$rf" | cut -f2)"; r="$(printf '%s' "$rf" | cut -f3)"
+	echo "!! sing-box не запустился: не скачался набор правил ${u:+${u##*/} }(${t:-?})${r:+ — $r}"
+	echo "   · sing-box скачивает наборы правил сам при каждом запуске (и после перезагрузки роутера) и без любого из них не работает"
+	if [ "$(uci -q get netshift.settings.download_lists_via_proxy)" != 1 ]; then
+		case "$r" in *"оборвалось"*|*"вовремя"*|*"нет связи"*) echo "   · Похоже, провайдер не даёт скачивать файлы с GitHub напрямую" ;; esac
+		sec="$(_fk_uc secnames 2>/dev/null | head -n1)"
+		case "$sec" in ''|*[!A-Za-z0-9_]*) sec="" ;; esac
+		if [ -n "$sec" ] && [ -n "$(uci -q get "netshift.$sec.connection_type")" ]; then
+			uci -q set netshift.settings.download_lists_via_proxy=1
+			uci -q set "netshift.settings.download_lists_via_proxy_section=$sec"
+			uci -q commit netshift
+			logger -t zapret-manager "Forkozz: набор правил ${u##*/} не скачался напрямую ($r) — включено «Скачивать списки сервисов через VPN»"
+			_fk_say "Включаем «Скачивать списки сервисов через VPN»: наборы правил sing-box будет качать через подключение"
+			return 0
+		fi
+	fi
+	echo "   · Наборы правил и так качаются через VPN — проверьте, что сервер подключения работает и через него открывается GitHub"
+	return 2
+}
+
 _fk_lists_errors() {
 	local e
 	[ -n "$FK_LOGMARK" ] || return 0
@@ -22411,6 +22736,18 @@ _fk_lists_errors() {
 			return c
 		}
 		function add(s, own) { if (seen[s]++) return; out[++n] = s; if (own) nn++ }
+		function rsw(r) {
+			if (r ~ /deadline exceeded|i\/o timeout|[Tt]imeout|timed out/) return "сервер не ответил вовремя"
+			if (r ~ /connection reset|EOF|broken pipe|forcibly closed/) return "соединение оборвалось"
+			if (r ~ /connection refused/) return "сервер отказал в соединении"
+			if (r ~ /network is unreachable|no route to host|host is unreachable/) return "нет связи с сервером"
+			if (r ~ /no such host|lookup |server misbehaving/) return "не удалось узнать адрес сервера (DNS)"
+			if (r ~ /x509|certificate|tls: /) return "не установилось защищённое соединение"
+			if (r ~ /operation not permitted/) return "запрос заблокировал сам роутер: правила или туннель ещё не были готовы"
+			if (match(r, /(status|code)[: ]+[0-9][0-9][0-9]/)) return "сервер ответил ошибкой " substr(r, RSTART + RLENGTH - 3, 3)
+			return substr(r, 1, 160)
+		}
+		function rsbase(u) { sub(/[?#].*$/, "", u); sub(/^.*\//, "", u); return u }
 		!f { if (index($0, m)) f = 1; next }
 		{
 			if (!match($0, /(netshift|sing-box)(\[[0-9]+\])?: /)) next
@@ -22418,7 +22755,12 @@ _fk_lists_errors() {
 			l = substr($0, RSTART + RLENGTH)
 		}
 		src != "netshift" {
-			if (l ~ /(ERROR|FATAL)/ && l ~ /rule[-_]?set/) add("sing-box: " substr(l, 1, 200))
+			gsub(/\033\[[0-9;]*m/, "", l)
+			# «initial rule-set» (sing-box не запустился) разбирает _fk_rs_check
+			if (l ~ /(ERROR|FATAL)/ && l ~ /rule[-_]?set/ && l !~ /initial rule-set/) {
+				if (match(l, /"https?:\/\/[^"]+"/)) { u = substr(l, RSTART + 1, RLENGTH - 2); r = substr(l, RSTART + RLENGTH); sub(/^:[ ]*/, "", r); add("sing-box: набор правил " rsbase(u) " не обновился — " rsw(r)) }
+				else add("sing-box: " substr(l, 1, 200))
+			}
 			next
 		}
 		{ sub(/^\[[a-z]+\] /, "", l) }
@@ -22928,11 +23270,12 @@ _fk_why() {
 	# только записи этого запуска: старая ошибка из журнала (например, «нет настроенного подключения» до
 	# того, как добавили сервер) больше не выдаётся за причину сейчас
 	if [ -n "$FK_LOGMARK" ]; then
-		l="$(logread 2>/dev/null | awk -v m="$FK_LOGMARK" 'f { print } index($0, m) { f = 1 }' | grep -E 'netshift|sing-box' | grep -E 'fatal|Aborted|error' | tail -n 1)"
+		l="$(logread 2>/dev/null | awk -v m="$FK_LOGMARK" 'f { print } index($0, m) { f = 1 }' | grep -E 'netshift|sing-box' | grep -E 'fatal|FATAL|Aborted|error' | tail -n 1)"
 	else
-		l="$(logread 2>/dev/null | tail -n 200 | grep -E 'netshift|sing-box' | grep -E 'fatal|Aborted|error' | tail -n 1)"
+		l="$(logread 2>/dev/null | tail -n 200 | grep -E 'netshift|sing-box' | grep -E 'fatal|FATAL|Aborted|error' | tail -n 1)"
 	fi
 	case "$l" in
+		*"initial rule-set"*) echo "sing-box не смог скачать набор правил при запуске (подробности выше)" ;;
 		*"Outbound section not found"*) echo "ни в одной секции нет настроенного подключения" ;;
 		*"Invalid service in community lists"*) echo "в секции выбран список, которого Forkozz не знает — сохраните сервисы заново" ;;
 		*"configuration"*"is invalid"*) echo "sing-box не принял собранный конфиг — посмотрите журнал" ;;
@@ -23021,9 +23364,14 @@ do_fk_service() {
 		_fk_wait_up 90
 	fi
 	if ! _fk_up; then
-		b="$(_fk_why)"
-		_rb_warn "Forkozz не поднялся${b:+: $b}"
+		_fk_rs_check
+		if [ "$?" = 1 ]; then
+			b="$(_fk_why)"
+			_rb_warn "Forkozz не поднялся${b:+: $b}"
+		fi
 		_fk_say "Пробуем ещё раз: снимаем остатки прошлого запуска и запускаем заново"
+		# новая отметка в журнале: ошибки первой попытки не должны считаться ошибками повторной
+		_fk_log_mark
 		_fk_reset_runtime
 		: > "$JOBS_DIR/forkop-svc.out"
 		_fk_start_once || echo "!! Повторный запуск завершился с ошибкой"
@@ -23039,6 +23387,33 @@ do_fk_service() {
 		_fk_lists_wait 240 || _rb_warn "Списки ещё скачиваются — числа ниже могут быть неполными. Они догрузятся сами; позже нажмите «Обновить списки сейчас», чтобы увидеть итог"
 		_fk_lists_report
 		_fk_lists_errors
+		# sing-box мог упасть уже после проверки: при запуске он сам качает наборы правил, и без любого из них
+		# завершается. Не пишем «Forkozz работает», пока sing-box не ответил
+		_fk_sb_settle 60
+		_fk_rs_check; b=$?
+		if [ "$b" = 0 ]; then
+			_fk_say "Перезапускаем Forkozz с новой настройкой"
+			_fk_log_mark
+			_fk_reset_runtime
+			: > "$JOBS_DIR/forkop-svc.out"
+			_fk_start_once || echo "!! Запуск завершился с ошибкой"
+			_fk_svc_report
+			rm -f "$JOBS_DIR/forkop-svc.out"
+			_fk_ready || _fk_wait_up 90
+			_fk_sb_settle 90
+			_fk_rs_check; b=$?
+			if [ "$b" = 1 ] && _fk_up; then
+				echo "   ✓ sing-box запустился — наборы правил скачались через VPN"
+				_fk_lists_wait 240 || _rb_warn "Списки ещё скачиваются — они догрузятся сами"
+				_fk_lists_errors
+			fi
+		fi
+		if [ "$b" != 1 ] || ! _fk_up; then
+			echo "ОШИБКА: Forkozz не работает — sing-box не запустился. Если GitHub у провайдера не открывается, проверьте сервер подключения и включите «Авто» в Система → Доступ к GitHub."
+			_zm_reboot_hint "Forkozz не запустился: sing-box не смог скачать наборы правил с GitHub."
+			return 1
+		fi
+		_fk_clash_ok || echo "!! sing-box пока не отвечает — он ещё запускается; если так и останется, нажмите «Перезапустить»"
 		_fk_servers_report
 		_ab_free_sync >/dev/null 2>&1
 		_fk_zash_ensure
@@ -23052,6 +23427,7 @@ do_fk_service() {
 		grep -q '^Forkozz не запустился' "$ZM_REBOOT_HINT" 2>/dev/null && rm -f "$ZM_REBOOT_HINT"
 		return 0
 	fi
+	[ -n "$(_fk_rs_fatal)" ] && _fk_rs_check
 	b="$(_fk_why)"
 	echo "ОШИБКА: Forkozz не запустился${b:+: $b}. Если ошибка повторяется, перезагрузите роутер — это сбросит всё, что осталось от прошлых запусков."
 	_zm_reboot_hint "Forkozz не запустился. Перезагрузите роутер — это сбросит всё, что осталось от прошлых запусков, — и включите Forkozz снова."
@@ -23506,9 +23882,47 @@ _fk_dns_probe() {
 	printf '%s|%s|%s|%s\n' "$v" "$ok" "${ms:-0}" "$how" > "$out"
 }
 
+# Ссылка DoH для проверки: сервер, путь /dns-query по умолчанию и запрос example.com
+_fk_doh_url() {
+	local url
+	case "$1" in
+		https://*) url="$1"; case "${url#https://}" in */*) ;; *) url="$url/dns-query" ;; esac ;;
+		*/*) url="https://$1" ;;
+		*) url="https://$1/dns-query" ;;
+	esac
+	case "$url" in *\?*) echo "$url&dns=$FK_DNS_Q" ;; *) echo "$url?dns=$FK_DNS_Q" ;; esac
+}
+
+# «DNS через VPN» и DoH: серверы проверяются через тот же выход sing-box, через который Forkozz к ним ходит
+_fk_dns_test_vpn() {
+	local list="$1" v j sep="" n=0 urls="" ms u
+	for v in $list; do
+		case "$v" in *[!A-Za-z0-9.:/_?=%-]*|'') continue ;; esac
+		n=$((n + 1)); [ "$n" -gt 16 ] && break
+		urls="$urls$(_fk_doh_url "$v")
+"
+	done
+	j="$(printf '%s' "$urls" | _fk_ucj dnsvpn)" || return 1
+	printf '{"type":"doh","via":"vpn","results":['
+	n=0
+	for v in $list; do
+		case "$v" in *[!A-Za-z0-9.:/_?=%-]*|'') continue ;; esac
+		n=$((n + 1)); [ "$n" -gt 16 ] && break
+		u="$(_fk_doh_url "$v")"
+		ms="$(printf '%s' "$j" | jsonfilter -e "@.results[@.url='$u'].ms" 2>/dev/null | head -n1)"
+		case "$ms" in ''|*[!0-9]*) ms=0 ;; esac
+		printf '%s{"server":"%s","ok":%s,"ms":%s,"how":"vpn"}' "$sep" "$(esc "$v")" "$([ "$ms" -gt 0 ] && echo true || echo false)" "$ms"
+		sep=","
+	done
+	printf ']}\n'
+}
+
 fk_dns_test() {
 	local t="${1%%|*}" list="${1#*|}" d="$JOBS_DIR/fkdns.$$" v i=0 sep="" line ok ms how
 	case "$t" in udp|dot|doh) ;; *) echo '{"error":"неизвестный тип DNS"}'; return 1 ;; esac
+	if [ "$t" = doh ] && [ "$(uci -q get netshift.settings.dns_via_outbound)" = 1 ] && _fk_up; then
+		_fk_dns_test_vpn "$list" && return 0
+	fi
 	command -v dig >/dev/null 2>&1 || [ "$t" = doh ] || { echo '{"error":"нет программы dig — нажмите «Переустановить» Forkozz"}'; return 1; }
 	mkdir -p "$d"
 	for v in $list; do
@@ -23518,7 +23932,7 @@ fk_dns_test() {
 		_fk_dns_probe "$t" "$v" "$d/$i" &
 	done
 	wait
-	printf '{"type":"%s","results":[' "$t"
+	printf '{"type":"%s","via":"%s","results":[' "$t" "$([ "$(uci -q get netshift.settings.dns_via_outbound)" = 1 ] && echo direct_detour || echo direct)"
 	for v in $(ls "$d" 2>/dev/null | sort -n); do
 		IFS='|' read -r line ok ms how < "$d/$v"
 		printf '%s{"server":"%s","ok":%s,"ms":%s,"how":"%s"}' "$sep" "$(esc "$line")" "$([ "$ok" = 1 ] && echo true || echo false)" "${ms:-0}" "$how"
@@ -28512,6 +28926,33 @@ function cmd_stats() {
 		mem: int(j.memory || 0) > 0 ? int(j.memory) : sb_rss() });
 }
 
+// «DNS через VPN»: Forkozz ходит к серверам DoH через подключение секции, поэтому и проверять их надо
+// так же — запросом через тот же выход sing-box (Clash API, проверка задержки по адресу DoH). Прямая
+// проверка с роутера тут обманывает: провайдер часто режет dns.google, dns.quad9.net и другие, хотя
+// через VPN они работают. Ссылки — построчно на stdin: https://сервер/путь?dns=…
+function cmd_dnsvpn() {
+	let ep = clash_ep();
+	if (!ep) { out({ error: "у sing-box не включён API — перезапустите Forkozz" }); return; }
+	let c = cursor(), st = c.get_all(CFG, "settings") || {}, p = pick(c), sec = s(st.dns_outbound_section);
+	if (sec == "" || c.get(CFG, sec) != "section" || !is_conn(c.get_all(CFG, sec) || {})) sec = p.sec;
+	if (!sec) { out({ error: "нет секции с подключением" }); return; }
+	let urls = filter(map(split(s(fs.stdin.read("all")), "\n"), (x) => trim(x)), (x) => !!match(x, /^https:\/\/[^ \t'"\\`$]+$/));
+	if (length(urls) > 16) urls = slice(urls, 0, 16);
+	let tag = group_tag(sec), dir = "/tmp/zm-fk-dnsvpn." + s(fs.readlink("/proc/self")), cmd = "";
+	if (fs.mkdir(dir) == null) { out({ error: "не удалось создать временную папку" }); return; }
+	for (let k = 0; k < length(urls); k++)
+		cmd += "(" + lat_cmd(ep, tag, urls[k], 5000) + " > " + q(dir + "/" + k) + " 2>/dev/null) & ";
+	sh(cmd + "wait");
+	let res = [];
+	for (let k = 0; k < length(urls); k++) {
+		let d = 0;
+		try { d = lat_parse(fs.readfile(dir + "/" + k)); } catch (e) { d = 0; }
+		push(res, { url: urls[k], ms: d });
+	}
+	sh("rm -rf " + q(dir));
+	out({ sec, results: res });
+}
+
 function cmd_conns() {
 	let ep = clash_ep();
 	if (!ep) { out({ error: "у sing-box не включён API соединений — перезапустите Forkozz" }); return; }
@@ -28542,7 +28983,7 @@ function cmd_conns() {
 let mode = ARGV[0] || "";
 let sec = ARGV[1] || "";
 if (mode != "route" && sec != "" && (ml(sec) || !match(sec, /^[A-Za-z0-9_]+$/))) fail("неверное имя секции");
-if (sec == "" && index([ "get", "set", "secdel", "route", "diag", "secnames", "secstate", "stats", "conns", "fallback_config", "guard", "latmode", "nodepol" ], mode) < 0) sec = pick(cursor()).sec;
+if (sec == "" && index([ "get", "set", "secdel", "route", "diag", "secnames", "secstate", "stats", "conns", "dnsvpn", "fallback_config", "guard", "latmode", "nodepol" ], mode) < 0) sec = pick(cursor()).sec;
 
 if (mode == "device_setup") cmd_device_setup();
 else if (mode == "fallback_config") cmd_fallback_config();
@@ -28567,6 +29008,7 @@ else if (mode == "secstate") cmd_secstate(sec == "probe");
 else if (mode == "subinfo") cmd_subinfo(sec);
 else if (mode == "stats") cmd_stats();
 else if (mode == "conns") cmd_conns();
+else if (mode == "dnsvpn") cmd_dnsvpn();
 else if (mode == "route") cmd_route(ARGV[1], ARGV[2], ARGV[3]);
 else fail("неизвестная команда");
 ZM_INSTALLER_EOF
@@ -31751,12 +32193,12 @@ var E = (function(raw) { return function() { var a = Array.prototype.slice.call(
 // k — тип сервера: plain — только шифрование, safe — защита от угроз, family — защита от угроз и сайтов для взрослых, geo — обход геоблокировок.
 // v — название варианта внутри «папки» провайдера (FAMS). Адреса сверены с документацией провайдеров.
 var PROVIDERS = [
-	{ id: 'google', label: 'Google', url: 'https://dns.google/dns-query', boot: '8.8.8.8, 8.8.4.4', k: 'plain' },
-	{ id: 'cloudflare', label: 'Cloudflare', v: 'Без фильтрации', url: 'https://cloudflare-dns.com/dns-query', boot: '1.1.1.1, 1.0.0.1', k: 'plain' },
-	{ id: 'cloudflare_sec', label: 'Cloudflare · Защита от угроз', v: 'Защита от угроз', url: 'https://security.cloudflare-dns.com/dns-query', boot: '1.1.1.2, 1.0.0.2', k: 'safe' },
-	{ id: 'cloudflare_fam', label: 'Cloudflare · Семейный фильтр', v: 'Семейный фильтр', url: 'https://family.cloudflare-dns.com/dns-query', boot: '1.1.1.3, 1.0.0.3', k: 'family' },
-	{ id: 'quad9_open', label: 'Quad9 · Без фильтрации', v: 'Без фильтрации', url: 'https://dns10.quad9.net/dns-query', boot: '9.9.9.10, 149.112.112.10', k: 'plain' },
-	{ id: 'quad9', label: 'Quad9 · Защита от угроз', v: 'Защита от угроз', url: 'https://dns.quad9.net/dns-query', boot: '9.9.9.9, 149.112.112.112', k: 'safe' },
+	{ id: 'google', label: 'Google', url: 'https://dns.google/dns-query', boot: '8.8.8.8, 8.8.4.4, 2001:4860:4860::8888, 2001:4860:4860::8844', k: 'plain' },
+	{ id: 'cloudflare', label: 'Cloudflare', v: 'Без фильтрации', url: 'https://cloudflare-dns.com/dns-query', boot: '1.1.1.1, 1.0.0.1, 2606:4700:4700::1111, 2606:4700:4700::1001', k: 'plain' },
+	{ id: 'cloudflare_sec', label: 'Cloudflare · Защита от угроз', v: 'Защита от угроз', url: 'https://security.cloudflare-dns.com/dns-query', boot: '1.1.1.2, 1.0.0.2, 2606:4700:4700::1112, 2606:4700:4700::1002', k: 'safe' },
+	{ id: 'cloudflare_fam', label: 'Cloudflare · Семейный фильтр', v: 'Семейный фильтр', url: 'https://family.cloudflare-dns.com/dns-query', boot: '1.1.1.3, 1.0.0.3, 2606:4700:4700::1113, 2606:4700:4700::1003', k: 'family' },
+	{ id: 'quad9_open', label: 'Quad9 · Без фильтрации', v: 'Без фильтрации', url: 'https://dns10.quad9.net/dns-query', boot: '9.9.9.10, 149.112.112.10, 2620:fe::10, 2620:fe::fe:10', k: 'plain' },
+	{ id: 'quad9', label: 'Quad9 · Защита от угроз', v: 'Защита от угроз', url: 'https://dns.quad9.net/dns-query', boot: '9.9.9.9, 149.112.112.112, 2620:fe::fe, 2620:fe::9', k: 'safe' },
 	{ id: 'controld', label: 'Control D', v: 'Без фильтрации', url: 'https://freedns.controld.com/p0', boot: '76.76.2.0, 76.76.10.0', k: 'plain' },
 	{ id: 'controld_sec', label: 'Control D · Защита от угроз', v: 'Защита от угроз', url: 'https://freedns.controld.com/p1', boot: '76.76.2.1, 76.76.10.1', k: 'safe' },
 	{ id: 'controld_fam', label: 'Control D · Семейный фильтр', v: 'Семейный фильтр', url: 'https://freedns.controld.com/family', boot: '76.76.2.4, 76.76.10.4', k: 'family' },
@@ -31767,7 +32209,7 @@ var PROVIDERS = [
 	{ id: 'yandex_safe', label: 'Яндекс · Защита от угроз', v: 'Защита от угроз', url: 'https://safe.dot.dns.yandex.net/dns-query', boot: '77.88.8.88, 77.88.8.2', k: 'safe' },
 	{ id: 'yandex_family', label: 'Яндекс · Семейный фильтр', v: 'Семейный фильтр', url: 'https://family.dot.dns.yandex.net/dns-query', boot: '77.88.8.7, 77.88.8.3', k: 'family' },
 	{ id: 'xbox', label: 'XBOX', url: 'https://xbox-dns.ru/dns-query', k: 'geo' },
-	{ id: 'comss', label: 'Comss', url: 'https://dns.comss.one/dns-query', k: 'geo' },
+	{ id: 'comss', label: 'Comss', url: 'https://dns.comss.one/dns-query', boot: '83.220.169.155, 212.109.195.93', k: 'geo' },
 	{ id: 'dnsai', label: 'DNS-AI', url: 'https://dns.dns-ai.ru/dns-query', k: 'geo' },
 	{ id: 'bezmezhau', label: 'Bezmezhau', url: 'https://dns.bezmezhau.com/dns-query', k: 'geo' },
 	{ id: 'geohide_ru', label: 'GeoHide RU', v: 'RU', d: 'российский сервер', url: 'https://geohide.ru/dns-query', k: 'geo' },
@@ -31778,7 +32220,25 @@ var PROVIDERS = [
 	{ id: 'webshift', label: 'WebShift', url: 'https://d.webshiftvpn.ru/dns-query', k: 'geo' },
 	{ id: 'dagami', label: 'Dagami', url: 'https://dns.dagami.ru/dns-query', k: 'geo' }
 ];
-var BOOT_STD = '1.1.1.1, 8.8.8.8';
+// Bootstrap «Авто»: адреса из таблицы панели (проверенные), иначе из шаблона провайдера LuCI https-dns-proxy
+function bootLuci(url) {
+	var out = '';
+	(bootLuci.list || []).some(function(x) {
+		var t = x.t || '', i = t.indexOf('{option}');
+		if (i < 0) { if (url === t) out = x.b; return !!out; }
+		var pre = t.slice(0, i), suf = t.slice(i + 8);
+		if (url.length < pre.length + suf.length || url.indexOf(pre) !== 0 || url.slice(url.length - suf.length) !== suf) return false;
+		if (/[\/?#]/.test(url.slice(pre.length, url.length - suf.length))) return false;
+		out = x.b; return true;
+	});
+	return out;
+}
+function bootAuto(url) {
+	var p = PROVIDERS.filter(function(x) { return x.url === url; })[0];
+	return p && p.boot ? p.boot : bootLuci(url || '');
+}
+function bootKey(s) { return String(s || '').split(/[\s,;]+/).filter(Boolean).join(','); }
+function bootFmt(s) { return String(s || '').split(/[\s,;]+/).filter(Boolean).join(', '); }
 var OWN_RE = /^https:\/\/[A-Za-z0-9.-]+\.[A-Za-z0-9-]+(:\d{1,5})?(\/[A-Za-z0-9._~%\/+=&?-]*)?$/;
 var INTRO = 'Шифрованный DNS для всей сети: интернет-провайдер не видит DNS-запросы устройств и не может их подменить.';
 var DNSM_URL = '/cgi-bin/luci/admin/services/dns-manager';
@@ -32105,6 +32565,8 @@ return view.extend({
 				}).then(function(res) {
 					if (res.error) throw new Error(res.error);
 					logLines.push(res.stopped ? '   ✓ ' + label(id) + ' выбран — DoH остановлен, DNS пойдёт через этот сервер после «Запустить»' : '   ✓ ' + label(id) + ' применён — DNS на роутере отвечает');
+					if (res.boot_note) logLines.push('   · Bootstrap DNS: ' + res.boot_note);
+					else logLines.push('   · Bootstrap DNS: ' + (res.bootstrap ? bootFmt(res.bootstrap) : 'не задан — https-dns-proxy использует встроенные'));
 				});
 			});
 			if (foChanged()) steps.push(function() {
@@ -32417,9 +32879,21 @@ return view.extend({
 				card.appendChild(E('p', { 'class': 'zm-hint' }, 'IP-адреса через запятую, до 6 штук.'));
 				return;
 			}
-			now = p && p.boot ? p.boot : BOOT_STD;
-			if (!data.bootstrap_custom && !pickProv && l.length === 1 && l[0].bootstrap) now = l[0].bootstrap.split(',').filter(function(x) { return x.indexOf(':') < 0; }).join(', ') || now;
-			card.appendChild(E('p', { 'class': 'zm-hint' }, 'Сейчас: ' + now + (p && p.boot ? ' — адреса самого ' + p.label + '.' : ' — стандартные.')));
+			// показываем ровно то, что записано в /etc/config/https-dns-proxy, — это же видно и в LuCI https-dns-proxy
+			bootLuci.list = data.luci_boots || [];
+			var r = !pickProv && l.length === 1 ? l[0] : null, name = p ? p.label : 'сервера';
+			var auto = r ? (r.boot_auto || '') : bootAuto(p ? p.url : sel);
+			var line = function(lead, v, tail) { return E('p', { 'class': 'zm-hint', 'style': 'overflow-wrap:anywhere' }, [ lead, E('b', {}, bootFmt(v)), tail ]); };
+			var none = function(txt) { return E('p', { 'class': 'zm-hint' }, txt + (auto ? '' : ' — у ' + name + ' своих адресов нет') + ', https-dns-proxy использует встроенные.'); };
+			now = r ? (r.bootstrap || '') : '';
+			if (!r) card.appendChild(auto ? line('Будут: ', auto, ' — адреса ' + name + ' (перед записью панель проверит, что они отвечают).') : none('Bootstrap DNS задан не будет'));
+			else if (!now && auto && r.boot_dead) card.appendChild(line('Сейчас: не задан — адреса ' + name + ' ', auto, ' не отвечают, https-dns-proxy использует встроенные.'));
+			else if (!now) card.appendChild(none('Сейчас: не задан'));
+			else if (data.bootstrap_custom && bootKey(now) === bootKey(data.bootstrap_custom)) {
+				card.appendChild(line('Сейчас: ', now, ' — ваши адреса.'));
+				card.appendChild(auto ? line('После сохранения: ', auto, ' — адреса ' + name + '.') : none('После сохранения задан не будет'));
+			} else if (bootKey(now) === bootKey(auto) || (p && bootKey(now) === bootKey(p.boot))) card.appendChild(line('Сейчас: ', now, ' — адреса ' + name + '.'));
+			else card.appendChild(line('Сейчас: ', now, ' — заданы вручную в настройках https-dns-proxy (LuCI), панель их не меняет, пока вы не смените сервер.'));
 		}
 
 		var foCard = E('div', { 'class': 'zm-card', 'style': 'display:none' }), foDraft = null, foPicking = false, foLats = {};
@@ -45419,7 +45893,7 @@ return view.extend({
 		var diag = null, diagBusy = false, openGroups = {}, catWait = 0;
 		var connKind = null, connRes = null, connBusy = false;
 		var secState = null, secProbe = false, secProbed = false;
-		var dnsRes = {}, dnsTesting = false, dnsInput = null;
+		var dnsRes = {}, dnsVia = '', dnsTesting = false, dnsInput = null;
 		var tab = 'conn';
 		try { tab = localStorage.getItem('zm.forkozz.tab') || 'conn'; } catch (e) {}
 		if (!TABS.some(function(t) { return t.id === tab; }) || (cfg && !cfg.main_exists)) tab = 'conn';
@@ -47259,7 +47733,7 @@ return view.extend({
 				dnsTesting = false;
 				if (!res || res.error) { zm.toast((res && res.error) || 'Проверка не удалась', 'error'); renderDns(); return; }
 				if (res.type !== draft.dns.type) { renderDns(); return; }
-				dnsRes = {};
+				dnsRes = {}; dnsVia = res.via || '';
 				(res.results || []).forEach(function(r) { dnsRes[t + '|' + r.server] = r; });
 				var good = (res.results || []).filter(function(r) { return r.ok; }).sort(function(a, b) { return a.ms - b.ms; });
 				if (pick) {
@@ -47277,7 +47751,8 @@ return view.extend({
 		function dnsLat(v) {
 			var r = dnsRes[draft.dns.type + '|' + v];
 			if (!r) return E('span');
-			return E('span', { 'class': 'zm-lat ' + (r.ok ? latClass(r.ms) : 'zm-lat-bad'), 'title': r.how === 'tls' ? 'TLS-соединение есть, ответ DNS проверить не удалось' : '' }, r.ok ? r.ms + ' мс' + (r.how === 'tls' ? '*' : '') : 'не отвечает');
+			return E('span', { 'class': 'zm-lat ' + (r.ok ? latClass(r.ms) : 'zm-lat-bad'), 'title': r.how === 'tls' ? 'TLS-соединение есть, ответ DNS проверить не удалось' : r.how === 'vpn' ? 'Проверено через VPN — так, как Forkozz ходит к этому серверу' : dnsVia === 'direct_detour' ? 'Проверено с роутера напрямую, а Forkozz ходит к серверу через VPN' : '' },
+				r.ok ? r.ms + ' мс' + (r.how === 'tls' ? '*' : '') + (r.how === 'vpn' ? ' · VPN' : '') : (r.how === 'vpn' ? 'не отвечает через VPN' : dnsVia === 'direct_detour' ? 'напрямую не отвечает' : 'не отвечает'));
 		}
 
 		function renderDns() {
@@ -47298,7 +47773,7 @@ return view.extend({
 				ol.appendChild(E('div', { 'class': 'zm-dns-item' + (i === act ? ' zm-dns-active' : '') }, [
 					E('span', { 'class': 'zm-dns-num' }, String(i + 1)),
 					E('div', { 'class': 'zm-dns-text' }, [ E('b', {}, dnsName(t, v)), E('span', {}, v) ]),
-					i === act ? badge('zm-ok', sel.length > 1 ? 'сейчас работает' : 'используется') : E([]),
+					i === act ? badge('zm-ok', 'сейчас используется') : E([]),
 					dnsLat(v),
 					E('div', { 'class': 'zm-dns-btns' }, [
 						E('button', { 'class': 'cbi-button', 'title': 'Выше', 'disabled': i === 0 ? '' : null, 'click': function() { var a = sel.slice(); a.splice(i - 1, 0, a.splice(i, 1)[0]); dnsSet(a, true); } }, '↑'),
@@ -47342,7 +47817,8 @@ return view.extend({
 				E('button', { 'class': 'cbi-button cbi-button-action', 'disabled': dnsTesting || busy ? '' : null, 'click': function() { dnsTest(true); } }, dnsTesting ? 'Проверяем…' : 'Подобрать лучшие'),
 				E('button', { 'class': 'cbi-button', 'disabled': dnsTesting || busy ? '' : null, 'click': function() { dnsTest(false); } }, 'Только проверить')
 			]));
-			dnsCard.appendChild(E('p', { 'class': 'zm-hint' }, '«Подобрать лучшие» проверит с роутера все серверы ' + DNS_TYPES[t] + ' и поставит в список до 4 отвечающих — самые быстрые первыми.'));
+			dnsCard.appendChild(E('p', { 'class': 'zm-hint' }, '«Подобрать лучшие» проверит все серверы ' + DNS_TYPES[t] + ' и поставит в список до 4 отвечающих — самые быстрые первыми. ' +
+				(d.detour ? (t === 'doh' ? 'Включено «DNS через VPN» — серверы проверяются через VPN, так же, как Forkozz к ним ходит (если Forkozz запущен).' : 'Включено «DNS через VPN», а проверка ' + DNS_TYPES[t] + ' идёт с роутера напрямую: «не отвечает» может значить только, что сервер режет провайдер, — через VPN он может работать.') : 'Проверка идёт с роутера напрямую, как Forkozz и ходит к DNS.')));
 			if (t !== 'udp') {
 				dnsCard.appendChild(E('h4', { 'style': 'margin:16px 0 4px' }, 'Bootstrap DNS'));
 				dnsCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:0' }, 'Обычный DNS, через который Forkozz узнаёт адреса самих серверов ' + DNS_TYPES[t] + ' (например, dns.quad9.net).'));
