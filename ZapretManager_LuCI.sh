@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.41
+# Version: 4.43
 ZM_VERSION_EOF
 set -e
 
@@ -3214,6 +3214,23 @@ _hosts_append() {
 	echo "$1" >> "$HOSTS_FILE"
 }
 
+# Дописывает в hosts строки из stdin, которых там ещё нет, — за один проход по файлу. Раньше каждая строка
+# блока проверялась отдельным проходом: «Финские IP для Discord» — это 200 строк, и с большим hosts
+# (GeoHide, dns.malw.link) включение шло дольше, чем ждёт панель, — «hosts_toggle: нет данных»
+_hosts_add_lines() {
+	local list="$HOSTS_FILE.zmadd" add="$HOSTS_FILE.zmnew"
+	cat > "$list"
+	[ -f "$HOSTS_FILE" ] || : > "$HOSTS_FILE"
+	awk -v hf="$HOSTS_FILE" 'function n(s) { gsub(/\r/, "", s); gsub(/[ \t]+/, " ", s); sub(/^ /, "", s); sub(/ $/, "", s); return s }
+		BEGIN { while ((getline l < hf) > 0) have[n(l)] = 1; close(hf) }
+		{ k = n($0); if (k == "" || (k in have)) next; have[k] = 1; print }' "$list" > "$add"
+	if [ -s "$add" ]; then
+		[ -s "$HOSTS_FILE" ] && [ -n "$(tail -c 1 "$HOSTS_FILE" 2>/dev/null)" ] && echo >> "$HOSTS_FILE"
+		cat "$add" >> "$HOSTS_FILE"
+	fi
+	rm -f "$list" "$add"
+}
+
 _hosts_has_line() {
 	awk -v want="$1" 'function n(s) { gsub(/\r/, "", s); gsub(/[ \t]+/, " ", s); sub(/^ /, "", s); sub(/ $/, "", s); return s }
 		BEGIN { want = n(want) } n($0) == want { f = 1; exit } END { exit !f }' "$HOSTS_FILE" 2>/dev/null
@@ -3247,9 +3264,7 @@ hosts_toggle() {
 	if [ "$enabled" = "true" ]; then
 		printf '%s\n' "$content" | _hosts_drop_lines
 	else
-		while IFS= read -r line; do [ -z "$line" ] && continue; _hosts_has_line "$line" || _hosts_append "$line"; done <<-EOF
-		$content
-		EOF
+		printf '%s\n' "$content" | _hosts_add_lines
 	fi
 	/etc/init.d/dnsmasq restart >/dev/null 2>&1
 	printf '{"ok":true,"block":"%s","enabled":%s}\n' "$(esc "$block")" "$([ "$enabled" = "true" ] && echo false || echo true)"
@@ -21165,7 +21180,7 @@ _fk_ui_dir() {
 	ui="$(jsonfilter -i "$c" -e '@.experimental.clash_api.external_ui' 2>/dev/null)"
 	[ -n "$ui" ] || return 1
 	case "$ui" in /*) [ -d "$ui" ] && { echo "$ui"; return 0; }; return 1 ;; esac
-	pid="$(pidof sing-box 2>/dev/null | awk '{ print $1 }')"
+	pid="$(pidof sing-box sing-box-core 2>/dev/null | awk '{ print $1 }')"
 	base=""
 	[ -n "$pid" ] && base="$(readlink "/proc/$pid/cwd" 2>/dev/null)"
 	for base in "$base" /etc/sing-box /tmp/sing-box /var/run/sing-box; do
@@ -21237,7 +21252,13 @@ _fk_say() { echo "==> $*"; }
 _fk_installed() { [ -x /usr/bin/netshift ] && [ -f /usr/lib/netshift/constants.sh ]; }
 _fk_version() { sed -n 's/^NETSHIFT_VERSION="\([^"]*\)".*/\1/p' /usr/lib/netshift/constants.sh 2>/dev/null | head -n1; }
 _fk_enabled() { ls /etc/rc.d/S*netshift >/dev/null 2>&1; }
-_fk_up() { nft list table inet "$FK_NFT" >/dev/null 2>&1 && pidof sing-box >/dev/null 2>&1; }
+# sing-box Forkozz работает? Сжатая (UPX) сборка расширенного облегчённого sing-box запускается не как
+# sing-box, а как /usr/libexec/sing-box-core (/usr/bin/sing-box там — обёртка, которая передаёт ему
+# управление). Раньше панель искала только «sing-box» и на таких роутерах считала, что Forkozz не
+# работает: ждала по 90 секунд, писала «не поднялся», а сторож перезапускал рабочий Forkozz
+FK_SB_PROCS="sing-box sing-box-core"
+_fk_sb_alive() { pidof $FK_SB_PROCS >/dev/null 2>&1; }
+_fk_up() { nft list table inet "$FK_NFT" >/dev/null 2>&1 && _fk_sb_alive; }
 FK_SERIAL_DIR="/var/run/netshift-zm-serial"
 _fk_engine_busy() {
 	local p
@@ -21727,10 +21748,10 @@ _fk_sb_purge() {
 		/etc/init.d/sing-box stop >/dev/null 2>&1
 		/etc/init.d/sing-box disable >/dev/null 2>&1
 	fi
-	if pidof sing-box >/dev/null 2>&1; then
-		killall sing-box >/dev/null 2>&1
+	if _fk_sb_alive; then
+		killall $FK_SB_PROCS >/dev/null 2>&1
 		sleep 1
-		killall -9 sing-box >/dev/null 2>&1
+		killall -9 $FK_SB_PROCS >/dev/null 2>&1
 	fi
 	ZM_PKG_QUIET=1
 	for p in $had; do _zm_pkg_purge "$p"; done
@@ -22471,12 +22492,20 @@ _fk_servers_report() {
 
 _fk_check_live() {
 	local j
-	if pidof sing-box >/dev/null 2>&1; then echo "   ✓ sing-box работает"; else echo "   ✗ sing-box не запущен"; fi
+	if _fk_sb_alive; then echo "   ✓ sing-box работает"; else echo "   ✗ sing-box не запущен"; fi
 	if nft list table inet "$FK_NFT" >/dev/null 2>&1; then echo "   ✓ Правила перехвата трафика на месте"; else echo "   ✗ Правил перехвата трафика нет"; fi
-	j="$(_zm_run 20 /usr/bin/netshift check_fakeip 2>/dev/null)"
+	# сразу после запуска или применения настроек DNS sing-box поднимается не мгновенно — даём ему до
+	# ~15 секунд, а не пишем «не получил адрес» после первой же попытки
+	local t=0
+	while :; do
+		j="$(_zm_run 20 /usr/bin/netshift check_fakeip 2>/dev/null)"
+		case "$j" in *'"fakeip": true'*|*'"fakeip":true'*) break ;; esac
+		t=$((t + 1)); [ "$t" -ge 5 ] && break
+		sleep 3
+	done
 	case "$j" in
 		*'"fakeip": true'*|*'"fakeip":true'*) echo "   ✓ DNS отдаёт адреса Forkozz — выбранные сервисы идут через туннель" ;;
-		*) echo "   ! Проверочный домен не получил адрес Forkozz — DNS может ещё прогреваться" ;;
+		*) echo "   ! Проверочный домен не получил адрес Forkozz — нажмите «Проверить» через минуту; если так и останется, перезапустите Forkozz" ;;
 	esac
 }
 
@@ -22549,7 +22578,8 @@ do_fk_install() {
 	fi
 	sed -i "s#__COMPILED_VERSION_VARIABLE__#$tag#g" "$src/usr/lib/constants.sh"
 	grep -q "^NETSHIFT_VERSION=\"$tag\"" "$src/usr/lib/constants.sh" || { rm -rf "$tmp"; echo "ОШИБКА: не удалось прописать версию движка Forkozz"; return 1; }
-	_fk_say "Источники: GitHub и репозиторий OpenWrt, без зеркал"
+	if [ -n "$(gh_mirrors)" ]; then _fk_say "Источники: GitHub (если не отвечает — через зеркала) и репозиторий OpenWrt"
+	else _fk_say "Источники: GitHub и репозиторий OpenWrt, без зеркал"; fi
 
 	if _fk_foreign; then
 		_fk_say "Убираем отдельный пакет движка с LuCI, настройки оставляем"
@@ -22728,7 +22758,7 @@ _fk_sb_park() {
 	fi
 	_fk_say "Оставляем sing-box $(_fk_sb_ver) ($(_fk_sb_name "$(_fk_sb_var)"))"
 	[ -x /etc/init.d/sing-box ] && { /etc/init.d/sing-box stop >/dev/null 2>&1; /etc/init.d/sing-box disable >/dev/null 2>&1; }
-	pidof sing-box >/dev/null 2>&1 && { killall sing-box >/dev/null 2>&1; sleep 1; killall -9 sing-box >/dev/null 2>&1; }
+	_fk_sb_alive && { killall $FK_SB_PROCS >/dev/null 2>&1; sleep 1; killall -9 $FK_SB_PROCS >/dev/null 2>&1; }
 	rm -rf /tmp/sing-box 2>/dev/null
 	echo "   ✓ Он остановлен и убран из автозапуска — без Forkozz ему нечего делать. Удалить его можно на вкладке Forkozz"
 }
@@ -22753,9 +22783,9 @@ do_fk_remove() {
 		/etc/init.d/netshift disable >/dev/null 2>&1
 		_zm_run 90 $FK_REL /etc/init.d/netshift stop >/dev/null 2>&1
 	fi
-	if pidof sing-box >/dev/null 2>&1 && [ -z "$(_fk_sb_users)" ]; then
+	if _fk_sb_alive && [ -z "$(_fk_sb_users)" ]; then
 		[ -x /etc/init.d/sing-box ] && /etc/init.d/sing-box stop >/dev/null 2>&1
-		pidof sing-box >/dev/null 2>&1 && { killall sing-box >/dev/null 2>&1; sleep 1; killall -9 sing-box >/dev/null 2>&1; }
+		_fk_sb_alive && { killall $FK_SB_PROCS >/dev/null 2>&1; sleep 1; killall -9 $FK_SB_PROCS >/dev/null 2>&1; }
 	fi
 	echo "   ✓ Forkozz остановлен и убран из автозапуска"
 	_fk_say "Снимаем перехват трафика и возвращаем DNS роутера"
@@ -22866,7 +22896,13 @@ _fk_wait_up() {
 
 _fk_why() {
 	local l
-	l="$(logread 2>/dev/null | grep -E 'netshift|sing-box' | grep -E 'fatal|Aborted|error' | tail -n 1)"
+	# только записи этого запуска: старая ошибка из журнала (например, «нет настроенного подключения» до
+	# того, как добавили сервер) больше не выдаётся за причину сейчас
+	if [ -n "$FK_LOGMARK" ]; then
+		l="$(logread 2>/dev/null | awk -v m="$FK_LOGMARK" 'f { print } index($0, m) { f = 1 }' | grep -E 'netshift|sing-box' | grep -E 'fatal|Aborted|error' | tail -n 1)"
+	else
+		l="$(logread 2>/dev/null | tail -n 200 | grep -E 'netshift|sing-box' | grep -E 'fatal|Aborted|error' | tail -n 1)"
+	fi
 	case "$l" in
 		*"Outbound section not found"*) echo "ни в одной секции нет настроенного подключения" ;;
 		*"Invalid service in community lists"*) echo "в секции выбран список, которого Forkozz не знает — сохраните сервисы заново" ;;
@@ -22880,11 +22916,11 @@ _fk_why() {
 
 _fk_reset_runtime() {
 	_zm_run 90 /etc/init.d/netshift stop >/dev/null 2>&1
-	if pidof sing-box >/dev/null 2>&1 && [ -z "$(_fk_sb_users)" ]; then
+	if _fk_sb_alive && [ -z "$(_fk_sb_users)" ]; then
 		[ -x /etc/init.d/sing-box ] && /etc/init.d/sing-box stop >/dev/null 2>&1
-		killall sing-box >/dev/null 2>&1
+		killall $FK_SB_PROCS >/dev/null 2>&1
 		sleep 2
-		pidof sing-box >/dev/null 2>&1 && killall -9 sing-box >/dev/null 2>&1
+		_fk_sb_alive && killall -9 $FK_SB_PROCS >/dev/null 2>&1
 		echo "   ✓ Остановлен оставшийся процесс sing-box"
 	fi
 	nft delete table inet "$FK_NFT" >/dev/null 2>&1
@@ -22945,7 +22981,7 @@ do_fk_service() {
 		_zm_run 240 /usr/bin/netshift reload >> "$JOBS_DIR/forkop-svc.out" 2>&1 || echo "!! Перезагрузка настроек завершилась с ошибкой"
 	else
 		_fk_say "Запускаем Forkozz: собираем конфиг sing-box, скачиваем списки, ставим правила"
-		if _fk_up || pidof sing-box >/dev/null 2>&1 || nft list table inet "$FK_NFT" >/dev/null 2>&1; then
+		if _fk_up || _fk_sb_alive || nft list table inet "$FK_NFT" >/dev/null 2>&1; then
 			_zm_run 90 /etc/init.d/netshift stop >> "$JOBS_DIR/forkop-svc.out" 2>&1
 		fi
 		_fk_start_once || echo "!! Запуск завершился с ошибкой"
@@ -22991,7 +23027,11 @@ do_fk_service() {
 	echo "ОШИБКА: Forkozz не запустился${b:+: $b}. Если ошибка повторяется, перезагрузите роутер — это сбросит всё, что осталось от прошлых запусков."
 	_zm_reboot_hint "Forkozz не запустился. Перезагрузите роутер — это сбросит всё, что осталось от прошлых запусков, — и включите Forkozz снова."
 	echo "Последние записи журнала:"
-	logread 2>/dev/null | grep -E 'netshift|sing-box' | grep -v 'DEBUG\|\[debug\]' | tail -n 10 | sed 's/^[^]]*\]: //; s/^/   /'
+	# записи этого запуска (если метка есть), без цветовых кодов, служебного шума udhcpc и предупреждений
+	# sing-box об устаревших настройках — они ни на что не влияют и только мешают увидеть причину
+	logread 2>/dev/null | { if [ -n "$FK_LOGMARK" ]; then awk -v m="$FK_LOGMARK" 'f { print } index($0, m) { f = 1 }'; else cat; fi; } |
+		grep -E 'netshift|sing-box' | grep -v 'DEBUG\|\[debug\]\|udhcpc\|is deprecated\|deprecated in sing-box' |
+		sed 's/\x1b\[[0-9;]*m//g; s/\[[0-9;]*m//g' | tail -n 10 | sed 's/^[^]]*\]: //; s/^/   /'
 	return 1
 }
 
@@ -23020,7 +23060,7 @@ do_fk_lists() {
 	if [ "$rc" != 0 ]; then
 		echo "!! Скачивание списков завершилось с ошибкой — работают прежние"
 	else
-		echo "   ✓ Списки скачаны — sing-box подхватит их сам"
+		echo "   ✓ Загрузка списков закончилась — sing-box подхватит новые сам"
 	fi
 	_fk_say "Проверяем, что списки на месте и работают"
 	_fk_check_live
@@ -26693,7 +26733,7 @@ function port_list(v, what) {
 }
 
 function engine_caps() {
-	let b = s(fs.readfile(BIN));
+	let b = s(fs.readfile(BIN)), fc = s(fs.readfile(NS_LIB + "/sing_box_config_facade.sh"));
 	return {
 		naive: !!fs.access(NS_LIB + "/naive.sh"),
 		kill: !!fs.access(NS_LIB + "/kill_switch.sh"),
@@ -26702,7 +26742,10 @@ function engine_caps() {
 		hijack: index(b, "nft_add_dns_hijack() {") >= 0,
 		ports: index(b, "sing_box_configure_port_rules() {") >= 0,
 		quic_all: index(b, "disable_quic_mode() {") >= 0,
-		prefixes: prefix_ok()
+		prefixes: prefix_ok(),
+		// ссылки tuic:// и anytls:// движок понимает с версий новее 0.9.11 — разрешаем их, как только он их знает
+		tuic: index(fc, "\n    tuic)") >= 0,
+		anytls: index(fc, "\n    anytls)") >= 0
 	};
 }
 
@@ -26884,10 +26927,11 @@ function cmd_set() {
 			else links[length(links) - 1] += "%20" + w;
 		}
 	links = uniq(links);
-	let naive_ok = !!fs.access(NS_LIB + "/naive.sh");
+	let naive_ok = !!fs.access(NS_LIB + "/naive.sh"), ec = engine_caps();
+	let more = (ec.tuic ? ", tuic" : "") + (ec.anytls ? ", anytls" : "");
 	for (let x in links)
-		if (!match(x, SCHEMES) && !(naive_ok && match(x, SCHEMES_NAIVE)))
-			fail(match(x, /^naive\+/i) ? (naive_ok ? "ссылке NaiveProxy нужны логин и пароль: naive+https://логин:пароль@сервер" : "NaiveProxy работает с движком Forkozz 0.9.11 и новее — обновите Forkozz") : match(x, /^(tuic|http|https|anytls|wireguard|hysteria):\/\//i) ? "Forkozz не поддерживает такие ссылки: " + substr(x, 0, 40) + " — подойдут vless, vmess, trojan, ss, socks5, hysteria2" + (naive_ok ? ", naive" : "") : "ссылка не поддерживается: " + substr(x, 0, 40));
+		if (!match(x, SCHEMES) && !(naive_ok && match(x, SCHEMES_NAIVE)) && !(ec.tuic && match(x, /^tuic:\/\/[^ \t\r\n]+$/i)) && !(ec.anytls && match(x, /^anytls:\/\/[^ \t\r\n]+$/i)))
+			fail(match(x, /^naive\+/i) ? (naive_ok ? "ссылке NaiveProxy нужны логин и пароль: naive+https://логин:пароль@сервер" : "NaiveProxy работает с движком Forkozz 0.9.11 и новее — обновите Forkozz") : match(x, /^(tuic|http|https|anytls|wireguard|hysteria):\/\//i) ? "Forkozz не поддерживает такие ссылки: " + substr(x, 0, 40) + " — подойдут vless, vmess, trojan, ss, socks5, hysteria2" + (naive_ok ? ", naive" : "") + more : "ссылка не поддерживается: " + substr(x, 0, 40));
 	let subs = uniq(lines(type(d.subs) == "array" && length(d.subs) ? d.subs : d.sub)), iface = trim(s(d.iface));
 	if (mode == "links" && !length(links)) fail("добавьте хотя бы одну ссылку на сервер");
 	if (mode == "sub") {
@@ -28018,7 +28062,7 @@ function cmd_diag() {
 	function add(v, what, why) { push(checks, { verdict: v, what, why: why || "" }); }
 	let en = length(filter(fs.lsdir("/etc/rc.d") || [], (f) => !!match(f, /^S[0-9]+netshift$/))) > 0;
 	let nft = sh("nft list table inet " + NFT_TABLE + " >/dev/null 2>&1 && echo y") != "";
-	let sbr = sh("pidof sing-box") != "";
+	let sbr = sh("pidof sing-box sing-box-core") != "";
 	add(nft ? "ok" : "fail", "Служба Forkozz", nft ? "запущена" + (en ? " и включена в автозапуск" : ", но не в автозапуске") : "не запущена — нажмите «Включить»");
 	add(sbr ? "ok" : "fail", "sing-box", sbr ? "работает" : "не работает — посмотрите журнал ниже");
 	let sb = jcmd(BIN + " get_sing_box_status") || {};
@@ -28341,7 +28385,7 @@ function cmd_route(target, addr, source) {
 }
 
 function sb_rss() {
-	let pid = trim(split(trim(sh("pidof sing-box")), " ")[0] || "");
+	let pid = trim(split(trim(sh("pidof sing-box sing-box-core")), " ")[0] || "");
 	if (!match(pid, /^[0-9]+$/)) return null;
 	let m = match(s(fs.readfile("/proc/" + pid + "/status")), /VmRSS:[ \t]*([0-9]+)/);
 	return m ? int(m[1]) * 1024 : null;
@@ -45311,8 +45355,8 @@ return view.extend({
 			return ta;
 		}
 
-		function linkOk(x) { return LINK_RE.test(x) || (!!CAPS.naive && NAIVE_RE.test(x)); }
-		function linkKinds() { return 'vless, vmess, trojan, ss, socks5, hysteria2' + (CAPS.naive ? ', naive' : ''); }
+		function linkOk(x) { return LINK_RE.test(x) || (!!CAPS.naive && NAIVE_RE.test(x)) || (!!CAPS.tuic && /^tuic:\/\/\S+$/i.test(x)) || (!!CAPS.anytls && /^anytls:\/\/\S+$/i.test(x)); }
+		function linkKinds() { return 'vless, vmess, trojan, ss, socks5, hysteria2' + (CAPS.naive ? ', naive' : '') + (CAPS.tuic ? ', tuic' : '') + (CAPS.anytls ? ', anytls' : ''); }
 		var taLinks = area('links', 'vless://…\nss://…\ntrojan://…', 130);
 		var linksOpt = { value: draft.links, re: { test: linkOk }, placeholder: 'vless://…\nss://…\ntrojan://…',
 			empty: 'Серверов пока нет — вставьте ссылки ниже и нажмите «Добавить».',
