@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.38
+# Version: 4.39
 ZM_VERSION_EOF
 set -e
 
@@ -10840,6 +10840,7 @@ do_doh_install() {
 
 do_doh_remove() {
 	local r rc=0
+	rm -f "$DOH_STOP"
 	echo "==> Останавливаем DNS over HTTPS — dnsmasq возвращается к прежним серверам"
 	_zm_svc_off https-dns-proxy
 	killall https-dns-proxy >/dev/null 2>&1
@@ -10915,6 +10916,45 @@ _hosts_extra() {
 		END { print r }' "$HOSTS_FILE" 2>/dev/null || echo false
 }
 
+# Остановить / запустить DoH кнопкой. Остановленный не запускается сам — ни после перезагрузки роутера,
+# ни сторожем переключения, ни выбором сервера, — пока не нажмут «Запустить»
+doh_power() {
+	local cur
+	_dnsm_guard || return 1
+	{ [ -f "$_doh_file" ] && [ -x /etc/init.d/https-dns-proxy ]; } || { echo '{"error":"DNS over HTTPS не установлен"}'; return 1; }
+	cur="$(_doh_cur_id)"
+	case "$1" in
+		off)
+			mkdir -p "$(dirname "$DOH_STOP")"; : > "$DOH_STOP"
+			/etc/init.d/https-dns-proxy stop >/dev/null 2>&1
+			/etc/init.d/https-dns-proxy disable >/dev/null 2>&1
+			/etc/init.d/dnsmasq restart >/dev/null 2>&1
+			rm -f "$DOH_FO_STATE"
+			_doh_fo_event "DoH остановлен кнопкой — DNS идёт через обычные серверы, пока не нажмёте «Запустить»"
+			_zo_doh_follow
+			_ab_dns_bg
+			if /etc/init.d/https-dns-proxy running >/dev/null 2>&1; then echo '{"error":"служба https-dns-proxy не остановилась — смотрите журнал роутера"}'; return 1; fi
+			printf '{"ok":true,"stopped":true}\n' ;;
+		on)
+			rm -f "$DOH_STOP" "$DOH_FO_STATE"
+			/etc/init.d/https-dns-proxy enable >/dev/null 2>&1
+			_zm_run 30 /etc/init.d/https-dns-proxy restart >/dev/null 2>&1
+			/etc/init.d/dnsmasq restart >/dev/null 2>&1
+			_zo_doh_follow
+			_ab_dns_bg
+			if _doh_wait_real 5053 10; then
+				_doh_fo_event "DoH запущен кнопкой — DNS снова идёт через ${cur:+$(_doh_name "$cur")}"
+				printf '{"ok":true,"stopped":false}\n'
+			elif /etc/init.d/https-dns-proxy running >/dev/null 2>&1; then
+				_doh_fo_event "DoH запущен кнопкой, но ${cur:+$(_doh_name "$cur")} пока не отвечает"
+				printf '{"ok":true,"stopped":false,"warn":"%s"}\n' "$(esc "Служба запущена, но сервер ${cur:+$(_doh_name "$cur") }пока не отвечает — проверьте его или выберите другой")"
+			else
+				echo '{"error":"служба https-dns-proxy не запустилась — смотрите журнал роутера"}'; return 1
+			fi ;;
+		*) echo '{"error":"неизвестный режим"}'; return 1 ;;
+	esac
+}
+
 doh_status() {
 	local installed="false" current="" running=false force=false list="" sep="" i url port prov n=0 provs=""
 	_doh_legacy_fix
@@ -10935,8 +10975,9 @@ doh_status() {
 		[ "$(uci -q get https-dns-proxy.config.force_dns)" != "0" ] && force=true
 	fi
 	/etc/init.d/https-dns-proxy running >/dev/null 2>&1 && running=true
-	printf '{"installed":%s,"current":"%s","running":%s,"force_dns":%s,"force_mode":"%s","resolvers":[%s],"steer_active":%s,"steer_installed":%s,"forkozz":%s,"fk_name":"%s","bootstrap_custom":"%s","hosts_extra":%s,"failover":%s,"dnsm":%s,"net":%s,"own":[%s],"zapret_doh":"%s"}\n' \
-		"$installed" "$(esc "$current")" "$running" "$force" "$(_doh_force_mode)" "$list" \
+	[ -f "$DOH_STOP" ] && ! _doh_pkg && rm -f "$DOH_STOP"
+	printf '{"installed":%s,"stopped":%s,"current":"%s","running":%s,"force_dns":%s,"force_mode":"%s","resolvers":[%s],"steer_active":%s,"steer_installed":%s,"forkozz":%s,"fk_name":"%s","bootstrap_custom":"%s","hosts_extra":%s,"failover":%s,"dnsm":%s,"net":%s,"own":[%s],"zapret_doh":"%s"}\n' \
+		"$installed" "$([ -f "$DOH_STOP" ] && echo true || echo false)" "$(esc "$current")" "$running" "$force" "$(_doh_force_mode)" "$list" \
 		"$(_doh_steer_active && echo true || echo false)" \
 		"$(grep -qx 'engine' /etc/zm-steer/owned 2>/dev/null && stl_present && echo true || echo false)" \
 		"$(_fk_installed && echo true || echo false)" "$(_fk_name)" "$(esc "$(cat "$DOH_BOOT_FILE" 2>/dev/null)")" "$(_hosts_extra)" "$(_doh_fo_json)" \
@@ -10998,8 +11039,10 @@ doh_bootstrap_set() {
 			i=$((i + 1)); [ "$i" -gt 16 ] && break
 		done
 		uci -q commit https-dns-proxy
-		_zm_run 30 /etc/init.d/https-dns-proxy restart >/dev/null 2>&1
-		/etc/init.d/dnsmasq restart >/dev/null 2>&1
+		if [ ! -f "$DOH_STOP" ]; then
+			_zm_run 30 /etc/init.d/https-dns-proxy restart >/dev/null 2>&1
+			/etc/init.d/dnsmasq restart >/dev/null 2>&1
+		fi
 	fi
 	printf '{"ok":true,"bootstrap":"%s"}\n' "$(esc "$out")"
 }
@@ -11201,6 +11244,19 @@ doh_probe() {
 	printf '{%s}\n' "$(_doh_res_json "$(_doh_probe "$url" "$(_doh_boots_for "$1")")")"
 }
 
+# Ответ nslookup от DNS-сервера — живой? Адрес (Name:), «такого имени нет» (NXDOMAIN) и «имя есть, а адреса
+# нет» (NODATA — busybox пишет «No answer») — сервер ответил. Часть серверов DoH (WebShift, Comss, Яндекс)
+# на случайное имя отвечает именно NODATA, и раньше сторож считал их неработающими: DNS переключался на
+# запасной и через две проверки возвращался — так по кругу каждые 4 минуты.
+# Не ответ: SERVFAIL, REFUSED, тишина (timed out / no servers) и пустой вывод
+_doh_ns_ans() {
+	case "$1" in
+		*SERVFAIL*|*REFUSED*|*[Rr]efused*|*"timed out"*|*"no servers"*) return 1 ;;
+		*NXDOMAIN*|*"Name:"*|*"No answer"*|*NODATA*) return 0 ;;
+	esac
+	return 1
+}
+
 _doh_local_ok() {
 	local port="${1:-5053}" o
 	_doh_t 3 nslookup -type=a example.com "127.0.0.1:$port" >/dev/null 2>&1 && return 0
@@ -11212,8 +11268,8 @@ _doh_live() {
 	local o n
 	n="zm$(printf '%08d' $(( ($$ * 7919 + $(date +%s)) % 100000000 ))).example.com"
 	o="$(_doh_t 4 nslookup -type=a "$n" "127.0.0.1:${1:-5053}" 2>&1)"
+	_doh_ns_ans "$o" && return 0
 	case "$o" in
-		*NXDOMAIN*|*"Name:"*) return 0 ;;
 		*SERVFAIL*|*REFUSED*|*[Rr]efused*|*"timed out"*|*"no servers"*) return 1 ;;
 	esac
 	_doh_local_ok "$1"
@@ -11223,7 +11279,7 @@ _doh_live_real() {
 	local o n port="${1:-5053}"
 	n="zm$(printf '%08d' $(( ($$ * 7919 + $(date +%s)) % 100000000 ))).example.com"
 	o="$(_doh_t 5 nslookup -type=a "$n" "127.0.0.1:$port" 2>&1)"
-	case "$o" in *NXDOMAIN*|*"Name:"*) ;; *) return 1 ;; esac
+	_doh_ns_ans "$o" || return 1
 	o="$(_doh_t 5 nslookup -type=a example.com "127.0.0.1:$port" 2>&1)"
 	case "$o" in *"Name:"*) return 0 ;; esac
 	return 1
@@ -11312,6 +11368,11 @@ _doh_apply() {
 		[ -n "$bootstrap" ] && echo "	option bootstrap_dns '$bootstrap'"
 		echo "	option listen_port '5053'"
 	} > "$_doh_file.zmtmp" && mv -f "$_doh_file.zmtmp" "$_doh_file"
+	if [ -f "$DOH_STOP" ]; then
+		rm -f "$_doh_file.zm-prev"
+		printf '{"ok":true,"provider":"%s","stopped":true}\n' "$(esc "$provider")"
+		return 0
+	fi
 	/etc/init.d/https-dns-proxy enable >/dev/null 2>&1
 	/etc/init.d/https-dns-proxy reload >/dev/null 2>&1
 	/etc/init.d/https-dns-proxy restart >/dev/null 2>&1
@@ -11332,6 +11393,9 @@ _doh_apply() {
 }
 
 DOH_FO_FILE="/opt/zapret-manager-luci/doh_failover"
+# DoH остановлен кнопкой «Остановить»: служба выключена и убрана из автозапуска, сторож переключения,
+# выбор сервера и прочие настройки её не запускают — только кнопка «Запустить»
+DOH_STOP="/opt/zapret-manager-luci/state/doh.stopped"
 DOH_FO_STATE="/tmp/zm-doh-failover.state"
 DOH_FO_EVENTS="/tmp/zm-doh-failover.events"
 DOH_FO_CRON="# zm-dohwatch"
@@ -11425,8 +11489,9 @@ _doh_fo_pool() {
 	for id in $(_doh_fo_chain "$pref"); do [ "$id" = "$skip" ] || [ "$id" = "$pref" ] || echo "$id"; done
 }
 doh_watch() {
-	local lk="/tmp/zm-doh-failover.lock" cur pref mode fails okc c run=0 t
+	local lk="/tmp/zm-doh-failover.lock" cur pref mode fails okc c run=0 t flap="" since
 	_doh_fo_on || { _doh_fo_cron off; return 0; }
+	[ -f "$DOH_STOP" ] && return 0
 	[ -f "$_doh_file" ] && _doh_pkg || return 0
 	_fk_installed && return 0
 	_dnsm_present && return 0
@@ -11472,7 +11537,6 @@ doh_watch() {
 		if _doh_ok "$pref"; then okc=$((okc + 1)); else okc=0; fi
 		if [ "$okc" -ge 2 ]; then
 			if _doh_apply "$pref" >/dev/null 2>&1; then
-				_doh_bad_clear "$pref"
 				_doh_fo_put active "$pref"
 				_doh_st_put mode normal fails 0 okc 0 since "$(date +%s)"
 				_doh_fo_event "$(_doh_name "$pref") снова отвечает — вернулись на него с $(_doh_name "$cur")"
@@ -11484,13 +11548,19 @@ doh_watch() {
 		fi
 		_doh_st_put okc "$okc"
 	fi
+	since="$(_doh_st_get since 0)"; case "$since" in ''|*[!0-9]*) since=0 ;; esac
 	if /etc/init.d/https-dns-proxy running >/dev/null 2>&1 && _doh_cur_alive "$cur" "$fails"; then
 		_doh_st_put fails 0
+		# основной держится больше часа — забываем прошлые срывы, пауза перед возвратом снова 10 минут
+		[ "$cur" = "$pref" ] && [ $(( $(date +%s) - since )) -ge 3600 ] && _doh_bad_clear "$pref"
 		rmdir "$lk" 2>/dev/null
 		return 0
 	fi
 	fails=$((fails + 1)); _doh_st_put fails "$fails"
 	[ "$fails" -ge 2 ] || { rmdir "$lk" 2>/dev/null; return 0; }
+	# основной снова не отвечает меньше чем через полчаса после возврата на него — значит, он мигает:
+	# возвращаемся к нему не сразу, а после паузы (10 минут, затем 20, 40… до 2 часов)
+	[ "$cur" = "$pref" ] && [ "$since" -gt 0 ] && [ $(( $(date +%s) - since )) -lt 1800 ] && flap=1
 	if [ "$(_doh_fo_get fo 0)" = 1 ]; then
 		for c in $([ "$cur" != "$pref" ] && echo "$pref") $(_doh_fo_pool "$pref" "$cur"); do
 			_doh_bad_skip "$c" && continue
@@ -11499,7 +11569,12 @@ doh_watch() {
 			_doh_bad_clear "$c"
 			_doh_fo_put active "$c"
 			_doh_st_put mode "$([ "$c" = "$pref" ] && echo normal || echo backup)" fails 0 okc 0 since "$(date +%s)"
-			_doh_fo_event "$(_doh_name "$cur") не отвечает — DNS переключён на $(_doh_name "$c")"
+			if [ -n "$flap" ]; then
+				_doh_bad_mark "$pref"
+				_doh_fo_event "$(_doh_name "$cur") снова перестал отвечать вскоре после возврата — DNS переключён на $(_doh_name "$c"), к $(_doh_name "$pref") вернёмся не раньше чем через $(( $(_doh_bad_wait "$pref") / 60 )) мин"
+			else
+				_doh_fo_event "$(_doh_name "$cur") не отвечает — DNS переключён на $(_doh_name "$c")"
+			fi
 			rmdir "$lk" 2>/dev/null
 			return 0
 		done
@@ -11569,7 +11644,7 @@ doh_failover_set() {
 	if [ "$fo" = 1 ] || [ "$direct" = 1 ]; then _doh_fo_cron on
 	else
 		_doh_fo_cron off
-		if [ "$(_doh_st_get mode normal)" = direct ]; then
+		if [ "$(_doh_st_get mode normal)" = direct ] && [ ! -f "$DOH_STOP" ]; then
 			/etc/init.d/https-dns-proxy start >/dev/null 2>&1
 			_doh_fo_event "автопереключение выключено — DNS снова идёт через DoH"
 		fi
@@ -19572,6 +19647,9 @@ term_action() {
 
 TSC_DIR="$ZM_STATE_DIR/tailscale"
 TSC_ON="$TSC_DIR/on"
+# Tailscale остановлен кнопкой «Остановить»: служба выключена и убрана из автозапуска, панель и её сторож
+# не запускают его — ни после перезагрузки, ни при «Исправить», входе или обновлении. Только «Запустить»
+TSC_STOP="$TSC_DIR/stopped"
 TSC_NOEXIT="$TSC_DIR/noexit"
 TSC_LAN="$TSC_DIR/lan"
 TSC_LS_PREV="$TSC_DIR/localservice"
@@ -19769,7 +19847,7 @@ _tsc_uci_sync() {
 	e=1; [ -f "$TSC_NOEXIT" ] && e=0
 	uci set tailscale.settings.advertise_exit_node="$e"
 	uci set tailscale.settings.dns_mode=disabled
-	uci set tailscale.settings.service_enabled=1
+	uci set tailscale.settings.service_enabled="$([ -f "$TSC_STOP" ] && echo 0 || echo 1)"
 	uci set tailscale.settings.disable_fw_config=1
 	r="$(_tsc_lan_cidr)"
 	if [ -n "$r" ]; then
@@ -19783,6 +19861,7 @@ _tsc_uci_sync() {
 
 _tsc_start() {
 	local t=0
+	[ -f "$TSC_STOP" ] && { echo "ОШИБКА: Tailscale остановлен кнопкой «Остановить» — запустите его кнопкой «Запустить»"; return 1; }
 	/etc/init.d/tailscale enable >/dev/null 2>&1
 	/etc/init.d/tailscale restart >/dev/null 2>&1
 	while [ "$t" -lt 20 ]; do
@@ -20433,6 +20512,7 @@ _tsc_heal_need() {
 tsc_watch() {
 	local pid l="$TSC_DIR/watch.lock"
 	[ -f "$TSC_ON" ] && _tsc_installed || return 0
+	[ -f "$TSC_STOP" ] && return 0
 	pid="$(pidof tailscaled 2>/dev/null)"
 	[ -n "$pid" ] || return 0
 	_job_alive tsc && return 0
@@ -20582,6 +20662,8 @@ tsc_status() {
 	local inst=false run=false en=false on=false j="" st="" url="" ip="" host="" tn="" exo=false lano=false man=false
 	local pok=true cidr="" ver="" kexp="" lip lprev="" net=false zone=false nft=false tg=false tgr=0 zr=false st_on=false z lz free
 	_tsc_installed && { inst=true; ver="$(_tsc_ver)"; }
+	# остановили кнопкой, а потом запустили в LuCI или вручную — значит, Tailscale снова нужен
+	[ -f "$TSC_STOP" ] && _tsc_running && [ -n "$(find "$TSC_STOP" -mmin +1 2>/dev/null)" ] && rm -f "$TSC_STOP"
 	[ -f "$TSC_ON" ] && on=true
 	_tsc_enabled && en=true
 	if $inst && _tsc_running; then
@@ -20649,6 +20731,7 @@ tsc_status() {
 	printf '"luci_app":%s,"latest":"%s","newer":%s,"source":"%s",' "$(_tsc_luci_app && echo true || echo false)" "$(esc "$(_tsc_vnum "$lat")")" \
 		"$([ -n "$lat" ] && [ -n "$vcur" ] && _st_ver_lt "$vcur" "$(_tsc_vnum "$lat")" && echo true || echo false)" "$(esc "$(cat "$TSC_SRC" 2>/dev/null)")"
 	printf '"server":"%s","server_kind":"%s","admin":"%s","has_key":%s,' "$(esc "$(_tsc_srv)")" "$(_tsc_kind)" "$(esc "$(_tsc_admin)")" "$([ -s "$TSC_KEY" ] && echo true || echo false)"
+	printf '"stopped":%s,' "$([ -f "$TSC_STOP" ] && echo true || echo false)"
 	printf '"stgws":%s,"tg_rules":%s,"zapret":%s,"zapret_inst":%s,"steer":%s,"steer_inst":%s,"steer_dns":"%s","free_kb":%s,"need_kb":%s,"job":%s}\n' \
 		"$tg" "${tgr:-0}" "$zr" "$([ -f /etc/init.d/zapret ] && echo true || echo false)" "$st_on" "$(_st_installed && echo true || echo false)" "$(esc "$(_st_dnsmode 2>/dev/null)")" "${free:-0}" "$TSC_NEED_KB" \
 		"$(_job_alive tsc && echo true || echo false)"
@@ -20656,6 +20739,7 @@ tsc_status() {
 
 do_tsc_install() {
 	local free
+	rm -f "$TSC_STOP"
 	_ensure_deps
 	_tsc_say "Проверяем место на флеш-памяти"
 	free="$(_tsc_free_kb)"
@@ -20705,6 +20789,14 @@ do_tsc_update() {
 	$UPDATE >/dev/null 2>&1
 	_tsc_install_gh || { echo "ОШИБКА: свежая версия не скачалась — Tailscale $old продолжает работать"; return 1; }
 	rm -f "$TSC_DIR/version"
+	if [ -f "$TSC_STOP" ]; then
+		# остановлен кнопкой — пакет мог запустить службу при установке; гасим её снова
+		/etc/init.d/tailscale stop >/dev/null 2>&1
+		/etc/init.d/tailscale disable >/dev/null 2>&1
+		ZM_VER_FORCE=1 _zm_cached tsc _tsc_gh_latest >/dev/null 2>&1
+		_tsc_say "Готово: Tailscale $old → $(_tsc_ver). Служба остановлена, как и была — запустите её кнопкой «Запустить»"
+		return 0
+	fi
 	_tsc_say "Перезапускаем службу"
 	_tsc_start || return 1
 	_tsc_prefs
@@ -20721,6 +20813,7 @@ do_tsc_update() {
 
 do_tsc_repair() {
 	_tsc_installed || { echo "ОШИБКА: Tailscale не установлен"; return 1; }
+	[ -f "$TSC_STOP" ] && { echo "ОШИБКА: Tailscale остановлен — сначала нажмите «Запустить»"; return 1; }
 	_tsc_running || { _tsc_say "Запускаем службу Tailscale"; _tsc_start || return 1; }
 	_tsc_setup
 	_tsc_prefs
@@ -20788,10 +20881,31 @@ tsc_action() {
 				repair)  job_start tsc do_tsc_repair ;;
 				update)  job_start tsc do_tsc_update ;;
 			esac ;;
-		login|logout|restart|exit|lan|server|apply|kick|lanack|approved)
+		login|logout|restart|exit|lan|server|apply|kick|lanack|approved|stop|start)
 			_tsc_installed || { echo '{"error":"Tailscale не установлен"}'; return 1; }
 			_job_alive tsc && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
 			case "$a" in
+				login|logout|restart|apply|kick) [ -f "$TSC_STOP" ] && { echo '{"error":"Tailscale остановлен — сначала нажмите «Запустить»"}'; return 1; } ;;
+			esac
+			case "$a" in
+				stop)
+					mkdir -p "$TSC_DIR"; : > "$TSC_STOP"
+					pkill -f 'tailscale (up|login)' >/dev/null 2>&1
+					_tsc_uci_sync
+					[ -x /etc/init.d/tailscale ] && { /etc/init.d/tailscale stop >/dev/null 2>&1; /etc/init.d/tailscale disable >/dev/null 2>&1; }
+					sleep 1
+					if _tsc_running; then killall tailscaled >/dev/null 2>&1; sleep 2; _tsc_running && killall -9 tailscaled >/dev/null 2>&1; fi
+					rm -f "$TSC_DIR/watch.key"
+					_tsc_running && { echo '{"error":"служба Tailscale не остановилась — смотрите журнал роутера"}'; return 1; }
+					logger -t zapret-manager "Tailscale остановлен кнопкой — сам не запустится, пока не нажмут «Запустить»"
+					printf '{"ok":true}\n' ;;
+				start)
+					rm -f "$TSC_STOP"
+					_tsc_start >/dev/null 2>&1; j=$?
+					_tsc_uci_sync
+					[ "$j" = 0 ] || { echo '{"error":"служба Tailscale не запустилась — смотрите журнал роутера"}'; return 1; }
+					_tsc_kick_bg
+					printf '{"ok":true}\n' ;;
 				login) _tsc_login ;;
 				server) rm -f "$TSC_MANUAL"; _tsc_server_set "$m" ;;
 				kick) _tsc_kick_bg; printf '{"ok":true}\n' ;;
@@ -20827,6 +20941,7 @@ tsc_action() {
 						else rm -f "$TSC_LAN"; fi
 					fi
 					[ "$m" = off ] && rm -f "$TSC_MANUAL"
+					[ -f "$TSC_STOP" ] && { printf '{"ok":true}\n'; return 0; }
 					_tsc_prefs || { echo '{"error":"Tailscale не принял настройку — смотрите журнал роутера"}'; return 1; }
 					printf '{"ok":true}\n' ;;
 			esac ;;
@@ -21476,6 +21591,19 @@ _fk_sb_install() {
 	fi
 	_fk_sb_pkg > "$FK_SB_OWN"
 	_fk_say "sing-box $(_fk_sb_ver) установлен ($(_fk_sb_name "$(_fk_sb_var)"))"
+	# По умолчанию Forkozz работает на расширенном облегчённом sing-box (yandexru45/sing-box-extended-lite):
+	# все протоколы (XHTTP, VMess, VLESS Encryption, AmneziaWG…) при 10–17 МБ. Пакет выше нужен ради
+	# службы запуска sing-box. Не встал облегчённый или нет сборки под роутер — работаем на пакетном
+	if [ "$1" != stable ] && _fk_lite_arch >/dev/null && _fk_lite_engine; then
+		local up=0
+		/etc/init.d/netshift running >/dev/null 2>&1 && up=1
+		ZM_FK_SB_NESTED=1
+		do_fk_singbox lite norestart || _rb_warn "Расширенный облегчённый sing-box не встал — Forkozz работает на $(_fk_sb_name "$(_fk_sb_var)") sing-box $(_fk_sb_ver). Поставить его можно позже в «Настройках» → sing-box"
+		ZM_FK_SB_NESTED=""
+		# движок после смены ядра перезапускает Forkozz, даже если тот не был запущен, — возвращаем как было
+		[ "$up" = 0 ] && /etc/init.d/netshift running >/dev/null 2>&1 && _zm_run 60 $FK_REL /etc/init.d/netshift stop >/dev/null 2>&1
+	fi
+	return 0
 }
 
 _fk_sb_users() {
@@ -22913,20 +23041,23 @@ _fk_ext_auto() {
 	local why rc
 	why="$(_fk_ext_need "$1" "$2")" || return 0
 	if [ -f "$FK_EXT_FAIL" ] && [ -z "$(find "$FK_EXT_FAIL" -mmin +720 2>/dev/null)" ]; then
-		_rb_warn "${why}, а расширенный sing-box поставить не удалось — такие серверы пока пропускаются"
+		_rb_warn "${why}, а расширенный облегчённый sing-box поставить не удалось — такие серверы пока пропускаются"
 		return 0
 	fi
-	local v=extended fr hv
-	fr="$(df -k /overlay 2>/dev/null | awk 'NR==2 {print $4}')"; [ -n "$fr" ] || fr="$(df -k / 2>/dev/null | awk 'NR==2 {print $4}')"
-	hv="$(ls -l /usr/bin/sing-box 2>/dev/null | awk '{print int($5 / 1024)}')"
-	[ -n "$fr" ] && [ $((fr + ${hv:-0})) -lt 40960 ] && _fk_lite_arch >/dev/null && _fk_lite_engine && v=lite
-	if [ "$v" = lite ]; then _fk_say "${why} — нынешний sing-box их не умеет, а для расширенного мало места на флеше — ставим расширенный облегчённый"
-	else _fk_say "${why} — нынешний sing-box их не умеет, ставим расширенный"; fi
+	if ! _fk_lite_arch >/dev/null; then
+		_rb_warn "${why}, а расширенного облегчённого sing-box для этого роутера ($TG_ARCH) нет — такие серверы пропускаются"
+		return 0
+	fi
+	if ! _fk_lite_engine; then
+		_rb_warn "${why} — их умеет только расширенный облегчённый sing-box, а этот движок Forkozz ($(_fk_version)) его не ставит. Обновите Forkozz"
+		return 0
+	fi
+	_fk_say "${why} — нынешний sing-box их не умеет, ставим расширенный облегчённый"
 	ZM_FK_SB_NESTED=1
-	do_fk_singbox "$v" "$3"; rc=$?
+	do_fk_singbox lite "$3"; rc=$?
 	ZM_FK_SB_NESTED=""
 	if [ "$rc" = 0 ]; then rm -f "$FK_EXT_FAIL"
-	else mkdir -p "$ZM_STATE_DIR"; touch "$FK_EXT_FAIL"; _rb_warn "Расширенный sing-box не встал — Forkozz работает на прежнем, такие серверы пропускаются"; fi
+	else mkdir -p "$ZM_STATE_DIR"; touch "$FK_EXT_FAIL"; _rb_warn "Расширенный облегчённый sing-box не встал — Forkozz работает на прежнем, такие серверы пропускаются"; fi
 	return 0
 }
 
@@ -23010,14 +23141,18 @@ _fk_sbext_run() {
 do_fk_singbox() {
 	local want="$1" norestart="$2" free tfree have need tneed out="$JOBS_DIR/forkop-sb.json" old oldvar msg why same=0 verb
 	_fk_installed || { echo "ОШИБКА: Forkozz не установлен"; return 1; }
-	case "$want" in tiny|stable|extended|lite) ;; *) echo "ОШИБКА: неизвестный вариант sing-box"; return 1 ;; esac
+	case "$want" in
+		tiny|stable|lite) ;;
+		extended) echo "ОШИБКА: сборку sing-box-extended панель больше не ставит — выберите «Расширенный облегчённый»: те же протоколы, а места нужно в 3 раза меньше"; return 1 ;;
+		*) echo "ОШИБКА: неизвестный вариант sing-box"; return 1 ;;
+	esac
 	if [ "$want" = lite ]; then
 		_fk_lite_arch >/dev/null || { echo "ОШИБКА: для этого роутера ($TG_ARCH) нет облегчённой сборки — она выходит для amd64, arm64, armv7, mips и mipsel. Выберите «Расширенный»"; return 1; }
 		_fk_lite_engine || { echo "ОШИБКА: этот движок Forkozz ($(_fk_version)) ещё не умеет ставить облегчённый расширенный sing-box — обновите Forkozz"; return 1; }
 	fi
 	old="$(_fk_sb_ver)"; oldvar="$(_fk_sb_var)"
-	if [ "$want" != extended ] && [ "$want" != lite ] && why="$(_fk_ext_why all "" "$want")"; then
-		echo "ОШИБКА: ${why} — такие серверы работают только на расширенном sing-box, а Forkozz при следующем запуске сам вернул бы расширенный. Чтобы сменить вариант, сначала уберите их в «Подключении»"
+	if [ "$want" != lite ] && why="$(_fk_ext_why all "" "$want")"; then
+		echo "ОШИБКА: ${why} — такие серверы работают только на расширенном облегчённом sing-box, а Forkozz при следующем запуске сам вернул бы его. Чтобы сменить вариант, сначала уберите их в «Подключении»"
 		return 1
 	fi
 	[ -n "$old" ] && [ "$oldvar" = "$want" ] && same=1
@@ -23028,7 +23163,6 @@ do_fk_singbox() {
 	have="$(ls -l /usr/bin/sing-box 2>/dev/null | awk '{print int($5 / 1024)}')"
 	tfree="$(df -k /tmp 2>/dev/null | awk 'NR==2 {print $4}')"
 	case "$want" in
-		extended) need=40960; tneed=30720 ;;
 		lite) need=12288; tneed=$((18432 + ${have:-0})) ;;
 		*) need=16384; tneed=12288 ;;
 	esac
@@ -25271,6 +25405,7 @@ case "$cmd" in
 	doh_force_set)                        doh_force_set "$1" ;;
 	doh_failover_set)                     doh_failover_set "$1" ;;
 	doh_own_set)                          doh_own_set "$1" ;;
+	doh_power)                            doh_power "$1" ;;
 	doh_watch)                            doh_watch ;;
 	dns_net_set)                          dns_net_set "$1" ;;
 	dns_net_gone)                         dns_net_gone ;;
@@ -28308,6 +28443,7 @@ list_methods() {
 	json_add_object "doh_bootstrap_set";      json_add_string "value" "string"; json_close_object
 	json_add_object "doh_force_set";          json_add_string "mode" "string"; json_close_object
 	json_add_object "doh_failover_set";       json_add_string "value" "string"; json_close_object
+	json_add_object "doh_power";              json_add_string "mode" "string"; json_close_object
 	json_add_object "doh_own_set";            json_add_string "value" "string"; json_close_object
 	json_add_object "dns_net_set";            json_add_string "value" "string"; json_close_object
 	json_add_object "test_status";             json_close_object
@@ -28474,6 +28610,7 @@ call_method() {
 		doh_bootstrap_set)       json_get_var value value; "$BACKEND" doh_bootstrap_set "$value" ;;
 		doh_force_set)           json_get_var mode mode; "$BACKEND" doh_force_set "$mode" ;;
 		doh_failover_set)        json_get_var value value; "$BACKEND" doh_failover_set "$value" ;;
+		doh_power)               json_get_var mode mode; "$BACKEND" doh_power "$mode" ;;
 		doh_own_set)             json_get_var value value; "$BACKEND" doh_own_set "$value" ;;
 		dns_net_set)             json_get_var value value; "$BACKEND" dns_net_set "$value" ;;
 		test_status)             "$BACKEND" test_status ;;
@@ -28644,6 +28781,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"doh_force_set",
 					"doh_failover_set",
 					"doh_own_set",
+					"doh_power",
 					"dns_net_set",
 					"hosts_replace_geohide",
 					"hosts_reset",
@@ -28996,6 +29134,7 @@ var callDohBootstrapSet = zmDeclare({ object: 'zapret-manager', method: 'doh_boo
 var callDohForceSet = zmDeclare({ object: 'zapret-manager', method: 'doh_force_set', params: ['mode'], expect: {} });
 var callDohFailoverSet = zmDeclare({ object: 'zapret-manager', method: 'doh_failover_set', params: ['value'], expect: {} });
 var callDohOwnSet = zmDeclare({ object: 'zapret-manager', method: 'doh_own_set', params: ['value'], expect: {} });
+var callDohPower = zmDeclare({ object: 'zapret-manager', method: 'doh_power', params: ['mode'], expect: {} });
 var callDnsNetSet = zmDeclare({ object: 'zapret-manager', method: 'dns_net_set', params: ['value'], expect: {} });
 var callTestStatus = zmDeclare({ object: 'zapret-manager', method: 'test_status', expect: {} });
 var callTestAction = zmDeclare({ object: 'zapret-manager', method: 'test_action', params: ['action', 'mode'], expect: {} });
@@ -30910,6 +31049,7 @@ return baseclass.extend({
 	dohForceSet: callDohForceSet,
 	dohFailoverSet: callDohFailoverSet,
 	dohOwnSet: callDohOwnSet,
+	dohPower: callDohPower,
 	dnsNetSet: callDnsNetSet,
 	testStatus: callTestStatus,
 	testAction: bigArg2(callTestAction),
@@ -31651,6 +31791,11 @@ return view.extend({
 			svcBox.innerHTML = '';
 			if (!data.running) {
 				var dm = data.failover && data.failover.mode === 'direct';
+				if (data.stopped) {
+					svcBox.appendChild(badge('zm-off', 'остановлена'));
+					svcBox.appendChild(E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'DNS идёт без шифрования. Сама не запустится — нажмите «Запустить».'));
+					return;
+				}
 				svcBox.appendChild(badge(dm ? 'zm-warn' : 'zm-bad', dm ? 'временно выключена — серверы не отвечают' : 'остановлена'));
 				return;
 			}
@@ -31725,7 +31870,7 @@ return view.extend({
 					return zm.dohSet(id);
 				}).then(function(res) {
 					if (res.error) throw new Error(res.error);
-					logLines.push('   ✓ ' + label(id) + ' применён — DNS на роутере отвечает');
+					logLines.push(res.stopped ? '   ✓ ' + label(id) + ' выбран — DoH остановлен, DNS пойдёт через этот сервер после «Запустить»' : '   ✓ ' + label(id) + ' применён — DNS на роутере отвечает');
 				});
 			});
 			if (foChanged()) steps.push(function() {
@@ -31812,6 +31957,31 @@ return view.extend({
 			}).catch(function() { busy = false; });
 		}
 
+		function power(on) {
+			if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+			var go = function() {
+				busy = true;
+				render();
+				zm.toast(on ? 'Запускаем DNS over HTTPS…' : 'Останавливаем DNS over HTTPS…', 'warning');
+				return zm.dohPower(on ? 'on' : 'off').then(function(res) {
+					busy = false;
+					if (res && res.error) zm.toast(res.error, 'error');
+					else if (res && res.warn) zm.toast(res.warn, 'warning', 8000);
+					else zm.toast(on ? 'DNS over HTTPS запущен' : 'DNS over HTTPS остановлен — DNS идёт без шифрования', 'info');
+					return refresh();
+				}).catch(function() { busy = false; zm.toast('Роутер не ответил', 'error'); render(); });
+			};
+			if (on) return go();
+			return zm.dialog({ title: 'Остановить DNS over HTTPS?', okText: 'Остановить',
+				blocks: [ { type: 'list', title: 'Что произойдёт', items: [
+					'DNS роутера пойдёт через обычные серверы, без шифрования',
+					'Перехват DNS устройств и переключение на запасной сервер не работают, пока DoH остановлен',
+					'Сам DoH не запустится — ни после перезагрузки роутера, ни по таймеру, — только кнопкой «Запустить»',
+					'Серверы и настройки сохраняются'
+				] } ]
+			}).then(function(v) { if (v) return go(); });
+		}
+
 		function render() {
 			hostsWarn.set(!!(data.installed && data.hosts_extra && !data.dnsm));
 			card.innerHTML = '';
@@ -31851,12 +32021,15 @@ return view.extend({
 						]);
 					}))
 				]));
-				card.appendChild(row('Перехват DNS устройств', data.force_dns
+				card.appendChild(row('Перехват DNS устройств', data.stopped && data.force_dns ? badge('zm-off', 'не работает, пока DoH остановлен') : data.force_dns
 					? badge('zm-ok', 'включён') : badge('zm-off', 'выключен')));
 			}
 
 			card.appendChild(E('div', { 'class': 'zm-actions' }, data.installed
-				? [ E('button', { 'class': 'cbi-button cbi-button-remove', 'click': function() {
+				? [ data.running && !data.stopped
+					? E('button', { 'class': 'cbi-button', 'disabled': busy ? '' : null, 'click': function() { power(false); } }, 'Остановить')
+					: E('button', { 'class': 'cbi-button cbi-button-positive', 'disabled': busy || !(data.resolvers || []).length ? '' : null, 'click': function() { power(true); } }, 'Запустить'),
+					E('button', { 'class': 'cbi-button cbi-button-remove', 'click': function() {
 					zm.dialog({ title: 'Удалить DNS over HTTPS?', danger: true, okText: 'Удалить DNS over HTTPS',
 						blocks: [ { type: 'list', title: 'Что произойдёт', items: [
 							'DNS over HTTPS удалится вместе с пакетами и настройками',
@@ -32150,7 +32323,8 @@ return view.extend({
 				f.mode === 'direct' ? 'сейчас без DoH' : f.mode === 'backup' ? 'на запасном' : 'следим') : E([]) ]));
 			if (live && f.mode === 'backup') foCard.appendChild(E('div', { 'class': 'zm-refresh-banner zm-show', 'role': 'status', 'style': 'margin:0 0 12px' }, [ E('span', {},
 				'Сейчас работает запасной ' + label(now) + ': основной ' + label(f.pref || main) + ' не отвечает' + (f.since ? ' с ' + at(f.since) : '') + '. Как только он ответит две проверки подряд, DNS вернётся на него. Хотите оставить ' + label(now) + ' основным — выберите его в списке серверов выше или поднимите стрелкой ↑ и нажмите «Применить».') ]));
-			if (saved.on && f.mode === 'direct') foCard.appendChild(E('div', { 'class': 'zm-refresh-banner zm-show', 'role': 'status', 'style': 'margin:0 0 12px' }, [ E('span', {},
+			if (saved.on && data.stopped) foCard.appendChild(E('p', { 'class': 'zm-hint zm-ab-warn', 'style': 'margin-top:0' }, 'DoH остановлен — сервер не проверяется и не переключается, пока не нажмёте «Запустить».'));
+			if (saved.on && f.mode === 'direct' && !data.stopped) foCard.appendChild(E('div', { 'class': 'zm-refresh-banner zm-show', 'role': 'status', 'style': 'margin:0 0 12px' }, [ E('span', {},
 				'DNS временно идёт без шифрования, через обычные серверы' + (f.since ? ' — с ' + at(f.since) : '') + ': не отвечает ни один сервер цепочки. DoH включится сам, как только какой-нибудь из них ответит.') ]));
 			foCard.appendChild(zm.swRow(d.on, 'Переключать на запасной сервер',
 				'Раз в 2 минуты панель проверяет основной сервер настоящим DNS-запросом. Не ответил две проверки подряд — DNS переходит на следующий отвечающий сервер цепочки, сверху вниз. Основной снова ответил две проверки подряд — DNS возвращается на него.',
@@ -33357,7 +33531,9 @@ return view.extend({
 			if (!data.installed) { renderIntro(); return; }
 			mainCard.appendChild(E('h3', {}, 'Удалённый доступ'));
 			var st = data.state || '', kv = E('div', { 'class': 'zm-kv' });
-			kv.appendChild(row('Служба', data.running ? badge('zm-ok', 'работает') : badge(data.enabled ? 'zm-bad' : 'zm-off', 'остановлена')));
+			kv.appendChild(row('Служба', data.running ? badge('zm-ok', 'работает') : data.stopped
+				? E('span', { 'style': 'display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap' }, [ badge('zm-off', 'остановлена'), E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'сама не запустится — нажмите «Запустить»') ])
+				: badge(data.enabled ? 'zm-bad' : 'zm-off', 'остановлена')));
 			kv.appendChild(row('Сервер', E('span', { 'style': 'display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap' }, [
 				E('span', {}, srvName() + (keyLogin() ? ' · вход по ключу' : '')),
 				E('button', { 'type': 'button', 'class': 'cbi-button', 'style': 'padding:2px 10px', 'disabled': busy ? '' : null, 'click': changeServer }, 'Сменить')
@@ -33518,11 +33694,20 @@ return view.extend({
 			}
 
 			var b = [];
-			if (!data.running) b.push(btn('cbi-button-positive', 'Запустить', function() { quick('restart', '', 'Tailscale запущен'); }));
+			if (!data.running) b.push(btn('cbi-button-positive', 'Запустить', function() { quick('start', '', 'Tailscale запущен'); }));
 			else if (!loggedIn() && (keyLogin() || (loginUrl && !viaLuci))) b.push(btn('cbi-button-positive', keyLogin() ? 'Подключить' : 'Получить новую ссылку', function() { login(false); }));
-			if (data.on === false) b.push(btn('cbi-button-action', 'Настроить для телефона', function() { job('repair', 'Настраиваем сеть для телефона — ход работы в окне вывода'); }));
+			if (data.on === false && !data.stopped) b.push(btn('cbi-button-action', 'Настроить для телефона', function() { job('repair', 'Настраиваем сеть для телефона — ход работы в окне вывода'); }));
 			else if (data.running && (!data.net || !data.zone)) b.push(btn('cbi-button-action', 'Исправить', function() { job('repair', 'Восстанавливаем настройки — ход работы в окне вывода'); }));
 			if (data.running) b.push(btn('', 'Перезапустить', function() { quick('restart', '', 'Tailscale перезапущен'); }));
+			if (data.running) b.push(btn('', 'Остановить', function() {
+				zm.dialog({ title: 'Остановить Tailscale?', okText: 'Остановить',
+					blocks: [ { type: 'list', title: 'Что произойдёт', items: [
+						'Телефоны потеряют доступ к роутеру и выход в интернет через него',
+						'Tailscale сам не запустится — ни после перезагрузки роутера, ни по таймеру, — только кнопкой «Запустить»',
+						'Вход в аккаунт и настройки сохраняются'
+					] } ]
+				}).then(function(v) { if (v) quick('stop', '', 'Tailscale остановлен'); });
+			}));
 			if (panel('/machines')) b.push(link(panel('/machines'), official() ? 'Панель Tailscale' : 'Панель ' + srvName()));
 			if (data.luci_app) b.push(link(luciUrl(), 'Открыть в LuCI'));
 			if (loggedIn()) b.push(btn('', 'Отключить роутер', function() {
@@ -43149,7 +43334,6 @@ return view.extend({
 			{ g: 'vpn', product: 'sTGWS, Steer, каталог списков', author: 'xyzmean', url: 'https://github.com/xyzmean' },
 			{ g: 'vpn', product: 'NetShift (основа Forkozz)', author: 'yandexru45', url: 'https://github.com/yandexru45/netshift' },
 			{ g: 'vpn', product: 'sing-box', author: 'SagerNet', url: 'https://github.com/SagerNet/sing-box' },
-			{ g: 'vpn', product: 'sing-box-extended', author: 'shtorm-7', url: 'https://github.com/shtorm-7/sing-box-extended' },
 			{ g: 'vpn', product: 'sing-box-extended-lite', author: 'yandexru45', url: 'https://github.com/yandexru45/sing-box-extended-lite' },
 			{ g: 'vpn', product: 'Mixomo, GeoHideDNS', author: 'Internet-Helper', url: 'https://github.com/Internet-Helper' },
 			{ g: 'vpn', product: 'mihomo, metacubexd, meta-rules-dat', author: 'MetaCubeX', url: 'https://github.com/MetaCubeX' },
@@ -44765,10 +44949,9 @@ function extPick(d, def) {
 	return o;
 }
 var SB_VARS = [
-	{ id: 'tiny', label: 'Облегчённый', hint: 'Пакет sing-box-tiny из OpenWrt: меньше памяти, все протоколы Forkozz, кроме XHTTP и VMess — для них Forkozz сам поставит расширенный. Подходит почти всем.', warn: '' },
-	{ id: 'stable', label: 'Обычный', hint: 'Полный sing-box из репозитория OpenWrt. Нужно больше места.', warn: '' },
-	{ id: 'extended', label: 'Расширенный', hint: 'Сборка sing-box-extended с GitHub: XHTTP, VMess и другое. Forkozz ставит его сам, когда среди серверов или в подписке есть XHTTP или VMess; нужно ~40 МБ.', warn: 'Скачивается с GitHub (shtorm-7/sing-box-extended), нужно около 40 МБ свободной памяти.\n' },
-	{ id: 'lite', label: 'Расширенный облегчённый', hint: 'Сборка sing-box-extended-lite с GitHub (yandexru45): те же XHTTP, VMess, VLESS Encryption, Reality, Hysteria2 и AmneziaWG, но без тяжёлого лишнего — 10–17 МБ вместо ~40. Для роутеров с маленьким флешем. Есть для amd64, arm64, armv7, mips и mipsel.', warn: 'Скачивается с GitHub (yandexru45/sing-box-extended-lite), нужно около 12–17 МБ на флеше. Если места мало, ставится сжатая сборка: при запуске она ненадолго берёт 35–45 МБ оперативной памяти.\n' }
+	{ id: 'lite', label: 'Расширенный облегчённый', hint: 'Ставится по умолчанию. Сборка sing-box-extended-lite с GitHub (yandexru45): все протоколы Forkozz — XHTTP, VMess, VLESS Encryption, Reality, Hysteria2 и AmneziaWG — при 10–17 МБ на флеше. Есть для amd64, arm64, armv7, mips и mipsel.', warn: 'Скачивается с GitHub (yandexru45/sing-box-extended-lite), нужно около 12–17 МБ на флеше. Если места мало, ставится сжатая сборка: при запуске она ненадолго берёт 35–45 МБ оперативной памяти.\n' },
+	{ id: 'tiny', label: 'Облегчённый', hint: 'Пакет sing-box-tiny из OpenWrt: меньше памяти, все протоколы Forkozz, кроме XHTTP и VMess — для них Forkozz сам поставит расширенный облегчённый.', warn: '' },
+	{ id: 'stable', label: 'Обычный', hint: 'Полный sing-box из репозитория OpenWrt. Нужно больше места.', warn: '' }
 ];
 var SB_NAMES = { tiny: 'Облегчённый', stable: 'Обычный', extended: 'Расширенный', lite: 'Расширенный облегчённый', compact: 'Расширенный компактный' };
 var SUB_IV = [ { id: '1h', label: '1 ч' }, { id: '6h', label: '6 ч' }, { id: '12h', label: '12 ч' }, { id: '1d', label: '24 ч' } ];
@@ -47105,6 +47288,7 @@ return view.extend({
 			var curVar = vars.some(function(x) { return x.id === sv; }) ? sv : '';
 			var restartNote = st.enabled ? 'Forkozz перезапустится — на полминуты выбранные сервисы пойдут напрямую.\n' : '';
 			sbCard.appendChild(row('Версия', has ? E('span', {}, [ E('b', {}, SB_NAMES[sv] || 'установлен вручную'), ' · ' + st.singbox ]) : E('span', {}, 'не установлен')));
+			if (has && sv === 'extended') sbCard.appendChild(E('p', { 'class': 'zm-hint zm-ab-warn' }, 'Сборку sing-box-extended (shtorm-7) панель больше не ставит и не обновляет. Выберите «Расширенный облегчённый» — те же протоколы, а места нужно в 3 раза меньше.'));
 			var sbSeg = seg(vars, curVar, function(v) {
 				var it = vars.filter(function(x) { return x.id === v; })[0];
 				if (v === 'lite' && st.sb_lite === 'engine') { zm.toast('Этот движок Forkozz ещё не умеет ставить облегчённый расширенный sing-box — сначала обновите Forkozz', 'warning', 8000); return; }
@@ -47115,8 +47299,8 @@ return view.extend({
 			if (has && curVar) {
 				var cur = vars.filter(function(x) { return x.id === curVar; })[0];
 				sbCard.appendChild(E('div', { 'class': 'zm-actions' }, [ E('button', { 'class': 'cbi-button', 'disabled': busy ? '' : null, 'click': function() {
-					return zm.ask('Переустановить ' + cur.label.toLowerCase() + ' sing-box?\n\n' + (curVar === 'extended' ? 'Скачается свежая сборка с GitHub (около 40 МБ).\n' : curVar === 'lite' ? 'Скачается свежая сборка с GitHub (около 10–17 МБ).\n' : 'Пакет скачается из репозитория OpenWrt заново.\n') + restartNote + 'Если не установится, останется прежний.').then(function(ok) { if (!ok) return; act('singbox_reinstall', curVar); });
-				} }, curVar === 'extended' || curVar === 'lite' ? 'Переустановить (обновить сборку)' : 'Переустановить') ]));
+					return zm.ask('Переустановить ' + cur.label.toLowerCase() + ' sing-box?\n\n' + (curVar === 'lite' ? 'Скачается свежая сборка с GitHub (около 10–17 МБ).\n' : 'Пакет скачается из репозитория OpenWrt заново.\n') + restartNote + 'Если не установится, останется прежний.').then(function(ok) { if (!ok) return; act('singbox_reinstall', curVar); });
+				} }, curVar === 'lite' ? 'Переустановить (обновить сборку)' : 'Переустановить') ]));
 			}
 			sbCard.appendChild(E('div', { 'class': 'zm-kv' }, vars.map(function(x) {
 				return row(x.label, E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, x.hint));
