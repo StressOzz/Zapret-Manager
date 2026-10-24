@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.43
+# Version: 4.47
 ZM_VERSION_EOF
 set -e
 
@@ -1546,6 +1546,7 @@ zm_watch() {
 		_fk_listsvia_patch
 		_fk_ghdl_patch
 		_fk_b4_watch
+		_fk_subfmt_watch
 	fi
 	_st_colo_guard
 	_st_vpn_watch
@@ -12274,7 +12275,11 @@ stl_leftovers() {
 stl_spec_whose() {
 	[ -s "$STL_YAML" ] && { echo foreign; return; }
 	[ -s "$STL_SPEC" ] || { echo none; return; }
-	grep -qE '"zm_(warp|vpn[0-9]*|if[2-9]|direct)"' "$STL_SPEC" && { echo zm; return; }
+	# свой spec узнаём по именам выходов, которые пишет только панель: zm_vpn, zm_vpn2…, zmv_vless…,
+	# zm_warp…, zm_direct и zm_if — туннель основной секции (без цифры), zm_if2… — туннели других секций.
+	# Раньше zm_if без цифры не узнавался: Steer с выходом «Интерфейс» в основной секции считался чужим
+	# и вкладка блокировалась (issue #1188)
+	grep -qE '"(zm_(warp[0-9]*|vpn[0-9]*|if[0-9]*|direct)|zmv[0-9]*_[A-Za-z0-9]+)"' "$STL_SPEC" && { echo zm; return; }
 	tr '\n\r' '  ' < "$STL_SPEC" | grep -q '"\(channels\|rules\)"[[:space:]]*:[[:space:]]*\[[[:space:]]*{' && { echo foreign; return; }
 	echo none
 }
@@ -21921,6 +21926,30 @@ _fk_b4_watch() {
 	return 0
 }
 
+# Подписки, которые панель до 4.44 переключила на формат Happ (из-за этого могли пропасть серверы
+# Hysteria2 и VMess): один раз проверяем их заново — Forkozz применяет настройки сам, не чаще раза в 30 минут
+_fk_subfmt_watch() {
+	local f="$JOBS_DIR/fk-subfmt.last" d="$ZM_STATE_DIR/fk.subfmt.day" s
+	# раз в сутки: сервис мог начать отдавать серверы (например, Hysteria2) только в одном формате —
+	# сверяем форматы подписок с «Авто» и, если выбор поменялся, сразу перекачиваем подписку
+	if grep -q "proxy_config_type 'subscription'" /etc/config/netshift 2>/dev/null && [ -z "$(find "$d" -mmin -1440 2>/dev/null)" ] &&
+		_fk_up && ! _job_running forkop; then
+		mkdir -p "$ZM_STATE_DIR"; : > "$d"
+		( _fk_sub_fmt_auto >/dev/null 2>&1 && _zm_run 300 /usr/bin/netshift subscription_update all >/dev/null 2>&1 ) </dev/null >/dev/null 2>&1 &
+		return 0
+	fi
+	grep -q "subscription_format_preference 'xray'" /etc/config/netshift 2>/dev/null || return 0
+	[ -n "$(find "$f" -mmin -30 2>/dev/null)" ] && return 0
+	for s in $(uci -q show netshift | sed -n "s/^netshift\.\([A-Za-z0-9_]*\)\.subscription_format_preference='xray'$/\1/p"); do
+		[ -z "$(uci -q get "netshift.$s.zm_subfmt_auto")" ] && [ -f "$ZM_STATE_DIR/fk.subfmt.$s" ] || continue
+		_fk_up && ! _job_running forkop || return 0
+		mkdir -p "$JOBS_DIR"; : > "$f"
+		job_start forkop do_fk_service apply >/dev/null 2>&1
+		return 0
+	done
+	return 0
+}
+
 _fk_ghdl_patch() {
 	local f=/usr/lib/netshift/helpers.sh
 	[ -f "$f" ] || return 0
@@ -22961,7 +22990,7 @@ do_fk_service() {
 	_fk_log_default
 	if _fk_sub_fmt_auto; then
 		_fk_say "Скачиваем подписку в новом формате"
-		if _zm_quiet "" /usr/bin/netshift subscription_update all; then echo "   ✓ Подписка обновлена"
+		if _fk_sub_update; then echo "   ✓ Подписка обновлена"
 		else echo "!! Подписка в новом формате не обновилась — Forkozz возьмёт её при следующем обновлении"; fi
 	fi
 	local lx; lx="$(_fk_log_ext)"
@@ -23086,41 +23115,120 @@ _fk_sub_keys() {
 		end' 2>/dev/null
 }
 
+# Подписка: какой формат у сервиса полнее — sing-box или Xray JSON (Happ). Сервер сравнивается целиком:
+# протокол + адрес + порт. Раньше сравнивались только адрес и порт, а у многих сервисов Hysteria2 (UDP) и
+# VLESS (TCP) живут на одном адресе и порту 443 — панель считала, что в Happ «есть всё», переключала
+# подписку на Happ, и серверы Hysteria2 (а заодно VMess, которых в Happ нет) пропадали из списка.
+# Переключённые так подписки (отметка zm_subfmt_auto) проверяются снова и возвращаются на «Авто»,
+# если в Happ чего-то не хватает. Формат, выбранный вручную, панель не трогает
 _fk_sub_fmt_auto() {
-	local sec url ver f sb xr ch="" d="$JOBS_DIR/fk-subfmt" mark n_sb n_xr miss extra
+	local sec url ver sb xr ch="" d="$JOBS_DIR/fk-subfmt" mark n_sb n_xr miss xex lost extra pref auto legacy
 	command -v jq >/dev/null 2>&1 || return 1
 	ver="$(sing-box version 2>/dev/null | head -n1 | awk '{print $3}')"
 	for sec in $(uci -q show netshift | sed -n "s/^netshift\.\([A-Za-z0-9_]*\)\.subscription_url=.*/\1/p" | sort -u); do
-		case "$(uci -q get "netshift.$sec.subscription_format_preference")" in ''|auto) ;; *) continue ;; esac
+		pref="$(uci -q get "netshift.$sec.subscription_format_preference")"
+		mark="$ZM_STATE_DIR/fk.subfmt.$sec"
+		auto=""
+		case "$pref" in
+			''|auto) ;;
+			xray)
+				# переключила панель: есть её отметка, или (до 4.44) она проверяла эту подписку
+				if [ "$(uci -q get "netshift.$sec.zm_subfmt_auto")" = 1 ] || { [ -f "$mark" ] && [ -z "$(uci -q get "netshift.$sec.zm_subfmt_auto")" ]; }; then auto=1
+				else continue; fi ;;
+			*) continue ;;
+		esac
 		[ -z "$(uci -q get "netshift.$sec.subscription_user_agent")" ] || continue
 		[ "$(uci -q get "netshift.$sec.proxy_config_type")" = subscription ] || continue
 		url="$(uci -q get "netshift.$sec.subscription_url")"
 		case "$url" in *' '*) continue ;; esac
 		case "$url" in http://*|https://*) ;; *) continue ;; esac
-		mark="$ZM_STATE_DIR/fk.subfmt.$sec"
-		[ "$1" = force ] || { [ -f "$mark" ] && [ "$(cat "$mark" 2>/dev/null)" = "$(printf '%s' "$url" | md5sum | cut -c1-16)" ] && [ -z "$(find "$mark" -mmin +1440 2>/dev/null)" ] && continue; }
+		# подписку, переключённую на Happ до 4.44, проверяем сразу; остальные — не чаще раза в сутки
+		legacy=""; [ -n "$auto" ] && [ -z "$(uci -q get "netshift.$sec.zm_subfmt_auto")" ] && legacy=1
+		if [ "$1" != force ] && [ -z "$legacy" ]; then
+			[ -f "$mark" ] && [ "$(cat "$mark" 2>/dev/null)" = "$(printf '%s' "$url" | md5sum | cut -c1-16)" ] && [ -z "$(find "$mark" -mmin +1440 2>/dev/null)" ] && continue
+		fi
 		_fk_say "Подписка «$(uci -q get "netshift.$sec.zm_label" || echo "$sec")»: сравниваем, что сервер отдаёт в форматах sing-box и Happ"
 		rm -rf "$d"; mkdir -p "$d"; : > "$d/sb"; : > "$d/xr"
 		curl -fsSL --compressed -m 15 -A "singbox/${ver:-1.12.0}" -o "$d/sb" "$url" 2>/dev/null
 		curl -fsSL --compressed -m 15 -A "Happ/1.0.0" -o "$d/xr" "$url" 2>/dev/null
-		_fk_sub_keys < "$d/sb" > "$d/sb.k"; _fk_sub_keys < "$d/xr" > "$d/xr.k"
+		_fk_sub_keys < "$d/sb" | sort -u > "$d/sb.k"; _fk_sub_keys < "$d/xr" | sort -u > "$d/xr.k"
 		mkdir -p "$ZM_STATE_DIR"; printf '%s' "$url" | md5sum | cut -c1-16 > "$mark"
-		n_sb="$(cut -d'|' -f2 "$d/sb.k" | sort -u | grep -c .)"; n_xr="$(cut -d'|' -f2 "$d/xr.k" | sort -u | grep -c .)"
+		n_sb="$(grep -c . "$d/sb.k")"; n_xr="$(grep -c . "$d/xr.k")"
 		if [ "$n_sb" = 0 ] && [ "$n_xr" = 0 ]; then echo "   · подписка не скачалась напрямую — формат оставляем как есть"; rm -rf "$d"; continue; fi
-		[ "$n_xr" -gt 0 ] || { echo "   ✓ формат sing-box подходит: в формате Happ сервер подписку не отдал"; rm -rf "$d"; continue; }
-		[ "$n_sb" -gt 0 ] && [ "$n_xr" -gt "$n_sb" ] || { echo "   ✓ формат sing-box подходит: серверов в нём не меньше ($n_sb)"; rm -rf "$d"; continue; }
-		miss="$(cut -d'|' -f2 "$d/sb.k" | sort -u | grep -vxF -f "$(cut -d'|' -f2 "$d/xr.k" | sort -u > "$d/xa"; echo "$d/xa")" | grep -c .)"
-		[ "$miss" = 0 ] || { echo "   ✓ формат оставляем: в sing-box есть серверы, которых нет в Happ"; rm -rf "$d"; continue; }
-		extra="$(cut -d'|' -f1 "$d/xr.k" | sort -u | grep -vxF -f "$(cut -d'|' -f1 "$d/sb.k" | sort -u > "$d/sa"; echo "$d/sa")" | tr '\n' ' ' | sed 's/ $//')"
-		uci set "netshift.$sec.subscription_format_preference=xray"
-		ch=1
-		echo "   ✓ в формате Happ серверов больше ($n_xr против $n_sb${extra:+, в том числе $extra}) — подписка переключена на формат Happ"
-		logger -t zapret-manager "Forkozz: подписка секции $sec переключена на формат Happ ($n_xr серверов против $n_sb)"
+		# сравниваем серверы целиком (протокол + адрес + порт): каких нет в Happ (miss) и каких нет в sing-box (xex)
+		miss="$(grep -vxF -f "$d/xr.k" "$d/sb.k" | grep -c .)"; [ -s "$d/xr.k" ] || miss="$n_sb"
+		xex="$(grep -vxF -f "$d/sb.k" "$d/xr.k" | grep -c .)"; [ -s "$d/sb.k" ] || xex="$n_xr"
+		# Берём формат, в котором серверов видно больше всего: Happ — если в нём есть серверы, которых нет в
+		# sing-box, и он не теряет серверов sing-box, а если у каждого формата есть свои — тот, где их больше
+		if [ "$n_xr" -gt 0 ] && [ "$xex" -gt 0 ] && { [ "$miss" = 0 ] || [ "$n_xr" -gt "$n_sb" ]; }; then
+			extra="$(grep -vxF -f "$d/sb.k" "$d/xr.k" | cut -d'|' -f1 | sort -u | tr '\n' ' ' | sed 's/ $//')"
+			lost=""; [ "$miss" = 0 ] || lost="$(grep -vxF -f "$d/xr.k" "$d/sb.k" | cut -d'|' -f1 | sort -u | tr '\n' ' ' | sed 's/ $//')"
+			if [ -n "$auto" ] && [ "$pref" = xray ]; then
+				uci set "netshift.$sec.zm_subfmt_auto=1"; ch=1
+				echo "   ✓ формат Happ по-прежнему полнее ($n_xr серверов против $n_sb) — оставляем"
+			else
+				uci set "netshift.$sec.subscription_format_preference=xray"
+				uci set "netshift.$sec.zm_subfmt_auto=1"
+				ch=1
+				echo "   ✓ в формате Happ серверов больше ($n_xr против $n_sb${extra:+, в том числе $extra}) — подписка переключена на формат Happ"
+				logger -t zapret-manager "Forkozz: подписка секции $sec переключена на формат Happ ($n_xr серверов против $n_sb)"
+			fi
+			[ -n "$lost" ] && echo "   ! в формате Happ нет $miss серверов из формата sing-box ($lost) — сервис отдаёт их только для sing-box, а их меньше"
+			rm -rf "$d"; continue
+		fi
+		if [ -n "$auto" ]; then
+			uci -q delete "netshift.$sec.subscription_format_preference"
+			uci -q delete "netshift.$sec.zm_subfmt_auto"
+			ch=1
+			extra="$(grep -vxF -f "$d/xr.k" "$d/sb.k" | cut -d'|' -f1 | sort -u | tr '\n' ' ' | sed 's/ $//')"
+			echo "   ✓ подписка возвращена на «Авто»: в формате sing-box серверов не меньше ($n_sb против $n_xr${extra:+; только в sing-box — $extra})"
+			logger -t zapret-manager "Forkozz: подписка секции $sec возвращена с формата Happ на «Авто» ($n_sb серверов в sing-box против $n_xr в Happ)"
+		elif [ "$n_xr" = 0 ]; then echo "   ✓ формат sing-box подходит: в формате Happ сервер подписку не отдал"
+		elif [ "$xex" = 0 ]; then echo "   ✓ формат sing-box подходит: в Happ нет серверов, которых нет в нём ($n_sb)"
+		else echo "   ✓ формат sing-box оставляем: в нём серверов больше ($n_sb против $n_xr), хотя $xex есть только в Happ"; fi
 		rm -rf "$d"
 	done
 	[ -n "$ch" ] || return 1
 	uci commit netshift
 	return 0
+}
+
+# Обновление подписок с понятным ходом работы. Сам движок Forkozz 0.9.11 подписку в формате Happ (Xray
+# JSON) разбирает медленно: каждый сервер — отдельной ссылкой, примерно десяток процессов на сервер, —
+# на роутере это минута-две на полсотни серверов. Раньше всё это время шли одни точки «Подождите…»;
+# теперь видно, что происходит. В следующей версии движка такие подписки разбираются одним проходом
+_fk_sub_update() {
+	local p m="zm-sub-$$-$(date +%s)" seen=0 tot all i=0 rc=0 out="$JOBS_DIR/fk-sub.out"
+	mkdir -p "$JOBS_DIR"
+	logger -t netshift "[info] $m" 2>/dev/null
+	/usr/bin/netshift subscription_update all > "$out" 2>&1 &
+	p=$!
+	while kill -0 "$p" 2>/dev/null; do
+		sleep 2; i=$((i + 2))
+		if [ "$i" -ge 600 ]; then _zm_kill_tree "$p"; echo "!! Подписка не обновилась за 10 минут — прерываем"; rm -f "$out"; return 1; fi
+		all="$(logread 2>/dev/null | awk -v m="$m" 'f && /netshift/ { print } index($0, m) { f = 1 }')"
+		tot="$(printf '%s\n' "$all" | grep -c .)"
+		[ "$tot" -gt "$seen" ] || continue
+		printf '%s\n' "$all" | awk -v skip="$seen" '
+			NR <= skip { next }
+			{ sub(/^.*netshift[^:]*: /, ""); sub(/^\[[a-z]+\] /, "") }
+			/Subscription connectivity check passed/ { print "   ✓ Сервер подписки отвечает"; next }
+			/Subscription connectivity check failed/ { print "   ✗ Сервер подписки не отвечает"; next }
+			/Trying subscription User-Agent/ { u = $0; sub(/^.*: /, "", u); f = (u ~ /^[Hh]app|^v2ray/) ? "Happ" : (u ~ /^sing-?box/) ? "sing-box" : u; print "   → Просим подписку в формате " f; next }
+			/Downloaded subscription body/ { b = $0; sub(/^.*bytes=/, "", b); sub(/[^0-9].*$/, "", b); if (b + 0 > 0) printf "   ✓ Скачано %d КБ\n", (b + 1023) / 1024; next }
+			/Detected Xray JSON subscription/ { print "   → Формат Happ: движок Forkozz разбирает серверы по одному — на роутере это минута-две, дождитесь"; next }
+			/produced [0-9]+ outbound/ { n = $0; sub(/^.*produced /, "", n); sub(/ .*$/, "", n); print "   ✓ Разобрано серверов: " n; next }
+			/Subscription download failed/ { print "   ! Подписка не скачалась — пробуем другой формат"; next }
+			/Applying updated subscriptions/ { print "   → Применяем новые серверы в sing-box"; next }
+			/is unchanged/ && /Subscription for section/ { if (!u1++) print "   ✓ Подписка не изменилась"; next }
+			/Subscription feed updated for section/ { n = $0; sub(/^.*: /, "", n); sub(/ outbounds.*$/, "", n); print "   ✓ Подписка обновлена: серверов " n; next }
+			/Failed to update any subscription feed/ { print "   ✗ Подписка не обновилась"; next }'
+		seen="$tot"
+	done
+	wait "$p" 2>/dev/null || rc=1
+	[ "$rc" = 0 ] || sed 's/\x1b\[[0-9;]*m//g' "$out" 2>/dev/null | grep -iE 'error|fail|❌' | tail -n 5 | sed 's/^/   /'
+	rm -f "$out"
+	return $rc
 }
 
 do_fk_subs() {
@@ -23132,7 +23240,7 @@ do_fk_subs() {
 	_fk_serial_patch
 	_fk_listsvia_patch
 	_fk_ghdl_patch
-	_zm_quiet "" /usr/bin/netshift subscription_update all || { echo "ОШИБКА: подписка не обновилась — проверьте ссылку"; return 1; }
+	_fk_sub_update || { echo "ОШИБКА: подписка не обновилась — проверьте ссылку"; return 1; }
 	_fk_ext_auto all "$lx"
 	_fk_say "Готово: подписки обновлены"
 }
@@ -26621,7 +26729,7 @@ function set_flag(c, sec, key, on) {
 }
 
 function write_sec_ext(c, sec, mode, x) {
-	const SUB_KEYS = [ "subscription_format_preference", "subscription_insecure", "subscription_user_agent", "subscription_group_mode", "subscription_group_prefix_len", "group_by_countries", "subscription_filter_include_keywords", "zm_sub_priority" ];
+	const SUB_KEYS = [ "subscription_format_preference", "zm_subfmt_auto", "subscription_insecure", "subscription_user_agent", "subscription_group_mode", "subscription_group_prefix_len", "group_by_countries", "subscription_filter_include_keywords", "zm_sub_priority" ];
 	const UT_KEYS = [ "urltest_check_interval", "urltest_tolerance", "urltest_testing_url" ];
 	const DRES_KEYS = [ "domain_resolver_dns_type", "domain_resolver_dns_server" ];
 	let cur = sec_ext(c.get_all(CFG, sec) || {});
@@ -26635,6 +26743,8 @@ function write_sec_ext(c, sec, mode, x) {
 		if (length(inc) > 40) fail("слов для отбора серверов можно указать не больше 40");
 		let plen = num_in(x.sub_plen, 1, 16);
 		if (grp == "prefix" && plen == null) fail("длина префикса для групп — число от 1 до 16");
+		// формат выбрали вручную — отметка «переключила панель» больше не действует
+		if (fmt != s(cur.sub_fmt)) c.delete(CFG, sec, "zm_subfmt_auto");
 		set_opt(c, sec, "subscription_format_preference", fmt, "auto");
 		set_flag(c, sec, "zm_sub_priority", !!x.sub_priority);
 		set_flag(c, sec, "subscription_insecure", !!x.sub_insecure);
