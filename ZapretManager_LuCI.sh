@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.53
+# Version: 4.54
 ZM_VERSION_EOF
 set -e
 
@@ -1549,7 +1549,6 @@ zm_watch() {
 		_fk_listsvia_patch
 		_fk_ghdl_patch
 		_fk_b4_watch
-		_fk_subfmt_watch
 	fi
 	_st_colo_guard
 	_st_vpn_watch
@@ -1559,6 +1558,7 @@ zm_watch() {
 	_dn_watch
 	_zo_doh_follow
 	_doh_boot_fill
+	_ft_steer_sync
 	return 0
 }
 
@@ -3556,6 +3556,55 @@ _zapret_v6_set() {
 	fi
 }
 
+# Строка выгрузки потоков в шаблоне firewall4 (chain forward):
+#   meta l4proto { tcp, udp } [ct mark and 0x0ff00000 == 0x0 ][ct original packets ge 30 ]flow offload @ft;
+# «ct original packets ge 30» — FIX для Zapret: первые 30 пакетов соединения идут обычным путём, их видит
+# Zapret. «ct mark and 0x0ff00000 == 0x0» — соединения, которые Steer отправил в выход (VPN, интерфейс,
+# Zapret), не выгружаются вовсе: Steer ставит метку соединения в этих битах. С включённым Flow Offloading
+# (особенно аппаратным) выгруженное соединение уходит в туннель Steer мимо обычного пути — по кабелю
+# трафик секции VPN переставал идти, по Wi‑Fi (его аппаратно не выгружают) работал. Остальной трафик
+# выгружается, как раньше, — скорость не теряется
+FW4_TPL="/usr/share/firewall4/templates/ruleset.uc"
+# _fw4_offload_set STEER(0|1|keep) ZFIX(0|1|keep) — переписать строку; 0 — изменено, 1 — не менялось, 2 — строки нет
+_fw4_offload_set() {
+	local st="$1" zf="$2" t="$FW4_TPL.zm.$$"
+	[ -f "$FW4_TPL" ] || return 2
+	awk -v st="$st" -v zf="$zf" '
+		BEGIN { re = "^[ \t]*meta l4proto [{] tcp, udp [}] (ct mark and 0x0ff00000 == 0x0 )?(ct original packets ge 30 )?flow offload @ft;$" }
+		!done && $0 ~ re {
+			ind = $0; sub(/meta l4proto.*$/, "", ind)
+			hs = index($0, "ct mark and 0x0ff00000 == 0x0 ") > 0; hz = index($0, "ct original packets ge 30 ") > 0
+			if (st == "1") hs = 1; else if (st == "0") hs = 0
+			if (zf == "1") hz = 1; else if (zf == "0") hz = 0
+			n = ind "meta l4proto { tcp, udp } " (hs ? "ct mark and 0x0ff00000 == 0x0 " : "") (hz ? "ct original packets ge 30 " : "") "flow offload @ft;"
+			if (n != $0) ch = 1
+			print n; done = 1; next
+		}
+		{ print }
+		END { exit done ? (ch ? 0 : 1) : 2 }' "$FW4_TPL" > "$t"
+	case $? in
+		0) cat "$t" > "$FW4_TPL"; rm -f "$t"; return 0 ;;
+		1) rm -f "$t"; return 1 ;;
+		*) rm -f "$t"; return 2 ;;
+	esac
+}
+
+_fw4_offload_on() { [ "$(uci -q get firewall.@defaults[0].flow_offloading)" = 1 ] || [ "$(uci -q get firewall.@defaults[0].flow_offloading_hw)" = 1 ]; }
+_ft_steer_applied() { grep -q 'ct mark and 0x0ff00000 == 0x0 .*flow offload @ft;' "$FW4_TPL" 2>/dev/null; }
+
+# Steer стоит — его соединения из выгрузки исключены; Steer удалён — исключение убираем
+_ft_steer_sync() {
+	local want=0
+	[ -f "$FW4_TPL" ] || return 0
+	stl_present && want=1
+	if [ "$want" = 1 ]; then _ft_steer_applied && return 0
+	else _ft_steer_applied || return 0; fi
+	_fw4_offload_set "$want" keep || return 0
+	logger -t zapret-manager "Flow Offloading: соединения Steer $([ "$want" = 1 ] && echo "исключены из выгрузки потоков" || echo "снова выгружаются — Steer удалён")"
+	_fw4_offload_on && /etc/init.d/firewall reload >/dev/null 2>&1
+	return 0
+}
+
 _flow_offloading_fix_applied() {
 	grep -q 'ct original packets ge 30 flow offload @ft;' /usr/share/firewall4/templates/ruleset.uc 2>/dev/null \
 		&& echo true || echo false
@@ -3685,12 +3734,12 @@ system_toggle_flow_offloading_fix() {
 	local template="/usr/share/firewall4/templates/ruleset.uc"
 	[ -f "$template" ] || { echo '{"error":"шаблон firewall4 не найден"}'; return 1; }
 	if grep -q 'ct original packets ge 30 flow offload @ft;' "$template"; then
-		sed -i 's/meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;/meta l4proto { tcp, udp } flow offload @ft;/' "$template"
+		_fw4_offload_set keep 0
 		fw4 restart >/dev/null 2>&1
 		printf '{"ok":true,"flow_offloading_fix":false}\n'
 		return
 	fi
-	sed -i 's/meta l4proto { tcp, udp } flow offload @ft;/meta l4proto { tcp, udp } ct original packets ge 30 flow offload @ft;/' "$template"
+	_fw4_offload_set keep 1
 	if ! grep -q 'ct original packets ge 30 flow offload @ft;' "$template"; then
 		echo '{"error":"в шаблоне firewall4 нет ожидаемой строки flow offload — исправление не применилось, ничего не изменено"}'
 		return 1
@@ -3757,6 +3806,9 @@ _zm_junk_raw() {
 		_zm_aged "$f" "$age" && echo "$f"
 	done
 	[ "$1" = install ] || { [ -e /tmp/zm_update_install.log ] && echo /tmp/zm_update_install.log; }
+	# недописанная программа TG WS Proxy от неудачной установки: файла нет у службы и версии
+	[ -f "$TG_BIN_RS" ] && [ ! -e "$TG_INIT_RS" ] && [ ! -s "$TG_VER_RS_FILE" ] && echo "$TG_BIN_RS"
+	[ -f "$TG_BIN_GO" ] && [ ! -e "$TG_INIT_GO" ] && [ ! -s "$TG_VER_GO_FILE" ] && echo "$TG_BIN_GO"
 	[ -e "$ZM_UP_FILE" ] && echo "$ZM_UP_FILE"
 	for f in /tmp/zm-rpc.*; do _zm_tmp_live "$f" && continue; _zm_aged "$f" 10 && echo "$f"; done
 	if ! _job_running strategy_test; then
@@ -3876,6 +3928,28 @@ zm_refs_heal() {
 _zm_mem_kb() { awk '/^MemAvailable:/ { print $2; f = 1; exit } /^MemFree:/ { m = $2 } END { if (!f) print m + 0 }' /proc/meminfo 2>/dev/null; }
 _zm_df_kb() { df -kP "$1" 2>/dev/null | awk 'NR == 2 { print $4 + 0; f = 1 } END { if (!f) print 0 }'; }
 
+# Положить скачанную программу на флеш: сначала проверяем место (с запасом 128 КБ; место прежней версии
+# освободится), при сбое записи убираем недописанный файл. Раньше программа, не влезшая на флеш, оставалась
+# недописанной в /usr/bin и занимала место — его не возвращала и «Очистка», и потом не хватало места
+# уже другим компонентам. _zm_bin_put ИСТОЧНИК ЦЕЛЬ
+_zm_bin_put() {
+	local need have old=0
+	need=$(( ($(wc -c < "$1" 2>/dev/null || echo 0) + 1023) / 1024 ))
+	[ -f "$2" ] && old=$(( ($(wc -c < "$2" 2>/dev/null || echo 0) + 1023) / 1024 ))
+	have="$(_zm_df_kb "${2%/*}")"
+	if [ "$have" -gt 0 ] && [ $((have + old)) -lt $((need + 128)) ]; then
+		echo "ОШИБКА: не хватает места на флеше: программе нужно $(( (need + 1023) / 1024 )) МБ, свободно $(( (have + old) / 1024 )) МБ. Освободите место (удалите ненужные компоненты в разделе «Система») и попробуйте снова"
+		return 1
+	fi
+	rm -f "$2"
+	if ! cp "$1" "$2" 2>/dev/null || ! chmod +x "$2"; then
+		rm -f "$2"
+		echo "ОШИБКА: программа не записалась на флеш — похоже, кончилось место. Недописанный файл удалён"
+		return 1
+	fi
+	return 0
+}
+
 _zm_usage_json() {
 	local list="$JOBS_DIR/cleanup.$$" jk=0 jn=0
 	mkdir -p "$JOBS_DIR"
@@ -3916,6 +3990,7 @@ zm_cleanup() {
 			/tmp/zm[-_]*|/tmp/ytb-*|/tmp/bytetube-test/?*|/tmp/netshift-sbext.*|/tmp/netshift-sblite.*|/tmp/mihomo.gz|/tmp/zashboard|/tmp/zashboard.zip|/tmp/metacubexd|/tmp/metacubexd.tgz|/tmp/tg-ws-proxy.ipk|/tmp/tg-ws-proxy.apk) ;;
 			/tmp/zapret-manager-luci/?*|/opt/zapret-manager-luci/?*|/etc/zm-steer/?*|/etc/hosts.zmtmp|/etc/hosts.zmdrop) ;;
 			/www/luci-static/resources/zapret-manager/?*|/www/luci-static/resources/view/zapret-manager/?*) ;;
+			"$TG_BIN_RS"|"$TG_BIN_GO") ;;
 			*) continue ;;
 		esac
 		case "$f" in */../*|*/..) continue ;; esac
@@ -6190,7 +6265,8 @@ do_tg_install_socks5() {
 	fi
 	chmod +x "$tmp"
 	[ -x "$TG_INIT_GO" ] && "$TG_INIT_GO" stop >/dev/null 2>&1
-	mv -f "$tmp" "$TG_BIN_GO" || { rm -f "$tmp"; echo "ОШИБКА: не удалось записать программу"; return 1; }
+	_zm_bin_put "$tmp" "$TG_BIN_GO" || { rm -f "$tmp"; [ -x "$TG_INIT_GO" ] && [ -x "$TG_BIN_GO" ] && "$TG_INIT_GO" start >/dev/null 2>&1; return 1; }
+	rm -f "$tmp"
 	if [ ! -f "$TG_INIT_GO" ]; then
 		printf '#!/bin/sh /etc/rc.common\nSTART=99\nUSE_PROCD=1\n\nstart_service() {\n\tprocd_open_instance\n\tprocd_set_param command /usr/bin/tg-ws-proxy-go --host 0.0.0.0 --port 2080 --cf-proxy --cf-proxy-first --cf-balance\n\tprocd_set_param respawn\n\tprocd_close_instance\n}\n' > "$TG_INIT_GO"
 		chmod +x "$TG_INIT_GO"
@@ -6237,9 +6313,7 @@ do_tg_install_rust() {
 	set -- $(find "$tmp_dir" -type f -name 'tg-ws-proxy*' 2>/dev/null)
 	[ -n "$1" ] || { echo "ОШИБКА: в архиве нет программы"; rm -rf "$tmp_dir" "$tmp_archive"; return 1; }
 	[ -x "$TG_INIT_RS" ] && "$TG_INIT_RS" stop >/dev/null 2>&1
-	rm -f "$TG_BIN_RS"
-	mv "$1" "$TG_BIN_RS" || { echo "ОШИБКА установки бинарника"; rm -rf "$tmp_dir" "$tmp_archive"; return 1; }
-	chmod +x "$TG_BIN_RS"
+	_zm_bin_put "$1" "$TG_BIN_RS" || { rm -rf "$tmp_dir" "$tmp_archive"; [ -x "$TG_INIT_RS" ] && [ -x "$TG_BIN_RS" ] && "$TG_INIT_RS" start >/dev/null 2>&1; return 1; }
 	rm -rf "$tmp_dir" "$tmp_archive"
 
 	if [ ! -f "$TG_SECRET_RS_FILE" ]; then
@@ -10854,8 +10928,20 @@ do_doh_install() {
 	echo "==> Устанавливаем https-dns-proxy и luci-app-https-dns-proxy"
 	$INSTALL https-dns-proxy luci-app-https-dns-proxy >&2 || { echo "ОШИБКА установки"; return 1; }
 	_doh_force_apply
+	# Сервер по умолчанию — Quad9 (dns.quad9.net); пакет сам ставит Google и Cloudflare.
+	# Не заработал — пробуем Cloudflare и Google
+	local p r
+	for p in quad9 cloudflare google; do
+		echo "==> Включаем DNS через $(_doh_name "$p")"
+		if r="$(_doh_apply "$p")"; then
+			_doh_fo_put pref "$p"; _doh_fo_put active "$p"; rm -f "$DOH_FO_STATE"
+			echo "   ✓ DNS роутера идёт через $(_doh_name "$p")"
+			break
+		fi
+		echo "   ! $(printf '%s' "$r" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')"
+	done
 	_zo_doh_follow
-	echo "==> Готово, DNS over HTTPS установлен — выберите сервер ниже"
+	echo "==> Готово, DNS over HTTPS установлен — сервер можно сменить ниже"
 }
 
 do_doh_remove() {
@@ -12424,6 +12510,12 @@ stl_engine_install() {
 	mods="$(for m in $mods $(_stl_mods_present); do echo "$m"; done | awk '!s[$0]++' | tr '\n' ' ')"
 	pkgs="steer-core$(for m in $mods; do printf ' steer-%s' "$m"; done)"
 	stl_v2 && _pkg_is_installed steer-extended && pkgs="$pkgs steer-extended"
+	# только модули к стоящему ядру той же версии: качаем и ставим лишь недостающие пакеты
+	if [ -n "$STL_MODS_ONLY" ] && stl_v2 && [ "$(stl_version)" = "$ver" ]; then
+		pkgs="$(for p in $pkgs; do _pkg_is_installed "$p" || printf '%s ' "$p"; done)"
+		pkgs="$(echo $pkgs)"
+		[ -n "$pkgs" ] || { _stl_say "Нужные модули ядра steer уже стоят"; STL_NEW=""; STL_PKGS=""; return 0; }
+	fi
 	STL_NEW=""; STL_PKGS="$pkgs"
 	for p in $pkgs; do _pkg_is_installed "$p" || STL_NEW="$STL_NEW $p"; done
 	mkdir -p "$STL_TMP"
@@ -12433,7 +12525,7 @@ stl_engine_install() {
 		files="$files $f"
 	done
 	stl_enabled && was_on=1
-	_stl_say "Ставим ядро steer $ver: $(echo $pkgs | sed 's/ /, /g')"
+	case " $pkgs " in *" steer-core "*) _stl_say "Ставим ядро steer $ver: $(echo $pkgs | sed 's/ /, /g')" ;; *) _stl_say "Ставим к ядру steer $ver: $(echo $pkgs | sed 's/ /, /g')" ;; esac
 	$UPDATE >&2
 	[ -s "$STL_SPEC" ] && cp -f "$STL_SPEC" "$keep"
 	if [ -n "$STL_REINSTALL" ] && [ -z "$legacy" ]; then
@@ -13390,9 +13482,15 @@ _st_ver_lt() {
 
 _st_vpn_ok() { stl_has vpn || { stl_present && ! stl_v2; }; }
 
+# STL_MODS_ONLY=1 — нужны только модули протоколов (новая VPN-секция, подписка с Hysteria2 и т. п.):
+# ставятся модули ТОЙ ЖЕ версии, что и стоящее ядро, а само ядро не трогается. Раньше в этот момент ядро
+# заодно обновлялось до последней версии — а после «Очистить» (она стирает запомненную последнюю версию)
+# или выхода новой версии Steer при создании секции внезапно скачивал и ставил всё ядро заново, и на
+# роутере с маленьким флешем это кончалось «недостаточно места». Обновить ядро — кнопка «Обновить»
 _st_install_steer() {
 	local want cur feat="$*" p
-	want="$(stl_latest)"; cur="$(stl_version)"
+	cur="$(stl_version)"
+	if [ -n "$STL_MODS_ONLY" ] && stl_v2; then want="$cur"; else want="$(stl_latest)"; fi
 	stl_v2 && _st_ver_lt "$want" "$cur" && want="$cur"
 	[ -z "$feat" ] && [ -s "$ST_SUB" ] && feat="$(_st_sub_feats)"
 	if stl_v2 && [ "$cur" = "$want" ] && _st_feats_ok $feat; then
@@ -13401,8 +13499,13 @@ _st_install_steer() {
 	fi
 	if stl_present && ! stl_v2; then _rb_say "Ядро steer $cur — переводим на $want"
 	elif stl_present && [ "$cur" != "$want" ]; then _rb_say "Ядро steer $cur — обновляем до $want"
-	elif stl_v2; then _rb_say "Ставим модули ядра steer для протоколов подписки"; fi
-	stl_engine_install "$want" $feat || return 1
+	elif stl_v2; then _rb_say "Ставим модули ядра steer $cur для протоколов подписки — само ядро не трогаем"; fi
+	if ! stl_engine_install "$want" $feat; then
+		# модулей для стоящей версии на сервере уже нет — тогда только обновлением ядра
+		[ -n "$STL_MODS_ONLY" ] && stl_v2 && p="$(stl_latest)" && [ "$p" != "$want" ] || return 1
+		_rb_say "Модулей для ядра steer $cur на сервере уже нет — обновляем ядро до $p вместе с модулями"
+		STL_MODS_ONLY="" stl_engine_install "$p" $feat || return 1
+	fi
 	if _st_owns "pkg steer" || _st_owns "pkg steer-extended"; then
 		sed -i '/^pkg steer$/d; /^pkg steer-extended$/d' "$ST_OWNED"
 		STL_NEW="$STL_PKGS"
@@ -15283,7 +15386,7 @@ _st_engine_ready() {
 	local f
 	f="$(_st_feats_all)"
 	stl_v2 && { [ -z "$(echo $f)" ] || _st_feats_ok $f; } && return 0
-	_st_install_steer $f
+	STL_MODS_ONLY=1 _st_install_steer $f
 }
 
 _st_failopen() { stl_state "$(_st_exit)" && [ "$STL_FAILED" = true ]; }
@@ -16957,7 +17060,7 @@ _st_need_ext() {
 	if ! stl_has vpn; then
 		_ensure_deps
 		_st_phase pkgs
-		_st_install_steer vpn || return 1
+		STL_MODS_ONLY=1 _st_install_steer vpn || return 1
 		stl_has vpn || { echo "ОШИБКА: модуль VLESS ядра steer не установился"; return 1; }
 	fi
 	_st_phase sub
@@ -16970,7 +17073,7 @@ _st_need_mods() {
 	case " $f " in *" proxy "*) names="${names:+$names, }Trojan, Shadowsocks, SOCKS, HTTP или VMess" ;; esac
 	_rb_say "В подписке есть серверы ${names:-VLESS} — ставим для них модули ядра steer"
 	_st_phase pkgs
-	_st_install_steer $f || return 1
+	STL_MODS_ONLY=1 _st_install_steer $f || return 1
 	_st_feats_ok $f || { echo "ОШИБКА: модули ядра steer для протоколов подписки не установились"; return 1; }
 	_st_phase sub
 }
@@ -21489,7 +21592,7 @@ _fk_zash_ensure() {
 }
 
 FK_REPO="yandexru45/netshift"
-FK_PIN="0.9.11"
+FK_PIN="0.9.12"
 FK_MARK="/usr/lib/netshift/zm-managed"
 FK_UC="/opt/zapret-manager-luci/netshift.uc"
 FK_SB_OWN="$ZM_STATE_DIR/netshift.singbox"
@@ -22174,30 +22277,6 @@ _fk_b4_watch() {
 	_job_running forkop && return 0
 	mkdir -p "$JOBS_DIR"; : > "$f"
 	( _fk_device_setup apply >/dev/null 2>&1 </dev/null & )
-	return 0
-}
-
-# Подписки, которые панель до 4.44 переключила на формат Happ (из-за этого могли пропасть серверы
-# Hysteria2 и VMess): один раз проверяем их заново — Forkozz применяет настройки сам, не чаще раза в 30 минут
-_fk_subfmt_watch() {
-	local f="$JOBS_DIR/fk-subfmt.last" d="$ZM_STATE_DIR/fk.subfmt.day" s
-	# раз в сутки: сервис мог начать отдавать серверы (например, Hysteria2) только в одном формате —
-	# сверяем форматы подписок с «Авто» и, если выбор поменялся, сразу перекачиваем подписку
-	if grep -q "proxy_config_type 'subscription'" /etc/config/netshift 2>/dev/null && [ -z "$(find "$d" -mmin -1440 2>/dev/null)" ] &&
-		_fk_up && ! _job_running forkop; then
-		mkdir -p "$ZM_STATE_DIR"; : > "$d"
-		( _fk_sub_fmt_auto >/dev/null 2>&1 && _zm_run 300 /usr/bin/netshift subscription_update all >/dev/null 2>&1 ) </dev/null >/dev/null 2>&1 &
-		return 0
-	fi
-	grep -q "subscription_format_preference 'xray'" /etc/config/netshift 2>/dev/null || return 0
-	[ -n "$(find "$f" -mmin -30 2>/dev/null)" ] && return 0
-	for s in $(uci -q show netshift | sed -n "s/^netshift\.\([A-Za-z0-9_]*\)\.subscription_format_preference='xray'$/\1/p"); do
-		[ -z "$(uci -q get "netshift.$s.zm_subfmt_auto")" ] && [ -f "$ZM_STATE_DIR/fk.subfmt.$s" ] || continue
-		_fk_up && ! _job_running forkop || return 0
-		mkdir -p "$JOBS_DIR"; : > "$f"
-		job_start forkop do_fk_service apply >/dev/null 2>&1
-		return 0
-	done
 	return 0
 }
 
@@ -23270,12 +23349,13 @@ _fk_why() {
 	# только записи этого запуска: старая ошибка из журнала (например, «нет настроенного подключения» до
 	# того, как добавили сервер) больше не выдаётся за причину сейчас
 	if [ -n "$FK_LOGMARK" ]; then
-		l="$(logread 2>/dev/null | awk -v m="$FK_LOGMARK" 'f { print } index($0, m) { f = 1 }' | grep -E 'netshift|sing-box' | grep -E 'fatal|FATAL|Aborted|error' | tail -n 1)"
+		l="$(logread 2>/dev/null | awk -v m="$FK_LOGMARK" 'f { print } index($0, m) { f = 1 }' | grep -E 'netshift|sing-box' | grep -E 'fatal|FATAL|Aborted|error|is not started: no section' | tail -n 1)"
 	else
-		l="$(logread 2>/dev/null | tail -n 200 | grep -E 'netshift|sing-box' | grep -E 'fatal|FATAL|Aborted|error' | tail -n 1)"
+		l="$(logread 2>/dev/null | tail -n 200 | grep -E 'netshift|sing-box' | grep -E 'fatal|FATAL|Aborted|error|is not started: no section' | tail -n 1)"
 	fi
 	case "$l" in
 		*"initial rule-set"*) echo "sing-box не смог скачать набор правил при запуске (подробности выше)" ;;
+		*"no section has a connection yet"*) echo "ни в одной секции нет подключения — добавьте ссылку на сервер или подписку" ;;
 		*"Outbound section not found"*) echo "ни в одной секции нет настроенного подключения" ;;
 		*"Invalid service in community lists"*) echo "в секции выбран список, которого Forkozz не знает — сохраните сервисы заново" ;;
 		*"configuration"*"is invalid"*) echo "sing-box не принял собранный конфиг — посмотрите журнал" ;;
@@ -23491,88 +23571,69 @@ _fk_sub_keys() {
 		end' 2>/dev/null
 }
 
-# Подписка: какой формат у сервиса полнее — sing-box или Xray JSON (Happ). Сервер сравнивается целиком:
-# протокол + адрес + порт. Раньше сравнивались только адрес и порт, а у многих сервисов Hysteria2 (UDP) и
-# VLESS (TCP) живут на одном адресе и порту 443 — панель считала, что в Happ «есть всё», переключала
-# подписку на Happ, и серверы Hysteria2 (а заодно VMess, которых в Happ нет) пропадали из списка.
-# Переключённые так подписки (отметка zm_subfmt_auto) проверяются снова и возвращаются на «Авто»,
-# если в Happ чего-то не хватает. Формат, выбранный вручную, панель не трогает
+# Формат подписки (sing-box или Xray JSON / Happ) панель определяет ОДИН раз — когда подписка добавлена
+# (её ссылки ещё не было) и формат стоит «Авто». Скачивает подписку в обоих форматах и берёт тот, где
+# серверов видно больше (сервер сравнивается целиком: протокол + адрес + порт). Решение запоминается
+# (zm_subfmt_url — отпечаток ссылки) и больше не пересматривается: ни при применении настроек, ни раз в
+# сутки, ни при обновлении подписки. Формат, выбранный вручную, панель не трогает никогда.
+# Раньше панель перепроверяла формат и могла вернуть подписку с Happ на «Авто» — у части сервисов из-за
+# этого пропадали серверы Hysteria2, даже если Happ выбрали вручную
 _fk_sub_fmt_auto() {
-	local sec url ver sb xr ch="" d="$JOBS_DIR/fk-subfmt" mark n_sb n_xr miss xex lost extra pref auto legacy
+	local sec url key ver ch="" sw="" d="$JOBS_DIR/fk-subfmt" n_sb n_xr miss xex lost extra pref
 	command -v jq >/dev/null 2>&1 || return 1
 	ver="$(sing-box version 2>/dev/null | head -n1 | awk '{print $3}')"
 	for sec in $(uci -q show netshift | sed -n "s/^netshift\.\([A-Za-z0-9_]*\)\.subscription_url=.*/\1/p" | sort -u); do
-		pref="$(uci -q get "netshift.$sec.subscription_format_preference")"
-		mark="$ZM_STATE_DIR/fk.subfmt.$sec"
-		auto=""
-		case "$pref" in
-			''|auto) ;;
-			xray)
-				# переключила панель: есть её отметка, или (до 4.44) она проверяла эту подписку
-				if [ "$(uci -q get "netshift.$sec.zm_subfmt_auto")" = 1 ] || { [ -f "$mark" ] && [ -z "$(uci -q get "netshift.$sec.zm_subfmt_auto")" ]; }; then auto=1
-				else continue; fi ;;
-			*) continue ;;
-		esac
-		[ -z "$(uci -q get "netshift.$sec.subscription_user_agent")" ] || continue
 		[ "$(uci -q get "netshift.$sec.proxy_config_type")" = subscription ] || continue
 		url="$(uci -q get "netshift.$sec.subscription_url")"
-		case "$url" in *' '*) continue ;; esac
-		case "$url" in http://*|https://*) ;; *) continue ;; esac
-		# подписку, переключённую на Happ до 4.44, проверяем сразу; остальные — не чаще раза в сутки
-		legacy=""; [ -n "$auto" ] && [ -z "$(uci -q get "netshift.$sec.zm_subfmt_auto")" ] && legacy=1
-		if [ "$1" != force ] && [ -z "$legacy" ]; then
-			[ -f "$mark" ] && [ "$(cat "$mark" 2>/dev/null)" = "$(printf '%s' "$url" | md5sum | cut -c1-16)" ] && [ -z "$(find "$mark" -mmin +1440 2>/dev/null)" ] && continue
+		key="$(printf '%s' "$url" | md5sum | cut -c1-16)"
+		[ "$(uci -q get "netshift.$sec.zm_subfmt_url")" = "$key" ] && continue
+		pref="$(uci -q get "netshift.$sec.subscription_format_preference")"
+		# старые подписки (панель их уже проверяла до 4.54) и подписки с форматом/User-Agent, выбранными
+		# вручную, — запоминаем как есть, ничего не меняя
+		if [ "$(cat "$ZM_STATE_DIR/fk.subfmt.$sec" 2>/dev/null)" = "$key" ] || { [ -n "$pref" ] && [ "$pref" != auto ]; } ||
+			[ -n "$(uci -q get "netshift.$sec.subscription_user_agent")$(uci -q get "netshift.$sec.subscription_hwid")$(uci -q get "netshift.$sec.subscription_device_os")" ]; then
+			uci set "netshift.$sec.zm_subfmt_url=$key"; uci -q delete "netshift.$sec.zm_subfmt_auto"
+			rm -f "$ZM_STATE_DIR/fk.subfmt.$sec"; ch=1
+			continue
 		fi
-		_fk_say "Подписка «$(uci -q get "netshift.$sec.zm_label" || echo "$sec")»: сравниваем, что сервер отдаёт в форматах sing-box и Happ"
+		case "$url" in *' '*|'') continue ;; esac
+		case "$url" in http://*|https://*) ;; *) continue ;; esac
+		_fk_say "Новая подписка «$(uci -q get "netshift.$sec.zm_label" || echo "$sec")»: определяем формат — сравниваем, что сервер отдаёт в форматах sing-box и Happ"
 		rm -rf "$d"; mkdir -p "$d"; : > "$d/sb"; : > "$d/xr"
 		curl -fsSL --compressed -m 15 -A "singbox/${ver:-1.12.0}" -o "$d/sb" "$url" 2>/dev/null
 		curl -fsSL --compressed -m 15 -A "Happ/1.0.0" -o "$d/xr" "$url" 2>/dev/null
 		_fk_sub_keys < "$d/sb" | sort -u > "$d/sb.k"; _fk_sub_keys < "$d/xr" | sort -u > "$d/xr.k"
-		mkdir -p "$ZM_STATE_DIR"; printf '%s' "$url" | md5sum | cut -c1-16 > "$mark"
 		n_sb="$(grep -c . "$d/sb.k")"; n_xr="$(grep -c . "$d/xr.k")"
-		if [ "$n_sb" = 0 ] && [ "$n_xr" = 0 ]; then echo "   · подписка не скачалась напрямую — формат оставляем как есть"; rm -rf "$d"; continue; fi
-		# сравниваем серверы целиком (протокол + адрес + порт): каких нет в Happ (miss) и каких нет в sing-box (xex)
+		# не скачалась — формат определим при следующем применении настроек
+		if [ "$n_sb" = 0 ] && [ "$n_xr" = 0 ]; then echo "   · подписка не скачалась напрямую — формат определим в следующий раз, пока «Авто»"; rm -rf "$d"; continue; fi
+		uci set "netshift.$sec.zm_subfmt_url=$key"; ch=1
 		miss="$(grep -vxF -f "$d/xr.k" "$d/sb.k" | grep -c .)"; [ -s "$d/xr.k" ] || miss="$n_sb"
 		xex="$(grep -vxF -f "$d/sb.k" "$d/xr.k" | grep -c .)"; [ -s "$d/sb.k" ] || xex="$n_xr"
-		# Берём формат, в котором серверов видно больше всего: Happ — если в нём есть серверы, которых нет в
-		# sing-box, и он не теряет серверов sing-box, а если у каждого формата есть свои — тот, где их больше
+		# Happ — если в нём есть серверы, которых нет в sing-box, и он не теряет серверов sing-box,
+		# а если у каждого формата есть свои — тот, где серверов больше
 		if [ "$n_xr" -gt 0 ] && [ "$xex" -gt 0 ] && { [ "$miss" = 0 ] || [ "$n_xr" -gt "$n_sb" ]; }; then
 			extra="$(grep -vxF -f "$d/sb.k" "$d/xr.k" | cut -d'|' -f1 | sort -u | tr '\n' ' ' | sed 's/ $//')"
 			lost=""; [ "$miss" = 0 ] || lost="$(grep -vxF -f "$d/xr.k" "$d/sb.k" | cut -d'|' -f1 | sort -u | tr '\n' ' ' | sed 's/ $//')"
-			if [ -n "$auto" ] && [ "$pref" = xray ]; then
-				uci set "netshift.$sec.zm_subfmt_auto=1"; ch=1
-				echo "   ✓ формат Happ по-прежнему полнее ($n_xr серверов против $n_sb) — оставляем"
-			else
-				uci set "netshift.$sec.subscription_format_preference=xray"
-				uci set "netshift.$sec.zm_subfmt_auto=1"
-				ch=1
-				echo "   ✓ в формате Happ серверов больше ($n_xr против $n_sb${extra:+, в том числе $extra}) — подписка переключена на формат Happ"
-				logger -t zapret-manager "Forkozz: подписка секции $sec переключена на формат Happ ($n_xr серверов против $n_sb)"
-			fi
-			[ -n "$lost" ] && echo "   ! в формате Happ нет $miss серверов из формата sing-box ($lost) — сервис отдаёт их только для sing-box, а их меньше"
-			rm -rf "$d"; continue
-		fi
-		if [ -n "$auto" ]; then
-			uci -q delete "netshift.$sec.subscription_format_preference"
-			uci -q delete "netshift.$sec.zm_subfmt_auto"
-			ch=1
-			extra="$(grep -vxF -f "$d/xr.k" "$d/sb.k" | cut -d'|' -f1 | sort -u | tr '\n' ' ' | sed 's/ $//')"
-			echo "   ✓ подписка возвращена на «Авто»: в формате sing-box серверов не меньше ($n_sb против $n_xr${extra:+; только в sing-box — $extra})"
-			logger -t zapret-manager "Forkozz: подписка секции $sec возвращена с формата Happ на «Авто» ($n_sb серверов в sing-box против $n_xr в Happ)"
-		elif [ "$n_xr" = 0 ]; then echo "   ✓ формат sing-box подходит: в формате Happ сервер подписку не отдал"
-		elif [ "$xex" = 0 ]; then echo "   ✓ формат sing-box подходит: в Happ нет серверов, которых нет в нём ($n_sb)"
-		else echo "   ✓ формат sing-box оставляем: в нём серверов больше ($n_sb против $n_xr), хотя $xex есть только в Happ"; fi
+			uci set "netshift.$sec.subscription_format_preference=xray"; sw=1
+			echo "   ✓ в формате Happ серверов больше ($n_xr против $n_sb${extra:+, в том числе $extra}) — подписке поставлен формат Happ"
+			[ -n "$lost" ] && echo "   ! в формате Happ нет $miss серверов из формата sing-box ($lost)"
+			logger -t zapret-manager "Forkozz: новой подписке секции $sec поставлен формат Happ ($n_xr серверов против $n_sb)"
+		elif [ "$n_xr" = 0 ]; then echo "   ✓ формат «Авто» (sing-box): в формате Happ сервер подписку не отдал"
+		elif [ "$xex" = 0 ]; then echo "   ✓ формат «Авто» (sing-box): в Happ нет серверов, которых нет в нём ($n_sb)"
+		elif [ "$n_sb" = "$n_xr" ]; then echo "   ✓ формат «Авто» (sing-box): серверов столько же ($n_sb), но $xex есть только в Happ, а $miss — только в sing-box. Нужны именно они — выберите Happ вручную"
+		else echo "   ✓ формат «Авто» (sing-box): в нём серверов больше ($n_sb против $n_xr), хотя $xex есть только в Happ. Нужны именно они — выберите Happ вручную"; fi
+		echo "   · формат запомнен и больше сам не меняется — поменять можно вручную в настройках подписки"
 		rm -rf "$d"
 	done
 	[ -n "$ch" ] || return 1
 	uci commit netshift
-	return 0
+	# 0 — у новой подписки поставлен формат Happ: её надо перекачать
+	[ -n "$sw" ]
 }
 
-# Обновление подписок с понятным ходом работы. Сам движок Forkozz 0.9.11 подписку в формате Happ (Xray
-# JSON) разбирает медленно: каждый сервер — отдельной ссылкой, примерно десяток процессов на сервер, —
-# на роутере это минута-две на полсотни серверов. Раньше всё это время шли одни точки «Подождите…»;
-# теперь видно, что происходит. В следующей версии движка такие подписки разбираются одним проходом
+# Обновление подписок с понятным ходом работы. Движок Forkozz 0.9.11 подписку в формате Happ (Xray
+# JSON) разбирает медленно: каждый сервер — отдельной ссылкой, — на роутере это минута-две на полсотни
+# серверов. С 0.9.12 (linkfast.jq) такие подписки разбираются одним проходом jq — за секунды
 _fk_sub_update() {
 	local p m="zm-sub-$$-$(date +%s)" seen=0 tot all i=0 rc=0 out="$JOBS_DIR/fk-sub.out"
 	mkdir -p "$JOBS_DIR"
@@ -23585,14 +23646,14 @@ _fk_sub_update() {
 		all="$(logread 2>/dev/null | awk -v m="$m" 'f && /netshift/ { print } index($0, m) { f = 1 }')"
 		tot="$(printf '%s\n' "$all" | grep -c .)"
 		[ "$tot" -gt "$seen" ] || continue
-		printf '%s\n' "$all" | awk -v skip="$seen" '
+		printf '%s\n' "$all" | awk -v skip="$seen" -v fast="$([ -f /usr/lib/netshift/linkfast.jq ] && echo 1)" '
 			NR <= skip { next }
 			{ sub(/^.*netshift[^:]*: /, ""); sub(/^\[[a-z]+\] /, "") }
 			/Subscription connectivity check passed/ { print "   ✓ Сервер подписки отвечает"; next }
 			/Subscription connectivity check failed/ { print "   ✗ Сервер подписки не отвечает"; next }
 			/Trying subscription User-Agent/ { u = $0; sub(/^.*: /, "", u); f = (u ~ /^[Hh]app|^v2ray/) ? "Happ" : (u ~ /^sing-?box/) ? "sing-box" : u; print "   → Просим подписку в формате " f; next }
 			/Downloaded subscription body/ { b = $0; sub(/^.*bytes=/, "", b); sub(/[^0-9].*$/, "", b); if (b + 0 > 0) printf "   ✓ Скачано %d КБ\n", (b + 1023) / 1024; next }
-			/Detected Xray JSON subscription/ { print "   → Формат Happ: движок Forkozz разбирает серверы по одному — на роутере это минута-две, дождитесь"; next }
+			/Detected Xray JSON subscription/ { print (fast ? "   → Формат Happ: разбираем серверы" : "   → Формат Happ: движок Forkozz разбирает серверы по одному — на роутере это минута-две, дождитесь"); next }
 			/produced [0-9]+ outbound/ { n = $0; sub(/^.*produced /, "", n); sub(/ .*$/, "", n); print "   ✓ Разобрано серверов: " n; next }
 			/Subscription download failed/ { print "   ! Подписка не скачалась — пробуем другой формат"; next }
 			/Applying updated subscriptions/ { print "   → Применяем новые серверы в sing-box"; next }
@@ -23610,7 +23671,7 @@ _fk_sub_update() {
 do_fk_subs() {
 	_fk_installed || { echo "ОШИБКА: Forkozz не установлен"; return 1; }
 	_fk_say "Обновляем подписки"
-	_fk_sub_fmt_auto force
+	_fk_sub_fmt_auto
 	local lx; lx="$(_fk_log_ext)"
 	_fk_mlkem_patch
 	_fk_serial_patch
@@ -24872,6 +24933,7 @@ do_sysinfo() {
 		elif [ "$sw" = 1 ]; then _si_row "Flow Offloading" "программный" warn
 		else _si_row "Flow Offloading" "выключен" ok; fi
 		[ "$fix" = true ] && _si_row "FIX для Flow Offloading" "применён" ok || _si_row "FIX для Flow Offloading" "не применён" "$([ "$sw" = 1 ] || [ "$hw" = 1 ] && echo bad)"
+		stl_present && { _ft_steer_applied && _si_row "Steer и Flow Offloading" "соединения Steer не выгружаются" ok || _si_row "Steer и Flow Offloading" "соединения Steer выгружаются" "$([ "$sw" = 1 ] || [ "$hw" = 1 ] && echo bad)"; }
 		if /etc/init.d/https-dns-proxy running >/dev/null 2>&1 && [ -f /etc/config/https-dns-proxy ]; then
 			sed -n "s/^[[:space:]]*option resolver_url '\([^']*\)'.*/\1/p" /etc/config/https-dns-proxy | while IFS= read -r v; do _si_row "DNS over HTTPS" "$v" ""; SI_SEP=","; done
 		fi
@@ -27031,6 +27093,10 @@ function sec_ext(m) {
 		sub_incl: join(" | ", kw_list(m.subscription_filter_include_keywords)),
 		sub_insecure: flag(m.subscription_insecure),
 		sub_ua: s(m.subscription_user_agent),
+		sub_hwid: s(m.subscription_hwid),
+		sub_os: s(m.subscription_device_os),
+		sub_osv: s(m.subscription_os_version),
+		sub_model: s(m.subscription_device_model),
 		ut_iv: index(UT_IVS, s(m.urltest_check_interval)) >= 0 ? s(m.urltest_check_interval) : "3m",
 		ut_tol: s(num_in(m.urltest_tolerance, 0, 10000) ?? 50),
 		ut_url: s(m.urltest_testing_url) || UT_URL_DEF,
@@ -27064,6 +27130,7 @@ function set_ext(st) {
 		ipv6: flag(st.enable_ipv6),
 		no_dhcp: flag(st.dont_touch_dhcp),
 		excl_ntp: flag(st.exclude_ntp),
+		wifi_call: flag(st.wifi_calling_direct),
 		excl_bt: flag(st.exclude_bittorrent),
 		bt_ports: s(st.zm_bt_ports),
 		block_doh: flag(st.block_doh),
@@ -27143,7 +27210,8 @@ function set_flag(c, sec, key, on) {
 }
 
 function write_sec_ext(c, sec, mode, x) {
-	const SUB_KEYS = [ "subscription_format_preference", "zm_subfmt_auto", "subscription_insecure", "subscription_user_agent", "subscription_group_mode", "subscription_group_prefix_len", "group_by_countries", "subscription_filter_include_keywords", "zm_sub_priority" ];
+	const SUB_KEYS = [ "subscription_format_preference", "zm_subfmt_auto", "zm_subfmt_url", "subscription_insecure", "subscription_user_agent", "subscription_group_mode", "subscription_group_prefix_len", "group_by_countries", "subscription_filter_include_keywords", "zm_sub_priority",
+		"subscription_hwid", "subscription_device_os", "subscription_os_version", "subscription_device_model" ];
 	const UT_KEYS = [ "urltest_check_interval", "urltest_tolerance", "urltest_testing_url" ];
 	const DRES_KEYS = [ "domain_resolver_dns_type", "domain_resolver_dns_server" ];
 	let cur = sec_ext(c.get_all(CFG, sec) || {});
@@ -27163,6 +27231,13 @@ function write_sec_ext(c, sec, mode, x) {
 		set_flag(c, sec, "zm_sub_priority", !!x.sub_priority);
 		set_flag(c, sec, "subscription_insecure", !!x.sub_insecure);
 		set_opt(c, sec, "subscription_user_agent", ua, "");
+		// «устройство» для подписки (движок 0.9.12+): уходит в заголовки X-HWID, X-Device-OS, X-Ver-OS, X-Device-Model
+		for (let kv in [ [ "sub_hwid", "subscription_hwid", "HWID", 128 ], [ "sub_os", "subscription_device_os", "ОС устройства", 40 ],
+				[ "sub_osv", "subscription_os_version", "версия ОС", 40 ], [ "sub_model", "subscription_device_model", "модель устройства", 80 ] ]) {
+			let v = trim(s(x[kv[0]]));
+			if (length(v) > kv[3] || match(v, /[\r\n\t'"\\`$]/) || non_ascii(v)) fail(kv[2] + " для подписки — одна строка латиницей до " + kv[3] + " символов, без кавычек");
+			set_opt(c, sec, kv[1], v, "");
+		}
 		c.delete(CFG, sec, "group_by_countries");
 		set_opt(c, sec, "subscription_group_mode", grp, "off");
 		set_opt(c, sec, "subscription_group_prefix_len", grp == "prefix" ? s(plen) : null, "2");
@@ -27269,7 +27344,10 @@ function engine_caps() {
 		prefixes: prefix_ok(),
 		// ссылки tuic:// и anytls:// движок понимает с версий новее 0.9.11 — разрешаем их, как только он их знает
 		tuic: index(fc, "\n    tuic)") >= 0,
-		anytls: index(fc, "\n    anytls)") >= 0
+		anytls: index(fc, "\n    anytls)") >= 0,
+		// с движка 0.9.12: звонки по Wi‑Fi напрямую и «устройство» для подписки (HWID, ОС, модель)
+		wifi_call: index(b, "wifi_calling_direct") >= 0,
+		sub_id: index(s(fs.readfile(NS_LIB + "/helpers.sh")), "load_subscription_client_identity()") >= 0
 	};
 }
 
@@ -27316,6 +27394,7 @@ function write_set_ext(c, g) {
 
 	for (let kv in [ [ "ipv6", "enable_ipv6" ], [ "no_dhcp", "dont_touch_dhcp" ], [ "excl_ntp", "exclude_ntp" ], [ "excl_bt", "exclude_bittorrent" ], [ "block_doh", "block_doh" ] ])
 		c.set(CFG, S, kv[1], g[kv[0]] ? "1" : "0");
+	set_flag(c, S, "wifi_calling_direct", !!g.wifi_call);
 	let btl = [];
 	for (let p in split(replace(trim(s(g.bt_ports)), /[ \t;]+/g, ","), ",")) {
 		if (p == "") continue;
@@ -45613,10 +45692,24 @@ var UT_URL_DEF = 'https://www.gstatic.com/generate_204';
 var UT_URLS = [ { id: UT_URL_DEF, label: 'Google' }, { id: 'https://cp.cloudflare.com/generate_204', label: 'Cloudflare' }, { id: 'https://captive.apple.com', label: 'Apple' } ];
 var LOG_LV = [ { id: 'panic', label: 'Выключен' }, { id: 'error', label: 'Только ошибки' }, { id: 'warn', label: 'Обычный' }, { id: 'info', label: 'Подробный' }, { id: 'debug', label: 'Отладка' } ];
 var DRES_DEF = { udp: '1.1.1.1', dot: 'one.one.one.one', doh: 'https://cloudflare-dns.com/dns-query' };
-var SEC_EXT = { sub_fmt: 'auto', sub_priority: false, ping_auto: false, sub_group: 'off', sub_plen: '2', sub_incl: '', sub_insecure: false, sub_ua: '', ut_iv: '3m', ut_tol: '50', ut_url: UT_URL_DEF, ut_guard: false, direct_fallback: false,
+// «Устройство» для подписки — как в генераторе клиента движка NetShift 0.9.12: User-Agent, HWID, ОС,
+// версия ОС и модель так, как их шлёт приложение на этой платформе. HWID каждый раз новый
+var SUB_CLIENT_IPHONES = [ 'iPhone 15 Pro Max', 'iPhone 16 Pro Max', 'iPhone 17 Pro', 'iPhone 13', 'iPhone 16', 'iPhone 15 Pro' ];
+function subRnd(abc, n) { var o = ''; for (var i = 0; i < n; i++) o += abc.charAt(Math.floor(Math.random() * abc.length)); return o; }
+function subPick(a) { return a[Math.floor(Math.random() * a.length)]; }
+function subUuid() { var h = subRnd('0123456789abcdef', 32); return [ h.slice(0, 8), h.slice(8, 12), '4' + h.slice(13, 16), subPick('89ab'.split('')) + h.slice(17, 20), h.slice(20) ].join('-'); }
+function subIncyId() { return subRnd('0123456789ABCDEF', 32).replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, '$1-$2-$3-$4-$5'); }
+var SUB_CLIENTS = [
+	{ id: 'happ_android', label: 'Happ · Android', make: function() { return { ua: 'Happ/4.7.1/Android/' + subRnd('123456789', 1) + subRnd('0123456789', 19), hwid: subRnd('0123456789abcdef', 16), os: 'Android', osv: subPick([ '16', '15', '14', '13' ]), model: subPick([ 'CPH2747', 'SM-A556E', 'SM-S721B', 'SM-S938B', 'SM-S918N', '2112123AG' ]) }; } },
+	{ id: 'happ_ios', label: 'Happ · iOS', make: function() { return { ua: 'Happ/6.1.0/ios/2610091516618', hwid: subRnd('0123456789abcdefghijklmnopqrstuvwxyz', 16), os: 'iOS', osv: subPick([ '26.6.2', '26.6.1', '27.0.1' ]), model: subPick(SUB_CLIENT_IPHONES) }; } },
+	{ id: 'happ_win', label: 'Happ · Windows', make: function() { return { ua: 'Happ/4.5.4/Windows/2610141139602', hwid: subUuid(), os: 'Windows', osv: subPick([ '11_10.0.26200', '10_10.0.19045', '11_10.0.26100' ]), model: 'DESKTOP-' + subRnd('0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ', 7) + '_x86_64' }; } },
+	{ id: 'incy_android', label: 'INCY · Android', make: function() { return { ua: 'INCY/3.7.9/android Dalvik/2.1.0', hwid: subIncyId(), os: 'Android', osv: subPick([ '16', '15', '14', '13' ]), model: subPick([ 'samsung SM-S938B', 'samsung SM-A546E', 'samsung SM-A556E', 'Xiaomi 24116RACCG', 'Xiaomi 2311DRK48G' ]) }; } },
+	{ id: 'incy_ios', label: 'INCY · iOS', make: function() { var v = subPick([ [ 'INCY/2.6.4/ios CFNetwork/3896.100.1.2.1 Darwin/27.0.0', '27.0.1' ], [ 'INCY/2.6.4/ios CFNetwork/3860.700.2 Darwin/25.6.0', '26.6.2' ] ]); return { ua: v[0], hwid: subIncyId(), os: 'iOS', osv: v[1], model: subPick(SUB_CLIENT_IPHONES) }; } }
+];
+var SEC_EXT = { sub_fmt: 'auto', sub_priority: false, ping_auto: false, sub_group: 'off', sub_plen: '2', sub_incl: '', sub_insecure: false, sub_ua: '', sub_hwid: '', sub_os: '', sub_osv: '', sub_model: '', ut_iv: '3m', ut_tol: '50', ut_url: UT_URL_DEF, ut_guard: false, direct_fallback: false,
 	uot: false, mixed: false, mixed_port: '2080', real_ip: false, dres_on: false, dres_type: 'udp', dres_server: '' };
 var SET_EXT = { dns_ttl: '60', dns_ecs: '', src_ifs: [ 'br-lan' ], out_if: '', badwan: false, badwan_ifs: [], badwan_delay: '2000', ipv6: false, no_dhcp: false,
-	excl_ntp: false, excl_bt: false, bt_ports: '', block_doh: false, log_level: 'panic', yacd: false, yacd_wan: false, yacd_secret: '',
+	excl_ntp: false, wifi_call: false, excl_bt: false, bt_ports: '', block_doh: false, log_level: 'panic', yacd: false, yacd_wan: false, yacd_secret: '',
 	kill: false, hijack: false, quic_all: false, ecs_auto: false, fwd: '', p_dt: '', p_du: '', p_pt: '', p_pu: '' };
 var PORT_KEYS = [ [ 'p_dt', 'TCP напрямую' ], [ 'p_du', 'UDP напрямую' ], [ 'p_pt', 'TCP через VPN' ], [ 'p_pu', 'UDP через VPN' ] ];
 
@@ -46754,6 +46847,7 @@ return view.extend({
 				if (draft.sub_group !== 'off') p.push(draft.sub_group === 'country' ? 'группы по странам' : 'группы по имени');
 				if (inclWords(draft.sub_incl).length) p.push('отбор по словам');
 				if (draft.sub_insecure) p.push('без проверки сертификата');
+				if (draft.sub_hwid.trim() || draft.sub_os.trim() || draft.sub_model.trim()) p.push('своё устройство');
 			}
 			if (draft.mode !== 'iface') {
 				if (draft.ut_iv !== '3m' || draft.ut_tol.trim() !== '50' || (draft.ut_url.trim() || UT_URL_DEF) !== UT_URL_DEF) p.push('свой автовыбор');
@@ -46772,7 +46866,7 @@ return view.extend({
 			if (draft.mode === 'sub') {
 				box.appendChild(E('h4', {}, 'Подписка'));
 				box.appendChild(row('Формат', seg(SUB_FMT, draft.sub_fmt, function(v) { set('sub_fmt', v); })));
-				box.appendChild(hint('Какой формат просить у сервиса первым. «Авто» подходит почти всем. Xray JSON (Happ) — если часть серверов (например, с XHTTP) сервис отдаёт только приложению Happ; sing-box — если сервис умеет отдавать его напрямую.'));
+				box.appendChild(hint('Какой формат просить у сервиса первым. «Авто» подходит почти всем. Xray JSON (Happ) — если часть серверов (например, с XHTTP или Hysteria2) сервис отдаёт только приложению Happ; sing-box — если сервис умеет отдавать его напрямую. Когда подписку добавляют, панель один раз сравнивает форматы и ставит тот, где серверов больше; дальше формат сам не меняется — только вручную здесь.'));
 				box.appendChild(row('Группы', seg(SUB_GROUP, draft.sub_group, function(v) { set('sub_group', v); })));
 				if (draft.sub_group === 'prefix') box.appendChild(row('Символов', inp('sub_plen', '2', 70, 'первые символы имени, по которым серверы собираются в группу')));
 				box.appendChild(hint('Серверы собираются в группы, и в каждой работает автовыбор лучшего. Удобно, когда в подписке десятки серверов: в карточке «Серверы» выбираете страну, а не отдельный сервер.'));
@@ -46780,6 +46874,26 @@ return view.extend({
 				box.appendChild(hint('Из подписки останутся только серверы, в имени которых есть хоть одно из слов (через |, регистр не важен). Убрать отдельные серверы удобнее маркерами в карточке «Серверы».'));
 				box.appendChild(row('User-Agent', inp('sub_ua', 'подбирается сам', 340)));
 				box.appendChild(hint('Нужен редко: если сервис отдаёт подписку только определённому приложению, например Happ/2.0.'));
+				if (CAPS.sub_id) {
+					var devOn = !!(draft.sub_hwid.trim() || draft.sub_os.trim() || draft.sub_osv.trim() || draft.sub_model.trim());
+					box.appendChild(fold('subdev', 'Устройство для подписки', devOn ? (draft.sub_os.trim() || 'своё') + (draft.sub_model.trim() ? ' · ' + draft.sub_model.trim() : '') : 'роутер', function(fb) {
+						fb.appendChild(hint('Некоторые панели (например, Remnawave с лимитом устройств) отдают подписку только приложению на привязанном устройстве и проверяют, что оно о себе сообщает: HWID, систему и модель. Без этого роутер шлёт свои данные и занимает ещё одно место в лимите — или получает пустую подписку.', 0));
+						var cl = E('select', { 'class': 'cbi-input-select', 'style': 'max-width:100%' }, SUB_CLIENTS.map(function(c) { return E('option', { 'value': c.id }, c.label); }));
+						fb.appendChild(row('Как приложение', E('span', { 'style': 'display:inline-flex; gap:8px; flex-wrap:wrap; align-items:center' }, [ cl, E('button', { 'class': 'btn cbi-button', 'click': function(ev) {
+							ev.preventDefault();
+							var c = SUB_CLIENTS.filter(function(x) { return x.id === cl.value; })[0], v = c && c.make();
+							if (!v) return;
+							draft.sub_ua = v.ua; draft.sub_hwid = v.hwid; draft.sub_os = v.os; draft.sub_osv = v.osv; draft.sub_model = v.model;
+							touch(); renderPanes();
+							zm.toast('Заполнено как ' + c.label + ' — HWID новый. Если подписка привязана к телефону, лучше вставьте HWID из приложения', 'info');
+						} }, 'Заполнить') ])));
+						fb.appendChild(row('HWID', inp('sub_hwid', 'свой у роутера', 340)));
+						fb.appendChild(row('Система', inp('sub_os', 'OpenWrt Linux', 200)));
+						fb.appendChild(row('Версия системы', inp('sub_osv', 'версия ядра роутера', 160)));
+						fb.appendChild(row('Модель', inp('sub_model', 'модель роутера', 260)));
+						fb.appendChild(hint('HWID лучше скопировать из приложения на устройстве, где подписка уже работает (в Happ — «Настройки» → «HWID»): так роутер не займёт новое место в лимите. User-Agent выше заполняется вместе с остальным. Все поля пустые — роутер шлёт свои данные, как раньше.'));
+					}));
+				}
 				box.appendChild(sw(draft.sub_insecure, 'Не проверять сертификат подписки', 'Только для панелей по IP-адресу с самоподписанным сертификатом. Небезопасно: подписку могут подменить по дороге.', function() { set('sub_insecure', !draft.sub_insecure); }));
 			}
 			if (draft.mode !== 'iface') {
@@ -47967,6 +48081,7 @@ return view.extend({
 				miscCard.appendChild(row('Порт торрент-клиента', inp('bt_ports', '51413', 160, 'необязательно')));
 				miscCard.appendChild(hint('Зашифрованные соединения и DHT по протоколу не распознать — укажите порт из настроек клиента (qBittorrent: «Соединение»), и они тоже пойдут мимо VPN.', 0));
 			}
+			if (CAPS.wifi_call) miscCard.appendChild(sw(draft.wifi_call, 'Звонки по Wi‑Fi — напрямую', 'Wi‑Fi Calling (VoWiFi) у операторов связи: телефон звонит через интернет по туннелю к оператору (порты UDP 500 и 4500). Через VPN оператор такие звонки часто не принимает — с этим переключателем они идут напрямую.', function() { set('wifi_call', !draft.wifi_call); }));
 			miscCard.appendChild(sw(draft.excl_ntp, 'Синхронизация времени — напрямую', 'Запросы NTP не пойдут через VPN: часы устройств сверяются с ближайшим сервером времени.', function() { set('excl_ntp', !draft.excl_ntp); }));
 			if (CAPS.ports) {
 				var psum = [], pd = portsShort(draft.p_dt, draft.p_du), pv = portsShort(draft.p_pt, draft.p_pu);
