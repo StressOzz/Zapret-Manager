@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.61
+# Version: 4.62
 ZM_VERSION_EOF
 set -e
 
@@ -1929,7 +1929,7 @@ do_remove_zapret() {
 		/tmp/zapret /tmp/zapret.* "$YV_OFF_FLAG" "$DV_OFF_FLAG" "$JOBS_DIR/flowseal_strategies.txt" "$JOBS_DIR/youtube_strategies.txt" "$ZO_RKN_FLAG" "$ZO_USER_FLAG" "$ZO_IPID_FLAG" "$ZO_DOH_FLAG" &&
 		echo "   ✓ Файлы удалены, остатков нет" || rc=1
 	crontab -l 2>/dev/null | awk '{ l = tolower($0) } l ~ /zapret/ && l !~ /zapret-manager|zapret2/ { next } { print }' | crontab - 2>/dev/null
-	sed -i "\\|$ZA_TAG|d" "$CRON_FILE" 2>/dev/null
+	sed -i "\\|$ZA_TAG|d; \\|$ZX_AUTO_TAG=|d" "$CRON_FILE" 2>/dev/null
 	echo "   ✓ Задания Zapret убраны из расписания"
 	_zm_rm_listed zapret || rc=1
 	/etc/init.d/firewall reload >/dev/null 2>&1
@@ -4207,7 +4207,7 @@ _pg_st_dir() {
 }
 _pg_trace() {
 	case "$1" in
-		zapret) echo "pkg:luci-i18n-zapret-ru pkg:luci-app-zapret pkg:zapret /opt/zapret /etc/config/zapret /etc/config/zapret-opkg /etc/init.d/zapret /etc/rc.d/*[0-9]zapret /etc/firewall.zapret /etc/hotplug.d/*/*zapret /etc/config/zapret.apk-new /tmp/zapret $(_zm_luci_files zapret) nft:zapret cron:zm-autobest $ZO_RKN_FLAG $ZO_USER_FLAG $ZO_IPID_FLAG $ZO_DOH_FLAG $ZA_MODE_FILE $ZA_LAST $ZA_YT_FILE $ZA_LAST_YT $ZA_TS $ZA_TIME_FILE $TEST_BACKUP $ZC_FILE $ZC_BAK $ZC_AFTER $YV_OFF_FLAG $DV_OFF_FLAG $TEST_DIR $TEST_CUSTOM_FILE" ;;
+		zapret) echo "pkg:luci-i18n-zapret-ru pkg:luci-app-zapret pkg:zapret /opt/zapret /etc/config/zapret /etc/config/zapret-opkg /etc/init.d/zapret /etc/rc.d/*[0-9]zapret /etc/firewall.zapret /etc/hotplug.d/*/*zapret /etc/config/zapret.apk-new /tmp/zapret $(_zm_luci_files zapret) nft:zapret cron:zm-autobest cron:zm-excl-auto $ZO_RKN_FLAG $ZO_USER_FLAG $ZO_IPID_FLAG $ZO_DOH_FLAG $ZA_MODE_FILE $ZA_LAST $ZA_YT_FILE $ZA_LAST_YT $ZA_TS $ZA_TIME_FILE $ZA_LOG $TEST_KEEP $TEST_BACKUP $ZC_FILE $ZC_BAK $ZC_AFTER $YV_OFF_FLAG $DV_OFF_FLAG $TEST_DIR $TEST_CUSTOM_FILE" ;;
 		zapret2) echo "pkg:luci-i18n-zapret2-ru pkg:luci-app-zapret2 pkg:zapret2 /opt/zapret2 /etc/config/zapret2 /etc/config/zapret2-opkg /etc/init.d/zapret2 /etc/rc.d/*zapret2 /etc/hotplug.d/*/*zapret2 /etc/config/zapret2.apk-new /tmp/zapret2* $(_zm_luci_files zapret2) nft:zapret2 cronrx:zapret2" ;;
 		bytetube)
 			echo "pkg:byedpi /usr/bin/ciadpi /etc/init.d/byedpi /etc/rc.d/*byedpi /etc/config/byedpi /etc/config/byedpi-opkg /usr/bin/bytetube /etc/config/bytetube /etc/init.d/bytetube /etc/rc.d/*bytetube /usr/libexec/bytetube /usr/share/bytetube /etc/bytetube /etc/hotplug.d/firewall/90-bytetube /usr/share/nftables.d/chain-pre/forward/50-bytetube.nft /var/etc/bytetube /var/run/bytetube.started /tmp/bytetube-test /lib/upgrade/keep.d/bytetube /tmp/dhcp.ytb.bak dnsconf:bytetube.conf cronrx:bytetube"
@@ -5187,44 +5187,9 @@ _mirror_upd_try() {
 }
 _mirror_mark() { rm -f "$ZM_SI_STATIC"; mkdir -p "$ZM_STATE_DIR"; printf '%s\t%s\t%s\n' "$1" "$(date +%s)" "$2" > "$ZM_MIRROR_STATE"; }
 _mirror_auto() {
-	local cur u dir h t list="" n=0
 	[ -n "$ZM_MIRROR_TRIED" ] && return 1
 	ZM_MIRROR_TRIED=1
-	cur="$(_mirror_host)"; u="$(_mirror_feed1)"
-	[ -n "$cur" ] && [ -n "$u" ] || return 1
-	echo "==> Репозиторий OpenWrt ($cur) отвечает с ошибками — подбираем рабочее зеркало"
-	dir="$JOBS_DIR/mirror.$$"; rm -rf "$dir"; mkdir -p "$dir"
-	for h in $ZM_MIRRORS; do
-		[ "$h" = "$cur" ] && continue
-		n=$((n + 1))
-		_mirror_probe "$h" "$u" > "$dir/$n" &
-	done
-	wait
-	list="$(cat "$dir"/* 2>/dev/null | sort -n | head -n 4)"
-	rm -rf "$dir"
-	if [ -z "$list" ]; then
-		echo "   ✗ Ни одно зеркало не ответило — похоже, нет интернета. Оставляем $cur"
-		return 1
-	fi
-	echo "   ✓ Отвечают: $(printf '%s\n' "$list" | awk '{ printf "%s%s (%d мс)", (NR > 1 ? ", " : ""), $2, $1 }')"
-	if printf '%s\n' "$list" | {
-		while read -r t h; do
-			[ -n "$h" ] || continue
-			echo "   → Пробуем $h"
-			_mirror_write "$h" || exit 1
-			if _mirror_upd_try; then
-				_mirror_keep
-				_mirror_mark "$h" auto
-				echo "   ✓ Список пакетов обновлён через зеркало $h — оно останется, вернуть основное можно в «Системе»"
-				exit 0
-			fi
-			_mirror_undo
-			echo "   ✗ $h: список пакетов не обновился без ошибок"
-		done
-		exit 1
-	}; then return 0; fi
-	echo "   ✗ Ни одно зеркало не помогло — оставляем $cur"
-	return 1
+	_mirror_pick_core auto
 }
 
 mirror_status() {
@@ -5277,16 +5242,16 @@ _mirror_why() {
 	esac
 }
 _mirror_feed_check() {
-	local out="$1" n p bad=0 all=0 errs
+	local out="$1" n p bad=0 all=0 errs I="$MP_I"
 	errs="$(grep -iE 'error|fail|unable|warning|timed out|not found|404|network' "$out" 2>/dev/null | grep -v 'write error: Broken pipe')"
 	while IFS='	' read -r n p; do
 		[ -n "$p" ] || continue
 		all=$((all + 1))
 		if printf '%s\n' "$errs" | grep -qF "$p"; then
 			bad=$((bad + 1))
-			echo "     ✗ $n — $(_mirror_why "$(printf '%s\n' "$errs" | grep -F "$p" | head -n 1)")"
+			echo "$I     ✗ $n — $(_mirror_why "$(printf '%s\n' "$errs" | grep -F "$p" | head -n 1)")"
 		else
-			echo "     ✓ $n"
+			echo "$I     ✓ $n"
 		fi
 	done <<MF_EOF
 $(_mirror_feeds)
@@ -5294,14 +5259,24 @@ MF_EOF
 	MF_ALL="$all"; MF_BAD="$bad"
 	[ "$all" -gt 0 ] && [ "$bad" = 0 ]
 }
-do_mirror_pick() {
-	local cur u dir h t p n=0 k total out rc ok_list="" name rel arch
+_mirror_nrep() { awk -v n="$1" 'BEGIN { a = n % 100; b = n % 10; print n " " ((a >= 11 && a <= 14) ? "репозиториев" : b == 1 ? "репозиторий" : (b >= 2 && b <= 4) ? "репозитория" : "репозиториев") }'; }
+_mirror_hd() { if [ -n "$MP_I" ]; then echo "   → $*"; else echo "==> $*"; fi; }
+_mirror_pick_core() {
+	local mode="$1" cur u dir h t p n=0 k total out rc name rel arch I="" cn
 	cur="$(_mirror_host)"; u="$(_mirror_feed1)"
-	[ -n "$u" ] || { echo "ОШИБКА: в списке репозиториев ($(_confz)) нет адреса OpenWrt"; return 1; }
-	rel="$(. /etc/openwrt_release 2>/dev/null; echo "$DISTRIB_RELEASE")"; arch="$(. /etc/openwrt_release 2>/dev/null; echo "$DISTRIB_ARCH")"
-	echo "==> Подбираем зеркало OpenWrt ${rel:+$rel }${arch:+($arch) }— сейчас $(_mirror_label "$cur")"
+	cn="$(_mirror_label "$cur")"
+	if [ "$mode" = auto ]; then
+		[ -n "$cur" ] && [ -n "$u" ] || return 1
+		I="  "
+		echo "==> Репозиторий OpenWrt ($cn) отвечает с ошибками — подбираем рабочее зеркало"
+	else
+		[ -n "$u" ] || { echo "ОШИБКА: в списке репозиториев ($(_confz)) нет адреса OpenWrt"; return 1; }
+		rel="$(. /etc/openwrt_release 2>/dev/null; echo "$DISTRIB_RELEASE")"; arch="$(. /etc/openwrt_release 2>/dev/null; echo "$DISTRIB_ARCH")"
+		echo "==> Подбираем зеркало OpenWrt ${rel:+$rel }${arch:+($arch) }— сейчас $cn"
+	fi
+	MP_I="$I"
 	dir="$JOBS_DIR/mirror-pick.$$"; rm -rf "$dir"; mkdir -p "$dir"
-	echo "==> Меряем пинг до $(echo $ZM_MIRRORS | wc -w | tr -d ' ') зеркал"
+	_mirror_hd "Меряем пинг до $(echo $ZM_MIRRORS | wc -w | tr -d ' ') зеркал"
 	for h in $ZM_MIRRORS; do
 		n=$((n + 1))
 		( t="$(_mirror_ping "$h")" || t=-
@@ -5313,51 +5288,60 @@ do_mirror_pick() {
 	while IFS='	' read -r t p h; do
 		[ -n "$h" ] || continue
 		if [ "$t" != - ]; then k="пинг $t мс"; else k="на пинг не отвечает"; fi
-		if [ "$p" != - ]; then echo "   · $(_mirror_label "$h") ($h) — $k, пакеты отдаёт за $p мс"
-		else echo "   · $(_mirror_label "$h") ($h) — $k, пакеты для этого роутера не отдаёт"; fi
+		if [ "$mode" = auto ] && [ "$h" = "$cur" ]; then echo "$I   · $(_mirror_label "$h") ($h) — $k, сейчас выбрано и отвечает с ошибками"
+		elif [ "$p" != - ]; then echo "$I   · $(_mirror_label "$h") ($h) — $k, пакеты отдаёт за $p мс"
+		else echo "$I   · $(_mirror_label "$h") ($h) — $k, пакеты для этого роутера не отдаёт"; fi
 	done < "$dir/all"
-	awk -F'\t' '$2 != "-" { print ($1 == "-" ? 100000 + $2 : $1) "\t" $1 "\t" $3 }' "$dir/all" | sort -n | cut -f2- > "$dir/order"
+	awk -F'\t' -v skip="$([ "$mode" = auto ] && echo "$cur")" '$2 != "-" && $3 != skip { print ($1 == "-" ? 100000 + $2 : $1) "\t" $1 "\t" $3 }' "$dir/all" | sort -n | cut -f2- > "$dir/order"
+	[ "$mode" = auto ] && { head -n 4 "$dir/order" > "$dir/o4"; mv -f "$dir/o4" "$dir/order"; }
 	rm -f "$dir"/[0-9]* "$dir/all"
 	total="$(grep -c . "$dir/order")"
 	if [ "$total" = 0 ]; then
-		rm -rf "$dir"
-		echo "ОШИБКА: ни одно зеркало не отдаёт пакеты для этого роутера — похоже, нет интернета. Оставляем $(_mirror_label "$cur")"
+		rm -rf "$dir"; MP_I=""
+		if [ "$mode" = auto ]; then echo "   ✗ Ни одно зеркало не отдаёт пакеты — похоже, нет интернета. Оставляем $cn"
+		else echo "ОШИБКА: ни одно зеркало не отдаёт пакеты для этого роутера — похоже, нет интернета. Оставляем $cn"; fi
 		return 1
 	fi
 	k=""; n=0
 	while IFS='	' read -r t h; do n=$((n + 1)); k="$k${k:+, }$n) $(_mirror_label "$h")$([ "$t" != - ] && echo " $t мс")"; done < "$dir/order"
-	echo "==> Порядок проверки — от быстрого к медленному: $k"
+	_mirror_hd "Порядок проверки — от быстрого к медленному$([ "$mode" = auto ] && echo ", первые $total"): $k"
 	n=0
 	out="$dir/upd"
 	while IFS='	' read -r t h; do
 		[ -n "$h" ] || continue
 		n=$((n + 1)); name="$(_mirror_label "$h")"
-		echo "==> [$n/$total] $name — $h$([ "$t" != - ] && echo ", пинг $t мс")"
+		_mirror_hd "[$n/$total] $name — $h$([ "$t" != - ] && echo ", пинг $t мс")"
 		if [ "$h" != "$cur" ]; then
-			_mirror_write "$h" || { echo "ОШИБКА: не удалось записать $(_confz)"; rm -rf "$dir"; return 1; }
+			_mirror_write "$h" || { echo "ОШИБКА: не удалось записать $(_confz)"; rm -rf "$dir"; MP_I=""; return 1; }
 		fi
-		echo "   → Обновляем список пакетов через $h"
+		echo "$I   → Обновляем список пакетов через $h"
 		_zm_run 150 $PKG_UPD > "$out" 2>&1; rc=$?
 		_zm_pkg_unlock
 		if _mirror_feed_check "$out" && [ "$rc" = 0 ]; then
 			[ "$h" != "$cur" ] && _mirror_keep
-			if [ "$h" = downloads.openwrt.org ]; then rm -f "$ZM_MIRROR_STATE"; else _mirror_mark "$h" pick; fi
-			rm -rf "$dir"
-			if [ "$h" = "$cur" ]; then echo "==> Готово: текущее зеркало $name — самое быстрое из рабочих, все $MF_ALL репозиториев обновились. Оставляем его"
-			else echo "==> Готово: выбрано зеркало $name ($h)$([ "$t" != - ] && echo ", пинг $t мс") — все $MF_ALL репозиториев обновились без ошибок"; fi
+			if [ "$h" = downloads.openwrt.org ]; then rm -f "$ZM_MIRROR_STATE"; else _mirror_mark "$h" "$([ "$mode" = auto ] && echo auto || echo pick)"; fi
+			rm -rf "$dir"; MP_I=""
+			if [ "$mode" = auto ]; then echo "   ✓ Список пакетов обновлён через зеркало $name ($h) — все $(_mirror_nrep "$MF_ALL"). Оно останется, вернуть основное можно в «Системе»"
+			elif [ "$h" = "$cur" ]; then echo "==> Готово: текущее зеркало $name — самое быстрое из рабочих, все $(_mirror_nrep "$MF_ALL") обновились. Оставляем его"
+			else echo "==> Готово: выбрано зеркало $name ($h)$([ "$t" != - ] && echo ", пинг $t мс") — все $(_mirror_nrep "$MF_ALL") обновились без ошибок"; fi
 			return 0
 		fi
-		if [ "$MF_BAD" = 0 ]; then echo "   ✗ $name: обновление списка пакетов завершилось с ошибкой"; _zm_pkg_fmt < "$out" | head -n 3
-		else echo "   ✗ $name: не обновилось репозиториев — $MF_BAD из $MF_ALL"; fi
+		if [ "$MF_BAD" = 0 ]; then echo "$I   ✗ $name: обновление списка пакетов завершилось с ошибкой"; _zm_pkg_fmt < "$out" | head -n 3
+		else echo "$I   ✗ $name: не обновилось репозиториев — $MF_BAD из $MF_ALL"; fi
 		[ "$h" != "$cur" ] && _mirror_undo
-		[ "$n" -lt "$total" ] && echo "   → Пробуем следующее по пингу"
+		[ "$n" -lt "$total" ] && echo "$I   → Пробуем следующее по пингу"
 	done < "$dir/order"
-	rm -rf "$dir"
-	echo "==> Возвращаем прежнее зеркало $(_mirror_label "$cur") и обновляем список пакетов"
+	rm -rf "$dir"; MP_I=""
+	if [ "$mode" = auto ]; then
+		echo "   ✗ Ни одно зеркало не помогло — оставляем $cn"
+		return 1
+	fi
+	echo "==> Возвращаем прежнее зеркало $cn и обновляем список пакетов"
 	_zm_run 150 $PKG_UPD >/dev/null 2>&1; _zm_pkg_unlock
-	echo "ОШИБКА: ни через одно зеркало все репозитории не обновились. Оставлено $(_mirror_label "$cur")"
+	echo "ОШИБКА: ни через одно зеркало все репозитории не обновились. Оставлено $cn"
 	return 1
 }
+do_mirror_pick() { _mirror_pick_core pick; }
 
 do_mirror_set() {
 	local host="$1" u prev ms
@@ -5383,7 +5367,7 @@ do_mirror_set() {
 }
 
 mirror_set() {
-	local id="$1" host j
+	local id="$1" host="" j
 	case "$id" in
 		infra)        host="mirror-03.infra.openwrt.org" ;;
 		brazil)       host="openwrt.c3sl.ufpr.br" ;;
@@ -5394,12 +5378,12 @@ mirror_set() {
 		usa)          host="openwrt.pixeldeck.net" ;;
 		germany_rwth) host="ftp.halifax.rwth-aachen.de/openwrt" ;;
 		default)      host="downloads.openwrt.org" ;;
-		pick)
-			if j="$(_zm_busy_job)"; then printf '{"error":"%s"}\n' "$(esc "идёт операция «$j» — дождитесь её окончания")"; return 1; fi
-			job_start mirror_set do_mirror_pick; return ;;
+		pick) ;;
 		*) echo '{"error":"неизвестное зеркало"}'; return 1 ;;
 	esac
-	job_start mirror_set do_mirror_set "$host"
+	if j="$(_zm_busy_job)"; then printf '{"error":"%s"}\n' "$(esc "идёт операция «$j» — дождитесь её окончания")"; return 1; fi
+	if [ "$id" = pick ]; then job_start mirror_set do_mirror_pick
+	else job_start mirror_set do_mirror_set "$host"; fi
 }
 
 _excl_dir() { echo "/opt/zapret/init.d/openwrt/custom.d"; }
@@ -16614,6 +16598,7 @@ do_steer_warp_recreate() {
 do_steer_remove() {
 	local rc
 	_do_steer_remove_core "$@"; rc=$?
+	stl_present || rm -f "$FT_STEER_OFF"
 	_ft_steer_sync
 	return $rc
 }
@@ -23195,8 +23180,8 @@ _fk_rs_check() {
 			uci -q set netshift.settings.download_lists_via_proxy=1
 			uci -q set "netshift.settings.download_lists_via_proxy_section=$sec"
 			uci -q commit netshift
-			logger -t zapret-manager "Forkozz: набор правил ${u##*/} не скачался напрямую ($r) — включено «Скачивать списки сервисов через VPN»"
-			_fk_say "Включаем «Скачивать списки сервисов через VPN»: наборы правил sing-box будет качать через подключение"
+			logger -t zapret-manager "Forkozz: набор правил ${u##*/} не скачался напрямую ($r) — включено «Скачивать списки сервисов через VPN», через подключение теперь обновляется и подписка"
+			_fk_say "Включаем «Скачивать списки сервисов через VPN»: наборы правил sing-box и обновления подписки пойдут через подключение (не ответит VPN — подписка скачается напрямую)"
 			return 0
 		fi
 	fi
@@ -32595,17 +32580,38 @@ return view.extend({
 			var day = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime(), dd = new Date(t.getFullYear(), t.getMonth(), t.getDate()).getTime();
 			return dd === day ? 'сегодня ' + hm : day - dd === 864e5 ? 'вчера ' + hm : p2(t.getDate()) + '.' + p2(t.getMonth() + 1) + '.' + t.getFullYear();
 		}
+		function sysStrip(sys) {
+			var href = document.body.classList.contains('zmw-body') ? '#/system' : L.url('admin/services/zapret-manager/system');
+			var p2 = function(x) { return (x < 10 ? '0' : '') + x; };
+			function chip(tone, text, title) {
+				var go = function() { location.href = href; };
+				return E('span', { 'class': 'zm-badge ' + tone, 'role': 'link', 'tabindex': '0', 'title': title + '\nНажмите — откроется «Система»', 'click': go,
+					'keydown': function(ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); } } }, [ E('span', { 'class': 'zm-dot' }), text ]);
+			}
+			var fm = { hw: 'аппаратный', sw: 'программный' }[sys.flow_mode] || '', fon = !!fm;
+			var zf = sys.flow_offloading_fix === true, sf = sys.steer_offload_fix === true;
+			var c = [
+				chip(sys.quic_blocked ? 'zm-ok' : 'zm-off', sys.quic_blocked ? 'QUIC блокируется' : 'QUIC не блокируется', 'Блокировка QUIC (UDP 80 и 443): браузеры переходят на обычный HTTPS, его Zapret обрабатывает надёжнее'),
+				chip(sys.ipv6_enabled ? 'zm-ok' : 'zm-off', sys.ipv6_enabled ? 'IPv6 в Zapret' : 'IPv6 в Zapret выключен', 'Обрабатывает ли Zapret трафик IPv6'),
+				chip(fon ? 'zm-sx-info' : 'zm-off', 'Flow Offloading ' + (fm || 'выключен'), 'Ускорение маршрутизации/NAT (Сеть → Межсетевой экран)')
+			];
+			if (fon || zf) c.push(chip(zf ? 'zm-ok' : 'zm-bad', zf ? 'поправка для Zapret' : 'нет поправки для Zapret', zf ? 'Поправка Flow Offloading для Zapret применена' + (fon ? '' : ' — пока Flow Offloading выключен, она ни на что не влияет') : 'Flow Offloading включён, а поправки для Zapret нет — часть соединений может идти мимо Zapret'));
+			if (sys.steer_installed && (fon || sf)) c.push(chip(sf ? 'zm-ok' : 'zm-bad', sf ? 'поправка для Steer' : 'нет поправки для Steer', sf ? 'Поправка Flow Offloading для Steer применена' + (fon ? '' : ' — пока Flow Offloading выключен, она ни на что не влияет') : 'Flow Offloading включён, а поправки для Steer нет' + (sys.steer_offload_off ? ' (отключена вручную)' : '') + ' — соединения Steer могут перестать идти'));
+			var mh = String(sysInfo.mirror_host || '');
+			if (mh) {
+				var def = mh === 'downloads.openwrt.org', how = def ? '' : String(sysInfo.mirror_how || '');
+				var at = how && +sysInfo.mirror_at > 0 ? new Date(sysInfo.mirror_at * 1000) : null, when = at ? ' ' + p2(at.getDate()) + '.' + p2(at.getMonth() + 1) : '';
+				c.push(chip(def ? 'zm-off' : how === 'auto' ? 'zm-warn' : 'zm-sx-info',
+					def ? 'Зеркало OpenWrt · основное' : 'Зеркало ' + String(sysInfo.mirror || mh) + (how === 'auto' ? ' · автовыбор' + when : how === 'pick' ? ' · подобрано' + when : ''),
+					'Откуда ставятся пакеты OpenWrt: ' + mh + (how === 'auto' ? '\nОсновной репозиторий отвечал с ошибками — панель переключилась сама' : how === 'pick' ? '\nПодобрано кнопкой «Подобрать зеркало»' : how === 'manual' ? '\nВыбрано вручную' : '')));
+			}
+			return E('div', { 'class': 'zm-sysline' }, [ E('span', { 'class': 'zm-label' }, 'Система') ].concat(c));
+		}
 		function renderOverview(d, doh, hosts, sys, h, bk) {
 			var hostsAi = (hosts.items || []).filter(function(it) { return /^ai_/.test(it.id); });
 			var hostsOther = (hosts.items || []).filter(function(it) { return !/^ai_/.test(it.id); });
 			var hostsEnabled = hostsOther.filter(function(it) { return it.enabled; }).length + (hostsAi.some(function(it) { return it.enabled; }) ? 1 : 0);
 			var hostsTotal = hostsOther.length + (hostsAi.length ? 1 : 0);
-
-			var sysFlags = [];
-			if (sys.quic_blocked) sysFlags.push('QUIC заблокирован');
-			if (sys.ipv6_enabled) sysFlags.push('IPv6 в Zapret включён');
-			if (sys.flow_offloading_fix) sysFlags.push('поправка Flow Offloading для Zapret');
-			if (sys.steer_offload_fix) sysFlags.push('поправка Flow Offloading для Steer');
 
 			var zrSt = st(h, 'zapret', d.zapret === 'installed' ? (d.zapret_running ? 1 : 2) : 0);
 			var zr2St = st(h, 'zapret2', d.zapret2 === 'installed' ? (d.zapret2_running ? 1 : 2) : 0);
@@ -32659,7 +32665,6 @@ return view.extend({
 				!bk || !bk.items ? E('span', {}, '—')
 					: bkItems.length ? zm.badge(true, 'копий: ' + bkItems.length + ' · последняя ' + bkWhen(bkItems[0].at), '') : offBadge('копий нет'),
 				bk && bk.items && bk.auto === false ? E('span', { 'class': 'zm-badge zm-off', 'title': 'Копия перед установкой, удалением и обновлением не сохраняется сама' }, [ E('span', { 'class': 'zm-dot' }), 'авто выкл' ]) : '' ])));
-			if (sysFlags.length) items.push(row('Система', E('span', { 'style': 'display:flex;flex-wrap:wrap;gap:6px;flex:1 1 0;min-width:0' }, sysFlags.map(function(f) { return E('span', { 'class': 'zm-badge zm-off' }, f); }))));
 
 			var half = Math.ceil(items.length / 2);
 
@@ -32668,7 +32673,8 @@ return view.extend({
 				E('div', { 'class': 'bt-cols' }, [
 					E('div', { 'class': 'bt-col' }, items.slice(0, half)),
 					E('div', { 'class': 'bt-col' }, items.slice(half))
-				])
+				]),
+				sysStrip(sys || {})
 			]);
 		}
 
@@ -32686,16 +32692,6 @@ return view.extend({
 				row('Платформа', E('span', {}, [ String(sysInfo.target || '—') ])),
 				row('OpenWrt', E('span', {}, [ String(sysInfo.openwrt || '—') ]))
 			];
-			if (sysInfo.mirror_host && sysInfo.mirror_host !== 'downloads.openwrt.org') {
-				var mAt = +sysInfo.mirror_at > 0 ? new Date(sysInfo.mirror_at * 1000) : null;
-				var mWhen = mAt ? ('0' + mAt.getDate()).slice(-2) + '.' + ('0' + (mAt.getMonth() + 1)).slice(-2) : '';
-				rows.push(row('Зеркало OpenWrt', E('span', { 'style': 'display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap' }, [
-					E('span', { 'title': String(sysInfo.mirror_host) }, [ String(sysInfo.mirror || sysInfo.mirror_host) ]),
-					sysInfo.mirror_how === 'auto' ? E('span', { 'class': 'zm-badge zm-warn', 'title': 'Основной репозиторий отвечал с ошибками — панель переключилась сама' }, [ E('span', { 'class': 'zm-dot' }), 'автовыбор' + (mWhen ? ' · ' + mWhen : '') ])
-						: sysInfo.mirror_how === 'pick' ? E('span', { 'class': 'zm-badge zm-ok', 'title': 'Подобрано кнопкой «Подобрать зеркало»' }, [ E('span', { 'class': 'zm-dot' }), 'подобрано' + (mWhen ? ' · ' + mWhen : '') ])
-						: E('span', { 'class': 'zm-badge zm-off' }, [ E('span', { 'class': 'zm-dot' }), 'вручную' ])
-				])));
-			}
 			function meter(label, val, pct, mid, hi) {
 				pct = Math.max(0, Math.min(100, pct || 0));
 				return E('div', { 'class': 'zm-meter zmw-mem-row' + (pct >= hi ? ' zm-meter-hi zmw-mem-hi' : pct >= mid ? ' zm-meter-mid zmw-mem-mid' : '') }, [
@@ -32753,7 +32749,6 @@ return view.extend({
 			]).then(function(res) {
 				overviewEl.innerHTML = '';
 				overviewEl.appendChild(renderOverview(res[0], res[1], res[2], res[3], res[4], res[5]));
-				renderSysFix(res[3]);
 				if (res[4] && typeof res[4].zapret === 'number') {
 					try { window.dispatchEvent(new CustomEvent('zm:health', { detail: res[4] })); } catch (e) {}
 				}
@@ -32823,14 +32818,6 @@ return view.extend({
 
 		overviewEl.appendChild(renderOverview(data, dohData, hostsData, sysData, healthData, bkData));
 		renderCards();
-		var sysFixEl = E('div', {});
-		function renderSysFix(d) {
-			if (!d || d.error) return;
-			sysData = d;
-			sysFixEl.innerHTML = '';
-			sysFixEl.appendChild(zm.sysFixCard(d, renderSysFix, { title: 'Настройки системы' }));
-		}
-		renderSysFix(sysData);
 		var updateEl = E('div', {});
 		var updateLog = E('pre', { 'class': 'zm-log' });
 		wrap.appendChild(updateEl);
@@ -32847,7 +32834,6 @@ return view.extend({
 		]));
 		wrap.appendChild(overviewEl);
 		wrap.appendChild(cards);
-		wrap.appendChild(sysFixEl);
 		wrap.appendChild(verEl);
 		renderVersions();
 		loadVersions('auto');
@@ -42977,6 +42963,13 @@ html.zm-theme-dark .zm-si-box { border-color: rgba(255,255,255,.12); background:
 html.zm-theme-dark .zm-sx-tile { border-color: rgba(255,255,255,.12); background: rgba(255,255,255,.03); }
 html.zm-theme-dark .zm-sx-sub { background: rgba(255,255,255,.05); }
 html.zm-theme-dark .zm-badge.zm-sx-info { background: rgba(88,166,255,.16); color: #79c0ff; }
+.zm-sx-info .zm-dot { background: currentColor; }
+.zm-sysline { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(127,127,127,.18); }
+.zm-sysline > .zm-label { flex: 0 0 auto; margin-right: 6px; }
+.zm-sysline .zm-badge { cursor: pointer; user-select: none; transition: filter .15s ease, transform .15s ease; }
+.zm-sysline .zm-badge:hover { filter: brightness(.94); transform: translateY(-1px); }
+.zm-sysline .zm-badge:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+html.zm-theme-dark .zm-sysline .zm-badge:hover { filter: brightness(1.18); }
 @media (max-width: 720px) { .zm-sx-grid, .zm-sx-two { grid-template-columns: minmax(0, 1fr); } }
 .zm-si-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
 .zm-si-head h4 { margin: 0; font-size: 14px; }
@@ -53022,6 +53015,7 @@ html[data-theme="light"] .zmw-orbs i { opacity: .28; }
 #zmw-view .bt-cols { column-gap: 48px; }
 #zmw-view .bt-col .zm-row { padding: 6px 0; margin: 0; border-bottom: 1px dashed var(--border); }
 #zmw-view .bt-col .zm-row:last-child { border-bottom: 0; }
+#zmw-view .zm-sysline { border-top-color: var(--border); }
 
 #zmw-view .zm-hint, #zmw-view p.zm-hint, .zm-dock .zm-hint, .zm-dock p.zm-hint, .zmw-modal .zm-hint, .zmw-modal p.zm-hint { opacity: 1; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
 #zmw-view a:not(.cbi-button), .zm-dock a:not(.cbi-button), .zmw-modal a:not(.cbi-button) { color: var(--a2); text-decoration-color: rgba(59,130,246,.35); text-underline-offset: 3px; }
