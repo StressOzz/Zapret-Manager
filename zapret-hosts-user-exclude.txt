@@ -66,6 +66,11 @@ ipstream.one
 godville.net
 voidboost.cc
 hcaptcha.com
+gigabyte.com
+bambulab.com
+skillbox.pro
+tarantool.io
+kalay.net.cn
 fanatical.com
 mchose.com.cn
 voidboost.one
@@ -81,6 +86,7 @@ payguide.online
 easy4ipcloud.com
 feralhosting.com
 moondroplab.tech
+iotcplatform.com
 dahuasecurity.com
 rockstargames.com
 docs.altlinux.org
@@ -116,10 +122,6 @@ userapi.com
 vk-apps.com
 vkcache.com
 vkclips.app
-gigabyte.com
-bambulab.com
-skillbox.pro
-tarantool.io
 vk-portal.net
 vkuserlive.net
 vkmessenger.app
