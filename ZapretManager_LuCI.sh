@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.62
+# Version: 4.68
 ZM_VERSION_EOF
 set -e
 
@@ -1524,9 +1524,13 @@ zm_watch() {
 		_fk_serial_patch
 		_fk_listsvia_patch
 		_fk_subvia_patch
+		_fk_reality_patch
+		_fk_desync_patch
 		_fk_ghdl_patch
 		_fk_b4_watch
 	fi
+	_ft_zapret_sync
+	_fk_installed && ! _fk_foreign && _fk_rl_watch
 	_st_colo_guard
 	_st_vpn_watch
 	_st_secs_vpn_watch
@@ -1884,6 +1888,7 @@ do_install_zapret() {
 	_nochange_save zapret /opt/zapret/ipset "$CONF"
 	_do_install_zapret_core; rc=$?
 	_nochange_restore zapret
+	_ft_zapret_sync
 	return $rc
 }
 
@@ -1892,6 +1897,7 @@ do_install_zapret2() {
 	_nochange_save zapret2 /opt/zapret2/ipset /etc/config/zapret2
 	_do_install_zapret2_core; rc=$?
 	_nochange_restore zapret2
+	_ft_zapret_sync
 	return $rc
 }
 
@@ -1930,6 +1936,7 @@ do_remove_zapret() {
 		echo "   ✓ Файлы удалены, остатков нет" || rc=1
 	crontab -l 2>/dev/null | awk '{ l = tolower($0) } l ~ /zapret/ && l !~ /zapret-manager|zapret2/ { next } { print }' | crontab - 2>/dev/null
 	sed -i "\\|$ZA_TAG|d; \\|$ZX_AUTO_TAG=|d" "$CRON_FILE" 2>/dev/null
+	_ft_zapret_gone
 	echo "   ✓ Задания Zapret убраны из расписания"
 	_zm_rm_listed zapret || rc=1
 	/etc/init.d/firewall reload >/dev/null 2>&1
@@ -2050,6 +2057,7 @@ do_remove_zapret2() {
 	_zm_cron_drop 'zapret2' 'Zapret2'
 	_zm_rm_listed zapret2 || rc=1
 	/etc/init.d/firewall reload >/dev/null 2>&1
+	_ft_zapret_gone
 	_zm_rm_done "$rc" "Zapret2"
 }
 zapret2_action() {
@@ -3535,7 +3543,7 @@ _fw4_offload_set() {
 	esac
 }
 
-_fw4_offload_on() { [ "$(uci -q get firewall.@defaults[0].flow_offloading)" = 1 ] || [ "$(uci -q get firewall.@defaults[0].flow_offloading_hw)" = 1 ]; }
+_fw4_offload_on() { [ "$(uci -q get firewall.@defaults[0].flow_offloading)" = 1 ]; }
 _fw4_offload_mode() {
 	if [ "$(uci -q get firewall.@defaults[0].flow_offloading_hw)" = 1 ] && [ "$(uci -q get firewall.@defaults[0].flow_offloading)" = 1 ]; then echo hw
 	elif [ "$(uci -q get firewall.@defaults[0].flow_offloading)" = 1 ]; then echo sw
@@ -3544,12 +3552,35 @@ _fw4_offload_mode() {
 FT_STEER_OFF="$ZM_STATE_DIR/ft.steer.off"
 _ft_steer_applied() { grep -q 'ct mark and 0x0ff00000 == 0x0 .*flow offload @ft;' "$FW4_TPL" 2>/dev/null; }
 
+FT_ZAPRET_OFF="$ZM_STATE_DIR/ft.zapret.off"
+_ft_zapret_sync() {
+	[ -f "$FW4_TPL" ] && [ ! -f "$FT_ZAPRET_OFF" ] && _fw4_offload_on || return 0
+	[ -x /etc/init.d/zapret ] || [ -x /etc/init.d/zapret2 ] || return 0
+	[ "$(_flow_offloading_fix_applied)" = true ] && return 0
+	_fw4_offload_set keep 1 || return 0
+	logger -t zapret-manager "Flow Offloading: включён — поправка для Zapret применена сама"
+	/etc/init.d/firewall reload >/dev/null 2>&1
+	return 0
+}
+_ft_zapret_gone() {
+	[ -x /etc/init.d/zapret ] || [ -x /etc/init.d/zapret2 ] && return 0
+	rm -f "$FT_ZAPRET_OFF"
+	[ "$(_flow_offloading_fix_applied)" = true ] || return 0
+	_fw4_offload_set keep 0 || return 0
+	echo "   ✓ Поправка Flow Offloading для Zapret убрана — Zapret на роутере больше нет"
+	_fw4_offload_on && /etc/init.d/firewall reload >/dev/null 2>&1
+	return 0
+}
 _ft_steer_sync() {
 	local want=0
 	[ -f "$FW4_TPL" ] || return 0
-	stl_present && [ ! -f "$FT_STEER_OFF" ] && want=1
-	if [ "$want" = 1 ]; then _ft_steer_applied && return 0
-	else _ft_steer_applied || return 0; fi
+	if stl_present && [ ! -f "$FT_STEER_OFF" ]; then
+		_ft_steer_applied && return 0
+		_fw4_offload_on || return 0
+		want=1
+	else
+		_ft_steer_applied || return 0
+	fi
 	_fw4_offload_set "$want" keep || return 0
 	logger -t zapret-manager "Flow Offloading: соединения Steer $([ "$want" = 1 ] && echo "исключены из выгрузки потоков" || echo "снова выгружаются")"
 	_fw4_offload_on && /etc/init.d/firewall reload >/dev/null 2>&1
@@ -3565,7 +3596,7 @@ system_toggle_steer_offload_fix() {
 		printf '{"ok":true,"steer_offload_fix":%s}\n' "$w"; return 0
 	fi
 	if _ft_steer_applied; then
-		mkdir -p "$ZM_STATE_DIR"; : > "$FT_STEER_OFF"
+		if _fw4_offload_on; then mkdir -p "$ZM_STATE_DIR"; : > "$FT_STEER_OFF"; fi
 		_fw4_offload_set 0 keep
 		logger -t zapret-manager "Flow Offloading: поправка для Steer отключена вручную"
 	else
@@ -3587,9 +3618,10 @@ _flow_offloading_fix_applied() {
 _expert_mode() { [ -f "$EXPERT_MODE_FILE" ] && echo true || echo false; }
 
 system_status() {
-	printf '{"quic_blocked":%s,"ipv6_enabled":%s,"flow_offloading_fix":%s,"flow_mode":"%s","fw4_tpl":%s,"steer_installed":%s,"steer_offload_fix":%s,"steer_offload_off":%s,"expert_mode":%s,"pkg":"%s",%s}\n' \
+	printf '{"quic_blocked":%s,"ipv6_enabled":%s,"flow_offloading_fix":%s,"flow_mode":"%s","fw4_tpl":%s,"steer_installed":%s,"steer_offload_fix":%s,"steer_offload_off":%s,"zapret_fix_off":%s,"zapret_installed":%s,"watch_off":%s,"expert_mode":%s,"pkg":"%s",%s}\n' \
 		"$(_quic_blocked)" "$(_ipv6_enabled_in_zapret)" "$(_flow_offloading_fix_applied)" "$(_fw4_offload_mode)" "$([ -f "$FW4_TPL" ] && echo true || echo false)" \
 		"$(stl_present && echo true || echo false)" "$(_ft_steer_applied && echo true || echo false)" "$([ -f "$FT_STEER_OFF" ] && echo true || echo false)" \
+		"$([ -f "$FT_ZAPRET_OFF" ] && echo true || echo false)" "$([ -x /etc/init.d/zapret ] || [ -x /etc/init.d/zapret2 ] && echo true || echo false)" "$([ -f "$WATCH_OFF" ] && echo true || echo false)" \
 		"$(_expert_mode)" "$PKG" "$(_zt_json)"
 }
 
@@ -3720,13 +3752,18 @@ system_toggle_flow_offloading_fix() {
 	local template="/usr/share/firewall4/templates/ruleset.uc" w
 	[ -f "$template" ] || { echo '{"error":"шаблон firewall4 не найден"}'; return 1; }
 	w="$(_zm_want "$1")"
-	if [ -n "$w" ] && [ "$(_flow_offloading_fix_applied)" = "$w" ]; then printf '{"ok":true,"flow_offloading_fix":%s}\n' "$w"; return 0; fi
+	if [ -n "$w" ] && [ "$(_flow_offloading_fix_applied)" = "$w" ]; then
+		[ "$w" = true ] && rm -f "$FT_ZAPRET_OFF"
+		printf '{"ok":true,"flow_offloading_fix":%s}\n' "$w"; return 0
+	fi
 	if grep -q 'ct original packets ge 30 flow offload @ft;' "$template"; then
+		if _fw4_offload_on; then mkdir -p "$ZM_STATE_DIR"; : > "$FT_ZAPRET_OFF"; fi
 		_fw4_offload_set keep 0
 		fw4 restart >/dev/null 2>&1
 		printf '{"ok":true,"flow_offloading_fix":false}\n'
 		return
 	fi
+	rm -f "$FT_ZAPRET_OFF"
 	_fw4_offload_set keep 1
 	if ! grep -q 'ct original packets ge 30 flow offload @ft;' "$template"; then
 		echo '{"error":"в шаблоне firewall4 нет ожидаемой строки flow offload — исправление не применилось, ничего не изменено"}'
@@ -9308,7 +9345,7 @@ health() {
 	if [ "$sr" = 1 ] && stl_state "$(_st_exit)" && [ "$STL_FAILED" = true ]; then sr=2; sf=true; fi
 	if _st_installed; then sx="$(_st_exit)"; [ "$sx" = warp ] && _st_warp_own && sx=own; [ "$sx" = own ] && _st_warp_ext && sx="iface:$(_st_ext_if)"; [ "$sx" = iface ] && sx="iface:$(_st_main_iface)"; fi
 	local fw=false v6=false
-	[ "$(uci -q get firewall.@defaults[0].flow_offloading)" = 1 ] && [ -f /usr/share/firewall4/templates/ruleset.uc ] && [ "$(_flow_offloading_fix_applied)" = false ] && fw=true
+	_fw4_offload_on && [ -f "$FW4_TPL" ] && [ ! -f "$FT_ZAPRET_OFF" ] && { [ -x /etc/init.d/zapret ] || [ -x /etc/init.d/zapret2 ]; } && [ "$(_flow_offloading_fix_applied)" = false ] && fw=true
 	local fws=false
 	_fw4_offload_on && [ -f "$FW4_TPL" ] && stl_present && [ ! -f "$FT_STEER_OFF" ] && ! _ft_steer_applied && fws=true
 	[ -f "$CONF" ] && [ "$(_ipv6_enabled_in_zapret)" = false ] && [ "$(_zm_v6_cached)" = live ] && v6=true
@@ -9433,7 +9470,7 @@ do_versions_refresh() {
 	mkdir -p "$ZM_STATE_DIR"
 	printf '{"ts":"%s","at":%s,"via":"%s","items":[%s]}\n' "$ts" "${at:-0}" "$via" "$out" > "$tmp" && mv "$tmp" "$VERSIONS_CACHE"
 	if [ -n "$ZM_VER_LOCAL" ]; then echo "==> Установленные версии записаны"; else echo "==> Версии проверены"; fi
-	[ -z "$ZM_VER_LOCAL" ] && [ "$via" = day ] && _ver_bg && { _au_on panel || _au_on comp; } && _au_spawn night
+	[ -z "$ZM_VER_LOCAL" ] && [ "$via" = day ] && [ -n "$ZM_AU_GO" ] && _ver_bg && { _au_on panel || _au_on comp; } && _au_spawn night
 	return 0
 }
 
@@ -9460,11 +9497,32 @@ _ver_minute() {
 	echo "$m"
 }
 _ver_bg() { [ ! -f "$ZM_STATE_DIR/watch.off" ]; }
+VER_EVERY_FILE="$ZM_STATE_DIR/ver.every"
+VER_TIME_FILE="$ZM_STATE_DIR/ver.time"
+AU_WHEN_FILE="$ZM_STATE_DIR/au.when"
+_ver_every() { case "$(cat "$VER_EVERY_FILE" 2>/dev/null)" in 2) echo 2 ;; 6) echo 6 ;; 12) echo 12 ;; *) echo 24 ;; esac; }
+_ver_hm() {
+	local t h m
+	t="$(cat "$VER_TIME_FILE" 2>/dev/null)"
+	case "$t" in [0-9]:[0-5][0-9]|[01][0-9]:[0-5][0-9]|2[0-3]:[0-5][0-9]) h="${t%%:*}"; m="${t#*:}" ;; *) h=4; m="$(_ver_minute)" ;; esac
+	echo "$h $m" | awk '{ print $1 + 0, $2 + 0 }'
+}
+_ver_time() { _ver_hm | awk '{ printf "%02d:%02d\n", $1, $2 }'; }
+_ver_hours() { _ver_hm | awk -v e="$(_ver_every)" '{ n = 24 / e; for (i = 0; i < n; i++) h[i] = ($1 + i * e) % 24; for (i = 0; i < n; i++) for (j = i + 1; j < n; j++) if (h[j] < h[i]) { t = h[i]; h[i] = h[j]; h[j] = t } s = ""; for (i = 0; i < n; i++) s = s (i ? "," : "") h[i]; print s }'; }
+_ver_slots() { _ver_hm | awk -v e="$(_ver_every)" '{ n = 24 / e; for (i = 0; i < n; i++) printf "%s%02d:%02d", (i ? " " : ""), ($1 + i * e) % 24, $2; print "" }'; }
+_ver_next() {
+	local now
+	now="$(date '+%H %M')"
+	_ver_hm | awk -v e="$(_ver_every)" -v now="$now" '{ split(now, c, " "); cur = c[1] * 60 + c[2]; best = -1; n = 24 / e
+		for (i = 0; i < n; i++) { t = (($1 + i * e) % 24) * 60 + $2; d = t - cur; if (d <= 0) d += 1440; if (best < 0 || d < best) { best = d; bt = t } }
+		printf "%02d:%02d%s\n", int(bt / 60), bt % 60, (bt <= cur ? " завтра" : "") }'
+}
+_au_when() { [ "$(cat "$AU_WHEN_FILE" 2>/dev/null)" = now ] && echo now || echo night; }
 _ver_cron_sync() {
 	local line
 	mkdir -p "$(dirname "$CRON_FILE")"; [ -f "$CRON_FILE" ] || : > "$CRON_FILE"
 	if [ "$(_ver_mode)" = day ] && _ver_bg; then
-		line="$(_ver_minute) 4 * * * /opt/zapret-manager-luci/backend.sh versions_cron >/dev/null 2>&1 $VER_CRON_TAG"
+		line="$(_ver_hm | awk '{ print $2 }') $(_ver_hours) * * * /opt/zapret-manager-luci/backend.sh versions_cron >/dev/null 2>&1 $VER_CRON_TAG"
 		grep -qxF "$line" "$CRON_FILE" 2>/dev/null && return 0
 		grep -vF "$VER_CRON_TAG" "$CRON_FILE" > "$CRON_FILE.zm" 2>/dev/null; cat "$CRON_FILE.zm" > "$CRON_FILE"; rm -f "$CRON_FILE.zm"
 		echo "$line" >> "$CRON_FILE"
@@ -9482,19 +9540,36 @@ _ver_older() {
 	[ $(( $(date +%s) - at )) -ge $(( $1 * 60 )) ]
 }
 versions_cron() {
+	local go=""
 	{ [ "$(_ver_mode)" = day ] && _ver_bg; } || { _ver_cron_sync; return 0; }
 	_job_running versions && return 0
-	ZM_VER_FORCE=1 ZM_VER_VIA=day job_start versions do_versions_refresh >/dev/null
+	if [ "$(_ver_every)" = 24 ] || [ "$(_au_when)" = now ] || [ "$(date +%H | sed 's/^0//')" = "$(_ver_hm | awk '{ print $1 }')" ]; then go=1; fi
+	ZM_AU_GO="$go" ZM_VER_FORCE=1 ZM_VER_VIA=day job_start versions do_versions_refresh >/dev/null
 	return 0
 }
 versions_mode_set() {
-	case "$1" in day|open|button) ;; *) echo '{"error":"неизвестный способ проверки"}'; return 1 ;; esac
+	local v="${1#*:}" h m
 	mkdir -p "$ZM_STATE_DIR"
-	if [ "$1" = day ]; then rm -f "$VER_MODE_FILE"; else echo "$1" > "$VER_MODE_FILE"; fi
+	case "$1" in
+		day|open|button) if [ "$1" = day ]; then rm -f "$VER_MODE_FILE"; else echo "$1" > "$VER_MODE_FILE"; fi ;;
+		every:2|every:6|every:12) echo "$v" > "$VER_EVERY_FILE" ;;
+		every:24) rm -f "$VER_EVERY_FILE" ;;
+		time:*)
+			h="${v%%:*}"; m="${v#*:}"
+			case "$v" in [0-9]:[0-5][0-9]|[01][0-9]:[0-5][0-9]|2[0-3]:[0-5][0-9]) ;; *) echo '{"error":"время — в виде ЧЧ:ММ, например 04:21"}'; return 1 ;; esac
+			printf '%02d:%s\n' "${h#0}" "$m" > "$VER_TIME_FILE" ;;
+		au:now) echo now > "$AU_WHEN_FILE" ;;
+		au:night) rm -f "$AU_WHEN_FILE" ;;
+		*) echo '{"error":"неизвестная настройка проверки"}'; return 1 ;;
+	esac
 	_ver_cron_sync
 	versions_status ''
 }
 
+_ver_sched_json() {
+	printf '"minute":%s,"bg":%s,"every":%s,"time":"%s","slots":"%s","next":"%s","au_when":"%s"' "$(_ver_hm | awk '{ print $2 }')" "$(_ver_bg && echo true || echo false)" \
+		"$(_ver_every)" "$(_ver_time)" "$(_ver_slots)" "$(_ver_next)" "$(_au_when)"
+}
 versions_status() {
 	local busy=false mode
 	mode="$(_ver_mode)"
@@ -9502,16 +9577,16 @@ versions_status() {
 		_job_running versions || ZM_VER_FORCE=1 ZM_VER_VIA=button job_start versions do_versions_refresh >/dev/null
 	elif [ "$1" = auto ] && [ "$mode" = open ] && _ver_older 10; then
 		_job_running versions || ZM_VER_FORCE=1 ZM_VER_VIA=open job_start versions do_versions_refresh >/dev/null
-	elif [ "$1" = auto ] && [ "$mode" = day ] && _ver_older "$(_ver_bg && echo 1560 || echo 1440)"; then
-		_job_running versions || ZM_VER_FORCE=1 ZM_VER_VIA=day job_start versions do_versions_refresh >/dev/null
+	elif [ "$1" = auto ] && [ "$mode" = day ] && _ver_older "$(( $(_ver_every) * 60 + $(_ver_bg && echo 120 || echo 0) ))"; then
+		_job_running versions || ZM_AU_GO="$([ "$(_ver_every)" = 24 ] || [ "$(_au_when)" = now ] && echo 1)" ZM_VER_FORCE=1 ZM_VER_VIA=day job_start versions do_versions_refresh >/dev/null
 	elif [ "$1" = auto ] && _ver_changed; then
 		_job_running versions || ZM_VER_LOCAL=1 job_start versions do_versions_refresh >/dev/null
 	fi
 	_job_running versions && busy=true
 	if [ -s "$VERSIONS_CACHE" ]; then
-		sed "s/}\$/,\"pending\":$busy,\"mode\":\"$mode\",\"minute\":$(_ver_minute),\"bg\":$(_ver_bg && echo true || echo false)}/" "$VERSIONS_CACHE"
+		sed "s/}\$/,\"pending\":$busy,\"mode\":\"$mode\",$(_ver_sched_json)}/" "$VERSIONS_CACHE"
 	else
-		printf '{"ts":"","items":[],"pending":%s,"mode":"%s","minute":%s,"bg":%s}\n' "$busy" "$mode" "$(_ver_minute)" "$(_ver_bg && echo true || echo false)"
+		printf '{"ts":"","items":[],"pending":%s,"mode":"%s",%s}\n' "$busy" "$mode" "$(_ver_sched_json)"
 	fi
 }
 
@@ -21895,7 +21970,7 @@ watch_status() {
 	b=false; [ "$(_dn_get ru off)" = isp ] && b=true
 	_wi dnsnet "DNS провайдера для российских сайтов" "Провайдер сменил адреса DNS — обновляет их в настройках" "$b"
 	b=false; [ "$(_ver_mode)" = day ] && b=true
-	_wi ver "Поиск новых версий ночью" "Раз в сутки, около 04:$(printf '%02d' "$(_ver_minute)"), узнаёт, вышли ли обновления панели и компонентов. Выключено — Дашборд проверит сам при открытии, если с прошлой проверки прошли сутки" "$b"
+	_wi ver "Поиск новых версий" "$([ "$(_ver_every)" = 24 ] && echo "Раз в сутки, в $(_ver_time)" || echo "Каждые $(_ver_every) ч, начиная с $(_ver_time)"), узнаёт, вышли ли обновления панели и компонентов. Выключено — Дашборд проверит сам при открытии, если с прошлой проверки прошли сутки" "$b"
 	b="$(grep -F '/opt/zapret-manager-luci/backend.sh' "$CRON_FILE" 2>/dev/null | grep -v -e '# zm-rpcd-watch$' -e '# zm-versions$' | grep -vc '^[[:space:]]*#')"
 	printf '{"on":%s,"cron":%s,"last":%s,"now":%s,"others":%s,"items":[%s]}\n' "$on" "$cron" "${last:-0}" "$(date +%s)" "${b:-0}" "$items"
 }
@@ -22431,6 +22506,7 @@ ZM_SB_INIT_EOF
 
 _fk_sb_install() {
 	local v up=0 own=""
+	rm -f /tmp/zm-fk-rlcore
 	v="$(_fk_sb_ver)"
 	if [ -n "$v" ] && ! _st_ver_lt "$v" 1.12.0 && [ -x /etc/init.d/sing-box ]; then
 		_fk_say "sing-box $v уже установлен ($(_fk_sb_name "$(_fk_sb_var)")) — оставляем его"
@@ -22767,6 +22843,111 @@ _fk_subvia_patch() {
 	return 0
 }
 
+_fk_reality_patch() {
+	local f=/usr/bin/netshift tmp
+	[ -f "$f" ] || return 0
+	grep -q '^# ZM_REALITY 1$' "$f" && return 0
+	grep -q '^sing_box_save_config() {$' "$f" || return 0
+	[ "$(grep -c '^    sing_box_cm_save_config_to_file "\$config" "\$temp_file_path"$' "$f")" = 1 ] || return 0
+	[ "$(grep -c '^    sing_box_config_check "\$temp_file_path"$' "$f")" = 1 ] || return 0
+	tmp="$f.zm-reality"
+	cat > "$tmp.blk" << 'ZM_FK_REALITY_EOF'
+    local zm_rl=0 zm_rl_msg zm_rl_core=""
+    if grep -q '"reality"' "$temp_file_path" 2> /dev/null && command -v ucode > /dev/null 2>&1 && [ -s /opt/zapret-manager-luci/netshift.uc ]; then
+        [ "${NETSHIFT_REALITY_MLKEM_HINT_UNGATED:-0}" = "1" ] && zm_rl_core=1
+        zm_rl_msg="$(ZM_RL_CORE="$zm_rl_core" ucode /opt/zapret-manager-luci/netshift.uc reality "$temp_file_path" "$temp_file_path.zm" 2> /dev/null)" && [ -s "$temp_file_path.zm" ] && zm_rl=1
+        [ -n "$zm_rl_msg" ] && log "$zm_rl_msg"
+        if [ "$zm_rl" = 1 ]; then
+            cp "$temp_file_path" "$temp_file_path.zm0" 2> /dev/null && mv -f "$temp_file_path.zm" "$temp_file_path" || zm_rl=0
+        fi
+        rm -f "$temp_file_path.zm"
+        [ "$zm_rl" = 1 ] || rm -f "$temp_file_path.zm0"
+    fi
+ZM_FK_REALITY_EOF
+	cat > "$tmp.chk" << 'ZM_FK_REALITY_EOF'
+    if [ "$zm_rl" = 1 ] && ! sing_box_oneshot -c "$temp_file_path" check > /dev/null 2>&1; then
+        log "REALITY (Zapret Manager): sing-box did not accept the compatibility settings, the config is used without them" "warn"
+        mv -f "$temp_file_path.zm0" "$temp_file_path"
+        zm_rl=0
+    fi
+    rm -f "$temp_file_path.zm0"
+    [ "$zm_rl" = 1 ] || sing_box_config_check "$temp_file_path"
+ZM_FK_REALITY_EOF
+	awk -v bf="$tmp.blk" -v cf="$tmp.chk" '
+		NR == 1 { print; print "# ZM_REALITY 1"; next }
+		/^sing_box_save_config\(\) \{$/ { f = 1 }
+		f && /^}$/ { f = 0 }
+		f && $0 == "    sing_box_cm_save_config_to_file \"$config\" \"$temp_file_path\"" { print; while ((getline l < bf) > 0) print l; a++; next }
+		f && $0 == "    sing_box_config_check \"$temp_file_path\"" { while ((getline l < cf) > 0) print l; b++; next }
+		{ print }
+		END { exit a == 1 && b == 1 ? 0 : 1 }' "$f" > "$tmp" || { rm -f "$tmp" "$tmp.blk" "$tmp.chk"; return 0; }
+	if sh -n "$tmp" && chmod 0755 "$tmp"; then
+		mv -f "$tmp" "$f"
+	fi
+	rm -f "$tmp" "$tmp.blk" "$tmp.chk"
+	return 0
+}
+
+_fk_desync_patch() {
+	local f=/usr/bin/netshift k=/usr/lib/netshift/kill_switch.sh tmp m="" new=""
+	[ -f "$f" ] || return 0
+	tmp="$f.zm-desync"
+	cat > "$tmp.fn" << 'ZM_FK_DESYNC_EOF'
+# ZM_DESYNC 1
+zm_desync_mask() {
+    local zm_m=0 zm_v zm_f
+    for zm_f in /etc/config/zapret /etc/config/zapret2; do
+        for zm_v in $(sed -n "s/^[[:space:]]*option[[:space:]][[:space:]]*DESYNC_MARK[[:space:]][[:space:]]*'\{0,1\}\(0x[0-9a-fA-F]\{1,8\}\)'\{0,1\}[[:space:]]*$/\1/p" "$zm_f" 2> /dev/null); do
+            zm_m=$((zm_m | zm_v))
+        done
+    done
+    zm_m=$((zm_m & 0xffcfffff))
+    [ "$zm_m" -gt 0 ] 2> /dev/null || zm_m=$((0x40000000))
+    printf '0x%08x\n' "$zm_m"
+}
+ZM_FK_DESYNC_EOF
+	if ! grep -q '^# ZM_DESYNC 1$' "$f" &&
+		[ "$(grep -c '^    nft add rule inet "\$NFT_TABLE_NAME" mangle_output meta mark "\$NFT_OUTBOUND_MARK" counter return$' "$f")" = 1 ]; then
+		awk -v bf="$tmp.fn" '
+			NR == 1 { print; while ((getline l < bf) > 0) print l; next }
+			$0 == "    nft add rule inet \"$NFT_TABLE_NAME\" mangle_output meta mark \"$NFT_OUTBOUND_MARK\" counter return" {
+				print
+				print "    nft add rule inet \"$NFT_TABLE_NAME\" mangle_output meta mark \\& \"$(zm_desync_mask)\" != 0 counter return"
+				c++
+				next
+			}
+			{ print }
+			END { exit c == 1 ? 0 : 1 }' "$f" > "$tmp" &&
+		sh -n "$tmp" && chmod 0755 "$tmp" && mv -f "$tmp" "$f" && new=1
+		rm -f "$tmp"
+	fi
+	if [ -f "$k" ] && ! grep -q '^# ZM_DESYNC 1$' "$k" &&
+		[ "$(grep -c '^        echo "        meta mark & \$NFT_OUTBOUND_MARK == \$NFT_OUTBOUND_MARK accept"$' "$k")" = 1 ]; then
+		awk '
+			NR == 1 { print; print "# ZM_DESYNC 1"; next }
+			$0 == "        echo \"        meta mark & $NFT_OUTBOUND_MARK == $NFT_OUTBOUND_MARK accept\"" {
+				print
+				print "        echo \"        meta mark & $(zm_desync_mask 2> /dev/null || echo 0x40000000) != 0 accept\""
+				c++
+				next
+			}
+			{ print }
+			END { exit c == 1 ? 0 : 1 }' "$k" > "$k.zm-desync" &&
+		sh -n "$k.zm-desync" && cat "$k.zm-desync" > "$k" && new=1
+		rm -f "$k.zm-desync"
+	fi
+	if [ -n "$new" ] && command -v nft >/dev/null 2>&1; then
+		m="$(sh -c '. "$1"; zm_desync_mask' _ "$tmp.fn" 2>/dev/null)"
+		case "$m" in 0x[0-9a-f]*) ;; *) m=0x40000000 ;; esac
+		nft list chain inet NetShiftTable mangle_output 2>/dev/null | grep -q "meta mark & $m != 0x00000000" ||
+			nft insert rule inet NetShiftTable mangle_output meta mark \& "$m" != 0 counter return 2>/dev/null
+		nft list chain inet NetShiftGuard output_guard 2>/dev/null | grep -q "meta mark & $m != 0x00000000" ||
+			nft insert rule inet NetShiftGuard output_guard meta mark \& "$m" != 0 accept 2>/dev/null
+	fi
+	rm -f "$tmp.fn"
+	return 0
+}
+
 _fk_serial_patch() {
 	local f=/usr/bin/netshift tmp
 	[ -f "$f" ] || return 0
@@ -23005,11 +23186,25 @@ ZM_FK_MLKEM_EOF
 	return 0
 }
 
+_fk_sub_cache_files() {
+	local sec u h d=/etc/netshift/subscriptions
+	for sec in $(uci -q show netshift 2>/dev/null | sed -n "s/^netshift\.\([A-Za-z0-9_]*\)=section$/\1/p"); do
+		[ "$(uci -q get "netshift.$sec.proxy_config_type")" = subscription ] || continue
+		[ -s "$d/$sec.json" ] && echo "$d/$sec.json"
+		uci -q get "netshift.$sec.subscription_url" | tr ' ' '\n' | while IFS= read -r u; do
+			[ -n "$u" ] || continue
+			h="$(printf '%s' "${u%%#*}" | md5sum | awk '{print $1}')"
+			[ -s "$d/$sec.$h.json" ] && echo "$d/$sec.$h.json"
+		done
+	done
+	return 0
+}
+
 _fk_mlkem_why() {
 	local f
 	grep -Ei "security=reality" /etc/config/netshift 2>/dev/null | grep -Eqi '[?&]support-x25519mlkem768=(true|1)([&#'"'"' ]|$)' && { echo "среди серверов есть REALITY для Xray 26.9.8+ (ключ X25519MLKEM768)"; return 0; }
 	[ "$1" = config ] && return 1
-	for f in /etc/netshift/subscriptions/*.json; do
+	for f in $(_fk_sub_cache_files); do
 		[ -s "$f" ] || continue
 		grep -Eq '"support_x25519mlkem768"[[:space:]]*:[[:space:]]*true' "$f" && { echo "в подписке есть серверы REALITY для Xray 26.9.8+ (ключ X25519MLKEM768)"; return 0; }
 	done
@@ -23466,6 +23661,8 @@ do_fk_install() {
 	_fk_serial_patch
 	_fk_listsvia_patch
 	_fk_subvia_patch
+	_fk_reality_patch
+	_fk_desync_patch
 	_fk_ghdl_patch
 	rm -rf "$tmp"
 
@@ -23775,6 +23972,75 @@ _fk_svc_report() {
 	return 0
 }
 
+_fk_rl_si() {
+	local fp mk n
+	fp="$(uci -q get "netshift.$1.zm_rl_fp")"; mk="$(uci -q get "netshift.$1.zm_rl_mk")"
+	n="$(uci -q get "netshift.$1.zm_rl_node" | wc -w)"; n=$((n / 3))
+	[ -n "$fp$mk" ] || [ "$n" -gt 0 ] || return 0
+	printf ' · REALITY: отпечаток %s, ключ %s' "$(case "${fp:-auto}" in auto) echo авто ;; sub) echo как в подписке ;; *) echo "$fp" ;; esac)" \
+		"$(case "${mk:-auto}" in on) echo включён ;; off) echo выключен ;; *) echo авто ;; esac)"
+	[ "$n" -gt 0 ] && printf ', свои настройки у серверов: %s' "$n"
+	return 0
+}
+
+_fk_rl_learn_run() {
+	local req="$1" quiet="$2" j n
+	[ -n "$req" ] || req='{}'
+	command -v jq >/dev/null 2>&1 || return 0
+	[ -s /tmp/zm-fk-rlalt.json ] || { [ -n "$quiet" ] || echo "   · проверять нечего: серверов REALITY с выбором ключа «Авто» нет, или sing-box не умеет отправлять ключ"; return 0; }
+	j="$(printf '%s' "$req" | _fk_ucj rllearn)"
+	case "$j" in *'"error"'*) [ -n "$quiet" ] || echo "!! Проверка ключа не удалась: $(printf '%s' "$j" | jq -r '.error // empty' 2>/dev/null)"; return 1 ;; esac
+	n="$(printf '%s' "$j" | jq -r '.tested // 0' 2>/dev/null)"
+	[ "${n:-0}" -gt 0 ] 2>/dev/null || { [ -n "$quiet" ] || echo "   · все серверы REALITY уже проверены — ключ подобран"; return 0; }
+	printf '%s' "$j" | jq -r '
+		"   · проверено серверов REALITY: \(.tested) — работают как есть: \(.works)\(if .dead > 0 then ", не отвечают ни с ключом, ни без: \(.dead)" else "" end)",
+		(.list[] | "   ✓ «\(.name)»: работает только \(if .key then "с ключом X25519MLKEM768" else "без ключа X25519MLKEM768" end) — запомнили")' 2>/dev/null
+	n="$(printf '%s' "$j" | jq -r '.changed // 0' 2>/dev/null)"
+	[ "${n:-0}" -gt 0 ] 2>/dev/null || return 0
+	_fk_say "Применяем подобранный ключ X25519MLKEM768"
+	if _zm_run 240 /usr/bin/netshift reload >/dev/null 2>&1; then echo "   ✓ Настройки применены"
+	else echo "!! Forkozz не применил подобранный ключ — нажмите «Применить» ещё раз"; return 1; fi
+	return 0
+}
+
+do_fk_rl_learn() {
+	_fk_installed || { echo "ОШИБКА: Forkozz не установлен"; return 1; }
+	_fk_up || { echo "ОШИБКА: Forkozz выключен — включите его, и серверы можно будет проверить"; return 1; }
+	_fk_say "Проверяем серверы REALITY с ключом X25519MLKEM768 и без — запрос через каждый вариант"
+	_fk_rl_learn_run "$1" || return 1
+	_fk_say "Готово"
+}
+
+_fk_rl_watch() {
+	local s="$ZM_STATE_DIR/fk.rl.watch" now
+	[ -s /tmp/zm-fk-rlalt.json ] || return 0
+	now="$(date +%s)"
+	[ "$(( now - $(cat "$s" 2>/dev/null || echo 0) ))" -ge 21600 ] 2>/dev/null || return 0
+	_job_running forkop && return 0
+	_fk_up || return 0
+	echo "$now" > "$s"
+	( _fk_rl_learn_run '{"max":40}' quiet >/dev/null 2>&1 & )
+}
+
+_fk_rl_report() {
+	[ -n "$FK_LOGMARK" ] || return 0
+	logread 2>/dev/null | awk -v m="$FK_LOGMARK" 'f && /REALITY \(Zapret Manager\): / { print } index($0, m) { f = 1 }' | awk '
+		{ sub(/^.*REALITY \(Zapret Manager\): /, "") }
+		/did not accept/ { rej = 1; next }
+		/key share on [0-9]+ of [0-9]+/ { s = $0; rej = 0 }
+		END {
+			if (rej) { print "!! REALITY: sing-box не принял настройки совместимости — конфиг собран без них"; exit }
+			if (s == "" || !match(s, /key share on [0-9]+ of [0-9]+/)) exit
+			split(substr(s, RSTART, RLENGTH), a, " ")
+			fc = ""; if (match(s, /fingerprint changed on [0-9]+/)) { split(substr(s, RSTART, RLENGTH), b, " "); fc = b[4] }
+			nd = ""; if (match(s, /; [0-9]+ server/)) nd = substr(s, RSTART + 2, RLENGTH - 9)
+			print "==> REALITY: серверов — " a[6] ", с ключом X25519MLKEM768 — " a[4] (fc != "" ? ", отпечаток изменён — " fc : "")
+			if (match(s, /test variants for [0-9]+/)) print "   · Ключ «Авто»: каждый сервер проверяется с ключом и без, рабочий вариант запоминается"
+			if (nd != "") print "   ! Без ключа остались серверы REALITY: " nd " — ключ отправляет только расширенный sing-box 2.7.2 и новее (или используйте Steer)"
+		}'
+	return 0
+}
+
 do_fk_service() {
 	local a="$1" b
 	_fk_installed || { echo "ОШИБКА: Forkozz не установлен"; return 1; }
@@ -23811,6 +24077,8 @@ do_fk_service() {
 	_fk_serial_patch
 	_fk_listsvia_patch
 	_fk_subvia_patch
+	_fk_reality_patch
+	_fk_desync_patch
 	_fk_ghdl_patch
 	mkdir -p /etc/sing-box
 	_fk_log_mark
@@ -23881,6 +24149,11 @@ do_fk_service() {
 		fi
 		_fk_clash_ok || echo "!! sing-box пока не отвечает — он ещё запускается; если так и останется, нажмите «Перезапустить»"
 		_fk_servers_report
+		_fk_rl_report
+		if [ -s /tmp/zm-fk-rlalt.json ]; then
+			_fk_say "Проверяем новые серверы REALITY с ключом X25519MLKEM768 и без"
+			_fk_rl_learn_run '{"max":60}'
+		fi
 		_ab_free_sync >/dev/null 2>&1
 		_fk_zash_ensure
 		local ps
@@ -23915,6 +24188,8 @@ do_fk_lists() {
 	_fk_serial_patch
 	_fk_listsvia_patch
 	_fk_subvia_patch
+	_fk_reality_patch
+	_fk_desync_patch
 	_fk_ghdl_patch
 	_fk_log_mark
 	/usr/bin/netshift list_update > "$out" 2>&1 &
@@ -23956,18 +24231,47 @@ _fk_sub_keys() {
 		end' 2>/dev/null
 }
 
+_fk_sub_fmt_name() { case "$1" in xray) echo "Happ" ;; singbox) echo "sing-box" ;; *) echo "Авто" ;; esac; }
+
 _fk_sub_fmt_auto() {
-	local sec url key ver ch="" sw="" d="$JOBS_DIR/fk-subfmt" n_sb n_xr miss xex lost extra pref
+	local sec url key ver ch="" sw="" d="$JOBS_DIR/fk-subfmt" n_sb n_xr miss xex lost extra pref was man cust name
 	command -v jq >/dev/null 2>&1 || return 1
 	ver="$(sing-box version 2>/dev/null | head -n1 | awk '{print $3}')"
 	for sec in $(uci -q show netshift | sed -n "s/^netshift\.\([A-Za-z0-9_]*\)\.subscription_url=.*/\1/p" | sort -u); do
 		[ "$(uci -q get "netshift.$sec.proxy_config_type")" = subscription ] || continue
 		url="$(uci -q get "netshift.$sec.subscription_url")"
 		key="$(printf '%s' "$url" | md5sum | cut -c1-16)"
-		[ "$(uci -q get "netshift.$sec.zm_subfmt_url")" = "$key" ] && continue
-		pref="$(uci -q get "netshift.$sec.subscription_format_preference")"
-		if [ "$(cat "$ZM_STATE_DIR/fk.subfmt.$sec" 2>/dev/null)" = "$key" ] || { [ -n "$pref" ] && [ "$pref" != auto ]; } ||
-			[ -n "$(uci -q get "netshift.$sec.subscription_user_agent")$(uci -q get "netshift.$sec.subscription_hwid")$(uci -q get "netshift.$sec.subscription_device_os")" ]; then
+		pref="$(uci -q get "netshift.$sec.subscription_format_preference")"; was="${pref:-auto}"
+		man="$(uci -q get "netshift.$sec.zm_subfmt_man")"
+		cust="$(uci -q get "netshift.$sec.subscription_user_agent")$(uci -q get "netshift.$sec.subscription_hwid")$(uci -q get "netshift.$sec.subscription_device_os")"
+		name="$(uci -q get "netshift.$sec.zm_label" || echo "$sec")"
+		if [ "$(uci -q get "netshift.$sec.zm_subfmt_url")" = "$key" ]; then
+			[ "$pref" = xray ] && [ "$man" != "$url" ] && [ -z "$cust" ] && [ "$(uci -q get "netshift.$sec.zm_subfmt_chk")" != "$key" ] || continue
+			case "$url" in http://*|https://*) ;; *) continue ;; esac
+			case "$url" in *' '*) continue ;; esac
+			_fk_say "Подписка «$name»: проверяем, отдаёт ли сервер её в формате Happ"
+			rm -rf "$d"; mkdir -p "$d"; : > "$d/sb"; : > "$d/xr"
+			curl -fsSL --compressed -m 15 -A "singbox/${ver:-1.12.0}" -o "$d/sb" "$url" 2>/dev/null
+			curl -fsSL --compressed -m 15 -A "Happ/1.0.0" -o "$d/xr" "$url" 2>/dev/null
+			n_sb="$(_fk_sub_keys < "$d/sb" | sort -u | grep -c .)"; n_xr="$(_fk_sub_keys < "$d/xr" | sort -u | grep -c .)"
+			rm -rf "$d"
+			if [ "$n_sb" = 0 ] && [ "$n_xr" = 0 ]; then echo "   · подписка не скачалась напрямую — проверим в следующий раз"; continue; fi
+			uci set "netshift.$sec.zm_subfmt_chk=$key"; ch=1
+			if [ "$n_xr" = 0 ]; then
+				uci -q delete "netshift.$sec.subscription_format_preference"; uci -q delete "netshift.$sec.zm_subfmt_man"; sw=1
+				echo "   ! в формате Happ сервер подписку не отдаёт, а в sing-box — $n_sb серверов: формат переключён на «Авто»"
+				logger -t zapret-manager "Forkozz: подписка секции $sec не отдаётся в формате Happ — формат переключён на «Авто»"
+			else
+				echo "   ✓ формат Happ подходит: в нём $n_xr серверов"
+			fi
+			continue
+		fi
+		if [ -n "$pref" ] && [ "$pref" != auto ] && [ "$man" != "$url" ] && [ -z "$cust" ] && [ -n "$(uci -q get "netshift.$sec.zm_subfmt_url")" ]; then
+			_fk_say "Подписка «$name» сменилась: формат «$(_fk_sub_fmt_name "$pref")» остался от прежней — определяем заново"
+			uci -q delete "netshift.$sec.subscription_format_preference"; uci -q delete "netshift.$sec.zm_subfmt_man"; uci -q delete "netshift.$sec.zm_subfmt_chk"
+			pref=""; ch=1; sw=1
+		fi
+		if [ "$(cat "$ZM_STATE_DIR/fk.subfmt.$sec" 2>/dev/null)" = "$key" ] || { [ -n "$pref" ] && [ "$pref" != auto ]; } || [ -n "$cust" ]; then
 			uci set "netshift.$sec.zm_subfmt_url=$key"; uci -q delete "netshift.$sec.zm_subfmt_auto"
 			rm -f "$ZM_STATE_DIR/fk.subfmt.$sec"; ch=1
 			continue
@@ -23987,7 +24291,7 @@ _fk_sub_fmt_auto() {
 		if [ "$n_xr" -gt 0 ] && [ "$xex" -gt 0 ] && { [ "$miss" = 0 ] || [ "$n_xr" -gt "$n_sb" ]; }; then
 			extra="$(grep -vxF -f "$d/sb.k" "$d/xr.k" | cut -d'|' -f1 | sort -u | tr '\n' ' ' | sed 's/ $//')"
 			lost=""; [ "$miss" = 0 ] || lost="$(grep -vxF -f "$d/xr.k" "$d/sb.k" | cut -d'|' -f1 | sort -u | tr '\n' ' ' | sed 's/ $//')"
-			uci set "netshift.$sec.subscription_format_preference=xray"; sw=1
+			uci set "netshift.$sec.subscription_format_preference=xray"; uci set "netshift.$sec.zm_subfmt_chk=$key"; sw=1
 			echo "   ✓ в формате Happ серверов больше ($n_xr против $n_sb${extra:+, в том числе $extra}) — подписке поставлен формат Happ"
 			[ -n "$lost" ] && echo "   ! в формате Happ нет $miss серверов из формата sing-box ($lost)"
 			logger -t zapret-manager "Forkozz: новой подписке секции $sec поставлен формат Happ ($n_xr серверов против $n_sb)"
@@ -23995,7 +24299,7 @@ _fk_sub_fmt_auto() {
 		elif [ "$xex" = 0 ]; then echo "   ✓ формат «Авто» (sing-box): в Happ нет серверов, которых нет в нём ($n_sb)"
 		elif [ "$n_sb" = "$n_xr" ]; then echo "   ✓ формат «Авто» (sing-box): серверов столько же ($n_sb), но $xex есть только в Happ, а $miss — только в sing-box. Нужны именно они — выберите Happ вручную"
 		else echo "   ✓ формат «Авто» (sing-box): в нём серверов больше ($n_sb против $n_xr), хотя $xex есть только в Happ. Нужны именно они — выберите Happ вручную"; fi
-		echo "   · формат запомнен и больше сам не меняется — поменять можно вручную в настройках подписки"
+		echo "   · формат запомнен для этой подписки — поменять можно вручную в её настройках; для другой подписки панель определит формат заново"
 		rm -rf "$d"
 	done
 	[ -n "$ch" ] || return 1
@@ -24048,6 +24352,8 @@ do_fk_subs() {
 	_fk_serial_patch
 	_fk_listsvia_patch
 	_fk_subvia_patch
+	_fk_reality_patch
+	_fk_desync_patch
 	_fk_ghdl_patch
 	_fk_sub_update || { echo "ОШИБКА: подписка не обновилась — проверьте ссылку"; return 1; }
 	_fk_ext_auto all "$lx"
@@ -24071,7 +24377,7 @@ _fk_ext_why() {
 	grep -Eqi "[?&](type|transport)=(xhttp|splithttp)|'vmess://" /etc/config/netshift 2>/dev/null && { echo "среди серверов есть XHTTP или VMess"; return 0; }
 	_fk_mlkem_why "$1" && return 0
 	[ "$1" = config ] && return 1
-	for f in /etc/netshift/subscriptions/*.json; do
+	for f in $(_fk_sub_cache_files); do
 		[ -s "$f" ] || continue
 		grep -Eqi '"type"[[:space:]]*:[[:space:]]*"(xhttp|splithttp)"' "$f" && { echo "в подписке есть серверы XHTTP"; return 0; }
 		grep -Eqi '"type"[[:space:]]*:[[:space:]]*"vmess"' "$f" && { echo "в подписке есть серверы VMess"; return 0; }
@@ -24192,6 +24498,7 @@ _fk_sbext_run() {
 do_fk_singbox() {
 	local want="$1" norestart="$2" free tfree have need tneed out="$JOBS_DIR/forkop-sb.json" old oldvar msg why same=0 verb
 	_fk_installed || { echo "ОШИБКА: Forkozz не установлен"; return 1; }
+	rm -f /tmp/zm-fk-rlcore
 	case "$want" in
 		tiny|stable|lite) ;;
 		extended) echo "ОШИБКА: сборку sing-box-extended панель больше не ставит — выберите «Расширенный облегчённый»: те же протоколы, а места нужно в 3 раза меньше"; return 1 ;;
@@ -24803,6 +25110,22 @@ forkop_action() {
 			if _fk_enabled && _fk_up; then job_start forkop do_fk_service apply
 			else printf '{"ok":true,"saved":true}\n'; fi
 			;;
+		rllearn)
+			_fk_installed || { echo '{"error":"Forkozz не установлен"}'; return 1; }
+			_job_running forkop && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
+			_fk_up || { echo '{"error":"Forkozz выключен — включите его, и серверы можно будет проверить"}'; return 1; }
+			job_start forkop do_fk_rl_learn "$arg" ;;
+		reality)
+			_fk_installed || { echo '{"error":"Forkozz не установлен"}'; return 1; }
+			_job_running forkop && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
+			_fk_reality_patch
+			_fk_desync_patch
+			grep -q '^# ZM_REALITY 1$' /usr/bin/netshift 2>/dev/null || { echo '{"error":"эта версия Forkozz не даёт менять настройки REALITY — обновите Forkozz"}'; return 1; }
+			b="$(printf '%s' "$arg" | _fk_ucj rlnode)"
+			case "$b" in *'"ok": true'*|*'"ok":true'*) ;; *) printf '%s\n' "$b"; return 1 ;; esac
+			if _fk_enabled && _fk_up; then job_start forkop do_fk_service apply
+			else printf '{"ok":true,"saved":true}\n'; fi
+			;;
 		select)
 			case "$arg" in *'|'*) _fk_ucj select "${arg%%|*}" "${arg#*|}" ;; *) _fk_ucj select "" "$arg" ;; esac ;;
 		*) echo '{"error":"неизвестное действие"}' ;;
@@ -25152,11 +25475,25 @@ _si_components() {
 			if logread -e sing-box 2>/dev/null | grep -qE 'panic:|fatal error:|SIGSEGV|SIGABRT'; then _si_row "Падения sing-box" "есть в журнале — подробности в отчёте Forkozz" warn
 			else _si_row "Падения sing-box" "в журнале нет" ok; fi
 		fi
+		if [ -f /etc/init.d/zapret ] || [ -f /etc/init.d/zapret2 ]; then
+			if nft list chain inet NetShiftTable mangle_output 2>/dev/null | grep -q 'meta mark & 0x[0-9a-f]* != 0x00000000 .*return'; then _si_row "Пакеты Zapret мимо Forkozz" "да" ok
+			elif _fk_up; then _si_row "Пакеты Zapret мимо Forkozz" "нет — перезапустите Forkozz" warn; fi
+		fi
+		x="$(_fk_uc rlinfo 2>/dev/null)"
+		v="$(_si_j "$x" '@.total')"
+		if [ -n "$v" ] && [ "$v" -gt 0 ] 2>/dev/null; then
+			_si_row "Серверы REALITY" "$v · с ключом X25519MLKEM768: $(_si_j "$x" '@.key') · отпечатки: $(_si_j "$x" '@.fps')" ""
+			s="$(_si_j "$x" '@.learned_on')$(_si_j "$x" '@.learned_off')"
+			case "$s" in ''|*[!0-9]*|00) ;; *) _si_row "Ключ подобран" "с ключом: $(_si_j "$x" '@.learned_on') · без ключа: $(_si_j "$x" '@.learned_off')" "" ;; esac
+			if [ "$(_si_j "$x" '@.hook')" != true ]; then _si_row "Совместимость REALITY" "не подключена к движку — настройки панели не действуют" warn
+			elif [ "$(_si_j "$x" '@.core')" = true ]; then _si_row "Ключ X25519MLKEM768" "sing-box умеет отправлять" ok
+			else _si_row "Ключ X25519MLKEM768" "sing-box не умеет — нужен расширенный 2.7.2 и новее" ""; fi
+		fi
 		for sec in $(uci -q show netshift | sed -n "s/^netshift\.\([^.=]*\)=section$/\1/p"); do
 			x="$(uci -q get "netshift.$sec.connection_type")"
 			v="$(uci -q get "netshift.$sec.proxy_config_type")"
 			n="$(uci -q get "netshift.$sec.community_lists")"
-			_si_row "Секция $sec" "${x:-?}$([ -n "$v" ] && echo " · $v")$([ "$(uci -q get "netshift.$sec.global_proxy")" = 1 ] && echo ' · весь трафик')$([ -n "$n" ] && echo " · списки: $n")" ""
+			_si_row "Секция $sec" "${x:-?}$([ -n "$v" ] && echo " · $v")$([ "$(uci -q get "netshift.$sec.global_proxy")" = 1 ] && echo ' · весь трафик')$([ -n "$n" ] && echo " · списки: $n")$(_fk_rl_si "$sec")" ""
 		done
 		_si_end
 	fi
@@ -25276,7 +25613,8 @@ _si_components() {
 	_si_sec "Панель Zapret Manager"
 	_si_row "Версия" "$ZM_VERSION" ""
 	_si_row "Фоновые проверки" "$([ -f "$WATCH_OFF" ] && echo выключены || echo включены)" "$([ -f "$WATCH_OFF" ] && echo warn)"
-	_si_row "Поиск обновлений" "$(case "$(_ver_mode)" in day) echo ночью ;; open) echo при открытии ;; *) echo по кнопке ;; esac)" ""
+	_si_row "Поиск обновлений" "$(case "$(_ver_mode)" in day) [ "$(_ver_every)" = 24 ] && echo "раз в сутки, в $(_ver_time)" || echo "каждые $(_ver_every) ч, с $(_ver_time)"; _ver_bg || echo " (фоновые проверки выключены)" ;; open) echo при открытии ;; *) echo по кнопке ;; esac | tr -d '\n')" ""
+	_si_row "Ставить найденное" "$([ "$(_ver_every)" != 24 ] && [ "$(_au_when)" = now ] && echo "сразу после проверки" || echo "в $(_ver_time)")" ""
 	_si_autoupd
 	v="$(cat "$ZM_STATE_DIR/ui.theme" 2>/dev/null)"; _si_row "Тема Web UI" "${v:-авто}" ""
 	v="$(ui_nav_get)"; [ -n "$v" ] && _si_row "Скрыто в меню" "$v" ""
@@ -25365,11 +25703,11 @@ do_sysinfo() {
 		else
 			_si_row "GitHub API" "недоступен" bad
 		fi
-		if [ "$hw" = 1 ]; then _si_row "Flow Offloading" "аппаратный" warn
+		if [ "$hw" = 1 ] && [ "$sw" = 1 ]; then _si_row "Flow Offloading" "аппаратный" warn
 		elif [ "$sw" = 1 ]; then _si_row "Flow Offloading" "программный" warn
 		else _si_row "Flow Offloading" "выключен" ok; fi
-		[ "$fix" = true ] && _si_row "Поправка для Zapret" "применена" ok || _si_row "Поправка для Zapret" "не применена" "$([ "$sw" = 1 ] || [ "$hw" = 1 ] && echo bad)"
-		stl_present && { _ft_steer_applied && _si_row "Поправка для Steer" "применена — соединения Steer не выгружаются" ok || _si_row "Поправка для Steer" "не применена — соединения Steer выгружаются" "$([ "$sw" = 1 ] || [ "$hw" = 1 ] && echo bad)"; }
+		[ "$fix" = true ] && _si_row "Поправка для Zapret" "применена" ok || _si_row "Поправка для Zapret" "не применена$([ -f "$FT_ZAPRET_OFF" ] && echo ' (отключена вручную)')" "$([ "$sw" = 1 ] && echo bad)"
+		stl_present && { _ft_steer_applied && _si_row "Поправка для Steer" "применена — соединения Steer не выгружаются" ok || _si_row "Поправка для Steer" "не применена$([ -f "$FT_STEER_OFF" ] && echo ' (отключена вручную)') — соединения Steer выгружаются" "$([ "$sw" = 1 ] && echo bad)"; }
 		_si_row "Блокировка QUIC" "$([ "$(_quic_blocked)" = true ] && echo "включена (UDP 80 и 443)" || echo выключена)" ""
 		if /etc/init.d/https-dns-proxy running >/dev/null 2>&1 && [ -f /etc/config/https-dns-proxy ]; then
 			sed -n "s/^[[:space:]]*option resolver_url '\([^']*\)'.*/\1/p" /etc/config/https-dns-proxy | while IFS= read -r v; do _si_row "DNS over HTTPS" "$v" ""; SI_SEP=","; done
@@ -27605,6 +27943,240 @@ function kw_list(v) {
 	return r;
 }
 
+const RL_FPS = [ "chrome", "firefox", "safari", "edge", "ios", "random", "randomized" ];
+const RL_XKEY = { "": true, chrome: true, firefox: true, safari: true, random: true, randomized: true };
+const RL_HP_RE = /^(\[[0-9A-Fa-f:.]+\]|[^ \t\r\n\[\]'"\\`$:]+):[0-9]{1,5}$/;
+const RL_MAX = 300;
+const RL_CORE_CACHE = getenv("ZM_FK_RLCORE") || "/tmp/zm-fk-rlcore";
+const RL_LEARN = getenv("ZM_FK_RLLEARN") || STATE + "/fk.rl.learn.json";
+const RL_ALT = getenv("ZM_FK_RLALT") || "/tmp/zm-fk-rlalt.json";
+const RL_ALT_PFX = "zm-rlalt-";
+const RL_LEARN_MAX = 2000;
+
+function rl_jread(f) {
+	let j = null;
+	try { j = json(s(fs.readfile(f))); } catch (e) { j = null; }
+	return type(j) == "object" ? j : {};
+}
+
+function rl_fp(v) { v = s(v); return v == "sub" || index(RL_FPS, v) >= 0 ? v : "auto"; }
+
+function rl_mk(v) { v = s(v); return v == "on" || v == "off" ? v : "auto"; }
+
+function rl_hp(host, port) {
+	host = s(host);
+	return (index(host, ":") >= 0 ? "[" + host + "]" : host) + ":" + int(port || 0);
+}
+
+function rl_nodes(m) {
+	let r = {}, l = rawlist(m.zm_rl_node);
+	for (let i = 0; i < length(l); i++) {
+		let p = split(trim(l[i]), /[ \t]+/);
+		if (length(p) != 3 || !match(p[0], RL_HP_RE)) continue;
+		let fp = index(RL_FPS, p[1]) >= 0 ? p[1] : "", mk = p[2] == "on" || p[2] == "off" ? p[2] : "";
+		if (fp != "" || mk != "") r[p[0]] = { fp, mk };
+	}
+	return r;
+}
+
+function rl_core() {
+	let st = fs.stat(getenv("ZM_FK_SBBIN") || "/usr/bin/sing-box"), key = st ? st.mtime + "-" + st.size : "", now = time();
+	if (key != "") {
+		let c = split(trim(s(fs.readfile(RL_CORE_CACHE))), " ");
+		if (length(c) == 3 && c[0] == key && (c[1] == "1" || c[1] == "0") && now - int(c[2]) < 86400 && now >= int(c[2])) return c[1] == "1";
+	}
+	let m = match(sh("sing-box version"), /-extended-([0-9]+)\.([0-9]+)\.([0-9]+)/), ok = false;
+	if (m) {
+		let a = int(m[1]), b = int(m[2]), d = int(m[3]);
+		ok = a > 2 || (a == 2 && (b > 7 || (b == 7 && d >= 2)));
+	}
+	if (key != "") fs.writefile(RL_CORE_CACHE, key + " " + (ok ? "1" : "0") + " " + now + "\n");
+	return ok;
+}
+
+function rl_on(o) {
+	return type(o) == "object" && type(o.tls) == "object" && type(o.tls.reality) == "object" && o.tls.reality.enabled === true && type(o.tls.utls) == "object";
+}
+
+function rl_secmap(j, c) {
+	let by = {}, own = {}, obs = j.outbounds, secs = sections(c, "section");
+	for (let i = 0; i < length(obs); i++)
+		if (type(obs[i]) == "object" && s(obs[i].tag) != "") by[s(obs[i].tag)] = obs[i];
+	for (let k = 0; k < length(secs); k++) {
+		let n = secs[k][".name"], q = [];
+		for (let t in by) if (index(t, n + "-") == 0) push(q, t);
+		for (let i = 0; i < length(q); i++) {
+			let t = q[i], m = by[t].outbounds;
+			if (own[t] != null) continue;
+			own[t] = n;
+			if (type(m) == "array")
+				for (let x = 0; x < length(m); x++) if (by[s(m[x])] && own[s(m[x])] == null) push(q, s(m[x]));
+		}
+	}
+	return own;
+}
+
+function rl_plan(o, fp, mk, core, lk) {
+	let fp0 = s(o.tls.utls.fingerprint), cur = o.tls.reality.support_x25519mlkem768;
+	let f = fp == "auto" || fp == "sub" ? fp0 : fp, want = false, need = false;
+	if (mk == "on") want = true;
+	else if (mk == "off") want = false;
+	else if (cur === false) want = false;
+	else if (lk != null) want = !!lk;
+	else want = cur === true;
+	if (want && !(cur === true && fp0 == "chrome" && f == "chrome") && !core()) { want = false; need = true; }
+	if (want) f = "chrome";
+	return { fp: f, key: want, need };
+}
+
+function rl_apply(o, p) {
+	let u = o.tls.utls, r = o.tls.reality, ch = false;
+	if (p.fp != "" && s(u.fingerprint) != p.fp) { u.fingerprint = p.fp; u.enabled = true; ch = true; }
+	if (p.key && r.support_x25519mlkem768 !== true) { r.support_x25519mlkem768 = true; ch = true; }
+	if (!p.key && r.support_x25519mlkem768 === true) { delete r.support_x25519mlkem768; ch = true; }
+	return ch;
+}
+
+function rl_pol(c, sec, cache) {
+	if (cache[sec] == null) {
+		let m = sec != "" ? c.get_all(CFG, sec) || {} : {};
+		cache[sec] = { fp: rl_fp(m.zm_rl_fp), mk: rl_mk(m.zm_rl_mk), nodes: rl_nodes(m) };
+	}
+	return cache[sec];
+}
+
+function rl_conf() {
+	let raw = s(fs.readfile(SB_CONF)), j = null;
+	if (index(raw, "\"reality\"") < 0) return null;
+	try { j = json(raw); } catch (e) { j = null; }
+	return type(j) == "object" && type(j.outbounds) == "array" ? j : null;
+}
+
+function cmd_reality(src, dst) {
+	let raw = s(fs.readfile(src)), j = null;
+	if (s(dst) == "" || index(raw, "\"reality\"") < 0) exit(1);
+	try { j = json(raw); } catch (e) { j = null; }
+	if (type(j) != "object" || type(j.outbounds) != "array") exit(1);
+	let n0 = length(j.outbounds), list = [];
+	j.outbounds = filter(j.outbounds, (o) => type(o) != "object" || index(s(o.tag), RL_ALT_PFX) != 0);
+	let obs = j.outbounds, dropped = length(obs) != n0;
+	for (let i = 0; i < length(obs); i++) if (rl_on(obs[i])) push(list, obs[i]);
+	if (!length(list)) {
+		try { fs.unlink(RL_ALT); } catch (e) {}
+		if (dropped && fs.writefile(dst, sprintf("%J", j)) != null) exit(0);
+		exit(1);
+	}
+	let env = s(getenv("ZM_RL_CORE")), cv = env == "1" ? true : env == "0" ? false : null;
+	let core = () => { if (cv == null) cv = rl_core(); return cv; };
+	let c = cursor(), own = rl_secmap(j, c), cache = {}, ln = rl_jread(RL_LEARN), alts = {}, extra = [], nk = 0, nf = 0, nn = 0, na = 0, ch = dropped;
+	for (let i = 0; i < length(list); i++) {
+		let o = list[i], p = rl_pol(c, s(own[s(o.tag)]), cache), hp = rl_hp(o.server, o.server_port), ov = p.nodes[hp] || {};
+		let fp = s(ov.fp) || p.fp, mk = s(ov.mk) || p.mk, l = type(ln[hp]) == "object" ? ln[hp] : null;
+		let fp0 = s(o.tls.utls.fingerprint), x = rl_plan(o, fp, mk, core, l ? !!int(l.k) : null);
+		let auto = mk == "auto" && o.tls.reality.support_x25519mlkem768 !== false, a = null;
+		if (auto && length(extra) < RL_MAX && core()) a = json(sprintf("%J", o));
+		if (rl_apply(o, x)) { ch = true; if (x.fp != fp0) nf++; }
+		if (a) {
+			let ak = !x.key, af = ak ? "chrome" : (fp == "auto" || fp == "sub" ? fp0 : fp);
+			rl_apply(a, { fp: af, key: ak });
+			a.tag = RL_ALT_PFX + (length(extra) + 1);
+			push(extra, a);
+			alts[a.tag] = { tag: s(o.tag), hp, key: ak };
+			na++;
+		}
+		if (x.key) nk++;
+		if (x.need) nn++;
+	}
+	for (let i = 0; i < length(extra); i++) push(j.outbounds, extra[i]);
+	if (length(extra)) ch = true;
+	print("REALITY (Zapret Manager): X25519MLKEM768 key share on " + nk + " of " + length(list) + " server(s)" + (nf ? ", fingerprint changed on " + nf : "") +
+		(nn ? "; " + nn + " server(s) need sing-box-extended 2.7.2 or newer for the key share" : "") + (na ? "; test variants for " + na : ""), "\n");
+	if (!ch) { try { fs.unlink(RL_ALT); } catch (e) {} exit(1); }
+	if (fs.writefile(dst, sprintf("%J", j)) == null) exit(1);
+	if (length(extra)) fs.writefile(RL_ALT, sprintf("%J", alts));
+	else try { fs.unlink(RL_ALT); } catch (e) {}
+	exit(0);
+}
+
+function rl_view(sec) {
+	let j = rl_conf();
+	if (!j) return null;
+	let m = cursor().get_all(CFG, sec) || {}, nodes = rl_nodes(m), ln = rl_jread(RL_LEARN), alts = rl_jread(RL_ALT), hasalt = {}, r = {}, n = 0, obs = j.outbounds;
+	for (let a in alts) if (type(alts[a]) == "object") hasalt[s(alts[a].tag)] = true;
+	for (let i = 0; i < length(obs); i++) {
+		let o = obs[i];
+		if (!rl_on(o) || index(s(o.tag), RL_ALT_PFX) == 0) continue;
+		let hp = rl_hp(o.server, o.server_port), ov = nodes[hp] || {}, l = type(ln[hp]) == "object" ? ln[hp] : null;
+		r[s(o.tag)] = { hp, fp: s(o.tls.utls.fingerprint), key: o.tls.reality.support_x25519mlkem768 === true, ofp: s(ov.fp), omk: s(ov.mk),
+			learned: l ? (int(l.k) ? "on" : "off") : "", alt: !!hasalt[s(o.tag)] };
+		n++;
+	}
+	if (!n) return null;
+	return { fp: rl_fp(m.zm_rl_fp), mk: rl_mk(m.zm_rl_mk), core: rl_core(), nodes: r, own: length(keys(nodes)) };
+}
+
+function cmd_rlnode(sec) {
+	let d = null;
+	try { d = json(s(fs.stdin.read("all"))); } catch (e) { d = null; }
+	if (type(d) != "object") fail("пустой запрос");
+	let c = cursor();
+	if (d.sec != null && s(d.sec) != "") {
+		let p = pick(c);
+		sec = s(d.sec);
+		if (sec != p.sec && index(p.conns, sec) < 0) fail("такой секции нет");
+	}
+	if (c.get(CFG, sec) != "section") fail("Forkozz ещё не настроен");
+	let m = c.get_all(CFG, sec) || {};
+	if (sec_mode(m) == "iface") fail("у туннеля нет серверов REALITY");
+	let nodes = d.reset ? {} : rl_nodes(m);
+	if (!d.reset) {
+		let hps = type(d.hps) == "array" ? d.hps : [ d.hp ];
+		let fp = d.fp == null ? null : s(d.fp), mk = d.mk == null ? null : s(d.mk);
+		if (!length(hps) || length(hps) > RL_MAX) fail("не выбран сервер");
+		if (fp != null && fp != "" && index(RL_FPS, fp) < 0) fail("неизвестный отпечаток");
+		if (mk != null && mk != "" && mk != "on" && mk != "off") fail("неизвестное значение ключа");
+		for (let i = 0; i < length(hps); i++) {
+			let hp = s(hps[i]), o = null;
+			if (!match(hp, RL_HP_RE)) fail("неверный адрес сервера");
+			o = nodes[hp] || { fp: "", mk: "" };
+			if (fp != null) o.fp = fp;
+			if (mk != null) o.mk = mk;
+			if (o.fp == "" && o.mk == "") delete nodes[hp];
+			else nodes[hp] = o;
+		}
+	}
+	let l = [];
+	for (let hp in nodes) push(l, hp + " " + (nodes[hp].fp || "sec") + " " + (nodes[hp].mk || "sec"));
+	if (length(l) > RL_MAX) fail("слишком много серверов со своими настройками — сбросьте лишние");
+	l = sort(l);
+	if (length(l)) c.set(CFG, sec, "zm_rl_node", l);
+	else c.delete(CFG, sec, "zm_rl_node");
+	c.save(CFG);
+	c.commit(CFG);
+	out({ ok: true, own: length(l) });
+}
+
+function cmd_rlinfo() {
+	let j = rl_conf(), c = cursor(), n = 0, k = 0, fps = {}, secs = [], obs = j ? j.outbounds : [];
+	for (let i = 0; i < length(obs); i++) {
+		let o = obs[i];
+		if (!rl_on(o) || index(s(o.tag), RL_ALT_PFX) == 0) continue;
+		n++;
+		if (o.tls.reality.support_x25519mlkem768 === true) k++;
+		let f = s(o.tls.utls.fingerprint) || "-";
+		fps[f] = int(fps[f] || 0) + 1;
+	}
+	let ss = sections(c, "section");
+	for (let i = 0; i < length(ss); i++) {
+		let m = ss[i], fp = rl_fp(m.zm_rl_fp), mk = rl_mk(m.zm_rl_mk), own = length(keys(rl_nodes(m)));
+		if (fp != "auto" || mk != "auto" || own) push(secs, { name: m[".name"], fp, mk, own });
+	}
+	let ln = rl_jread(RL_LEARN), lon = 0, loff = 0;
+	for (let h in ln) if (type(ln[h]) == "object") { if (int(ln[h].k)) lon++; else loff++; }
+	out({ total: n, key: k, fps: join(", ", map(sort(keys(fps)), (f) => f + " " + fps[f])), core: n ? rl_core() : null, hook: index(s(fs.readfile(BIN)), "\n# ZM_REALITY 1\n") >= 0, secs,
+		learned_on: lon, learned_off: loff, alts: length(keys(rl_jread(RL_ALT))) });
+}
+
 function sec_ext(m) {
 	return {
 		sub_fmt: index(SUB_FMTS, s(m.subscription_format_preference)) >= 0 ? s(m.subscription_format_preference) : "auto",
@@ -27630,7 +28202,9 @@ function sec_ext(m) {
 		real_ip: flag(m.resolve_real_ip_for_routing),
 		dres_on: flag(m.domain_resolver_enabled),
 		dres_type: index([ "udp", "dot", "doh" ], s(m.domain_resolver_dns_type)) >= 0 ? s(m.domain_resolver_dns_type) : "udp",
-		dres_server: s(m.domain_resolver_dns_server)
+		dres_server: s(m.domain_resolver_dns_server),
+		rl_fp: rl_fp(m.zm_rl_fp),
+		rl_mk: rl_mk(m.zm_rl_mk)
 	};
 }
 
@@ -27732,7 +28306,7 @@ function set_flag(c, sec, key, on) {
 }
 
 function write_sec_ext(c, sec, mode, x) {
-	const SUB_KEYS = [ "subscription_format_preference", "zm_subfmt_auto", "zm_subfmt_url", "subscription_insecure", "subscription_user_agent", "subscription_group_mode", "subscription_group_prefix_len", "group_by_countries", "subscription_filter_include_keywords", "zm_sub_priority",
+	const SUB_KEYS = [ "subscription_format_preference", "zm_subfmt_auto", "zm_subfmt_url", "zm_subfmt_man", "zm_subfmt_chk", "subscription_insecure", "subscription_user_agent", "subscription_group_mode", "subscription_group_prefix_len", "group_by_countries", "subscription_filter_include_keywords", "zm_sub_priority",
 		"subscription_hwid", "subscription_device_os", "subscription_os_version", "subscription_device_model" ];
 	const UT_KEYS = [ "urltest_check_interval", "urltest_tolerance", "urltest_testing_url" ];
 	const DRES_KEYS = [ "domain_resolver_dns_type", "domain_resolver_dns_server" ];
@@ -27747,7 +28321,11 @@ function write_sec_ext(c, sec, mode, x) {
 		if (length(inc) > 40) fail("слов для отбора серверов можно указать не больше 40");
 		let plen = num_in(x.sub_plen, 1, 16);
 		if (grp == "prefix" && plen == null) fail("длина префикса для групп — число от 1 до 16");
-		if (fmt != s(cur.sub_fmt)) c.delete(CFG, sec, "zm_subfmt_auto");
+		if (fmt != s(cur.sub_fmt)) {
+			c.delete(CFG, sec, "zm_subfmt_auto");
+			if (fmt != "auto") c.set(CFG, sec, "zm_subfmt_man", join(" ", rawlist(c.get(CFG, sec, "subscription_url"))));
+			else del_keys(c, sec, [ "zm_subfmt_man", "zm_subfmt_chk" ]);
+		}
 		set_opt(c, sec, "subscription_format_preference", fmt, "auto");
 		set_flag(c, sec, "zm_sub_priority", !!x.sub_priority);
 		set_flag(c, sec, "subscription_insecure", !!x.sub_insecure);
@@ -27779,9 +28357,11 @@ function write_sec_ext(c, sec, mode, x) {
 		c.delete(CFG, sec, "failover_direct");
 		set_flag(c, sec, "zm_auto_ping", !!x.ping_auto && !(mode == "sub" && x.sub_priority));
 		set_flag(c, sec, "zm_ut_guard", !!x.ut_guard && !x.ping_auto);
+		set_opt(c, sec, "zm_rl_fp", rl_fp(x.rl_fp), "auto");
+		set_opt(c, sec, "zm_rl_mk", rl_mk(x.rl_mk), "auto");
 		del_keys(c, sec, [ "domain_resolver_enabled", ...DRES_KEYS ]);
 	} else {
-		del_keys(c, sec, [ ...UT_KEYS, "enable_udp_over_tcp", "zm_direct_fallback", "zm_ut_guard", "zm_auto_ping" ]);
+		del_keys(c, sec, [ ...UT_KEYS, "enable_udp_over_tcp", "zm_direct_fallback", "zm_ut_guard", "zm_auto_ping", "zm_rl_fp", "zm_rl_mk", "zm_rl_node" ]);
 		if (x.dres_on) {
 			let t = s(x.dres_type), v = trim(s(x.dres_server));
 			if (index([ "udp", "dot", "doh" ], t) < 0) fail("неизвестный тип DNS для туннеля");
@@ -27884,7 +28464,9 @@ function engine_caps() {
 		wifi_call: index(b, "wifi_calling_direct") >= 0,
 		dns_pool: index(b, "sing_box_configure_dns_pool") >= 0 && sb_at_least(1, 14),
 		sb_ver: sb_version(),
-		sub_id: index(s(fs.readfile(NS_LIB + "/helpers.sh")), "load_subscription_client_identity()") >= 0
+		sub_id: index(s(fs.readfile(NS_LIB + "/helpers.sh")), "load_subscription_client_identity()") >= 0,
+		reality: index(b, "\n# ZM_REALITY 1\n") >= 0,
+		rl_core: rl_core()
 	};
 }
 
@@ -28438,7 +29020,7 @@ function cmd_subinfo(sec) {
 	let c = cursor(), urls = sub_urls(c.get_all(CFG, sec) || {});
 	if (!length(urls)) { out({ ok: false }); return; }
 	let hdr = sh("curl -sS -m 12 -A 'v2rayN/7.0.0' -D - -o /dev/null " + q(urls[0]));
-	let info = { title: "", used: null, total: null, unlimited: false, expire: null, at: time() };
+	let info = { title: "", used: null, total: null, unlimited: false, expire: null, at: time(), url: urls[0] };
 	for (let l in split(hdr, /\r?\n/)) {
 		let m = match(l, /^([A-Za-z-]+):[ \t]*(.*)$/);
 		if (!m) continue;
@@ -28484,10 +29066,16 @@ function sub_feed(sec) {
 }
 
 function sub_info(sec) {
-	let j = null;
+	let j = null, u = sub_urls(cursor().get_all(CFG, sec) || {})[0];
 	try { j = json(s(fs.readfile(sub_cache_path(sec)))); } catch (e) { j = null; }
-	if (type(j) != "object" || time() - int(j.at || 0) > 1800)
-		system("(ucode " + q(sourcepath()) + " subinfo " + q(sec) + " >/dev/null 2>&1 &)");
+	if (type(j) == "object" && s(j.url) != s(u)) j = null;
+	if (type(j) != "object" || time() - int(j.at || 0) > 1800) {
+		let lk = "/tmp/zm-fk-subinfo." + sec, ls = fs.stat(lk);
+		if (!ls || time() - int(ls.mtime) > 20 || time() < int(ls.mtime)) {
+			fs.writefile(lk, "");
+			system("(ucode " + q(sourcepath()) + " subinfo " + q(sec) + " >/dev/null 2>&1 &)");
+		}
+	}
 	let fd = sub_feed(sec);
 	if (type(j) != "object") j = {};
 	return { title: s(j.title), used: j.used, total: j.total, unlimited: !!j.unlimited, expire: j.expire, updated: fd.updated, fmt: fd.fmt };
@@ -28573,8 +29161,14 @@ function cmd_servers(sec) {
 		}
 		if (lrun) for (let t in (type(lat.pending) == "array" ? lat.pending : [])) if (nodes[t]) nodes[t].delay = -2;
 	}
-	let home = node_pol() == "back" ? home_read(sec) : null;
-	out({ group: group_tag(sec), auto_tag: auto_tag(sec, px, g), now: fallback.override || s(g.now), list: g.all, nodes, sub: sec_mode(xm) == "sub" ? sub_info(sec) : null,
+	let home = node_pol() == "back" ? home_read(sec) : null, rl = rl_view(sec);
+	if (rl) {
+		let rn = {};
+		for (let t in rl.nodes) if (nodes[t]) rn[t] = rl.nodes[t];
+		rl.nodes = rn;
+		if (!length(keys(rn))) rl = null;
+	}
+	out({ group: group_tag(sec), reality: rl, auto_tag: auto_tag(sec, px, g), now: fallback.override || s(g.now), list: g.all, nodes, sub: sec_mode(xm) == "sub" ? sub_info(sec) : null,
 		hidden: length(xv.h), exclude: s(xm.zm_exclude), hide_names: xv.h, fell, fallback, priority: flag(xm.zm_sub_priority), ping: ping_on(xm), lat_mode: lat_mode(), lat: lat ? { running: lrun, at: int(lat.at || 0), error: s(lat.error), mode: s(lat.mode) } : null,
 		home: home ? s(home.name || home.tag) : "", home_tag: home ? s(home.tag) : "", node_pol: node_pol() });
 }
@@ -29198,12 +29792,7 @@ function cmd_secnames() {
 function mlkem_link(l) {
 	return !!match(s(l), /[?&]security=reality([&#]|$)/) && !!match(s(l), /[?&]support-x25519mlkem768=(true|1)([&#]|$)/);
 }
-function mlkem_core_ok() {
-	let m = match(sh("sing-box version 2>/dev/null"), /-extended-([0-9]+)\.([0-9]+)\.([0-9]+)/);
-	if (!m) return false;
-	let a = int(m[1]), b = int(m[2]), d = int(m[3]);
-	return a > 2 || (a == 2 && (b > 7 || (b == 7 && d >= 2)));
-}
+function mlkem_core_ok() { return rl_core(); }
 
 function cmd_diag() {
 	let checks = [];
@@ -29600,10 +30189,63 @@ function cmd_conns() {
 	out({ conns: list, total, truncated: total > 400 });
 }
 
+function rl_lat(ep, tags) {
+	let ok = lat_batch(ep, tags, LAT_URLS[0], 5000), again = filter(tags, (x) => !ok[x]);
+	if (length(again)) {
+		let b = lat_batch(ep, again, LAT_URLS[1], 6000);
+		for (let x in b) ok[x] = b[x];
+	}
+	return ok;
+}
+
+function cmd_rllearn() {
+	let d = null;
+	try { d = json(s(fs.stdin.read("all"))); } catch (e) { d = null; }
+	if (type(d) != "object") d = {};
+	let ep = clash_ep();
+	if (!ep) fail("у sing-box не включён API — перезапустите Forkozz");
+	let px = proxies();
+	if (!px) fail("sing-box не отвечает — Forkozz выключен или ещё запускается");
+	let alts = rl_jread(RL_ALT), ln = rl_jread(RL_LEARN), now = time(), force = !!d.force, only = null, seen = {}, pairs = [];
+	let max = int(d.max || 0) > 0 ? int(d.max) : RL_MAX;
+	if (type(d.hps) == "array") { only = {}; for (let i = 0; i < length(d.hps); i++) only[s(d.hps[i])] = true; }
+	for (let a in alts) {
+		let x = alts[a];
+		if (type(x) != "object" || !px[a] || !px[s(x.tag)] || seen[s(x.hp)]) continue;
+		if (only && !only[s(x.hp)]) continue;
+		let l = ln[s(x.hp)];
+		if (!force && !only && type(l) == "object" && now - int(l.at || 0) < 7 * 86400 && now >= int(l.at || 0)) continue;
+		seen[s(x.hp)] = true;
+		push(pairs, { alt: a, tag: s(x.tag), hp: s(x.hp), key: !!x.key });
+	}
+	if (length(pairs) > max) pairs = slice(pairs, 0, max);
+	let cur = length(pairs) ? rl_lat(ep, map(pairs, (p) => p.tag)) : {};
+	let miss = filter(pairs, (p) => !cur[p.tag]);
+	let alt = length(miss) ? rl_lat(ep, map(miss, (p) => p.alt)) : {};
+	let works = 0, dead = 0, list = [];
+	for (let i = 0; i < length(pairs); i++) {
+		let p = pairs[i];
+		if (cur[p.tag]) { ln[p.hp] = { k: p.key ? 0 : 1, at: now }; works++; }
+		else if (alt[p.alt]) { ln[p.hp] = { k: p.key ? 1 : 0, at: now }; push(list, { name: p.tag, hp: p.hp, key: p.key, ms: alt[p.alt] }); }
+		else dead++;
+	}
+	let hs = keys(ln);
+	if (length(hs) > RL_LEARN_MAX) {
+		hs = sort(hs, (a, b) => int((ln[a] || {}).at) - int((ln[b] || {}).at));
+		for (let i = 0; i < length(hs) - RL_LEARN_MAX; i++) delete ln[hs[i]];
+	}
+	if (length(pairs)) {
+		try { fs.mkdir(STATE); } catch (e) {}
+		if (fs.writefile(RL_LEARN, sprintf("%J", ln)) == null) fail("не удалось сохранить результаты проверки");
+	}
+	out({ ok: true, alts: length(keys(alts)), tested: length(pairs), works, dead, changed: length(list), list });
+}
+
 let mode = ARGV[0] || "";
 let sec = ARGV[1] || "";
+if (mode == "reality") { cmd_reality(ARGV[1], ARGV[2]); exit(1); }
 if (mode != "route" && sec != "" && (ml(sec) || !match(sec, /^[A-Za-z0-9_]+$/))) fail("неверное имя секции");
-if (sec == "" && index([ "get", "set", "secdel", "route", "diag", "secnames", "secstate", "stats", "conns", "dnsvpn", "fallback_config", "guard", "latmode", "nodepol" ], mode) < 0) sec = pick(cursor()).sec;
+if (sec == "" && index([ "get", "set", "secdel", "route", "diag", "secnames", "secstate", "stats", "conns", "dnsvpn", "fallback_config", "guard", "latmode", "nodepol", "rlinfo", "rllearn" ], mode) < 0) sec = pick(cursor()).sec;
 
 if (mode == "device_setup") cmd_device_setup();
 else if (mode == "fallback_config") cmd_fallback_config();
@@ -29623,6 +30265,9 @@ else if (mode == "select") cmd_select(sec, ARGV[2]);
 else if (mode == "heal") cmd_heal(sec, ARGV[2] || "");
 else if (mode == "guard") cmd_guard();
 else if (mode == "hide") cmd_hide(sec);
+else if (mode == "rlnode") cmd_rlnode(sec);
+else if (mode == "rlinfo") cmd_rlinfo();
+else if (mode == "rllearn") cmd_rllearn();
 else if (mode == "diag") cmd_diag();
 else if (mode == "secstate") cmd_secstate(sec == "probe");
 else if (mode == "subinfo") cmd_subinfo(sec);
@@ -31706,16 +32351,18 @@ function sysFixCard(d, onChange, o) {
 			run(d.ipv6_enabled ? 'Выключаем IPv6 в Zapret' : 'Включаем IPv6 в Zapret', function() { return callSystemToggleIpv6(d.ipv6_enabled ? 'off' : 'on'); }, function(r) { return r.ipv6_enabled ? 'IPv6 в Zapret включён' : 'IPv6 в Zapret выключен'; });
 		}));
 
-	var zf = d.flow_offloading_fix === true, sf = d.steer_offload_fix === true;
-	var zSub = tile('zm-sx-sub', 'Поправка для Zapret', stBadge(zf, 'применена', 'не применена', !fon),
-		'Первые 30 пакетов каждого соединения идут обычным путём — Zapret успевает их обработать. Дальше соединение ускоряется.' + (!fon && !zf ? ' Пока Flow Offloading выключен, она не нужна.' : ''),
+	var zf = d.flow_offloading_fix === true, sf = d.steer_offload_fix === true, auto = d.watch_off !== true, zIn = d.zapret_installed !== false;
+	var selfNote = auto ? ' Ставится сама, пока включён Flow Offloading.' : '';
+	var zSub = tile('zm-sx-sub', 'Поправка для Zapret', stBadge(zf, 'применена', d.zapret_fix_off ? 'отключена вручную' : 'не применена', !zIn),
+		'Первые 30 пакетов каждого соединения идут обычным путём — Zapret успевает их обработать. Дальше соединение ускоряется.' +
+			(d.zapret_fix_off && !zf ? ' Отключена вручную — сама не включится.' : !zIn ? ' Zapret не установлен — понадобится, если поставить его.' : selfNote),
 		tpl ? btn(zf, 'Отключить', 'Применить', function() {
 			run(zf ? 'Отключаем поправку для Zapret' : 'Применяем поправку для Zapret', function() { return callSystemToggleFlowOffloadingFix(zf ? 'off' : 'on'); }, function(r) { return r.flow_offloading_fix ? 'Поправка для Zapret применена' : 'Поправка для Zapret отключена'; });
 		}) : null);
 	var sSub = d.steer_installed
-		? tile('zm-sx-sub', 'Поправка для Steer', stBadge(sf, 'применена', d.steer_offload_off ? 'отключена вручную' : 'не применена', !fon),
+		? tile('zm-sx-sub', 'Поправка для Steer', stBadge(sf, 'применена', d.steer_offload_off ? 'отключена вручную' : 'не применена'),
 			'Соединения, которые Steer ведёт в секции (VPN, WARP, туннели), не ускоряются — иначе по кабелю они перестают идти. Остальной трафик ускоряется как раньше.' +
-				(d.steer_offload_off && !sf ? ' Отключена вручную — сама не включится.' : ' Ставится сама вместе со Steer.'),
+				(d.steer_offload_off && !sf ? ' Отключена вручную — сама не включится.' : selfNote),
 			tpl ? btn(sf, 'Отключить', 'Применить', function() {
 				(sf ? steerOffloadAsk(mode) : Promise.resolve(true)).then(function(go) {
 					if (!go) return;
@@ -31723,14 +32370,25 @@ function sysFixCard(d, onChange, o) {
 				});
 			}) : null)
 		: tile('zm-sx-sub', 'Поправка для Steer', E('span', { 'class': 'zm-badge zm-off' }, [ E('span', { 'class': 'zm-dot' }), 'Steer не установлен' ]),
-			'Понадобится, если поставить Steer, — тогда применится сама.', null);
+			'Понадобится, если поставить Steer.', null);
+	function offChip(text, start, call, done) {
+		return E('span', { 'class': 'zm-sx-offchip' }, [
+			E('span', { 'class': 'zm-badge zm-off' }, [ E('span', { 'class': 'zm-dot' }), text ]),
+			E('button', { 'class': 'zm-sx-unlink', 'type': 'button', 'title': 'Пока Flow Offloading выключен, поправка не нужна', 'click': function() { run(start, call, function() { return done; }); } }, 'убрать')
+		]);
+	}
+	var offList = [];
+	if (tpl && !fon && zf) offList.push(offChip('поправка для Zapret стоит', 'Убираем поправку для Zapret', function() { return callSystemToggleFlowOffloadingFix('off'); }, 'Поправка для Zapret убрана'));
+	if (tpl && !fon && sf) offList.push(offChip('поправка для Steer стоит', 'Убираем поправку для Steer', function() { return callSystemToggleSteerOffloadFix('off'); }, 'Поправка для Steer убрана'));
 	var flow = E('div', { 'class': 'zm-sx-tile zm-sx-wide' }, [
 		E('div', { 'class': 'zm-sx-head zm-sx-left' }, [ E('span', { 'class': 'zm-sx-title' }, 'Flow Offloading'),
 			E('span', { 'class': 'zm-badge ' + (fon ? 'zm-sx-info' : 'zm-off') }, [ E('span', { 'class': 'zm-dot' }), FLOW_MODE[mode] ]) ]),
 		E('p', { 'class': 'zm-hint' }, !tpl ? 'На роутере нет firewall4 — поправки для Flow Offloading недоступны.'
 			: (fon ? 'Ускорение маршрутизации/NAT (Сеть → Межсетевой экран): установленные соединения идут быстрым путём, мимо правил роутера. Для Zapret и Steer нужны свои поправки.'
-				: 'Ускорение маршрутизации/NAT сейчас выключено (Сеть → Межсетевой экран) — поправки ни на что не влияют. Если его включить, они понадобятся.')),
-		E('div', { 'class': 'zm-sx-two' }, [ zSub, sSub ])
+				: 'Ускорение маршрутизации/NAT сейчас выключено (Сеть → Межсетевой экран) — поправки для Zapret и Steer не нужны.' + (auto
+					? ' Если включите его, панель сама поставит нужные поправки.'
+					: ' Если включите его, поставьте поправки здесь: «Фоновые проверки» выключены, и сама панель их не поставит.'))),
+		tpl && fon ? E('div', { 'class': 'zm-sx-two' }, [ zSub, sSub ]) : offList.length ? E('div', { 'class': 'zm-sx-offfix' }, offList) : E([])
 	]);
 	return E('div', { 'class': 'zm-card' + (o.cls ? ' ' + o.cls : '') }, [
 		E('h3', {}, o.title || 'Система'),
@@ -32595,8 +33253,13 @@ return view.extend({
 				chip(sys.ipv6_enabled ? 'zm-ok' : 'zm-off', sys.ipv6_enabled ? 'IPv6 в Zapret' : 'IPv6 в Zapret выключен', 'Обрабатывает ли Zapret трафик IPv6'),
 				chip(fon ? 'zm-sx-info' : 'zm-off', 'Flow Offloading ' + (fm || 'выключен'), 'Ускорение маршрутизации/NAT (Сеть → Межсетевой экран)')
 			];
-			if (fon || zf) c.push(chip(zf ? 'zm-ok' : 'zm-bad', zf ? 'поправка для Zapret' : 'нет поправки для Zapret', zf ? 'Поправка Flow Offloading для Zapret применена' + (fon ? '' : ' — пока Flow Offloading выключен, она ни на что не влияет') : 'Flow Offloading включён, а поправки для Zapret нет — часть соединений может идти мимо Zapret'));
-			if (sys.steer_installed && (fon || sf)) c.push(chip(sf ? 'zm-ok' : 'zm-bad', sf ? 'поправка для Steer' : 'нет поправки для Steer', sf ? 'Поправка Flow Offloading для Steer применена' + (fon ? '' : ' — пока Flow Offloading выключен, она ни на что не влияет') : 'Flow Offloading включён, а поправки для Steer нет' + (sys.steer_offload_off ? ' (отключена вручную)' : '') + ' — соединения Steer могут перестать идти'));
+			var zIn = sys.zapret_installed !== false, idle = ' — пока Flow Offloading выключен, она ни на что не влияет';
+			if ((fon && zIn) || zf) c.push(chip(zf ? (fon ? 'zm-ok' : 'zm-off') : sys.zapret_fix_off ? 'zm-off' : 'zm-bad',
+				zf ? 'поправка для Zapret' : sys.zapret_fix_off ? 'поправка для Zapret отключена' : 'нет поправки для Zapret',
+				zf ? 'Поправка Flow Offloading для Zapret применена' + (fon ? '' : idle) : sys.zapret_fix_off ? 'Поправка для Zapret отключена вручную — сама не включится' : 'Flow Offloading включён, а поправки для Zapret нет — часть соединений может идти мимо Zapret'));
+			if ((fon && sys.steer_installed) || sf) c.push(chip(sf ? (fon ? 'zm-ok' : 'zm-off') : sys.steer_offload_off ? 'zm-off' : 'zm-bad',
+				sf ? 'поправка для Steer' : sys.steer_offload_off ? 'поправка для Steer отключена' : 'нет поправки для Steer',
+				sf ? 'Поправка Flow Offloading для Steer применена' + (fon ? '' : idle) : sys.steer_offload_off ? 'Поправка для Steer отключена вручную — сама не включится' : 'Flow Offloading включён, а поправки для Steer нет — соединения Steer могут перестать идти'));
 			var mh = String(sysInfo.mirror_host || '');
 			if (mh) {
 				var def = mh === 'downloads.openwrt.org', how = def ? '' : String(sysInfo.mirror_how || '');
@@ -32783,16 +33446,16 @@ return view.extend({
 					E('div', { 'class': 'bt-col' }, rows.slice(half))
 				]));
 			}
-			var mm = ('0' + (parseInt(d.minute, 10) || 0)).slice(-2);
+			var mm = ('0' + (parseInt(d.minute, 10) || 0)).slice(-2), nx = d.next || '04:' + mm, ev = +d.every || 24;
 			var how = d.mode === 'open' ? 'версии проверяются при каждом открытии Дашборда'
 				: d.mode === 'button' ? 'новые версии ищутся только по этой кнопке'
-				: d.bg === false ? 'фоновые проверки выключены — проверка при открытии Дашборда раз в сутки'
-				: 'роутер сам проверяет раз в день, около 04:' + mm;
+				: d.bg === false ? 'фоновые проверки выключены — проверка при открытии Дашборда'
+				: 'роутер проверяет сам ' + (ev < 24 ? 'каждые ' + ev + ' ч' : 'раз в сутки') + ', следующая — в ' + nx;
 			var said = d.pending ? 'Проверяем новые версии…'
 				: checked && d.ts ? 'Проверено: ' + d.ts + ' · ' + how
 				: d.mode === 'button' ? 'Новые версии ищутся только по этой кнопке — так роутер не нагружается'
 				: d.mode === 'open' ? 'Версии ещё не проверялись · ' + how
-				: 'Версии ещё не проверялись — роутер проверит сам около 04:' + mm + ', или нажмите «Проверить»';
+				: 'Версии ещё не проверялись — роутер проверит сам в ' + nx + ', или нажмите «Проверить»';
 			card.appendChild(E('div', { 'class': 'zm-actions' }, [
 				E('button', {
 					'class': 'cbi-button cbi-button-action',
@@ -42964,6 +43627,15 @@ html.zm-theme-dark .zm-sx-tile { border-color: rgba(255,255,255,.12); background
 html.zm-theme-dark .zm-sx-sub { background: rgba(255,255,255,.05); }
 html.zm-theme-dark .zm-badge.zm-sx-info { background: rgba(88,166,255,.16); color: #79c0ff; }
 .zm-sx-info .zm-dot { background: currentColor; }
+.zm-ver-slots { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.zm-ver-slotsrow { margin: -2px 0 8px; padding-left: 132px; }
+.zm-ver-sel { width: auto !important; min-width: 76px; }
+.zm-ver-colon { font-weight: 700; opacity: .55; margin: 0 -3px; }
+@media (max-width: 600px) { .zm-ver-slotsrow { padding-left: 0; } }
+.zm-sx-offfix { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-top: 2px; }
+.zm-sx-offchip { display: inline-flex; align-items: center; gap: 6px; }
+.zm-sx-unlink { background: none; border: 0; padding: 0; font: inherit; font-size: 12px; color: inherit; opacity: .7; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+.zm-sx-unlink:hover, .zm-sx-unlink:focus-visible { opacity: 1; }
 .zm-sysline { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(127,127,127,.18); }
 .zm-sysline > .zm-label { flex: 0 0 auto; margin-right: 6px; }
 .zm-sysline .zm-badge { cursor: pointer; user-select: none; transition: filter .15s ease, transform .15s ease; }
@@ -43230,6 +43902,19 @@ html.zm-theme-dark .zm-fold { border-top-color: rgba(255,255,255,.1); }
 .zm-fold-body h4 { margin: 16px 0 4px; }
 .zm-fold-body h4:first-child { margin-top: 8px; }
 @media (max-width: 600px) { .zm-fold-body { padding-left: 0; } }
+.zm-rl-list { margin-top: 6px; }
+.zm-rl-row { display: flex; align-items: center; justify-content: space-between; gap: 8px 14px; flex-wrap: wrap; padding: 9px 0; border-top: 1px solid rgba(127,127,127,.16); }
+.zm-rl-row:first-child { border-top: 0; }
+.zm-rl-name { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 220px; }
+.zm-rl-nm { display: block; min-width: 0; font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zm-rl-badge { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; line-height: 1.5; background: rgba(9,105,218,.10); color: #0969da; vertical-align: 1px; }
+html.zm-theme-dark .zm-rl-badge { background: rgba(88,166,255,.15); color: #58a6ff; }
+.zm-rl-now { font-size: 12px; opacity: .75; }
+.zm-rl-key { color: #1a7f37; font-weight: 600; }
+html.zm-theme-dark .zm-rl-key { color: #3fb950; }
+.zm-rl-ctl { display: flex; gap: 8px; flex-wrap: wrap; }
+.zm-rl-sel { width: auto !important; min-width: 0; max-width: 100%; }
+@media (max-width: 600px) { .zm-rl-ctl { width: 100%; flex-direction: column; gap: 6px; } .zm-rl-ctl .zm-rl-sel { width: 100% !important; } }
 .zm-fk-traffic { font-variant-numeric: tabular-nums; }
 @media (max-width: 600px) { .zm-route-line { flex-direction: column; gap: 0; } .zm-route-k { width: auto; } }
 .zm-hide-quick { margin: 0 0 12px; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(127,127,127,.25); background: rgba(127,127,127,.05); }
@@ -44222,8 +44907,26 @@ return view.extend({
 			box.appendChild(t);
 			return box;
 		}
-		var VER_MODES = [ { id: 'day', label: 'Раз в день' }, { id: 'open', label: 'При открытии Дашборда' }, { id: 'button', label: 'Только по кнопке' } ];
-		var VER_VIA = { day: 'ночная проверка', open: 'при открытии Дашборда', button: 'кнопкой' };
+		var VER_MODES = [ [ 'day', 'Автоматически' ], [ 'open', 'При открытии Дашборда' ], [ 'button', 'Только по кнопке' ] ];
+		var VER_EVERY = [ [ 2, 'Каждые 2 ч' ], [ 6, 'Каждые 6 ч' ], [ 12, 'Каждые 12 ч' ], [ 24, 'Раз в сутки' ] ];
+		var VER_VIA = { day: 'по расписанию', open: 'при открытии Дашборда', button: 'кнопкой' };
+		function verSet(v, okText) {
+			if (verBusy) return;
+			verBusy = true;
+			zm.versionsMode(v).then(function(r) {
+				verBusy = false;
+				if (!r || r.error) { zm.toast((r && r.error) || 'Роутер не ответил', 'error'); renderVer(); return; }
+				verD = r; renderVer();
+				if (okText) zm.toast(typeof okText === 'function' ? okText(r) : okText, 'info');
+			}).catch(function() { verBusy = false; renderVer(); zm.toast('Роутер не ответил', 'error'); });
+		}
+		function verSeg(items, cur, pick) {
+			return E('div', { 'class': 'zm-seg', 'role': 'radiogroup' }, items.map(function(o) {
+				var on = cur === o[0], go = function() { if (!on && !verBusy) pick(o[0]); };
+				return E('div', { 'class': 'zm-seg-item' + (on ? ' zm-active' : ''), 'role': 'radio', 'aria-checked': on ? 'true' : 'false', 'tabindex': '0', 'click': go,
+					'keydown': function(ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); } } }, o[1]);
+			}));
+		}
 		function verPoll() {
 			if (verTimer) { clearTimeout(verTimer); verTimer = null; }
 			if (!verD || !verD.pending || !document.body.contains(verCard)) return;
@@ -44246,33 +44949,51 @@ return view.extend({
 		function renderVer() {
 			verCard.innerHTML = '';
 			verCard.appendChild(E('h3', {}, 'Поиск новых версий'));
-			verCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:0' }, 'Как панель узнаёт о новых версиях: сама панель Zapret Manager, Forkozz, Steer, TG WS Proxy и другие установленные пакеты.'));
+			verCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:0' }, 'Панель, Forkozz, Steer, TG WS Proxy и другие установленные пакеты.'));
 			if (!verD) { verCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Загружаем…')); return; }
 			var mode = verD.mode === 'open' || verD.mode === 'button' ? verD.mode : 'day';
 			var mm = ('0' + (parseInt(verD.minute, 10) || 0)).slice(-2), night = verD.bg !== false;
-			verCard.appendChild(E('div', { 'class': 'zm-row' }, [ E('span', { 'class': 'zm-label' }, 'Проверять'),
-				E('div', { 'class': 'zm-seg' }, VER_MODES.map(function(o) {
-					return E('div', { 'class': 'zm-seg-item' + (mode === o.id ? ' zm-active' : ''), 'click': function() {
-						if (mode === o.id || verBusy) return;
-						verBusy = true;
-						zm.versionsMode(o.id).then(function(r) {
-							verBusy = false;
-							if (!r || r.error) { zm.toast((r && r.error) || 'Роутер не ответил', 'error'); return; }
-							verD = r; renderVer();
-							zm.toast(o.id === 'day' ? (r.bg === false ? 'Фоновые проверки выключены — новые версии проверятся при открытии Дашборда раз в сутки'
-								: 'Новые версии роутер будет искать сам раз в день, около 04:' + ('0' + (parseInt(r.minute, 10) || 0)).slice(-2))
-								: o.id === 'open' ? 'Новые версии ищутся при каждом открытии Дашборда' : 'Новые версии ищутся только кнопкой', 'info');
-						}).catch(function() { verBusy = false; zm.toast('Роутер не ответил', 'error'); });
-					} }, o.label);
-				}))
-			]));
-			verCard.appendChild(E('p', { 'class': 'zm-hint' }, mode === 'open'
-				? 'Каждый раз, когда вы открываете Дашборд, панель спрашивает GitHub о новых версиях (не чаще раза в 10 минут). Сведения всегда свежие, но роутер ходит в интернет при каждом заходе.'
-				: mode === 'button'
-					? 'Панель сама в интернет не ходит: новые версии проверяются только кнопкой «Проверить» на Дашборде или здесь.'
-					: !night
-						? 'Фоновые проверки выключены (' + (part ? 'раздел «Фоновые проверки» в меню' : 'ниже, «Фоновые проверки»') + '), поэтому ночью роутер ничего не проверяет. Раз в сутки версии проверятся при открытии Дашборда; в остальное время Дашборд показывает сохранённое.'
-						: 'Роутер сам проверяет новые версии раз в сутки, ночью около 04:' + mm + ', и запоминает результат. Дашборд показывает сохранённое и в интернет не ходит. Если роутер ночью был выключен, проверка пройдёт при следующем открытии Дашборда.'));
+			var every = [ 2, 6, 12 ].indexOf(+verD.every) >= 0 ? +verD.every : 24, tm = /^\d\d:\d\d$/.test(verD.time || '') ? verD.time : '04:' + mm;
+			var slots = String(verD.slots || tm).split(' ').filter(Boolean), nightTm = (parseInt(tm, 10) < 7 ? 'Ночью, в ' : 'В ') + tm;
+			verCard.appendChild(E('div', { 'class': 'zm-row' }, [ E('span', { 'class': 'zm-label' }, 'Проверять'), verSeg(VER_MODES, mode, function(id) {
+				verSet(id, id === 'day' ? (night ? 'Роутер будет проверять сам' : 'Фоновые проверки выключены — проверка пройдёт при открытии Дашборда')
+					: id === 'open' ? 'Проверка при каждом открытии Дашборда' : 'Проверка только кнопкой');
+			}) ]));
+			if (mode === 'day') {
+				verCard.appendChild(E('div', { 'class': 'zm-row' }, [ E('span', { 'class': 'zm-label' }, 'Как часто'), verSeg(VER_EVERY, every, function(v) {
+					verSet('every:' + v, function(r) { return v === 24 ? 'Раз в сутки, в ' + r.time : 'Каждые ' + v + ' ч, начиная с ' + r.time; });
+				}) ]));
+				if (night) {
+					var tH = parseInt(tm, 10) || 0, tM = parseInt(tm.slice(3), 10) || 0, p2 = function(n) { return (n < 10 ? '0' : '') + n; };
+					var mins = []; for (var mi = 0; mi < 60; mi += 5) mins.push(mi);
+					if (mins.indexOf(tM) < 0) { mins.push(tM); mins.sort(function(x, y) { return x - y; }); }
+					var hrs = []; for (var hi = 0; hi < 24; hi++) hrs.push(hi);
+					var tSel = function(list, cur, aria, pick) {
+						var el = E('select', { 'class': 'cbi-input-select zm-ver-sel', 'aria-label': aria, 'disabled': verBusy ? '' : null }, list.map(function(n) {
+							return E('option', { 'value': String(n), 'selected': n === cur ? '' : null }, p2(n));
+						}));
+						el.addEventListener('change', function() { pick(parseInt(el.value, 10) || 0); });
+						return el;
+					};
+					var tSave = function(h, m) {
+						var v = p2(h) + ':' + p2(m);
+						if (v === tm) return;
+						verSet('time:' + v, function(r) { return every === 24 ? 'Проверка в ' + r.time : 'Первая проверка в ' + r.time + ', дальше каждые ' + every + ' ч'; });
+					};
+					verCard.appendChild(E('div', { 'class': 'zm-row zm-ab-row' }, [ E('span', { 'class': 'zm-label' }, every === 24 ? 'Во сколько' : 'Первая проверка'),
+						E('div', { 'class': 'zm-ab-ctl' }, [
+							tSel(hrs, tH, 'Часы', function(h) { tSave(h, tM); }),
+							E('span', { 'class': 'zm-ver-colon' }, ':'),
+							tSel(mins, tM, 'Минуты', function(m) { tSave(tH, m); }),
+							every < 24 ? E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'дальше — каждые ' + every + ' ч:') : E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'по времени роутера')
+						]) ]));
+					if (every < 24) verCard.appendChild(E('div', { 'class': 'zm-ver-slotsrow' }, [ E('span', { 'class': 'zm-ver-slots' }, slots.map(function(t) { return E('span', { 'class': 'zm-badge zm-off' }, [ E('span', { 'class': 'zm-dot' }), t ]); })) ]));
+				}
+			}
+			verCard.appendChild(E('p', { 'class': 'zm-hint' }, mode === 'open' ? 'При каждом открытии Дашборда, не чаще раза в 10 минут.'
+				: mode === 'button' ? 'Только кнопкой «Проверить сейчас» — здесь или на Дашборде.'
+				: !night ? 'Фоновые проверки выключены' + (part ? ' (раздел в меню)' : ' (ниже)') + ' — проверка пройдёт при открытии Дашборда.'
+				: 'Роутер проверяет сам и запоминает результат — Дашборд в интернет не ходит.'));
 			var can = mode === 'day' && night;
 			verCard.appendChild(E('div', { 'class': 'zm-au-sep' }));
 			verCard.appendChild(E('h4', { 'class': 'zm-au-h' }, 'Автообновление'));
@@ -44280,22 +45001,29 @@ return view.extend({
 			else {
 				var pOn = !!auD.panel, cOn = !!auD.comp, dis = auBusy || !can;
 				verCard.appendChild(zm.swRow(pOn, 'Автоматическое обновление панели',
-					can ? 'Если ночная проверка найдёт новую версию Zapret Manager, роутер установит её в фоне. Настройки сохраняются.' : 'Приостановлено',
+					can ? 'Новая версия панели ставится сама, настройки сохраняются.' : 'Приостановлено',
 					function() { auCall(pOn ? 'panel_off' : 'panel_on', pOn ? 'Автоматическое обновление панели выключено' : 'Автоматическое обновление панели включено'); }, dis));
 				verCard.appendChild(zm.swRow(cOn, 'Автоматическое обновление всех компонентов',
-					can ? 'Zapret2, ядро steer, Forkozz, sing-box, Mixomo, TG WS Proxy, ByeDPI, DNS over HTTPS и другие установленные компоненты обновляются ночью в фоне — по одному, без перезагрузки роутера.' : 'Приостановлено',
+					can ? 'Zapret2, ядро steer, Forkozz, sing-box, Mixomo, TG WS Proxy, ByeDPI и другие — по одному, без перезагрузки роутера.' : 'Приостановлено',
 					function() { auCall(cOn ? 'comp_off' : 'comp_on', cOn ? 'Автоматическое обновление компонентов выключено' : 'Автоматическое обновление компонентов включено'); }, dis));
+				if (can && every < 24) {
+					var aw = verD.au_when === 'now' ? 'now' : 'night';
+					verCard.appendChild(E('div', { 'class': 'zm-row' }, [ E('span', { 'class': 'zm-label' }, 'Ставить найденное'), verSeg([ [ 'night', nightTm ], [ 'now', 'Сразу после проверки' ] ], aw, function(v) {
+						verSet('au:' + v, v === 'now' ? 'Найденное ставится сразу после проверки' : 'Найденное ставится в ' + tm);
+					}) ]));
+					verCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:-2px' }, aw === 'now' ? 'Ставится сразу, в любое время суток.' : 'Найденное днём поставится в ' + tm + ' — не мешает интернету днём.'));
+				}
 				if (!can) {
 					var need = [];
-					if (mode !== 'day') need.push('выберите «Раз в день»');
+					if (mode !== 'day') need.push('выберите «Автоматически»');
 					if (!night) need.push('включите «Фоновые проверки»' + (part ? ' (раздел в меню)' : ' (ниже)'));
-					verCard.appendChild(E('div', { 'class': 'zm-au-pause' }, 'Автоматическое обновление работает только вместе с ночной проверкой: ' + need.join(' и ') + '. Настройки сохранены и снова заработают, как только проверка пойдёт по расписанию.'));
+					verCard.appendChild(E('div', { 'class': 'zm-au-pause' }, 'На паузе: ' + need.join(' и ') + '. Переключатели сохранены.'));
 				}
 			}
 			verCard.appendChild(E('div', { 'class': 'zm-au-sep' }));
 			var last = verD.pending ? 'проверяем…'
-				: +verD.at > 0 && verD.ts ? verD.ts + (VER_VIA[verD.via] ? ', ' + VER_VIA[verD.via] : '') + ' · ' + verFound(verD) + (mode === 'day' && night ? ' · следующая — около 04:' + mm : '')
-				: 'ещё не было' + (mode === 'day' && night ? ' · первая — около 04:' + mm : '');
+				: +verD.at > 0 && verD.ts ? verD.ts + (VER_VIA[verD.via] ? ', ' + VER_VIA[verD.via] : '') + ' · ' + verFound(verD) + (mode === 'day' && night && verD.next ? ' · следующая — в ' + verD.next : '')
+				: 'ещё не было' + (mode === 'day' && night && verD.next ? ' · первая — в ' + verD.next : '');
 			verCard.appendChild(E('div', { 'class': 'zm-row' }, [ E('span', { 'class': 'zm-label' }, 'Последняя проверка'), E('span', {}, last) ]));
 			if (auD) verCard.appendChild(auLog());
 			verCard.appendChild(E('div', { 'class': 'zm-actions' }, [
@@ -46576,6 +47304,9 @@ var SEC_MAX = 9;
 var MODES = [ { id: 'links', label: 'Серверы' }, { id: 'sub', label: 'Подписка' }, { id: 'iface', label: 'Туннель' } ];
 var SUB_FMT = [ { id: 'auto', label: 'Авто' }, { id: 'xray', label: 'Xray JSON (Happ)' }, { id: 'singbox', label: 'sing-box' } ];
 var SUB_GROUP = [ { id: 'off', label: 'Нет' }, { id: 'country', label: 'По флагу страны' }, { id: 'prefix', label: 'По началу имени' } ];
+var RL_FPS = [ { id: 'chrome', label: 'Chrome' }, { id: 'firefox', label: 'Firefox' }, { id: 'safari', label: 'Safari' }, { id: 'edge', label: 'Edge' }, { id: 'ios', label: 'iOS' }, { id: 'random', label: 'Random' }, { id: 'randomized', label: 'Randomized' } ];
+var RL_MK = [ { id: 'auto', label: 'Авто' }, { id: 'on', label: 'Включён' }, { id: 'off', label: 'Выключен' } ];
+function rlFpName(id) { var x = RL_FPS.filter(function(f) { return f.id === id; })[0]; return x ? x.label : id || 'без отпечатка'; }
 var SUB_MAX = 10;
 var UT_IV = [ { id: '30s', label: '30 с' }, { id: '1m', label: '1 мин' }, { id: '3m', label: '3 мин' }, { id: '5m', label: '5 мин' } ];
 var UT_URL_DEF = 'https://www.gstatic.com/generate_204';
@@ -46595,7 +47326,7 @@ var SUB_CLIENTS = [
 	{ id: 'incy_ios', label: 'INCY · iOS', make: function() { var v = subPick([ [ 'INCY/2.6.4/ios CFNetwork/3896.100.1.2.1 Darwin/27.0.0', '27.0.1' ], [ 'INCY/2.6.4/ios CFNetwork/3860.700.2 Darwin/25.6.0', '26.6.2' ] ]); return { ua: v[0], hwid: subIncyId(), os: 'iOS', osv: v[1], model: subPick(SUB_CLIENT_IPHONES) }; } }
 ];
 var SEC_EXT = { sub_fmt: 'auto', sub_priority: false, ping_auto: false, sub_group: 'off', sub_plen: '2', sub_incl: '', sub_insecure: false, sub_ua: '', sub_hwid: '', sub_os: '', sub_osv: '', sub_model: '', ut_iv: '3m', ut_tol: '50', ut_url: UT_URL_DEF, ut_guard: false, direct_fallback: false,
-	uot: false, mixed: false, mixed_port: '2080', real_ip: false, dres_on: false, dres_type: 'udp', dres_server: '' };
+	uot: false, mixed: false, mixed_port: '2080', real_ip: false, dres_on: false, dres_type: 'udp', dres_server: '', rl_fp: 'auto', rl_mk: 'auto' };
 var SET_EXT = { dns_ttl: '60', dns_ecs: '', src_ifs: [ 'br-lan' ], out_if: '', badwan: false, badwan_ifs: [], badwan_delay: '2000', ipv6: false, no_dhcp: false,
 	excl_ntp: false, wifi_call: false, excl_bt: false, bt_ports: '', block_doh: false, log_level: 'panic', yacd: false, yacd_wan: false, yacd_secret: '',
 	kill: false, hijack: false, quic_all: false, ecs_auto: false, fwd: '', p_dt: '', p_du: '', p_pt: '', p_pu: '' };
@@ -46916,8 +47647,16 @@ return view.extend({
 		function area(key, placeholder, minh) {
 			var ta = E('textarea', { 'class': 'zm-config-editor', 'spellcheck': 'false', 'autocapitalize': 'off', 'placeholder': placeholder, 'style': 'min-height:' + (minh || 120) + 'px' });
 			ta.value = draft[key];
-			ta.addEventListener('input', function() { draft[key] = ta.value; touch(); if (key === 'links') renderLinkCount(); if (key === 'byDomains' || key === 'bySubnets') bypBadge(); });
+			ta.addEventListener('input', function() { draft[key] = ta.value; if (key === 'sub') subFmtFollow(); touch(); if (key === 'links') renderLinkCount(); if (key === 'byDomains' || key === 'bySubnets') bypBadge(); });
 			return ta;
+		}
+
+		var subFmtPicked = false;
+		function subFmtFollow() {
+			var was = cfg && cfg.mode === 'sub' && cfg.x ? cfg.x.sub_fmt || 'auto' : 'auto';
+			if (subFmtPicked || was === 'auto') return;
+			var same = textLines(draft.sub).join('\n') === (cfg.subs || []).join('\n');
+			draft.sub_fmt = same ? was : 'auto';
 		}
 
 		function linkOk(x) { return LINK_RE.test(x) || (!!CAPS.naive && NAIVE_RE.test(x)) || (!!CAPS.tuic && /^tuic:\/\/\S+$/i.test(x)) || (!!CAPS.anytls && /^anytls:\/\/\S+$/i.test(x)); }
@@ -46985,7 +47724,7 @@ return view.extend({
 				st = r[0] || {};
 				if (r[1] !== null) cfg = validCfg(r[1]);
 				if (cfg && curSec && cfg.sec !== curSec) { rememberSec(cfg.sec); dirty = false; }
-				if (!dirty) { draft = withBootMode(fromCfg(cfg)); savedSig = sig(draft); syncAreas(); }
+				if (!dirty) { draft = withBootMode(fromCfg(cfg)); subFmtPicked = false; savedSig = sig(draft); syncAreas(); }
 				else if (cfg) {
 					draft.exclude = cfg.exclude || '';
 					var rf = refsOf(draft);
@@ -47062,6 +47801,24 @@ return view.extend({
 			onMode: function(on) { hideMode = on; renderServers(); },
 			onSave: function(names, markers) { return hideAct(JSON.stringify({ sec: cfg && cfg.sec, names: names, markers: markers })); },
 			onReset: function() { return hideAct(JSON.stringify({ sec: cfg && cfg.sec, reset: true })); } });
+
+		var rlOpen = false;
+		function rlAct(o) {
+			if (busy || saving) { zm.toast('Дождитесь окончания текущей операции', 'warning'); renderServers(); return Promise.resolve(false); }
+			o.sec = cfg && cfg.sec;
+			return zm.forkopAction('reality', JSON.stringify(o)).then(function(res) {
+				if (!res || res.error) { zm.toast((res && res.error) || 'Роутер не ответил', 'error'); renderServers(); return false; }
+				if (res.started) {
+					lastAct = 'apply';
+					zm.toast('Применяем настройки REALITY — ход работы виден в окне вывода', 'warning');
+					follow();
+				} else {
+					zm.toast('Сохранено — применится, когда Forkozz будет включён', 'info');
+					reload();
+				}
+				return true;
+			}, function() { zm.toast('Роутер не ответил', 'error'); renderServers(); return false; });
+		}
 
 		function payload() {
 			return JSON.stringify({
@@ -47175,7 +47932,7 @@ return view.extend({
 
 		function discard() {
 			if (draft.sec === 'new') { switchSec(cfg.main || '', true); return; }
-			draft = withBootMode(fromCfg(cfg));
+			draft = withBootMode(fromCfg(cfg)); subFmtPicked = false;
 			savedSig = sig(draft);
 			dirty = false;
 			syncAreas();
@@ -47200,7 +47957,7 @@ return view.extend({
 					if (!c) { zm.toast('Не удалось загрузить секцию', 'error'); renderSections(); return; }
 					cfg = c;
 					rememberSec(c.sec);
-					draft = withBootMode(fromCfg(cfg));
+					draft = withBootMode(fromCfg(cfg)); subFmtPicked = false;
 					savedSig = sig(draft);
 					GLOBAL_KEYS.forEach(function(k) { draft[k] = keep[k]; });
 					dirty = sig(draft) !== savedSig;
@@ -47644,20 +48401,30 @@ return view.extend({
 			var runText = 'Сохраняем настройки' + (secs().length > 1 ? ' секции «' + secName() + '»' : '') + '…';
 			if (saving && st.installed) { if (saveToast) saveToast.set(runText); else saveToast = zm.busyToast(runText); }
 			else if (saveToast) { saveToast.close(); saveToast = null; }
-			saveBar.innerHTML = '';
-			saveBar.style.display = show ? '' : 'none';
-			saveBar.classList.remove('zm-savebar-run', 'zm-savebar-done');
-			zm.dock(saveBar, show);
-			if (!show) return;
-			var btns = [];
-			if ((dirty && configured()) || isNew) btns.push(E('button', { 'class': 'cbi-button', 'disabled': saving ? '' : null, 'click': discard }, 'Отменить'));
-			if (!st.enabled) btns.push(E('button', { 'class': 'cbi-button', 'disabled': saving || busy ? '' : null, 'click': function() { save(false); } }, 'Только сохранить'));
-			btns.push(E('button', { 'class': 'cbi-button cbi-button-positive', 'disabled': saving || busy ? '' : null, 'click': function() { save(true); } },
-				saving ? 'Сохраняем…' : st.enabled ? 'Сохранить и применить' : 'Сохранить и включить'));
-			saveBar.appendChild(E('span', { 'class': 'zm-savebar-dot' }));
-			saveBar.appendChild(E('span', { 'class': 'zm-savebar-text' }, busy ? 'Дождитесь окончания операции' : isNew ? 'Новая секция «' + secName() + '»: выберите подключение и сервисы или свои адреса, затем сохраните' : dirty ? 'Есть несохранённые изменения' + (secs().length > 1 && secSig(draft) !== secSig(withBootMode(fromCfg(cfg))) ? ' в секции «' + secName() + '»' : '') : 'Настройте подключение и сервисы или свои адреса, затем сохраните'));
-			saveBar.appendChild(E('div', { 'class': 'zm-savebar-btns' }, btns));
+			if (!show) {
+				saveBar.style.display = 'none';
+				saveBar._zmKey = '';
+				zm.dock(saveBar, false);
+				return;
+			}
+			var txt = busy ? 'Дождитесь окончания операции' : isNew ? 'Новая секция «' + secName() + '»: выберите подключение и сервисы или свои адреса, затем сохраните' : dirty ? 'Есть несохранённые изменения' + (secs().length > 1 && secSig(draft) !== secSig(withBootMode(fromCfg(cfg))) ? ' в секции «' + secName() + '»' : '') : 'Настройте подключение и сервисы или свои адреса, затем сохраните';
+			var cancel = (dirty && configured()) || isNew, key = [ cancel, !!st.enabled, !!busy, txt ].join('|');
+			if (saveBar._zmKey !== key || !saveBar.firstChild) {
+				saveBar._zmKey = key;
+				var btns = [];
+				if (cancel) btns.push(E('button', { 'class': 'cbi-button', 'click': discard }, 'Отменить'));
+				if (!st.enabled) btns.push(E('button', { 'class': 'cbi-button', 'disabled': busy ? '' : null, 'click': function() { save(false); } }, 'Только сохранить'));
+				btns.push(E('button', { 'class': 'cbi-button cbi-button-positive', 'disabled': busy ? '' : null, 'click': function() { save(true); } }, st.enabled ? 'Сохранить и применить' : 'Сохранить и включить'));
+				saveBar.classList.remove('zm-savebar-run', 'zm-savebar-done');
+				saveBar.innerHTML = '';
+				saveBar.appendChild(E('span', { 'class': 'zm-savebar-dot' }));
+				saveBar.appendChild(E('span', { 'class': 'zm-savebar-text' }, txt));
+				saveBar.appendChild(E('div', { 'class': 'zm-savebar-btns' }, btns));
+			}
+			saveBar.style.display = '';
+			zm.dock(saveBar, true);
 		}
+
 
 		function renderLinkCount() {
 			var l = textLines(draft.links), bad = l.filter(function(x) { return !linkOk(x); }).length;
@@ -47704,6 +48471,24 @@ return view.extend({
 
 		function hint(text, top) { return E('p', { 'class': 'zm-hint', 'style': 'margin-top:' + (top == null ? 2 : top) + 'px' }, text); }
 
+		function selEl(items, cur, pick, aria) {
+			var el = E('select', { 'class': 'cbi-input-select zm-rl-sel', 'aria-label': aria || null }, items.map(function(it) { return E('option', { 'value': it.id }, it.label); }));
+			el.value = cur;
+			el.addEventListener('change', function() { if (el.value !== cur) pick(el.value); });
+			return el;
+		}
+
+		function rlSecHint() {
+			var fp = draft.rl_fp, mk = draft.rl_mk, src = draft.mode === 'sub' ? 'подписке' : 'ссылке';
+			var now = mk === 'off' ? 'Сейчас ключ выключен у всех серверов REALITY — новые серверы без него не пустят.'
+				: mk === 'on' ? 'Сейчас ключ включён у всех серверов REALITY — часть старых серверов с ним не пустит.'
+				: '«Авто»: ключ берётся из ' + (draft.mode === 'sub' ? 'подписки' : 'ссылки') + ', а каждый сервер панель сама проверяет с ключом и без и запоминает рабочий вариант.';
+			var fpt = fp === 'auto' ? ' Отпечаток — как в ' + src + ', с ключом — Chrome.' : fp === 'sub' ? ' Отпечаток — всегда как в ' + src + '.' : ' Отпечаток ' + rlFpName(fp) + (fp === 'chrome' ? '.' : ', с ключом — Chrome.');
+			return 'Новым серверам REALITY (Xray 26.9.8 и новее) нужен ключ X25519MLKEM768, а некоторые старые с ним не пускают. ' + now + fpt + ' Свой выбор для сервера — в карточке «Серверы».';
+		}
+
+
+
 		function netInfo() { return (cfg && cfg.net) || { lan_ip: '', nets: [], devs: [] }; }
 
 		function lanIp() { return netInfo().lan_ip || 'IP-роутера'; }
@@ -47744,6 +48529,12 @@ return view.extend({
 				if (draft.direct_fallback) p.push('напрямую при отказе VPN');
 				if (draft.uot) p.push('UDP поверх TCP');
 			} else if (draft.dres_on) p.push('DNS ' + dnsName(draft.dres_type, draft.dres_server.trim()));
+			if (draft.mode !== 'iface' && CAPS.reality && (draft.rl_fp !== 'auto' || draft.rl_mk !== 'auto')) {
+				var rp = [];
+				if (draft.rl_fp !== 'auto') rp.push(draft.rl_fp === 'sub' ? 'отпечаток из ' + (draft.mode === 'sub' ? 'подписки' : 'ссылки') : rlFpName(draft.rl_fp));
+				if (draft.rl_mk !== 'auto') rp.push(draft.rl_mk === 'on' ? 'с ключом' : 'без ключа');
+				p.push('REALITY: ' + rp.join(', '));
+			}
 			if (draft.mixed) p.push('прокси :' + draft.mixed_port.trim());
 			if (draft.real_ip) p.push('настоящий IP');
 			return p.join(' · ');
@@ -47753,7 +48544,7 @@ return view.extend({
 			var many = secs().length > 1 || draft.sec === 'new';
 			if (draft.mode === 'sub') {
 				box.appendChild(E('h4', {}, 'Подписка'));
-				box.appendChild(row('Формат', seg(SUB_FMT, draft.sub_fmt, function(v) { set('sub_fmt', v); })));
+				box.appendChild(row('Формат', seg(SUB_FMT, draft.sub_fmt, function(v) { subFmtPicked = true; set('sub_fmt', v); })));
 				box.appendChild(hint('Какой формат просить у сервиса первым. «Авто» подходит почти всем. Xray JSON (Happ) — если часть серверов (например, с XHTTP или Hysteria2) сервис отдаёт только приложению Happ; sing-box — если сервис умеет отдавать его напрямую. Когда подписку добавляют, панель один раз сравнивает форматы и ставит тот, где серверов больше; дальше формат сам не меняется — только вручную здесь.'));
 				box.appendChild(row('Группы', seg(SUB_GROUP, draft.sub_group, function(v) { set('sub_group', v); })));
 				if (draft.sub_group === 'prefix') box.appendChild(row('Символов', inp('sub_plen', '2', 70, 'первые символы имени, по которым серверы собираются в группу')));
@@ -47812,6 +48603,13 @@ return view.extend({
 				if (!preset) box.appendChild(row('Адрес', inp('ut_url', 'https://…/generate_204', 340)));
 				box.appendChild(sw(draft.direct_fallback, 'Напрямую при отказе всех VPN', 'Если не отвечает ни один сервер секции, её сервисы, домены и адреса временно идут напрямую. Forkozz проверяет серверы раз в 2 минуты и вернёт секцию на рабочий сервер, как только он появится. Выбор устройств не меняется. По умолчанию выключено.', function() { set('direct_fallback', !draft.direct_fallback); }));
 				box.appendChild(sw(draft.uot, 'UDP поверх TCP', 'Для серверов Shadowsocks и SOCKS: UDP (звонки, игры, QUIC) пойдёт внутри TCP. Включайте, если сервер не пропускает UDP.', function() { set('uot', !draft.uot); }));
+				if (CAPS.reality) {
+					box.appendChild(E('h4', {}, 'Совместимость REALITY'));
+					box.appendChild(row('Отпечаток', selEl([ { id: 'auto', label: 'Авто' }, { id: 'sub', label: draft.mode === 'sub' ? 'Как в подписке' : 'Как в ссылке' } ].concat(RL_FPS), draft.rl_fp, function(v) { set('rl_fp', v); }, 'Отпечаток TLS для серверов REALITY')));
+					box.appendChild(row('Ключ X25519MLKEM768', seg(RL_MK, draft.rl_mk, function(v) { set('rl_mk', v); })));
+					box.appendChild(hint(rlSecHint(), 0));
+					if (CAPS.rl_core === false && draft.rl_mk !== 'off') box.appendChild(E('p', { 'class': 'zm-hint zm-ab-warn' }, 'Этот sing-box не умеет отправлять ключ — нужен расширенный 2.7.2 и новее: вкладка «Настройки» → «sing-box» → «Расширенный облегчённый». Серверы Xray 26.9.8 и новее работают и через Steer — он отправляет ключ всегда.'));
+				}
 			} else {
 				box.appendChild(E('h4', {}, 'DNS туннеля'));
 				box.appendChild(sw(draft.dres_on, 'Свой DNS для сайтов секции', 'Адреса сайтов этой секции будут искаться через сам туннель указанным DNS — ответ совпадёт со страной туннеля, а провайдер его не увидит.', function() {
@@ -47990,6 +48788,78 @@ return view.extend({
 			}).catch(function() { picking = false; bt.close(); pickServer(t, nodeName(n)); });
 		}
 
+		function rlList(ns) {
+			var rl = servers && servers.reality;
+			if (!rl || !rl.nodes) return [];
+			return Object.keys(rl.nodes).filter(function(t) { return ns[t] && !ns[t].members && !ns[t].hidden; });
+		}
+
+		function rlLearn(hps) {
+			if (busy || saving) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
+			zm.forkopAction('rllearn', JSON.stringify({ sec: cfg && cfg.sec, hps: hps, force: true })).then(function(res) {
+				if (!res || res.error) { zm.toast((res && res.error) || 'Роутер не ответил', 'error'); return; }
+				lastAct = 'apply';
+				zm.toast('Проверяем серверы с ключом и без — ход работы виден в окне вывода', 'warning');
+				follow();
+			}, function() { zm.toast('Роутер не ответил', 'error'); });
+		}
+
+		function rlBanner(ns) {
+			var rl = servers.reality;
+			var dead = rlList(ns).filter(function(t) { var x = rl.nodes[t]; return ns[t].blocked && !x.omk && rl.mk === 'auto'; });
+			var learn = dead.filter(function(t) { return rl.nodes[t].alt; });
+			if (!learn.length && !(dead.length && !rl.core)) return E([]);
+			var list = learn.length ? learn : dead, one = list.length === 1;
+			var txt = (one ? 'Сервер «' + nodeName(ns[list[0]]) + '» не пускает, хотя порт открыт.' : nn(list.length, 'сервер', 'сервера', 'серверов') + ' REALITY не пускают, хотя порт открыт.') +
+				(learn.length ? ' Возможно, ' + (one ? 'ему' : 'им') + ' нужен другой режим ключа X25519MLKEM768: панель проверит ' + (one ? 'сервер' : 'каждый') + ' с ключом и без и оставит рабочий вариант.'
+					: ' Если это сервер Xray 26.9.8 и новее, ему нужен ключ X25519MLKEM768 — его отправляет только расширенный sing-box 2.7.2 и новее (вкладка «Настройки» → «sing-box») или Steer.');
+			return E('div', { 'class': 'zm-refresh-banner zm-show zm-home-banner', 'role': 'note' }, [
+				E('span', {}, txt),
+				learn.length ? E('span', { 'class': 'zm-banner-acts' }, [ E('button', { 'class': 'cbi-button cbi-button-action', 'disabled': busy ? '' : null, 'click': function() {
+					rlLearn(learn.map(function(t) { return rl.nodes[t].hp; }));
+				} }, 'Подобрать ключ') ]) : E([])
+			]);
+		}
+
+		function rlPanel(ns) {
+			var rl = servers.reality, list = rlList(ns);
+			if (!list.length) return E([]);
+			var own = list.filter(function(t) { return rl.nodes[t].ofp || rl.nodes[t].omk; }).length, keyed = list.filter(function(t) { return rl.nodes[t].key; }).length;
+			var box = E('div', { 'class': 'zm-fold zm-rl' + (rlOpen ? ' zm-fold-open' : '') });
+			box.appendChild(E('div', { 'class': 'zm-fold-head', 'role': 'button', 'tabindex': '0', 'aria-expanded': rlOpen ? 'true' : 'false', 'click': function() { rlOpen = !rlOpen; renderServers(); },
+				'keydown': function(ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); rlOpen = !rlOpen; renderServers(); } } }, [
+				E('span', { 'class': 'zm-svc-chev' }, '›'), E('span', {}, 'Совместимость REALITY'),
+				E('span', { 'class': 'zm-fold-sum' }, nn(list.length, 'сервер', 'сервера', 'серверов') + ' · с ключом ' + keyed + (own ? ' · свой выбор у ' + own : ''))
+			]));
+			if (!rlOpen) return box;
+			var body = E('div', { 'class': 'zm-fold-body' });
+			body.appendChild(hint('Отпечаток и ключ X25519MLKEM768 для отдельного сервера. «Как в секции» — по настройке «Совместимость REALITY» в «Дополнительно» выше; при ключе «Авто» панель сама проверяет сервер с ключом и без и помечает выбор «подобрано». Свой выбор привязан к адресу сервера и не сбрасывается при обновлении подписки.', 0));
+			if (!rl.core) body.appendChild(E('p', { 'class': 'zm-hint zm-ab-warn' }, 'Этот sing-box не умеет отправлять ключ — нужен расширенный 2.7.2 и новее (вкладка «Настройки» → «sing-box»).'));
+			body.appendChild(E('div', { 'class': 'zm-rl-list' }, list.map(function(t) {
+				var x = rl.nodes[t], mine = !!(x.ofp || x.omk);
+				return E('div', { 'class': 'zm-rl-row' + (mine ? ' zm-rl-own' : '') }, [
+					E('div', { 'class': 'zm-rl-name' }, [
+						E('span', { 'class': 'zm-rl-nm', 'title': nodeName(ns[t]) + ' · ' + x.hp }, [ nodeName(ns[t]), mine ? E('span', { 'class': 'zm-rl-badge' }, 'свой выбор') : E([]) ]),
+						E('span', { 'class': 'zm-rl-now' }, [ rlFpName(x.fp) + ' · ', E('span', { 'class': x.key ? 'zm-rl-key' : 'zm-rl-nokey' }, x.key ? 'с ключом' : 'без ключа'), !x.omk && x.learned ? ' · подобрано' : '' ])
+					]),
+					E('div', { 'class': 'zm-rl-ctl' }, [
+						selEl([ { id: '', label: 'Отпечаток — как в секции' } ].concat(RL_FPS), x.ofp, function(v) { rlAct({ hp: x.hp, fp: v }); }, 'Отпечаток для ' + nodeName(ns[t])),
+						selEl([ { id: '', label: 'Ключ — как в секции' }, { id: 'on', label: 'Ключ включён' }, { id: 'off', label: 'Ключ выключен' } ], x.omk, function(v) { rlAct({ hp: x.hp, mk: v }); }, 'Ключ X25519MLKEM768 для ' + nodeName(ns[t]))
+					])
+				]);
+			})));
+			var learnable = list.filter(function(t) { return rl.nodes[t].alt; }), acts = [];
+			if (learnable.length) acts.push(E('button', { 'class': 'cbi-button cbi-button-action', 'disabled': busy ? '' : null, 'click': function() {
+				rlLearn(learnable.map(function(t) { return rl.nodes[t].hp; }));
+			} }, 'Проверить с ключом и без'));
+			if (rl.own) acts.push(E('button', { 'class': 'cbi-button', 'disabled': busy ? '' : null, 'click': function() {
+				zm.ask('Сбросить свой выбор отпечатка и ключа у всех серверов этой секции?\n\nСерверы REALITY снова будут работать по настройке секции. Forkozz применит настройки — на несколько секунд соединения прервутся.').then(function(ok) { if (ok) rlAct({ reset: true }); });
+			} }, 'Сбросить свой выбор у всех'));
+			if (acts.length) body.appendChild(E('div', { 'class': 'zm-actions' }, acts));
+			box.appendChild(body);
+			return box;
+		}
+
 		function fkLat(n) {
 			if (n.blocked) return E('span', { 'class': 'zm-lat zm-lat-blk', 'title': 'Порт сервера открыт' + (n.tcp > 0 ? ' (TCP ' + n.tcp + ' мс)' : '') + ', но запрос через сервер не прошёл — скорее всего, сервер блокирует провайдер' }, 'порт открыт, не\u00a0пускает');
 			if (n.rpend && n.tcp > 0) return E('span', { 'class': 'zm-lat zm-lat-none', 'title': 'TCP ' + n.tcp + ' мс — проверяем запросом через сервер' }, n.tcp + ' мс…');
@@ -48069,6 +48939,7 @@ return view.extend({
 				return node(nodeName(n), String(n.type || '').toLowerCase(), on, function() { if (!on) pickChecked(t, ns[t] || n); },
 					fkLat(n), n.delay === 0 ? 'zm-node-dead' + (n.blocked ? ' zm-node-blk' : '') : '');
 			})));
+			if (!latBusy) srvCard.appendChild(rlBanner(ns));
 			var lt = tags.filter(function(t) { return ns[t] && !ns[t].members; }), lw = lt.filter(function(t) { return ns[t].delay !== -2; }).length;
 			var acts = [ E('button', { 'class': 'cbi-button', 'disabled': latBusy ? '' : null, 'click': testLatency }, latBusy ? (lt.length ? 'Проверяем ' + lw + ' из ' + lt.length : 'Проверяем…') : 'Проверить задержку') ];
 			if (cfg.mode === 'sub') acts.push(E('button', { 'class': 'cbi-button', 'click': function() { act('subs'); } }, 'Обновить серверы подписки'));
@@ -48111,6 +48982,7 @@ return view.extend({
 						: 'Если выбранный вручную сервер перестал отвечать, Forkozz через 2–4 минуты переходит на рабочий, а выбранный проверяет раз в 10 минут и возвращается на него, как только он ответит. Перед выбором сервер проверяется.'));
 			}
 			srvCard.appendChild(E('p', { 'class': 'zm-hint' }, isAuto ? servers.priority ? 'Авто: используется первая доступная подписка в порядке ссылок. После её восстановления Forkozz возвращается к ней, даже если резервная быстрее. Нажатие на сервер включает ручной выбор.' : servers.ping ? 'Авто по пингу: включён самый быстрый сервер. Если он оборвётся, Forkozz за 20–40 секунд перейдёт на самый быстрый из рабочих. Нажмите на сервер, чтобы закрепить его.' : 'Авто: Forkozz сам выбирает лучший из этих серверов. Нажмите на сервер, чтобы закрепить его.' : servers.priority ? 'Нажмите на сервер, чтобы переключиться. Чтобы снова использовать автоматический порядок подписок, выберите «Авто».' : 'Нажмите на сервер, чтобы переключиться. Выбор держится до перезагрузки роутера.'));
+			srvCard.appendChild(rlPanel(ns));
 			srvCard.appendChild(hidePick);
 		}
 
@@ -53016,6 +53888,9 @@ html[data-theme="light"] .zmw-orbs i { opacity: .28; }
 #zmw-view .bt-col .zm-row { padding: 6px 0; margin: 0; border-bottom: 1px dashed var(--border); }
 #zmw-view .bt-col .zm-row:last-child { border-bottom: 0; }
 #zmw-view .zm-sysline { border-top-color: var(--border); }
+#zmw-view .zm-rl-row { border-top-color: var(--border); }
+#zmw-view .zm-rl-key { color: var(--ok); }
+#zmw-view .zm-rl-badge { background: color-mix(in srgb, var(--a1) 14%, transparent); color: var(--a1); }
 
 #zmw-view .zm-hint, #zmw-view p.zm-hint, .zm-dock .zm-hint, .zm-dock p.zm-hint, .zmw-modal .zm-hint, .zmw-modal p.zm-hint { opacity: 1; color: var(--muted); font-size: 12.5px; line-height: 1.6; }
 #zmw-view a:not(.cbi-button), .zm-dock a:not(.cbi-button), .zmw-modal a:not(.cbi-button) { color: var(--a2); text-decoration-color: rgba(59,130,246,.35); text-underline-offset: 3px; }
