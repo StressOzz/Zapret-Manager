@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.68
+# Version: 4.71
 ZM_VERSION_EOF
 set -e
 
@@ -4256,7 +4256,7 @@ _pg_trace() {
 		mixomo) echo "$MIHOMO_BIN $MIHOMO_DIR /tmp/mihomo* /tmp/zashboard /tmp/zashboard.zip /tmp/metacubexd /tmp/metacubexd.tgz /etc/init.d/mihomo /etc/rc.d/*mihomo pkg:magitrickle /etc/magitrickle /etc/init.d/magitrickle /etc/rc.d/*magitrickle /etc/config/magitrickle /etc/config/magitrickle-opkg /usr/bin/magitrickle* /usr/sbin/magitrickle* /var/run/magitrickle* nft:magitrickle uci:network.Mihomo uci:firewall.Mihomo uci:firewall.lan_to_Mihomo cronrx:mihomo cronrx:magitrickle"
 			_bt_installed || echo "pkg:hev-socks5-tunnel /usr/bin/hev-socks5-tunnel /etc/config/hev-socks5-tunnel /etc/config/hev-socks5-tunnel-opkg /etc/init.d/hev-socks5-tunnel /etc/rc.d/*hev-socks5-tunnel /etc/hev-socks5-tunnel" ;;
 		awg) echo "pkg:luci-i18n-amneziawg-ru pkg:luci-app-amneziawg pkg:luci-proto-amneziawg pkg:amneziawg-tools pkg:kmod-amneziawg $AWG_DIR /usr/bin/awg /usr/bin/awg-quick /lib/netifd/proto/amneziawg.sh /lib/modules/*/amneziawg.ko /etc/modules.d/*amneziawg* $AWG_KMOD_MANUAL $(_zm_luci_files amneziawg) $AWF_MODE $AWF_SKIP $AWF_STATE $AWF_LOG cron:zm-awgfix" ;;
-		tgproxy) echo "pkg:tg-ws-proxy /usr/bin/tg-ws-proxy /etc/init.d/tg-ws-proxy /etc/tg-ws-proxy /etc/tg-ws-proxy.conf /etc/config/tg-ws-proxy $TG_BIN_GO $TG_BIN_GO.new $TG_INIT_GO $TG_BIN_RS $TG_INIT_RS $TG_SECRET_RS_FILE $TG_VER_GO_FILE $TG_VER_RS_FILE /etc/config/tg-ws-proxy-rs $TG_WATCH_FLAG /tmp/tg-ws-proxy.ipk /tmp/tg-ws-proxy.apk /etc/rc.d/*tg-ws-proxy* cron:zm-tg-auto cronrx:tg-ws-proxy" ;;
+		tgproxy) echo "pkg:tg-ws-proxy /usr/bin/tg-ws-proxy /etc/init.d/tg-ws-proxy /etc/tg-ws-proxy /etc/tg-ws-proxy.conf /etc/config/tg-ws-proxy $TG_BIN_GO $TG_BIN_GO.new $TG_INIT_GO $TG_BIN_RS $TG_INIT_RS $TG_SECRET_RS_FILE $TG_VER_GO_FILE $TG_VER_RS_FILE /etc/config/tg-ws-proxy-rs $TG_WATCH_FLAG $TG_EXT_FILE uci:firewall.zm_tg_mtproto uci:firewall.zm_tg_rust /tmp/tg-ws-proxy.ipk /tmp/tg-ws-proxy.apk /etc/rc.d/*tg-ws-proxy* cron:zm-tg-auto cronrx:tg-ws-proxy" ;;
 		stgws) echo "pkg:tgws /etc/init.d/tgws /usr/sbin/tgws /usr/sbin/stgws /etc/config/tgws /etc/rc.d/*tgws* /var/lib/tgws /var/lib/stgws nft:tgws nft:stgws cronrx:tgws" ;;
 		tailscale) echo "cron:zm-tailscale $ZM_STATE_DIR/latest.tsc pkg:luci-i18n-tailscale-community-ru pkg:luci-app-tailscale-community /etc/init.d/tailscale-settings /etc/rc.d/*tailscale-settings /www/luci-static/resources/view/tailscale.js /usr/share/luci/menu.d/luci-app-tailscale-community.json /usr/share/rpcd/acl.d/luci-app-tailscale-community.json /usr/share/rpcd/ucode/tailscale.uc pkg:tailscale /usr/sbin/tailscale /usr/sbin/tailscaled /etc/init.d/tailscale /etc/rc.d/*tailscale /etc/config/tailscale /etc/config/tailscale-opkg /etc/config/tailscale.apk-new /etc/tailscale /var/lib/tailscale $TSC_NFT $TSC_HOOK $TSC_SYSCTL $TSC_DIR $TSC_UPLOG uci:network.$TSC_NET uci:firewall.$TSC_FW_RULE" ;;
 		terminal) echo "pkg:luci-i18n-ttyd-ru pkg:luci-app-ttyd pkg:ttyd /usr/bin/ttyd /etc/config/ttyd /etc/config/ttyd-opkg /etc/config/ttyd.apk-new /etc/init.d/ttyd /etc/rc.d/*ttyd $(_zm_luci_files ttyd)" ;;
@@ -6026,13 +6026,13 @@ tg_status() {
 
 	local mt_l go_l rs_l
 	mt_l="$(_tg_latest mt)"; mt_l="$(_tg_mt_show "$(_tg_mt_base "${mt_l%% *}")" "${mt_l##* }")"; go_l="$(_ver_norm "$(_tg_latest go)")"; rs_l="$(_ver_norm "$(_tg_latest rs)")"
-	printf '{"mtproto":"%s","mtproto_running":%s,"mtproto_version":"%s","mtproto_latest":"%s","mtproto_newer":%s,"socks5":"%s","socks5_running":%s,"socks5_version":"%s","socks5_latest":"%s","socks5_newer":%s,"rust":"%s","rust_running":%s,"rust_version":"%s","rust_latest":"%s","rust_newer":%s,"rust_uci":%s,"rust_enabled":%s,"rust_port":"%s","rust_host":"%s","lan_ip":"%s","secret_mtproto":"%s","secret_rust":"%s","mtproto_port":"%s","mtproto_host":"%s","link_mtproto":"%s","socks5_port":"%s","rust_key":"%s","auto":%s}\n' \
+	printf '{"mtproto":"%s","mtproto_running":%s,"mtproto_version":"%s","mtproto_latest":"%s","mtproto_newer":%s,"socks5":"%s","socks5_running":%s,"socks5_version":"%s","socks5_latest":"%s","socks5_newer":%s,"rust":"%s","rust_running":%s,"rust_version":"%s","rust_latest":"%s","rust_newer":%s,"rust_uci":%s,"rust_enabled":%s,"rust_port":"%s","rust_host":"%s","lan_ip":"%s","secret_mtproto":"%s","secret_rust":"%s","mtproto_port":"%s","mtproto_host":"%s","link_mtproto":"%s","socks5_port":"%s","rust_key":"%s","auto":%s,"ext":%s}\n' \
 		"$mt" "$mt_running" "$(esc "$mt_ver")" "$(esc "$mt_l")" "$(_tg_newer "$mt_ver" "$mt_l" && echo true || echo false)" \
 		"$go" "$go_running" "$(esc "$go_ver")" "$(esc "$go_l")" "$(_tg_newer "$go_ver" "$go_l" && echo true || echo false)" \
 		"$rs" "$rs_running" "$(esc "$rs_ver")" "$(esc "$rs_l")" "$(_tg_newer "$rs_ver" "$rs_l" && echo true || echo false)" \
 		"$rs_uci" "$rs_enabled" "$(esc "$rs_port")" "$(esc "$rs_host")" \
 		"$(esc "$lan_ip")" "$(esc "$secret_mt")" "$(esc "$secret_rs")" \
-		"$(esc "$mt_port")" "$(esc "$mt_host")" "$(esc "$mt_link")" "$(esc "$go_port")" "$(_tg_rs_uci || esc "$(_tg_rs_init_secret)")" "$(_tg_auto_json)"
+		"$(esc "$mt_port")" "$(esc "$mt_host")" "$(esc "$mt_link")" "$(esc "$go_port")" "$(_tg_rs_uci || esc "$(_tg_rs_init_secret)")" "$(_tg_auto_json)" "$(_tg_ext_json)"
 }
 
 TG_CONF_MT="/etc/tg-ws-proxy/config.conf"
@@ -6102,7 +6102,6 @@ _tg_secret_norm() {
 	case "$s" in *[!0-9a-f]*|'') echo "ключ — только цифры 0-9 и буквы a-f" >&2; return 1 ;; esac
 	if [ "$id" = mtproto ]; then
 		case "$s" in dd*) [ "${#s}" = 34 ] && s="${s#dd}" ;; esac
-		case "$s" in ee*) [ "${#s}" -gt 34 ] && { echo "этот прокси не принимает ключи ee… (FakeTLS) — нужен ключ из 32 знаков" >&2; return 1; } ;; esac
 		[ "${#s}" = 32 ] || { echo "нужно ровно 32 знака, сейчас ${#s}" >&2; return 1; }
 		printf '%s' "$s"; return 0
 	fi
@@ -6142,7 +6141,7 @@ _tg_listening() {
 	return 1
 }
 tg_conf_set() {
-	local id="$1" port="${2%%:*}" sec="${2#*:}" init was="" st err cur_port cur_sec
+	local id="$1" port="${2%%:*}" sec="${2#*:}" init was="" st err cur_port cur_sec tls_new=- s d
 	case "$id" in mtproto|socks5|rust) ;; *) echo '{"error":"у этого прокси порт и ключ не меняются"}'; return 1 ;; esac
 	init="$(_tg_auto_init "$id")"
 	[ -f "$init" ] || { echo '{"error":"прокси не установлен"}'; return 1; }
@@ -6158,12 +6157,24 @@ tg_conf_set() {
 		*) printf '{"error":"Порт %s уже занят программой %s — выберите другой"}\n' "$port" "$(esc "${st#busy }")"; return 1 ;;
 	esac
 	if [ "$id" != socks5 ]; then
+		s="$(printf '%s' "$sec" | tr -d ' \t\r\n' | tr 'A-F' 'a-f')"
+		case "$s" in
+			ee*)
+				if [ "${#s}" -gt 34 ]; then
+					d=""
+					case "$s" in *[!0-9a-f]*) ;; *) [ $(( (${#s} - 34) % 2 )) = 0 ] && d="$(_tg_unhex "$(printf '%s' "$s" | cut -c35-)" | tr 'A-Z' 'a-z')" ;; esac
+					{ _tg_dom_ok "$d" && ! _tg_ip4_ok "$d"; } || { echo '{"error":"Ключ не подходит: в ключе ee… после 32 знаков должно быть имя сайта в hex (например, google.com)"}'; return 1; }
+					_tg_ftls_ok "$id" || { printf '{"error":"Ключ ee… — это FakeTLS, а эта версия %s его не умеет. Обновите прокси или введите ключ из 32 знаков"}\n' "$(esc "$(_tg_title_of "$id")")"; return 1; }
+					tls_new="$d"; sec="$(printf '%s' "$s" | cut -c3-34)"
+				fi ;;
+		esac
+		[ "$id" = rust ] && [ "$tls_new" = - ] && case "$(_tg_rs_init_secret)" in ee*) tls_new="$(_tg_tls_of rust)" ;; esac
 		sec="$(_tg_secret_norm "$id" "$sec" 2>"$JOBS_DIR/tg_conf.err")" || { err="$(cat "$JOBS_DIR/tg_conf.err")"; rm -f "$JOBS_DIR/tg_conf.err"; printf '{"error":"Ключ не подходит: %s"}\n' "$(esc "$err")"; return 1; }
 		rm -f "$JOBS_DIR/tg_conf.err"
 	fi
 	cur_port="$(_tg_port_of "$id")"
 	case "$id" in mtproto) cur_sec="$(_tg_mt_secret)" ;; rust) cur_sec="$(_tg_rs_init_secret)" ;; esac
-	[ "$port" = "$cur_port" ] && [ "$sec" = "$cur_sec" ] && { printf '{"ok":true,"same":true}\n'; return 0; }
+	[ "$port" = "$cur_port" ] && [ "$sec" = "$cur_sec" ] && { [ "$tls_new" = - ] || [ "$tls_new" = "$(_tg_tls_of "$id")" ]; } && { printf '{"ok":true,"same":true}\n'; return 0; }
 	pidof "$(_tg_bin_of "$id")" >/dev/null 2>&1 && was=1
 	_tg_bk save
 	case "$id" in
@@ -6182,15 +6193,18 @@ tg_conf_set() {
 			else sed -i "s#\($TG_BIN_RS\)#\1 --secret $sec#" "$init"; fi
 			printf '%s\n' "$sec" > "$TG_SECRET_RS_FILE" ;;
 	esac
+	[ "$tls_new" != - ] && _tg_tls_write "$id" "$tls_new"
 	"$init" restart >/dev/null 2>&1
 	if _tg_listening "$id" "$port"; then
 		_tg_bk drop
-		logger -t zapret-manager "TG WS Proxy ($id): порт $port${sec:+, ключ изменён}"
+		_tg_fw_sync "$id"
+		logger -t zapret-manager "TG WS Proxy ($id): порт $port${sec:+, ключ изменён}$([ "$tls_new" != - ] && echo ", FakeTLS $tls_new")"
 		printf '{"ok":true,"running":true}\n'
 		return 0
 	fi
 	if [ -z "$was" ]; then
 		_tg_bk drop
+		_tg_fw_sync "$id"
 		printf '{"ok":true,"running":false}\n'
 		return 0
 	fi
@@ -6200,6 +6214,272 @@ tg_conf_set() {
 	return 1
 }
 
+TG_EXT_FILE="$ZM_STATE_DIR/tg.ext"
+_tg_unhex() { printf '%s' "$1" | awk '{ h = "0123456789abcdef"; o = ""; for (i = 1; i < length($0); i += 2) o = o sprintf("%c", (index(h, substr($0, i, 1)) - 1) * 16 + index(h, substr($0, i + 1, 1)) - 1); printf "%s", o }'; }
+_tg_dom_ok() { [ "${#1}" -le 253 ] && printf '%s' "$1" | grep -qE '^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]([a-z0-9-]*[a-z0-9])?$'; }
+_tg_ip4_ok() { printf '%s' "$1" | grep -qE '^(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}$'; }
+_tg_ext_get() {
+	[ -f "$TG_EXT_FILE" ] || return 0
+	awk -v k="$1.$2=" 'index($0, k) == 1 { v = substr($0, length(k) + 1) } END { printf "%s", v }' "$TG_EXT_FILE"
+}
+_tg_ext_put() {
+	local t="$TG_EXT_FILE.$$"
+	mkdir -p "$ZM_STATE_DIR"
+	{
+		[ -f "$TG_EXT_FILE" ] && awk -v k="$1.$2=" 'index($0, k) != 1' "$TG_EXT_FILE"
+		[ -n "$3" ] && printf '%s.%s=%s\n' "$1" "$2" "$3"
+	} > "$t"
+	if [ -s "$t" ]; then mv -f "$t" "$TG_EXT_FILE"; else rm -f "$t" "$TG_EXT_FILE"; fi
+	return 0
+}
+_tg_kv_set() {
+	if grep -q "^$2=" "$1" 2>/dev/null; then sed -i "s|^$2=.*|$2=\"$3\"|" "$1"
+	else
+		[ -s "$1" ] && [ -n "$(tail -c 1 "$1")" ] && echo >> "$1"
+		printf '%s="%s"\n' "$2" "$3" >> "$1"
+	fi
+}
+_tg_fw_name() { case "$1" in mtproto) echo "Allow-TG-WS-Proxy-Go" ;; *) echo "Allow-TG-WS-Proxy-Rust" ;; esac; }
+_tg_fw_port() { [ "$(uci -q get "firewall.zm_tg_$1")" = rule ] && uci -q get "firewall.zm_tg_$1.dest_port"; }
+_tg_fw_set() {
+	local s="zm_tg_$1" z
+	z="$(_zm_wan_zone)"
+	if [ -n "$2" ]; then
+		[ "$(uci -q get "firewall.$s")" = rule ] && [ "$(uci -q get "firewall.$s.dest_port")" = "$2" ] && [ "$(uci -q get "firewall.$s.src")" = "$z" ] && return 1
+		uci -q delete "firewall.$s"
+		uci set "firewall.$s=rule"
+		uci set "firewall.$s.name=$(_tg_fw_name "$1")"
+		uci set "firewall.$s.src=$z"
+		uci set "firewall.$s.proto=tcp"
+		uci set "firewall.$s.dest_port=$2"
+		uci set "firewall.$s.target=ACCEPT"
+	else
+		uci -q get "firewall.$s" >/dev/null || return 1
+		uci delete "firewall.$s"
+	fi
+	uci commit firewall
+	/etc/init.d/firewall reload >/dev/null 2>&1
+	return 0
+}
+_tg_fw_sync() {
+	local p n
+	p="$(_tg_fw_port "$1")"; [ -n "$p" ] || return 0
+	n="$(_tg_port_of "$1")"
+	[ "$p" = "$n" ] || _tg_fw_set "$1" "$n"
+	return 0
+}
+_tg_fw_live() {
+	command -v nft >/dev/null 2>&1 || return 0
+	nft list chain inet fw4 "input_$(_zm_wan_zone)" 2>/dev/null | grep -qF "$(_tg_fw_name "$1")"
+}
+_zm_wan_ip() {
+	local s n ip
+	for n in wan $(s="$(_zm_zone_sec "$(_zm_wan_zone)")" && uci -q get "firewall.$s.network"); do
+		ip="$(ifstatus "$n" 2>/dev/null | jsonfilter -e "@['ipv4-address'][0].address" 2>/dev/null)"
+		[ -n "$ip" ] && { echo "$ip"; return 0; }
+	done
+	return 1
+}
+_zm_ip_grey() {
+	case "$1" in
+		10.*|127.*|169.254.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*) return 0 ;;
+	esac
+	return 1
+}
+_tg_ftls_ok() {
+	local b c k r
+	case "$1" in
+		mtproto) b=/usr/bin/tg-ws-proxy; grep -q FAKE_TLS_DOMAIN /etc/init.d/tg-ws-proxy 2>/dev/null || return 1 ;;
+		rust) b="$TG_BIN_RS" ;;
+		*) return 1 ;;
+	esac
+	[ -x "$b" ] || return 1
+	k="$(ls -ln "$b" 2>/dev/null | awk '{ print $5 }') $(date -r "$b" +%s 2>/dev/null)"
+	c="$JOBS_DIR/tg.ftls.$1"
+	if [ -f "$c" ] && [ "$(sed -n 1p "$c")" = "$k" ]; then
+		r="$(sed -n 2p "$c")"
+	else
+		r=0
+		case "$1" in
+			mtproto) "$b" --print-link --host 127.0.0.1 --port 1443 --secret 00000000000000000000000000000000 --fake-tls-domain example.com 2>/dev/null | grep -q 'secret=ee' && r=1 ;;
+			rust) "$b" --help 2>&1 | grep -q 'listen-faketls-domain' && r=1 ;;
+		esac
+		mkdir -p "$JOBS_DIR"
+		printf '%s\n%s\n' "$k" "$r" > "$c"
+	fi
+	[ "$r" = 1 ]
+}
+_tg_tls_of() {
+	local d s
+	case "$1" in
+		mtproto) _tg_kv "$TG_CONF_MT" FAKE_TLS_DOMAIN ;;
+		rust)
+			if _tg_rs_uci; then uci -q get tg-ws-proxy-rs.main.listen_faketls_domain; return 0; fi
+			d="$(_tg_init_arg "$TG_INIT_RS" --listen-faketls-domain '[A-Za-z0-9.-]')"
+			if [ -z "$d" ]; then
+				s="$(_tg_rs_init_secret)"
+				case "$s" in ee*) [ "${#s}" -gt 34 ] && d="$(_tg_unhex "$(printf '%s' "$s" | cut -c35-)")" ;; esac
+			fi
+			printf '%s' "$d" ;;
+	esac
+}
+_tg_tls_write() {
+	local s init="$TG_INIT_RS"
+	case "$1" in
+		mtproto)
+			mkdir -p "$(dirname "$TG_CONF_MT")"
+			[ -f "$TG_CONF_MT" ] || printf 'HOST=0.0.0.0\nPORT=1443\n' > "$TG_CONF_MT"
+			_tg_kv_set "$TG_CONF_MT" FAKE_TLS_DOMAIN "$2" ;;
+		rust)
+			sed -i "s/[[:space:]]--listen-faketls-domain[[:space:]=]\{1,\}[\"']\{0,1\}[A-Za-z0-9.-]*[\"']\{0,1\}//g" "$init"
+			s="$(_tg_rs_init_secret)"
+			case "$s" in
+				dd*|ee*)
+					if [ "${#s}" -ge 34 ]; then
+						s="$(printf '%s' "$s" | cut -c3-34)"
+						sed -i "s/--secret\([[:space:]=]\{1,\}[\"']\{0,1\}\)[0-9a-fA-F,]\{1,\}/--secret\1$s/" "$init"
+						printf '%s\n' "$s" > "$TG_SECRET_RS_FILE"
+					fi ;;
+			esac
+			[ -n "$2" ] && sed -i "/procd_set_param[[:space:]]\{1,\}command/ s#\($TG_BIN_RS\)#\1 --listen-faketls-domain $2#" "$init" ;;
+	esac
+	return 0
+}
+_tg_tls_live() {
+	local p c
+	p="$(pidof "$(_tg_bin_of "$1")" 2>/dev/null | awk '{ print $1 }')"
+	[ -n "$p" ] || return 1
+	c=" $(tr '\000' ' ' < "/proc/$p/cmdline" 2>/dev/null) "
+	if [ -n "$2" ]; then
+		case "$c" in *"-domain $2 "*|*"-domain=$2 "*) return 0 ;; esac
+		return 1
+	fi
+	case "$c" in *fake-tls-domain*|*listen-faketls-domain*) return 1 ;; esac
+	return 0
+}
+_tg_tls_apply() {
+	local id="$1" d="$2" init port was=""
+	init="$(_tg_auto_init "$id")"; port="$(_tg_port_of "$id")"
+	pidof "$(_tg_bin_of "$id")" >/dev/null 2>&1 && was=1
+	_tg_bk save
+	_tg_tls_write "$id" "$d"
+	"$init" restart >/dev/null 2>&1
+	if _tg_listening "$id" "$port" && _tg_tls_live "$id" "$d"; then _tg_bk drop; return 0; fi
+	[ -z "$was" ] && { _tg_bk drop; return 0; }
+	_tg_bk restore
+	"$init" restart >/dev/null 2>&1
+	return 1
+}
+_tg_ddns_hosts() {
+	local s h
+	for s in $(uci -q -X show ddns 2>/dev/null | sed -n 's/^ddns\.\([^.=]*\)=service$/\1/p'); do
+		[ "$(uci -q get "ddns.$s.enabled")" = 1 ] || continue
+		[ "$(uci -q get "ddns.$s.use_ipv6")" = 1 ] && continue
+		h="$(uci -q get "ddns.$s.lookup_host")"; [ -n "$h" ] || h="$(uci -q get "ddns.$s.domain")"
+		h="$(printf '%s' "${h##*@}" | tr 'A-Z' 'a-z')"
+		_tg_dom_ok "$h" && echo "$h"
+	done | awk '!s[$0]++'
+}
+_tg_resolve() {
+	local t=""
+	command -v timeout >/dev/null 2>&1 && t="timeout 5"
+	$t nslookup "$1" $2 2>/dev/null | awk '/^Name:/ { n = 1; next } n && /^Address/ { for (i = 2; i <= NF; i++) if ($i ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) print $i }' | awk '!s[$0]++' | head -n 4
+}
+_tg_ext_one() {
+	local id="$1" tls port fp live=false ft=false pkg=false
+	[ -f "$(_tg_auto_init "$id")" ] || { printf '"%s":null' "$id"; return 0; }
+	tls="$(_tg_tls_of "$id")"; fp="$(_tg_fw_port "$id")"; port="$(_tg_port_of "$id")"
+	[ -n "$fp" ] && _tg_fw_live "$id" && live=true
+	if [ "$id" = rust ] && _tg_rs_uci; then pkg=true; else _tg_ftls_ok "$id" && ft=true; fi
+	printf '"%s":{"ftls":%s,"tls":"%s","open":%s,"fw_port":"%s","fw_live":%s,"port":"%s","host":"%s","hmode":"%s","pkg":%s}' "$id" \
+		"$ft" "$(esc "$tls")" "$([ -n "$fp" ] && echo true || echo false)" "$(esc "$fp")" "$live" "$(esc "$port")" \
+		"$(esc "$(_tg_ext_get "$id" host)")" "$(esc "$(_tg_ext_get "$id" hmode)")" "$pkg"
+}
+_tg_ext_json() {
+	local wan grey=false dd=""
+	wan="$(_zm_wan_ip)"
+	[ -n "$wan" ] && _zm_ip_grey "$wan" && grey=true
+	dd="$(_tg_ddns_hosts | awk '{ printf "%s\"%s\"", (NR > 1 ? "," : ""), $0 }')"
+	printf '{%s,%s,"wan":"%s","grey":%s,"ddns":[%s]}' "$(_tg_ext_one mtproto)" "$(_tg_ext_one rust)" "$(esc "$wan")" "$grey" "$dd"
+}
+tg_ext_check() {
+	local id="$1" h wan grey=false ips="" first="" x m=false listen=false fp live=false
+	h="$(printf '%s' "$2" | tr 'A-Z' 'a-z' | tr -d ' \t\r\n')"
+	[ -f "$(_tg_auto_init "$id")" ] || { echo '{"error":"прокси не установлен"}'; return 1; }
+	wan="$(_zm_wan_ip)"
+	[ -n "$wan" ] && _zm_ip_grey "$wan" && grey=true
+	if [ -n "$h" ]; then
+		if _tg_ip4_ok "$h"; then
+			ips="$h"
+		elif _tg_dom_ok "$h"; then
+			for x in - 77.88.8.8 1.1.1.1; do
+				[ "$x" = - ] && x=""
+				ips="$(_tg_resolve "$h" $x)"
+				[ -n "$ips" ] || continue
+				[ -n "$first" ] || first="$ips"
+				[ -n "$wan" ] && printf '%s\n' "$ips" | grep -qxF "$wan" && break
+				ips=""
+			done
+			[ -n "$ips" ] || ips="$first"
+		else
+			echo '{"error":"Адрес не похож на домен или IPv4"}'; return 1
+		fi
+		[ -n "$wan" ] && printf '%s\n' "$ips" | grep -qxF "$wan" && m=true
+	fi
+	_zm_tcp_listen "$(_tg_port_of "$id")" && pidof "$(_tg_bin_of "$id")" >/dev/null 2>&1 && listen=true
+	fp="$(_tg_fw_port "$id")"
+	[ -n "$fp" ] && _tg_fw_live "$id" && live=true
+	printf '{"ok":true,"host":"%s","ips":[%s],"match":%s,"wan":"%s","grey":%s,"listen":%s,"open":%s,"fw_port":"%s","fw_live":%s,"port":"%s"}\n' \
+		"$(esc "$h")" "$(printf '%s\n' "$ips" | awk 'NF { printf "%s\"%s\"", (n++ ? "," : ""), $0 }')" "$m" "$(esc "$wan")" "$grey" "$listen" \
+		"$([ -n "$fp" ] && echo true || echo false)" "$(esc "$fp")" "$live" "$(esc "$(_tg_port_of "$id")")"
+}
+tg_site_check() {
+	local d c
+	d="$(printf '%s' "$1" | tr 'A-Z' 'a-z' | tr -d ' \t\r\n')"
+	{ _tg_dom_ok "$d" && ! _tg_ip4_ok "$d"; } || { echo '{"error":"Нужно имя сайта, например www.google.com"}'; return 1; }
+	c="$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout 4 --max-time 8 "https://$d/" 2>/dev/null)"
+	case "$c" in ''|000) printf '{"ok":true,"up":false}\n' ;; *) printf '{"ok":true,"up":true,"code":"%s"}\n' "$(esc "$c")" ;; esac
+}
+tg_ext_set() {
+	local id="$1" spec="$2" tls open hmode host cur fw=same tch=false pkg=0
+	case "$id" in mtproto|rust) ;; *) echo '{"error":"у этого прокси нет доступа из интернета"}'; return 1 ;; esac
+	[ -f "$(_tg_auto_init "$id")" ] || { echo '{"error":"прокси не установлен"}'; return 1; }
+	_tg_auto_busy "$id" && { echo '{"error":"Идёт установка или удаление этого прокси — дождитесь окончания"}'; return 1; }
+	case "$spec" in *:*:*:*) ;; *) echo '{"error":"неверные настройки"}'; return 1 ;; esac
+	tls="$(printf '%s' "${spec%%:*}" | tr 'A-Z' 'a-z')"; spec="${spec#*:}"
+	open="${spec%%:*}"; spec="${spec#*:}"
+	hmode="${spec%%:*}"; host="$(printf '%s' "${spec#*:}" | tr 'A-Z' 'a-z')"
+	case "$open" in 0|1) ;; *) echo '{"error":"неверные настройки"}'; return 1 ;; esac
+	case "$hmode" in ddns|ip|'') ;; *) echo '{"error":"неверные настройки"}'; return 1 ;; esac
+	if [ -n "$tls" ]; then
+		{ _tg_dom_ok "$tls" && ! _tg_ip4_ok "$tls"; } || { echo '{"error":"Сайт для маскировки — имя сайта, например www.google.com"}'; return 1; }
+	fi
+	[ -z "$host" ] || _tg_ip4_ok "$host" || _tg_dom_ok "$host" || { echo '{"error":"Адрес для ссылки — домен (например, myhome.ddns.net) или IPv4"}'; return 1; }
+	[ "$open" = 1 ] && [ -z "$host" ] && { echo '{"error":"Укажите домен или внешний IP — без него ссылку из интернета не собрать"}'; return 1; }
+	[ "$id" = rust ] && _tg_rs_uci && pkg=1
+	cur="$(_tg_tls_of "$id")"
+	if [ "$tls" != "$cur" ]; then
+		[ "$pkg" = 1 ] && { echo '{"error":"Rust установлен пакетом — маскировка FakeTLS меняется в его настройках (Inbound FakeTLS domain)"}'; return 1; }
+		[ -z "$tls" ] || _tg_ftls_ok "$id" || { printf '{"error":"Эта версия %s не умеет FakeTLS — обновите прокси"}\n' "$(esc "$(_tg_title_of "$id")")"; return 1; }
+		_tg_tls_apply "$id" "$tls" || { printf '{"error":"С новой маскировкой %s не запустился — вернули прежние настройки, прокси работает как раньше"}\n' "$(esc "$(_tg_title_of "$id")")"; return 1; }
+		tch=true
+		logger -t zapret-manager "TG WS Proxy ($id): ${tls:+FakeTLS, сайт $tls}${tls:-обычный ключ (dd)}"
+	fi
+	_tg_ext_put "$id" host "$host"
+	_tg_ext_put "$id" hmode "$hmode"
+	if [ "$open" = 1 ]; then
+		_tg_fw_set "$id" "$(_tg_port_of "$id")" && { fw=opened; logger -t zapret-manager "TG WS Proxy ($id): порт $(_tg_port_of "$id") открыт из интернета"; }
+	else
+		_tg_fw_set "$id" "" && { fw=closed; logger -t zapret-manager "TG WS Proxy ($id): порт закрыт для интернета"; }
+	fi
+	printf '{"ok":true,"tls":%s,"fw":"%s","running":%s}\n' "$tch" "$fw" "$(pidof "$(_tg_bin_of "$id")" >/dev/null 2>&1 && echo true || echo false)"
+}
+_tg_ext_clear() {
+	_tg_fw_set "$1" "" && echo "   ✓ Порт прокси закрыт для интернета"
+	_tg_ext_put "$1" host ""
+	_tg_ext_put "$1" hmode ""
+	return 0
+}
 TG_AUTO_TAG="# zm-tg-auto"
 TG_WATCH_FLAG="$ZM_STATE_DIR/tg.watch"
 
@@ -6374,6 +6654,7 @@ do_tg_remove_mtproto() {
 	local rc=0
 	echo "==> Останавливаем TG WS Proxy MTProto"
 	_zm_stop_svc tg-ws-proxy tg-ws-proxy
+	_tg_ext_clear mtproto
 	_zm_pkg_purge tg-ws-proxy || rc=1
 	echo "==> Чистим файлы и настройки"
 	_zm_wipe /etc/init.d/tg-ws-proxy /usr/bin/tg-ws-proxy /etc/tg-ws-proxy /etc/tg-ws-proxy.conf /etc/tg-ws-proxy.conf-opkg /etc/config/tg-ws-proxy /etc/config/tg-ws-proxy-opkg /etc/rc.d/*tg-ws-proxy || rc=1
@@ -6473,6 +6754,7 @@ do_tg_install_rust() {
 do_tg_remove_rust() {
 	echo "==> Удаляем TG WS Proxy Rust"
 	_zm_stop_svc tg-ws-proxy-rs tg-ws-proxy-rs
+	_tg_ext_clear rust
 	echo "==> Удаляем программу, службу и настройки"
 	local rc=0
 	_zm_wipe "$TG_BIN_RS" "$TG_INIT_RS" "$TG_SECRET_RS_FILE" "$TG_VER_RS_FILE" /etc/rc.d/*tg-ws-proxy-rs || rc=1
@@ -6487,6 +6769,9 @@ tg_action() {
 		*:auto=*) tg_auto_set "$variant" "${action#auto=}"; return ;;
 		*:port=*) tg_port_check "$variant" "${action#port=}"; return ;;
 		*:conf=*) tg_conf_set "$variant" "${action#conf=}"; return ;;
+		*:ext=*) tg_ext_set "$variant" "${action#ext=}"; return ;;
+		*:chk=*) tg_ext_check "$variant" "${action#chk=}"; return ;;
+		*:site=*) tg_site_check "${action#site=}"; return ;;
 		rust:install|rust:update|rust:reinstall|rust:remove)
 			_tg_rs_uci && { echo '{"error":"TG WS Proxy (Rust) установлен пакетом luci-app-tg-ws-proxy-rs — обновляйте и удаляйте его через менеджер пакетов, настройки — в Службы → Telegram WS Proxy (Rust)"}'; return 1; } ;;
 	esac
@@ -25399,6 +25684,17 @@ _si_net_more() {
 	_si_row "dnsmasq" "своих серверов: $dns, noresolv: $(_si_yes "$(uci -q get dhcp.@dnsmasq[0].noresolv)")" ""
 }
 
+_si_tg_ext() {
+	local x v n
+	for x in mtproto rust; do
+		[ -f "$(_tg_auto_init "$x")" ] || continue
+		v="$(_tg_tls_of "$x")"; n="$(_tg_fw_port "$x")"
+		[ -n "$v" ] || [ -n "$n" ] || continue
+		_si_row "TG WS Proxy $(_tg_title_of "$x")" "$([ -n "$v" ] && echo "FakeTLS ($v)" || echo "обычный ключ (dd)")$([ -n "$n" ] && echo " · порт $n открыт из интернета")" ""
+	done
+	return 0
+}
+
 _si_components() {
 	local j v x s sec n
 	_si_sec "Компоненты ZM"
@@ -25409,6 +25705,7 @@ _si_components() {
 	_fk_installed && _si_row "$(_fk_name)" "$(_fk_up && echo работает || echo выключен)" "$(_fk_up && echo ok)"
 	[ -x /usr/bin/bytetube ] && _si_row "ByeTube" "установлен" ""
 	{ [ -f /etc/init.d/tg-ws-proxy ] || [ -f "$TG_INIT_GO" ] || [ -f "$TG_INIT_RS" ]; } && _si_row "TG WS Proxy" "установлен" ""
+	_si_tg_ext
 	[ -x /etc/init.d/tgws ] && _si_row "sTGWS" "установлен" ""
 	[ -x "$MIHOMO_BIN" ] && _si_row "Mixomo" "установлен" ""
 	_ab_on && _si_row "Блокировка рекламы" "включена" ok
@@ -33282,49 +33579,47 @@ return view.extend({
 			var dohNode = zm.stateBadge(dohSt);
 
 			var items = [];
-			items.push(row('Zapret', zm.stateBadge(zrSt)));
+			if (zrSt !== 0) items.push(row('Zapret', zm.stateBadge(zrSt)));
 			if (zrSt !== 0 && d.strategy) items.push(row('Стратегия', E('span', { 'style': 'display:inline-flex; gap:8px; flex-wrap:wrap; align-items:center' }, [ E('span', {}, [ String(d.strategy) ]),
 				d.rkn_on ? E('span', { 'class': 'zm-badge zm-ok' }, [ E('span', { 'class': 'zm-dot' }), 'по спискам РКН' ]) : d.ulist_on ? E('span', { 'class': 'zm-badge zm-ok' }, [ E('span', { 'class': 'zm-dot' }), 'по вашему списку' ]) : '',
 				d.testing ? E('span', { 'class': 'zm-badge zm-warn', 'title': 'Пока идёт тест, роутер по очереди пробует стратегии. Потом вернётся ваша' }, [ E('span', { 'class': 'zm-dot' }), 'идёт тест' + (d.test_now ? ': сейчас ' + d.test_now : '') ]) : '' ])));
-			items.push(row('Zapret2', zm.stateBadge(zr2St)));
+			if (zr2St !== 0) items.push(row('Zapret2', zm.stateBadge(zr2St)));
 			var warnBadge = function(text) { return E('span', { 'class': 'zm-badge zm-warn' }, [ E('span', { 'class': 'zm-dot' }), text ]); };
 			var offBadge = function(text) { return E('span', { 'class': 'zm-badge zm-off' }, [ E('span', { 'class': 'zm-dot' }), text ]); };
 			var stSt = st(h, 'steer', 0);
 			var stVia = /^iface:/.test(h.steer_exit || '') ? 'через ' + h.steer_exit.slice(6) : { warp: 'через WARP', own: 'через свой WARP', vpn: 'через VPN' }[h.steer_exit] || '';
-			items.push(row('Steer', stSt === 1 ? zm.badge(true, 'работает' + (stVia ? ' · ' + stVia : ''), '')
+			if (stSt !== 0) items.push(row('Steer', stSt === 1 ? zm.badge(true, 'работает' + (stVia ? ' · ' + stVia : ''), '')
 				: stSt === 2 ? zm.badge(false, '', (h.steer_fail ? 'туннель не принят' : 'не работает') + (stVia ? ' · ' + stVia : ''))
 				: stSt === 5 ? offBadge(h.steer_off ? 'выключен' : h.steer_exit === 'none' ? 'подключите WARP или VPN' : 'сервисы не выбраны')
 				: zm.badge(false, '', 'не установлен')));
 			var fkSt = st(h, 'forkop', 0);
-			items.push(row('Forkozz', fkSt === 1 ? zm.badge(true, 'работает', '')
+			if (fkSt !== 0) items.push(row('Forkozz', fkSt === 1 ? zm.badge(true, 'работает', '')
 				: fkSt === 2 ? zm.badge(false, '', 'не работает')
 				: fkSt === 5 ? offBadge('выключен')
 				: zm.badge(false, '', 'не установлен')));
-			items.push(row('ByeTube', zm.stateBadge(st(h, 'bytetube', 0))));
-			items.push(row('TG WS Proxy', zm.stateBadge(st(h, 'tg', 0))));
-			items.push(row('Mixomo', zm.stateBadge(st(h, 'mixomo', 0))));
-			items.push(row('DNS over HTTPS', dohNode));
+			[ [ 'ByeTube', st(h, 'bytetube', 0) ], [ 'TG WS Proxy', st(h, 'tg', 0) ], [ 'Mixomo', st(h, 'mixomo', 0) ] ].forEach(function(c) {
+				if (c[1] !== 0) items.push(row(c[0], zm.stateBadge(c[1])));
+			});
+			if (dohSt !== 0) items.push(row('DNS over HTTPS', dohNode));
 			var awgSt = st(h, 'awg', 0);
-			items.push(row('AmneziaWG', awgSt === 1 ? zm.badge(true, h.awg_up ? 'туннелей работает: ' + h.awg_up : h.awg_total ? 'установлен' : 'установлен, туннелей нет', '')
+			if (awgSt !== 0) items.push(row('AmneziaWG', awgSt === 1 ? zm.badge(true, h.awg_up ? 'туннелей работает: ' + h.awg_up : h.awg_total ? 'установлен' : 'установлен, туннелей нет', '')
 				: awgSt === 3 ? warnBadge(h.awg_total ? 'работает ' + (h.awg_up || 0) + ' из ' + h.awg_total : 'установлен не полностью')
 				: awgSt === 2 ? zm.badge(false, '', 'туннели не отвечают')
 				: awgSt === 5 ? offBadge('установлен, туннелей нет')
 				: zm.badge(false, '', 'не установлен')));
 			var tsSt = +h.tsc || 0;
-			items.push(row('Удалённый доступ', tsSt === 1 ? zm.badge(true, 'работает', '') : tsSt === 3 ? warnBadge('нужно войти в Tailscale')
+			if (tsSt !== 0) items.push(row('Удалённый доступ', tsSt === 1 ? zm.badge(true, 'работает', '') : tsSt === 3 ? warnBadge('нужно войти в Tailscale')
 				: tsSt === 2 ? zm.badge(false, '', 'не работает') : tsSt === 5 ? offBadge('выключен') : zm.badge(false, '', 'не установлен')));
 			var trSt = h && h.dots && typeof h.dots.term === 'number' ? h.dots.term : 0;
-			items.push(row('Терминал', trSt === 1 ? zm.badge(true, 'работает', '') : trSt === 2 ? zm.badge(false, '', 'не работает') : trSt === 4 ? offBadge('выключен') : zm.badge(false, '', 'не установлен')));
-			items.push(row('htop', h.htop ? zm.badge(true, 'установлен', '') : zm.badge(false, '', 'не установлен')));
-			items.push(row('Домены в hosts', hosts.geohide
+			if (trSt !== 0) items.push(row('Терминал', trSt === 1 ? zm.badge(true, 'работает', '') : trSt === 2 ? zm.badge(false, '', 'не работает') : trSt === 4 ? offBadge('выключен') : zm.badge(false, '', 'не установлен')));
+			if (h.htop) items.push(row('htop', zm.badge(true, 'установлен', '')));
+			if (hosts.geohide || hostsEnabled > 0) items.push(row('Домены в hosts', hosts.geohide
 				? zm.badge(true, hosts.geohide === 'malw' ? 'dns.malw.link' : 'GeoHide ' + hosts.geohide.toUpperCase(), '')
-				: hostsTotal
-					? (hostsEnabled > 0 ? zm.badge(true, 'включено ' + hostsEnabled + ' из ' + hostsTotal, '') : E('span', { 'class': 'zm-badge zm-off' }, [ E('span', { 'class': 'zm-dot' }), 'ничего не включено' ]))
-					: E('span', {}, '—')));
+				: zm.badge(true, 'включено ' + hostsEnabled + ' из ' + hostsTotal, '')));
 			var abSt = h && h.dots && typeof h.dots.adblock === 'number' ? h.dots.adblock : 0;
-			items.push(row('Блокировка рекламы', abSt === 1 ? zm.badge(true, 'работает', '') : abSt === 2 ? warnBadge('список не подключён') : offBadge('выключена')));
+			if (abSt !== 0) items.push(row('Блокировка рекламы', abSt === 1 ? zm.badge(true, 'работает', '') : warnBadge('список не подключён')));
 			var bkItems = (bk && bk.items) || [];
-			items.push(row('Резервная копия', E('span', { 'style': 'display:inline-flex; gap:8px; flex-wrap:wrap; align-items:center' }, [
+			if (bkItems.length || (bk && bk.auto === false)) items.push(row('Резервная копия', E('span', { 'style': 'display:inline-flex; gap:8px; flex-wrap:wrap; align-items:center' }, [
 				!bk || !bk.items ? E('span', {}, '—')
 					: bkItems.length ? zm.badge(true, 'копий: ' + bkItems.length + ' · последняя ' + bkWhen(bkItems[0].at), '') : offBadge('копий нет'),
 				bk && bk.items && bk.auto === false ? E('span', { 'class': 'zm-badge zm-off', 'title': 'Копия перед установкой, удалением и обновлением не сохраняется сама' }, [ E('span', { 'class': 'zm-dot' }), 'авто выкл' ]) : '' ])));
@@ -33333,10 +33628,10 @@ return view.extend({
 
 			return E('div', { 'class': 'zm-card', 'style': 'margin-bottom:4px' }, [
 				E('h3', {}, 'Компоненты'),
-				E('div', { 'class': 'bt-cols' }, [
+				items.length ? E('div', { 'class': 'bt-cols' }, [
 					E('div', { 'class': 'bt-col' }, items.slice(0, half)),
 					E('div', { 'class': 'bt-col' }, items.slice(half))
-				]),
+				]) : E('p', { 'class': 'zm-hint', 'style': 'margin-top:0' }, 'Пока ничего не установлено и не настроено — нужное ставится в разделах меню слева. Здесь появятся только установленные компоненты.'),
 				sysStrip(sys || {})
 			]);
 		}
@@ -43330,6 +43625,35 @@ html.zm-theme-dark .zm-tg-chip-ok { color: #3fb950; } html.zm-theme-dark .zm-tg-
 .zm-tg-qr-btn { white-space: nowrap; }
 .zm-tg-qr-box { margin-top: 10px; text-align: center; }
 .zm-tg-qr-box img { max-width: 100%; height: auto; border-radius: 8px; background: #fff; padding: 8px; box-shadow: 0 0 0 1px rgba(0,0,0,.08); box-sizing: border-box; }
+.zm-tg-qr-pic { display: inline-block; line-height: 0; border-radius: 10px; overflow: hidden; box-shadow: 0 0 0 1px rgba(0,0,0,.1); background: #fff; }
+.zm-tg-qr-pic svg { width: 240px; max-width: 100%; height: auto; display: block; }
+.zm-tg-qr-box .zm-hint { margin-top: 8px; }
+.zm-tg-link-item + .zm-hint { margin-top: 0; }
+.zm-tg-link-item + .zm-hint + .zm-tg-link-item { margin-top: 14px; padding-top: 12px; border-top: 1px dashed rgba(26,127,55,.3); }
+.zm-tg-link-label { font-size: 12.5px; font-weight: 700; margin: 0 0 6px; letter-spacing: .01em; }
+.zm-tg-x-body { display: flex; flex-direction: column; gap: 0; padding-top: 6px; }
+.zm-tg-x-intro { margin: 6px 0 4px; }
+.zm-cards.zm-cards-2 > .zm-card.zm-tg-wide { grid-column: 1 / -1; }
+.zm-cards.zm-cards-2 > .zm-card > .zm-tg-x { margin-top: auto; }
+.zm-tg-x-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 6px 14px; align-items: start; padding: 12px 0; border-bottom: 1px dashed rgba(110,118,129,.25); }
+.zm-tg-x-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.zm-tg-x-field > .zm-swrow { margin: 0; }
+.zm-tg-x-seg { align-self: flex-start; max-width: 100%; }
+.zm-tg-x-seg .zm-seg-item { white-space: nowrap; }
+.zm-tg-seg-off { opacity: .35 !important; cursor: not-allowed !important; }
+.zm-tg-x-line { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-width: 0; }
+.zm-tg-x-site { width: 220px !important; max-width: 100%; }
+.zm-tg-x-own, .zm-tg-x-host { flex: 0 1 280px; min-width: 0; width: 280px !important; max-width: 100%; }
+.zm-tg-x-note { margin: 0; }
+.zm-tg-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.zm-tg-chips:empty { display: none; }
+.zm-tg-pick { display: inline-flex; align-items: center; gap: 2px; font: inherit; font-size: 12.5px; line-height: 1.5; padding: 3px 10px; border-radius: 999px; border: 1px dashed rgba(110,118,129,.55); background: transparent; color: inherit; cursor: pointer; }
+.zm-tg-pick:hover { border-style: solid; }
+.zm-tg-pick span { opacity: .7; }
+.zm-tg-recheck { padding: 2px 10px; font-size: 12px; }
+.zm-tg-x-body > .zm-actions { margin-top: 14px; }
+.zm-tg-x-body .zm-tg-edit-preview { margin: 0; }
+@media (max-width: 600px) { .zm-tg-x-row { grid-template-columns: 1fr; } .zm-tg-x-row > .zm-tg-edit-label { line-height: 1.3; } .zm-tg-x-own, .zm-tg-x-host, .zm-tg-x-site { flex: 1 1 100%; width: 100% !important; } .zm-tg-x-seg { display: flex; width: 100%; box-sizing: border-box; } .zm-tg-x-seg .zm-seg-item { flex: 1; text-align: center; padding: 6px 8px; } }
 
 .zm-current-banner {
 	display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -46639,6 +46963,190 @@ var AUTO_OPTS = [
 	[ 'off', 'Выкл' ], [ 'h1', '1 ч' ], [ 'h2', '2 ч' ], [ 'h3', '3 ч' ], [ 'h6', '6 ч' ], [ 'h12', '12 ч' ]
 ];
 
+function qrMatrix(text) {
+	var ECC = [ 0, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26, 30, 22, 22, 24, 24, 28, 28, 26, 26, 26 ];
+	var BLK = [ 0, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10, 11, 13, 14, 16 ];
+	var bytes = [], i, j, c;
+	text = String(text);
+	for (i = 0; i < text.length; i++) {
+		c = text.charCodeAt(i);
+		if (c < 0x80) bytes.push(c);
+		else if (c < 0x800) bytes.push(0xc0 | c >> 6, 0x80 | c & 63);
+		else bytes.push(0xe0 | c >> 12, 0x80 | c >> 6 & 63, 0x80 | c & 63);
+	}
+	function raw(v) {
+		var r = (16 * v + 128) * v + 64;
+		if (v >= 2) { var n = Math.floor(v / 7) + 2; r -= (25 * n - 10) * n - 55; if (v >= 7) r -= 36; }
+		return r;
+	}
+	var ver = 0, cap;
+	for (i = 1; i <= 20; i++) {
+		cap = (Math.floor(raw(i) / 8) - ECC[i] * BLK[i]) * 8;
+		if (4 + (i < 10 ? 8 : 16) + bytes.length * 8 <= cap) { ver = i; break; }
+	}
+	if (!ver) return null;
+	var bits = [];
+	function put(v, n) { for (var k = n - 1; k >= 0; k--) bits.push(v >>> k & 1); }
+	put(4, 4); put(bytes.length, ver < 10 ? 8 : 16);
+	bytes.forEach(function(b) { put(b, 8); });
+	put(0, Math.min(4, cap - bits.length));
+	put(0, (8 - bits.length % 8) % 8);
+	for (i = 0xec; bits.length < cap; i ^= 0xec ^ 0x11) put(i, 8);
+	var data = [];
+	for (i = 0; i < bits.length; i += 8) { c = 0; for (j = 0; j < 8; j++) c = c << 1 | bits[i + j]; data.push(c); }
+	function mul(x, y) { var z = 0; for (var k = 7; k >= 0; k--) { z = z << 1 ^ (z >>> 7) * 0x11d; z ^= (y >>> k & 1) * x; } return z & 255; }
+	var deg = ECC[ver], div = [], root = 1;
+	for (i = 0; i < deg - 1; i++) div.push(0);
+	div.push(1);
+	for (i = 0; i < deg; i++) {
+		for (j = 0; j < div.length; j++) { div[j] = mul(div[j], root); if (j + 1 < div.length) div[j] ^= div[j + 1]; }
+		root = mul(root, 2);
+	}
+	function rem(d) {
+		var r = div.map(function() { return 0; });
+		d.forEach(function(b) { var f = b ^ r.shift(); r.push(0); div.forEach(function(x, k) { r[k] ^= mul(x, f); }); });
+		return r;
+	}
+	var nb = BLK[ver], tot = Math.floor(raw(ver) / 8), nshort = nb - tot % nb, slen = Math.floor(tot / nb), blocks = [], k = 0;
+	for (i = 0; i < nb; i++) {
+		var d = data.slice(k, k + slen - deg + (i < nshort ? 0 : 1));
+		k += d.length;
+		var e = rem(d);
+		if (i < nshort) d.push(0);
+		blocks.push(d.concat(e));
+	}
+	var cw = [];
+	for (i = 0; i < blocks[0].length; i++)
+		for (j = 0; j < nb; j++)
+			if (i !== slen - deg || j >= nshort) cw.push(blocks[j][i]);
+	var size = ver * 4 + 17, m = [], fn = [];
+	for (i = 0; i < size; i++) { m.push([]); fn.push([]); for (j = 0; j < size; j++) { m[i].push(false); fn[i].push(false); } }
+	function set(x, y, v) { m[y][x] = v; fn[y][x] = true; }
+	for (i = 0; i < size; i++) { set(6, i, i % 2 === 0); set(i, 6, i % 2 === 0); }
+	[ [ 3, 3 ], [ size - 4, 3 ], [ 3, size - 4 ] ].forEach(function(p) {
+		for (var dy = -4; dy <= 4; dy++) for (var dx = -4; dx <= 4; dx++) {
+			var dist = Math.max(Math.abs(dx), Math.abs(dy)), x = p[0] + dx, y = p[1] + dy;
+			if (x >= 0 && x < size && y >= 0 && y < size) set(x, y, dist !== 2 && dist !== 4);
+		}
+	});
+	var al = [];
+	if (ver > 1) {
+		var na = Math.floor(ver / 7) + 2, step = Math.ceil((ver * 4 + 4) / (na * 2 - 2)) * 2;
+		al = [ 6 ];
+		for (var pos = ver * 4 + 10; al.length < na; pos -= step) al.splice(1, 0, pos);
+	}
+	for (i = 0; i < al.length; i++) for (j = 0; j < al.length; j++) {
+		if ((i === 0 && j === 0) || (i === 0 && j === al.length - 1) || (i === al.length - 1 && j === 0)) continue;
+		for (var ay = -2; ay <= 2; ay++) for (var ax = -2; ax <= 2; ax++) set(al[i] + ax, al[j] + ay, Math.max(Math.abs(ax), Math.abs(ay)) !== 1);
+	}
+	function fmt(mask) {
+		var dv = mask, r = dv, b;
+		for (var q = 0; q < 10; q++) r = r << 1 ^ (r >>> 9) * 0x537;
+		b = (dv << 10 | r) ^ 0x5412;
+		function bit(n) { return (b >>> n & 1) !== 0; }
+		for (var q2 = 0; q2 <= 5; q2++) set(8, q2, bit(q2));
+		set(8, 7, bit(6)); set(8, 8, bit(7)); set(7, 8, bit(8));
+		for (q2 = 9; q2 < 15; q2++) set(14 - q2, 8, bit(q2));
+		for (q2 = 0; q2 < 8; q2++) set(size - 1 - q2, 8, bit(q2));
+		for (q2 = 8; q2 < 15; q2++) set(8, size - 15 + q2, bit(q2));
+		set(8, size - 8, true);
+	}
+	fmt(0);
+	if (ver >= 7) {
+		var vr = ver;
+		for (i = 0; i < 12; i++) vr = vr << 1 ^ (vr >>> 11) * 0x1f25;
+		var vb = ver << 12 | vr;
+		for (i = 0; i < 18; i++) { var bv = (vb >>> i & 1) !== 0, a = size - 11 + i % 3, b2 = Math.floor(i / 3); set(a, b2, bv); set(b2, a, bv); }
+	}
+	k = 0;
+	for (var right = size - 1; right >= 1; right -= 2) {
+		if (right === 6) right = 5;
+		for (var vert = 0; vert < size; vert++) for (j = 0; j < 2; j++) {
+			var x = right - j, up = ((right + 1) & 2) === 0, y = up ? size - 1 - vert : vert;
+			if (!fn[y][x] && k < cw.length * 8) { m[y][x] = (cw[k >>> 3] >>> (7 - (k & 7)) & 1) !== 0; k++; }
+		}
+	}
+	var MASKS = [
+		function(x, y) { return (x + y) % 2 === 0; }, function(x, y) { return y % 2 === 0; }, function(x) { return x % 3 === 0; },
+		function(x, y) { return (x + y) % 3 === 0; }, function(x, y) { return (Math.floor(x / 3) + Math.floor(y / 2)) % 2 === 0; },
+		function(x, y) { return x * y % 2 + x * y % 3 === 0; }, function(x, y) { return (x * y % 2 + x * y % 3) % 2 === 0; },
+		function(x, y) { return ((x + y) % 2 + x * y % 3) % 2 === 0; }
+	];
+	function flip(mask) { for (var yy = 0; yy < size; yy++) for (var xx = 0; xx < size; xx++) if (!fn[yy][xx] && MASKS[mask](xx, yy)) m[yy][xx] = !m[yy][xx]; }
+	function score() {
+		var p = 0, dark = 0, x, y, run, prev, line, s;
+		for (var pass = 0; pass < 2; pass++) for (y = 0; y < size; y++) {
+			run = 0; prev = null; line = '';
+			for (x = 0; x < size; x++) {
+				var v = pass ? m[x][y] : m[y][x];
+				line += v ? '1' : '0';
+				if (v === prev) { run++; if (run === 5) p += 3; else if (run > 5) p++; } else { run = 1; prev = v; }
+			}
+			s = '0000' + line + '0000';
+			for (var q = s.indexOf('1011101'); q >= 0; q = s.indexOf('1011101', q + 1))
+				if (s.substr(q - 4, 4) === '0000' || s.substr(q + 7, 4) === '0000') p += 40;
+		}
+		for (y = 0; y < size - 1; y++) for (x = 0; x < size - 1; x++) if (m[y][x] === m[y][x + 1] && m[y][x] === m[y + 1][x] && m[y][x] === m[y + 1][x + 1]) p += 3;
+		for (y = 0; y < size; y++) for (x = 0; x < size; x++) if (m[y][x]) dark++;
+		p += (Math.ceil(Math.abs(dark * 20 - size * size * 10) / (size * size)) - 1) * 10;
+		return p;
+	}
+	var best = 0, bs = Infinity;
+	for (i = 0; i < 8; i++) { flip(i); fmt(i); var sc = score(); if (sc < bs) { bs = sc; best = i; } flip(i); }
+	flip(best); fmt(best);
+	return m;
+}
+function qrSvg(text) {
+	var m = qrMatrix(text);
+	if (!m) return '';
+	var n = m.length, d = '', y, x;
+	for (y = 0; y < n; y++) for (x = 0; x < n; x++) if (m[y][x]) d += 'M' + (x + 4) + ' ' + (y + 4) + 'h1v1h-1z';
+	return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + (n + 8) + ' ' + (n + 8) + '" width="240" height="240" shape-rendering="crispEdges" role="img" aria-label="QR-код"><rect width="100%" height="100%" fill="#fff"/><path fill="#000" d="' + d + '"/></svg>';
+}
+
+var TG_SITES = [ 'www.google.com', 'ya.ru', 'vk.com', 'www.microsoft.com', 'www.apple.com', 'www.cloudflare.com' ];
+var TG_DOM_RE = /^([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]([a-z0-9-]*[a-z0-9])?$/;
+var TG_IP_RE = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+
+function tgHex(s) {
+	var out = '', i;
+	for (i = 0; i < s.length; i++) out += ('0' + s.charCodeAt(i).toString(16)).slice(-2);
+	return out;
+}
+
+function tgCore(k) {
+	k = String(k || '');
+	return k.length >= 34 && /^(dd|ee)/.test(k) ? k.slice(2, 34) : k;
+}
+
+function linkBlock(link, label) {
+	var qrLink = link.replace(/^tg:\/\//, 'https://t.me/');
+	var qrBox = E('div', { 'class': 'zm-tg-qr-box', 'style': 'display:none' });
+	var shown = false;
+	return E('div', { 'class': 'zm-tg-link-item' }, [
+		label ? E('div', { 'class': 'zm-tg-link-label' }, label) : E([]),
+		E('div', { 'class': 'zm-tg-link-row' }, [
+			E('div', { 'class': 'zm-tg-link-box' }, link),
+			E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() { copyToClipboard(link); } }, 'Скопировать'),
+			E('button', { 'class': 'cbi-button zm-tg-qr-btn', 'title': 'Показать QR-код', 'aria-expanded': 'false', 'click': function(ev) {
+				shown = !shown;
+				qrBox.style.display = shown ? '' : 'none';
+				ev.currentTarget.setAttribute('aria-expanded', shown ? 'true' : 'false');
+				if (shown && !qrBox.firstChild) {
+					var svg = qrSvg(qrLink);
+					if (svg) {
+						var pic = E('div', { 'class': 'zm-tg-qr-pic' });
+						pic.innerHTML = svg;
+						qrBox.appendChild(pic);
+						qrBox.appendChild(E('div', { 'class': 'zm-hint' }, 'Наведите камеру телефона — Telegram предложит подключить прокси'));
+					} else qrBox.appendChild(E('div', { 'class': 'zm-hint' }, 'Ссылка слишком длинная для QR-кода — скопируйте её'));
+				}
+			} }, 'QR-код')
+		]),
+		qrBox
+	]);
+}
+
 function copyToClipboard(text) {
 	if (window.isSecureContext && navigator.clipboard && navigator.clipboard.writeText) {
 		navigator.clipboard.writeText(text).then(function() {
@@ -46685,11 +47193,11 @@ return view.extend({
 
 		function statusOf(d, id) {
 			if (id === 'mtproto') return { installed: d.mtproto === 'installed', running: d.mtproto_running === true, secret: d.link_mtproto || (d.secret_mtproto ? 'dd' + d.secret_mtproto : ''), version: d.mtproto_version, latest: d.mtproto_latest, newer: d.mtproto_newer === true,
-				port: d.mtproto_port, host: d.mtproto_host, key: d.secret_mtproto || '', edit: true };
+				port: d.mtproto_port, host: d.mtproto_host, key: d.secret_mtproto || '', edit: true, ext: (d.ext || {}).mtproto || null };
 			if (id === 'socks5') return { installed: d.socks5 === 'installed', running: d.socks5_running === true, secret: '', version: d.socks5_version, latest: d.socks5_latest, newer: d.socks5_newer === true,
 				port: d.socks5_port, edit: true };
 			return { installed: d.rust === 'installed', running: d.rust_running === true, secret: d.secret_rust, version: d.rust_version, latest: d.rust_latest, newer: d.rust_newer === true,
-				uci: d.rust_uci === true, enabled: d.rust_enabled !== false, port: d.rust_port, host: d.rust_host, key: d.rust_key || '', edit: d.rust_uci !== true };
+				uci: d.rust_uci === true, enabled: d.rust_enabled !== false, port: d.rust_port, host: d.rust_host, key: d.rust_key || '', edit: d.rust_uci !== true, ext: (d.ext || {}).rust || null };
 		}
 
 		var editOpen = {}, editDraft = {}, portSeq = 0;
@@ -46708,18 +47216,20 @@ return view.extend({
 			s = String(s || '').replace(/\s+/g, '').toLowerCase();
 			if (!s) return { ok: false, text: 'Введите ключ или нажмите «Новый ключ»' };
 			if (/[^0-9a-f]/.test(s)) return { ok: false, text: 'Только цифры 0–9 и буквы a–f' };
+			var ex = statusOf(data, v.id).ext;
+			if (s.slice(0, 2) === 'ee' && s.length > 34) {
+				var h = s.length % 2 === 0 ? hexHost(s.slice(34)).toLowerCase() : '';
+				if (!TG_DOM_RE.test(h) || TG_IP_RE.test(h)) return { ok: false, text: 'После ee и 32 знаков должно идти имя сайта в hex' };
+				if (ex && !ex.ftls) return { ok: false, text: 'Ключ ee… — это FakeTLS, а эта версия ' + v.title + ' его не умеет. Обновите прокси или введите ключ из 32 знаков' };
+				return { ok: true, key: s, text: 'Ключ ee… — ' + (ex && ex.tls ? 'FakeTLS' : 'включится FakeTLS') + ', сайт для маскировки: ' + h };
+			}
+			var tlsNow = ex && ex.tls ? ' (сейчас FakeTLS — в ссылке будет ee…)' : '';
 			if (v.id === 'mtproto') {
 				if (s.length === 34 && s.slice(0, 2) === 'dd') s = s.slice(2);
-				if (s.length > 34 && s.slice(0, 2) === 'ee') return { ok: false, text: 'Go (MTProto) не принимает ключи ee… — нужен ключ из 32 знаков' };
-				return s.length === 32 ? { ok: true, key: s, text: '32 знака — подходит' } : { ok: false, text: 'Нужно ровно 32 знака, сейчас ' + s.length };
+				return s.length === 32 ? { ok: true, key: s, text: '32 знака — подходит' + tlsNow } : { ok: false, text: 'Нужно ровно 32 знака, сейчас ' + s.length };
 			}
-			if (s.length === 32) return { ok: true, key: s, text: '32 знака — подходит, в ссылке будет dd…' };
-			if (s.length === 34 && s.slice(0, 2) === 'dd') return { ok: true, key: s, text: 'Ключ dd… — подходит' };
-			if (s.slice(0, 2) === 'ee' && s.length >= 38 && s.length % 2 === 0) {
-				var h = hexHost(s.slice(34));
-				if (/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(h)) return { ok: true, key: s, text: 'FakeTLS-ключ ee…, сайт для маскировки: ' + h };
-				return { ok: false, text: 'После ee и 32 знаков должно идти имя сайта в hex' };
-			}
+			if (s.length === 32) return { ok: true, key: s, text: '32 знака — подходит' + (tlsNow || ', в ссылке будет dd…') };
+			if (s.length === 34 && s.slice(0, 2) === 'dd') return { ok: true, key: s, text: 'Ключ dd… — подходит' + tlsNow };
 			return { ok: false, text: 'Нужно 32 знака (или dd + 32, или ee + 32 + сайт в hex), сейчас ' + s.length };
 		}
 		function portCheck(v, st, p) {
@@ -46742,8 +47252,9 @@ return view.extend({
 				var p = String(+dr.port || dr.port);
 				if (v.kind === 'socks') return 'tg://socks?server=' + host + '&port=' + p;
 				if (!k) return '';
-				var sec = v.id === 'rust' && (k.slice(0, 2) === 'dd' || k.slice(0, 2) === 'ee') ? k : 'dd' + k;
-				if (v.id === 'mtproto' && st.secret && st.secret.slice(0, 2) === 'ee' && st.key) sec = 'ee' + k + st.secret.slice(34);
+				var sec = 'dd' + k;
+				if (k.length >= 34 && /^(dd|ee)/.test(k)) sec = k;
+				else if (st.secret && st.secret.length > 34 && st.secret.slice(0, 2) === 'ee') sec = 'ee' + k + st.secret.slice(34);
 				return 'tg://proxy?server=' + host + '&port=' + p + '&secret=' + sec;
 			}
 			function paint() {
@@ -46825,6 +47336,240 @@ return view.extend({
 			return box;
 		}
 
+		var extOpen = {}, extDraft = {}, extPaint = {};
+		function extSummary(st) {
+			var x = st.ext, parts = [];
+			if (x.tls) parts.push('FakeTLS · ' + x.tls);
+			if (x.open) parts.push('из интернета' + (x.host ? ': ' + x.host + ':' + st.port : ''));
+			if (x.open && String(x.fw_port) !== String(st.port)) parts.push('⚠ в правиле старый порт');
+			return parts.length ? parts.join(' · ') : 'выключено · прокси работает только дома';
+		}
+		function extFold(v, st) {
+			var open = !!extOpen[v.id];
+			function toggle() { extOpen[v.id] = !open; if (open) { delete extDraft[v.id]; delete extPaint[v.id]; } renderCards(data); }
+			var box = E('div', { 'class': 'zm-fold zm-tg-x' + (open ? ' zm-fold-open' : '') });
+			box.appendChild(E('div', { 'class': 'zm-fold-head', 'role': 'button', 'tabindex': '0', 'aria-expanded': open ? 'true' : 'false', 'click': toggle,
+				'keydown': function(ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); } } }, [
+				E('span', { 'class': 'zm-svc-chev' }, '›'), E('span', {}, 'Доступ из интернета и маскировка'), E('span', { 'class': 'zm-fold-sum' }, extSummary(st))
+			]));
+			if (open) box.appendChild(extPanel(v, st));
+			return box;
+		}
+		function extPanel(v, st) {
+			var x = st.ext, ex = data.ext || {}, ddns = ex.ddns || [], port = String(st.port || v.port);
+			var wanPub = ex.wan && !ex.grey ? ex.wan : '';
+			var dr = extDraft[v.id];
+			if (!dr) {
+				var hm = x.hmode || (x.host && TG_IP_RE.test(x.host) ? 'ip' : 'ddns');
+				dr = extDraft[v.id] = { tls: !!x.tls, site: x.tls || TG_SITES[0], own: !!x.tls && TG_SITES.indexOf(x.tls) < 0, open: !!x.open, hmode: hm,
+					host: x.host || (hm === 'ip' ? wanPub : ddns[0] || ''), busy: false, chk: null, siteChk: null };
+			}
+			var body = E('div', { 'class': 'zm-fold-body zm-tg-x-body' });
+			var siteMsg = E('div', { 'class': 'zm-tg-chips' }), tlsMsg = E('div', { 'class': 'zm-tg-chips' }), hostMsg = E('div', { 'class': 'zm-tg-chips' });
+			var linkWrap = E('div', {}), lastLink = null;
+			var applyBtn = E('button', { 'class': 'cbi-button cbi-button-positive' }, 'Применить');
+			var siteT = null, hostT = null, pickWrap = null, pickFill = null;
+			function site() { return String(dr.site || '').trim().toLowerCase(); }
+			function host() { return String(dr.host || '').trim().toLowerCase(); }
+			function siteOk() { return TG_DOM_RE.test(site()) && !TG_IP_RE.test(site()); }
+			function hostOk() { var h = host(); return TG_IP_RE.test(h) || TG_DOM_RE.test(h); }
+			function wantTls() { return x.pkg ? (x.tls || '') : dr.tls ? site() : ''; }
+			function valid() { return (x.pkg || !dr.tls || siteOk()) && (!dr.open || hostOk()); }
+			function same() {
+				return wantTls() === (x.tls || '') && dr.open === !!x.open && (!dr.open || host() === (x.host || '')) && !(x.open && String(x.fw_port) !== port);
+			}
+			function rebuild() { delete extPaint[v.id]; var nb = extPanel(v, st); body.parentNode && body.parentNode.replaceChild(nb, body); }
+			function row(label, kids) {
+				return E('div', { 'class': 'zm-tg-x-row' }, [ E('div', { 'class': 'zm-tg-edit-label' }, label), E('div', { 'class': 'zm-tg-x-field' }, kids) ]);
+			}
+			function seg(items, cur, pick, dis) {
+				return E('div', { 'class': 'zm-seg zm-tg-x-seg' }, items.map(function(it) {
+					var off = dis && dis[it[0]];
+					function go() { if (!off && !dr.busy && it[0] !== cur) pick(it[0]); }
+					return E('div', { 'class': 'zm-seg-item' + (it[0] === cur ? ' zm-active' : '') + (off ? ' zm-tg-seg-off' : ''), 'role': 'button', 'tabindex': off ? '-1' : '0',
+						'aria-pressed': it[0] === cur ? 'true' : 'false', 'title': off || null, 'click': go,
+						'keydown': function(ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); } } }, it[1]);
+				}));
+			}
+			function siteCheck() {
+				clearTimeout(siteT);
+				if (!dr.tls || x.pkg || !siteOk() || (dr.siteChk && dr.siteChk.site === site())) { paint(); return; }
+				var want = site();
+				dr.siteChk = 'wait'; paint();
+				siteT = setTimeout(function() {
+					zm.tgAction(v.id, 'site=' + want).then(function(r) {
+						if (site() !== want) return;
+						dr.siteChk = r && !r.error ? { site: want, up: !!r.up } : null;
+						if (extPaint[v.id]) extPaint[v.id]();
+					}, function() { if (site() === want) { dr.siteChk = null; if (extPaint[v.id]) extPaint[v.id](); } });
+				}, 600);
+			}
+			function hostCheck(delay) {
+				clearTimeout(hostT);
+				if (!dr.open || !hostOk()) { paint(); return; }
+				var want = host();
+				dr.chk = 'wait'; paint();
+				hostT = setTimeout(function() {
+					zm.tgAction(v.id, 'chk=' + want).then(function(r) {
+						if (host() !== want) return;
+						if (r && !r.error) r.host = want;
+						dr.chk = r && !r.error ? r : null;
+						if (extPaint[v.id]) extPaint[v.id]();
+					}, function() { if (host() === want) { dr.chk = null; if (extPaint[v.id]) extPaint[v.id](); } });
+				}, delay || 0);
+			}
+			function paint() {
+				var c = dr.chk, ip = TG_IP_RE.test(host());
+				siteMsg.innerHTML = '';
+				if (dr.tls && !x.pkg) {
+					if (!siteOk()) siteMsg.appendChild(chip('zm-tg-chip-bad', '✕ Нужно имя сайта, например www.google.com'));
+					else if (dr.siteChk === 'wait') siteMsg.appendChild(chip('zm-tg-chip-wait', 'проверяем сайт…'));
+					else if (dr.siteChk && dr.siteChk.site === site()) siteMsg.appendChild(dr.siteChk.up ? chip('zm-tg-chip-ok', '✓ сайт открывается по HTTPS') : chip('zm-tg-chip-wait', '⚠ сайт не открылся с роутера — лучше выбрать другой'));
+				}
+				tlsMsg.innerHTML = '';
+				if (!x.pkg && valid() && wantTls() !== (x.tls || '')) tlsMsg.appendChild(chip('zm-tg-chip-wait', '⚠ Ключ в ссылках станет ' + (wantTls() ? 'ee…' : 'dd…') + ' — после «Применить» откройте новую ссылку на всех устройствах, и дома тоже'));
+				if (pickFill) pickFill();
+				hostMsg.innerHTML = '';
+				if (dr.open) {
+					var grey = c && c !== 'wait' && c.host === host() ? c.grey && c.wan : ex.grey && ex.wan;
+					if (grey) hostMsg.appendChild(chip('zm-tg-chip-bad', '✕ У роутера серый адрес ' + grey + ' — из интернета к нему не подключиться: нужен белый IP от провайдера или проброс порта на модеме'));
+					if (!host()) hostMsg.appendChild(chip('zm-tg-chip-bad', dr.hmode === 'ip' ? '✕ Впишите внешний IP роутера' : '✕ Впишите домен, например myhome.ddns.net'));
+					else if (!hostOk()) hostMsg.appendChild(chip('zm-tg-chip-bad', '✕ Это не домен и не IPv4-адрес'));
+					else if (c === 'wait') hostMsg.appendChild(chip('zm-tg-chip-wait', 'проверяем адрес…'));
+					else if (c && c.host === host()) {
+						if (!c.grey) hostMsg.appendChild(!c.wan ? chip('zm-tg-chip-wait', '⚠ Не удалось узнать адрес роутера в интернете')
+							: c.match ? chip('zm-tg-chip-ok', ip ? '✓ это адрес роутера в интернете' : '✓ домен указывает на роутер · ' + c.wan)
+							: ip ? chip('zm-tg-chip-bad', '✕ У роутера сейчас адрес ' + c.wan)
+							: !(c.ips || []).length ? chip('zm-tg-chip-bad', '✕ Домен не найден в DNS')
+							: chip('zm-tg-chip-bad', '✕ Домен указывает на ' + c.ips.join(', ') + ', а у роутера ' + c.wan));
+						if (x.open) {
+							if (String(x.fw_port) !== port) hostMsg.appendChild(chip('zm-tg-chip-wait', '⚠ В правиле старый порт ' + x.fw_port + ' — нажмите «Применить»'));
+							else if (c.fw_live) hostMsg.appendChild(chip('zm-tg-chip-ok', '✓ порт ' + port + ' открыт в межсетевом экране'));
+							else hostMsg.appendChild(chip('zm-tg-chip-wait', '⚠ Правило есть, но межсетевой экран его не загрузил'));
+						}
+						if (!c.listen) hostMsg.appendChild(chip('zm-tg-chip-wait', '⚠ Прокси сейчас не запущен'));
+						hostMsg.appendChild(E('button', { 'type': 'button', 'class': 'zm-tg-pick zm-tg-recheck', 'click': function() { dr.chk = null; hostCheck(); } }, 'Проверить ещё раз'));
+					}
+				}
+				var lk = '', k = tgCore(st.key || st.secret);
+				if (dr.open && hostOk() && (x.pkg ? st.secret : k)) lk = 'tg://proxy?server=' + host() + '&port=' + port + '&secret=' + (x.pkg ? st.secret : wantTls() ? 'ee' + k + tgHex(wantTls()) : 'dd' + k);
+				var sm = same(), key = lk + '|' + sm;
+				if (key !== lastLink) {
+					lastLink = key;
+					linkWrap.innerHTML = '';
+					if (lk) linkWrap.appendChild(row('Ссылка из интернета', [
+						sm ? linkBlock(lk, '') : E('div', { 'class': 'zm-tg-link-box zm-tg-edit-preview' }, lk),
+						sm ? E([]) : E('div', { 'class': 'zm-tg-chips' }, [ chip('zm-tg-chip-wait', 'заработает после «Применить»') ]),
+						E('p', { 'class': 'zm-hint zm-tg-x-note' }, 'Не публикуйте эту ссылку: с ней прокси сможет пользоваться любой. Утекла — смените ключ в «Порт и ключ».')
+					]));
+				}
+				applyBtn.disabled = !valid() || sm || dr.busy;
+				applyBtn.textContent = dr.busy ? 'Применяем…' : sm ? 'Без изменений' : 'Применить';
+			}
+			extPaint[v.id] = paint;
+
+			var mask;
+			if (x.pkg) {
+				mask = [ E('p', { 'class': 'zm-hint zm-tg-x-note' }, 'Rust установлен пакетом — FakeTLS включается в его настройках (Inbound FakeTLS domain). Сейчас: ' + (x.tls ? 'FakeTLS, сайт ' + x.tls : 'обычный ключ (dd)') + '.') ];
+			} else {
+				mask = [ seg([ [ 'dd', 'Обычный ключ (dd)' ], [ 'ee', 'FakeTLS (ee)' ] ], dr.tls ? 'ee' : 'dd', function(m) { dr.tls = m === 'ee'; rebuild(); },
+					x.ftls || x.tls ? null : { ee: 'Эта версия прокси не умеет FakeTLS' }) ];
+				if (!x.ftls && !x.tls) mask.push(E('div', { 'class': 'zm-tg-chips' }, [ chip('zm-tg-chip-wait', '⚠ Эта версия ' + v.title + ' не умеет FakeTLS — ' + (st.newer ? 'обновите прокси кнопкой «Обновить до ' + st.latest + '»' : 'нужна версия новее')) ]));
+				if (dr.tls) {
+					var siteSel = E('select', { 'class': 'cbi-input-select zm-tg-x-site', 'aria-label': 'Сайт для маскировки' },
+						TG_SITES.map(function(d) { return E('option', { 'value': d, 'selected': !dr.own && d === site() ? 'selected' : null }, d); })
+							.concat([ E('option', { 'value': '', 'selected': dr.own ? 'selected' : null }, 'Свой сайт…') ]));
+					siteSel.addEventListener('change', function() {
+						if (siteSel.value) { dr.own = false; dr.site = siteSel.value; siteCheck(); }
+						else { dr.own = true; dr.site = ''; rebuild(); }
+					});
+					var line = [ siteSel ];
+					if (dr.own) {
+						var ownIn = E('input', { 'type': 'text', 'class': 'cbi-input-text zm-tg-edit-in zm-tg-x-own', 'value': dr.site, 'placeholder': 'example.com', 'spellcheck': 'false', 'autocapitalize': 'off', 'autocomplete': 'off', 'aria-label': 'Свой сайт для маскировки' });
+						ownIn.addEventListener('input', function() { dr.site = ownIn.value.trim(); clearTimeout(siteT); siteT = setTimeout(siteCheck, 500); paint(); });
+						line.push(ownIn);
+					}
+					mask.push(E('div', { 'class': 'zm-tg-x-line' }, line), siteMsg,
+						E('p', { 'class': 'zm-hint zm-tg-x-note' }, 'Для провайдера подключение к прокси выглядит как обычный HTTPS к этому сайту. Лучше выбрать сайт, который у вас открывается без VPN.'));
+				} else mask.push(E('p', { 'class': 'zm-hint zm-tg-x-note' }, 'Обычный ключ работает везде, но провайдеру проще распознать в нём прокси.'));
+				mask.push(tlsMsg);
+			}
+
+			var net = [ zm.swRow(dr.open, 'Открыть порт ' + port + ' для интернета', 'Правило «' + (v.id === 'rust' ? 'Allow-TG-WS-Proxy-Rust' : 'Allow-TG-WS-Proxy-Go') + '» в межсетевом экране (зона WAN). Выключите — правило уберётся.',
+				function() { dr.open = !dr.open; rebuild(); }, dr.busy) ];
+			if (dr.open) {
+				net.push(seg([ [ 'ddns', 'DDNS / свой домен' ], [ 'ip', 'Внешний IP' ] ], dr.hmode, function(m) {
+					dr.hmode = m;
+					if (m === 'ip' && !TG_IP_RE.test(host())) dr.host = wanPub;
+					if (m === 'ddns' && TG_IP_RE.test(host())) dr.host = ddns[0] || '';
+					dr.chk = null; rebuild();
+				}));
+				var hostIn = E('input', { 'type': 'text', 'class': 'cbi-input-text zm-tg-edit-in zm-tg-x-host', 'value': dr.host, 'placeholder': dr.hmode === 'ip' ? 'например, 203.0.113.10' : 'например, myhome.ddns.net',
+					'spellcheck': 'false', 'autocapitalize': 'off', 'autocomplete': 'off', 'aria-label': dr.hmode === 'ip' ? 'Внешний IP роутера' : 'Домен роутера' });
+				hostIn.addEventListener('input', function() { dr.host = hostIn.value.trim(); hostCheck(700); });
+				pickWrap = E('div', { 'class': 'zm-tg-chips' });
+				pickFill = function() {
+					pickWrap.innerHTML = '';
+					function pick(val, why) { return E('button', { 'type': 'button', 'class': 'zm-tg-pick', 'click': function() { dr.host = val; hostIn.value = val; hostCheck(); } }, [ val, E('span', {}, ' · ' + why) ]); }
+					if (dr.hmode === 'ddns') ddns.forEach(function(h) { if (h !== host()) pickWrap.appendChild(pick(h, 'из «Динамического DNS»')); });
+					else if (wanPub && wanPub !== host()) pickWrap.appendChild(pick(wanPub, 'адрес роутера сейчас'));
+				};
+				net.push(E('div', { 'class': 'zm-tg-x-line' }, [ hostIn ]), pickWrap, hostMsg);
+				net.push(E('p', { 'class': 'zm-hint zm-tg-x-note' }, dr.hmode === 'ip'
+					? 'Внешний IP может смениться — тогда ссылка перестанет работать. Надёжнее домен из «Динамического DNS».'
+					: ddns.length ? 'Домен из «Динамического DNS» всегда указывает на роутер, даже когда провайдер меняет IP.'
+						: 'Нет своего домена? Настройте «Динамический DNS» (пакет luci-app-ddns) — тогда ссылка не сломается, когда провайдер сменит IP.'));
+				net.push(E('p', { 'class': 'zm-hint zm-tg-x-note' }, 'Проверяйте с телефона через мобильный интернет: из домашней сети прокси откроется, даже если снаружи порт закрыт.'));
+			}
+
+			applyBtn.addEventListener('click', function() {
+				if (dr.busy || applyBtn.disabled) return;
+				if (busyMap[v.id]) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+				var tls = wantTls(), tlsCh = tls !== (x.tls || ''), opening = dr.open && !x.open;
+				function go() {
+					dr.busy = true; busyMap[v.id] = true; paint();
+					zm.toast(tlsCh ? 'Перезапускаем ' + v.title + ' с новой маскировкой' : 'Применяем настройки ' + v.title, 'warning');
+					zm.tgAction(v.id, 'ext=' + tls + ':' + (dr.open ? 1 : 0) + ':' + dr.hmode + ':' + (hostOk() ? host() : '')).then(function(r) {
+						dr.busy = false; busyMap[v.id] = false;
+						if (!r || r.error) { zm.toast((r && r.error) || 'Роутер не ответил', 'error', 10000); paint(); return; }
+						var msg = [];
+						if (r.tls) msg.push(tls ? 'FakeTLS включён, сайт ' + tls : 'FakeTLS выключен');
+						if (r.fw === 'opened') msg.push('порт ' + port + ' открыт для интернета');
+						if (r.fw === 'closed') msg.push('порт закрыт для интернета');
+						zm.toast(v.title + ': ' + (msg.length ? msg.join(', ') : 'сохранено') + (r.tls ? ' — откройте в Telegram новую ссылку на всех устройствах' : ''), 'info', r.tls ? 9000 : 5000);
+						delete extDraft[v.id]; delete extPaint[v.id];
+						zm.tgStatus().then(function(d) { data = d; renderCards(d); renderLinks(d); });
+					}, function() { dr.busy = false; busyMap[v.id] = false; zm.toast('Роутер не ответил', 'error'); paint(); });
+				}
+				if (!opening) { go(); return; }
+				zm.dialog({ title: 'Открыть ' + v.title + ' для интернета?', okText: 'Открыть порт ' + port,
+					blocks: [ { type: 'list', title: 'Что произойдёт', items: [
+						'Порт ' + port + ' (TCP) откроется в межсетевом экране со стороны интернета',
+						'Подключиться смогут только те, у кого есть ссылка с ключом',
+						tls ? 'Для провайдера подключения выглядят как HTTPS к ' + tls : 'Совет: включите FakeTLS — так прокси сложнее распознать',
+						'Закрыть порт можно здесь же одним переключателем'
+					] } ] }).then(function(ok) { if (ok) go(); });
+			});
+
+			body.appendChild(E('p', { 'class': 'zm-hint zm-tg-x-intro' }, 'Нужно, только если подключаться к прокси не из дома — с телефона в мобильной сети или с работы. Дома всё работает и без этого.'));
+			body.appendChild(row('Маскировка', mask));
+			body.appendChild(row('Из интернета', net));
+			body.appendChild(linkWrap);
+			body.appendChild(E('div', { 'class': 'zm-actions' }, [
+				applyBtn,
+				E('button', { 'class': 'cbi-button', 'click': function() { extOpen[v.id] = false; delete extDraft[v.id]; delete extPaint[v.id]; renderCards(data); } }, 'Отмена')
+			]));
+			paint();
+			if (dr.open && hostOk() && !dr.chk) hostCheck();
+			if (dr.tls && !x.pkg && siteOk() && !dr.siteChk) siteCheck();
+			return body;
+		}
+
+		function extLink(st, x) {
+			if (!x || !x.open || !x.host || !st.secret) return '';
+			return 'tg://proxy?server=' + x.host + '&port=' + (st.port || '') + '&secret=' + st.secret;
+		}
+
 		function renderLinks(d) {
 			linksWrap.innerHTML = '';
 			VARIANTS.forEach(function(v) {
@@ -46832,7 +47577,7 @@ return view.extend({
 				var host = st.host || d.lan_ip, port = st.port || v.port;
 				if (!st.installed || !st.running || !host) return;
 
-				var link, extra;
+				var link, extra, outLink = '';
 				if (v.kind === 'socks') {
 					link = 'tg://socks?server=' + host + '&port=' + port;
 					extra = 'SOCKS5-адрес: ' + host + ':' + port;
@@ -46840,42 +47585,17 @@ return view.extend({
 					if (!st.secret) return;
 					link = 'tg://proxy?server=' + host + '&port=' + port + '&secret=' + st.secret;
 					extra = 'Хост: ' + host + '   Порт: ' + port + '   Ключ: ' + st.secret;
-				}
-
-				var qrLink = link.replace(/^tg:\/\//, 'https://t.me/');
-				var qrBox = E('div', { 'class': 'zm-tg-qr-box', 'style': 'display:none' });
-				var qrShown = false;
-
-				function toggleQr() {
-					qrShown = !qrShown;
-					qrBox.style.display = qrShown ? '' : 'none';
-					if (qrShown && !qrBox.firstChild) {
-						qrBox.appendChild(E('img', {
-							'src': 'https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=' + encodeURIComponent(qrLink),
-							'alt': 'QR-код',
-							'width': '220',
-							'height': '220'
-						}));
-					}
+					outLink = extLink(st, st.ext);
 				}
 
 				linksWrap.appendChild(E('div', { 'class': 'zm-tg-link-card' }, [
 					E('h4', {}, v.title),
-					E('p', { 'class': 'zm-tg-link-hint' }, 'Откройте эту ссылку на телефоне/компьютере с Telegram — прокси подключится автоматически. Либо скопируйте и вставьте её в браузер/Telegram вручную.'),
-					E('div', { 'class': 'zm-tg-link-row' }, [
-						E('div', { 'class': 'zm-tg-link-box' }, link),
-						E('button', {
-							'class': 'cbi-button cbi-button-positive',
-							'click': function() { copyToClipboard(link); }
-						}, 'Скопировать'),
-						E('button', {
-							'class': 'cbi-button zm-tg-qr-btn',
-							'title': 'Показать QR-код',
-							'click': function() { toggleQr(); }
-						}, 'QR-код')
-					]),
+					E('p', { 'class': 'zm-tg-link-hint' }, outLink
+						? 'Дома подключайтесь по первой ссылке, вне дома — по второй. Откройте ссылку на телефоне или компьютере с Telegram — прокси подключится сам.'
+						: 'Откройте эту ссылку на телефоне/компьютере с Telegram — прокси подключится автоматически. Либо скопируйте и вставьте её в браузер/Telegram вручную.'),
+					linkBlock(link, outLink ? 'Дома' : ''),
 					E('p', { 'class': 'zm-hint' }, extra),
-					qrBox
+					outLink ? linkBlock(outLink, 'Из интернета') : E([])
 				]));
 			});
 		}
@@ -46929,7 +47649,7 @@ return view.extend({
 						'click': function() { doAction(v.id, 'install'); }
 					}, 'Установить'));
 				}
-				cards.appendChild(E('div', { 'class': 'zm-card' }, [
+				cards.appendChild(E('div', { 'class': 'zm-card' + (extOpen[v.id] && v.kind === 'proto' && st.installed ? ' zm-tg-wide' : '') }, [
 					E('h3', {}, v.title),
 					E('div', { 'class': 'zm-row' }, [
 						E('span', { 'class': 'zm-label' }, 'Статус'),
@@ -46943,7 +47663,8 @@ return view.extend({
 						E('span', { 'class': 'zm-tg-key', 'title': st.secret }, [ st.secret.length > 22 ? st.secret.slice(0, 10) + '…' + st.secret.slice(-8) : st.secret ]) ]) : E([]),
 					pkgNote || E([]),
 					E('div', { 'class': 'zm-actions' }, actions),
-					st.installed && st.edit && editOpen[v.id] ? editPanel(v, st) : E([])
+					st.installed && st.edit && editOpen[v.id] ? editPanel(v, st) : E([]),
+					st.installed && v.kind === 'proto' && st.ext ? extFold(v, st) : E([])
 				]));
 			});
 			if (tgwsCard) cards.appendChild(tgwsCard);
@@ -54690,7 +55411,7 @@ html[data-theme="micro"] {
 	--bg: #f4f5f8; --bg-glow-1: transparent; --bg-glow-2: transparent;
 	--surface: #ffffff; --surface-solid: #ffffff; --surface-2: #f7f8fb; --surface-3: #eceff5;
 	--side-bg: #ffffff; --border: #e3e6ee; --border-2: #e3e6ee;
-	--text: #151a26; --text-2: #151a26; --muted: #5a6377;
+	--text: #000000; --text-2: #000000; --muted: #000000;
 	--shadow: 0 1px 2px rgba(0,0,0,.04); --shadow-lg: 0 30px 70px -30px rgba(0,0,0,.45);
 	--input-bg: #f7f8fb;
 	--ok: #11643e; --ok-bg: #dcf5e9; --ok-dot: #11643e;
@@ -54702,42 +55423,42 @@ html[data-theme="micro"] {
 html[data-theme="micro"] body.zmw-body { background: #f4f5f8; }
 html[data-theme="micro"] .zmw-orbs, html[data-theme="micro"] .zmw-grid-bg { display: none; }
 html[data-theme="micro"] .zmw-top { --zmw-top-bg: #f4f5f8; background: var(--zmw-top-bg); }
-html[data-theme="micro"] .zmw-title { font-family: "Onest", sans-serif; color: #151a26; }
-html[data-theme="micro"] .zmw-sub, html[data-theme="micro"] .zmw-foot { color: #5a6377; }
-html[data-theme="micro"] .zmw-side { background: #ffffff; border-right: 1px solid #e3e6ee; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; color: #151a26; }
-html[data-theme="micro"] .zmw-brand-name, html[data-theme="micro"] .zmw-mem-row { color: #151a26; }
-html[data-theme="micro"] .zmw-nav-group, html[data-theme="micro"] .zmw-brand-sub, html[data-theme="micro"] .zmw-mem-label { color: #5d6679; }
-html[data-theme="micro"] .zmw-nav-item { color: #151a26; border-radius: 12px; }
-html[data-theme="micro"] .zmw-nav-item:hover { background: #f0f3fa; color: #151a26; }
-html[data-theme="micro"] .zmw-nav-item.zmw-active { background: #2d5bff; color: #ffffff; box-shadow: none; }
+html[data-theme="micro"] .zmw-title { font-family: "Onest", sans-serif; color: #000000; }
+html[data-theme="micro"] .zmw-sub, html[data-theme="micro"] .zmw-foot { color: #000000; }
+html[data-theme="micro"] .zmw-side { background: #ffffff; border-right: 1px solid #e3e6ee; box-shadow: none; backdrop-filter: none; -webkit-backdrop-filter: none; color: #000000; }
+html[data-theme="micro"] .zmw-brand-name, html[data-theme="micro"] .zmw-mem-row { color: #000000; }
+html[data-theme="micro"] .zmw-nav-group, html[data-theme="micro"] .zmw-brand-sub, html[data-theme="micro"] .zmw-mem-label { color: #000000; }
+html[data-theme="micro"] .zmw-nav-item { color: #000000; border-radius: 12px; }
+html[data-theme="micro"] .zmw-nav-item:hover { background: #f0f3fa; color: #000000; }
+html[data-theme="micro"] .zmw-nav-item.zmw-active { background: #2d5bff; color: #ffffff; box-shadow: inset 0 0 0 2px #000000; font-weight: 700; }
 html[data-theme="micro"] .zmw-nav-item.zmw-active::before { display: none; }
 html[data-theme="micro"] .zmw-nav-item.zmw-active .zmw-nav-ico { color: #ffffff; }
 html[data-theme="micro"] .zmw-mem-bar { background: #e3e6ee; border-radius: 6px; }
 html[data-theme="micro"] .zmw-mem-bar i { background: #2d5bff; border-radius: inherit; }
-html[data-theme="micro"] #zmw-view .zm-card { background: #ffffff; border: 1px solid #e3e6ee; border-radius: 20px; box-shadow: 0 1px 2px rgba(0,0,0,.04); backdrop-filter: none; -webkit-backdrop-filter: none; color: #151a26; }
+html[data-theme="micro"] #zmw-view .zm-card { background: #ffffff; border: 1px solid #e3e6ee; border-radius: 20px; box-shadow: 0 1px 2px rgba(0,0,0,.04); backdrop-filter: none; -webkit-backdrop-filter: none; color: #000000; }
 html[data-theme="micro"] #zmw-view .zm-card:hover { border-color: #e3e6ee; }
-html[data-theme="micro"] #zmw-view .zm-card h3 { color: #151a26; } html[data-theme="micro"] #zmw-view .zm-card h3::before { background: #2d5bff; }
-html[data-theme="micro"] #zmw-view .zm-hint, html[data-theme="micro"] #zmw-view p.zm-hint, html[data-theme="micro"] #zmw-view .zm-label, html[data-theme="micro"] .zm-dock .zm-hint, html[data-theme="micro"] .zm-dock p.zm-hint, html[data-theme="micro"] .zmw-modal .zm-hint, html[data-theme="micro"] .zmw-modal p.zm-hint { color: #5a6377; opacity: 1; }
+html[data-theme="micro"] #zmw-view .zm-card h3 { color: #000000; } html[data-theme="micro"] #zmw-view .zm-card h3::before { background: #2d5bff; }
+html[data-theme="micro"] #zmw-view .zm-hint, html[data-theme="micro"] #zmw-view p.zm-hint, html[data-theme="micro"] #zmw-view .zm-label, html[data-theme="micro"] .zm-dock .zm-hint, html[data-theme="micro"] .zm-dock p.zm-hint, html[data-theme="micro"] .zmw-modal .zm-hint, html[data-theme="micro"] .zmw-modal p.zm-hint { color: #000000; opacity: 1; }
 html[data-theme="micro"] #zmw-view a:not(.cbi-button), html[data-theme="micro"] .zm-dock a:not(.cbi-button), html[data-theme="micro"] .zmw-modal a:not(.cbi-button) { color: #2d5bff; }
-html[data-theme="micro"] #zmw-view .cbi-button, html[data-theme="micro"] .zmw-icon-btn, html[data-theme="micro"] .zm-dock .cbi-button, html[data-theme="micro"] .zmw-modal .cbi-button { background: #f7f8fb; color: #151a26; border: 1px solid #e3e6ee; border-radius: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
-html[data-theme="micro"] #zmw-view .cbi-button:hover, html[data-theme="micro"] .zmw-icon-btn:hover, html[data-theme="micro"] .zm-dock .cbi-button:hover, html[data-theme="micro"] .zmw-modal .cbi-button:hover { background: #eceff5; color: #151a26; }
+html[data-theme="micro"] #zmw-view .cbi-button, html[data-theme="micro"] .zmw-icon-btn, html[data-theme="micro"] .zm-dock .cbi-button, html[data-theme="micro"] .zmw-modal .cbi-button { background: #f7f8fb; color: #000000; border: 1px solid #e3e6ee; border-radius: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+html[data-theme="micro"] #zmw-view .cbi-button:hover, html[data-theme="micro"] .zmw-icon-btn:hover, html[data-theme="micro"] .zm-dock .cbi-button:hover, html[data-theme="micro"] .zmw-modal .cbi-button:hover { background: #eceff5; color: #000000; }
 html[data-theme="micro"] #zmw-view .cbi-button-positive, html[data-theme="micro"] #zmw-view .cbi-button-positive:hover, html[data-theme="micro"] .zmw-btn-primary, html[data-theme="micro"] .zm-dock .cbi-button-positive, html[data-theme="micro"] .zm-dock .cbi-button-positive:hover, html[data-theme="micro"] .zmw-modal .cbi-button-positive, html[data-theme="micro"] .zmw-modal .cbi-button-positive:hover { background: #2d5bff; color: #ffffff; border-color: #2d5bff; }
 html[data-theme="micro"] #zmw-view .cbi-button-remove, html[data-theme="micro"] #zmw-view .cbi-button-remove:hover, html[data-theme="micro"] .zm-dock .cbi-button-remove, html[data-theme="micro"] .zm-dock .cbi-button-remove:hover, html[data-theme="micro"] .zmw-modal .cbi-button-remove, html[data-theme="micro"] .zmw-modal .cbi-button-remove:hover { background: #ffe1e1; color: #9a1f1f; border-color: #ffe1e1; }
-html[data-theme="micro"] #zmw-view .cbi-button-action, html[data-theme="micro"] #zmw-view .cbi-button-action:hover, html[data-theme="micro"] .zm-dock .cbi-button-action, html[data-theme="micro"] .zm-dock .cbi-button-action:hover, html[data-theme="micro"] .zmw-modal .cbi-button-action, html[data-theme="micro"] .zmw-modal .cbi-button-action:hover { background: #e6ecff; color: #151a26; }
-html[data-theme="micro"] #zmw-view .zm-tile:not(.zm-active):not(.zm-tile-off), html[data-theme="micro"] #zmw-view .zm-tile { background: #f7f8fb; color: #151a26; border: 1px solid #e3e6ee; border-radius: 14px; }
+html[data-theme="micro"] #zmw-view .cbi-button-action, html[data-theme="micro"] #zmw-view .cbi-button-action:hover, html[data-theme="micro"] .zm-dock .cbi-button-action, html[data-theme="micro"] .zm-dock .cbi-button-action:hover, html[data-theme="micro"] .zmw-modal .cbi-button-action, html[data-theme="micro"] .zmw-modal .cbi-button-action:hover { background: #e6ecff; color: #000000; }
+html[data-theme="micro"] #zmw-view .zm-tile:not(.zm-active):not(.zm-tile-off), html[data-theme="micro"] #zmw-view .zm-tile { background: #f7f8fb; color: #000000; border: 1px solid #e3e6ee; border-radius: 14px; }
 html[data-theme="micro"] #zmw-view .zm-tile.zm-active { background: #2d5bff; color: #ffffff; border-color: #2d5bff; }
 html[data-theme="micro"] #zmw-view .zm-tile.zm-active::before { color: #ffffff; }
-html[data-theme="micro"] #zmw-view .zm-seg-item { color: #151a26; } html[data-theme="micro"] #zmw-view .zm-seg-item.zm-active { background: #2d5bff; color: #ffffff; }
-html[data-theme="micro"] #zmw-view .zm-node.zm-active { background: #e6ecff; border-color: #2d5bff; } html[data-theme="micro"] #zmw-view .zm-node.zm-active .zm-node-name, html[data-theme="micro"] #zmw-view .zm-node.zm-active .zm-node-name::before { color: #151a26; }
+html[data-theme="micro"] #zmw-view .zm-seg-item { color: #000000; } html[data-theme="micro"] #zmw-view .zm-seg-item.zm-active { background: #2d5bff; color: #ffffff; }
+html[data-theme="micro"] #zmw-view .zm-node.zm-active { background: #e6ecff; border-color: #2d5bff; } html[data-theme="micro"] #zmw-view .zm-node.zm-active .zm-node-name, html[data-theme="micro"] #zmw-view .zm-node.zm-active .zm-node-name::before { color: #000000; }
 html[data-theme="micro"] #zmw-view .zm-badge, html[data-theme="micro"] .zm-dock .zm-badge, html[data-theme="micro"] .zmw-modal .zm-badge { border-radius: 999px; }
-html[data-theme="micro"] #zmw-view input, html[data-theme="micro"] #zmw-view select, html[data-theme="micro"] #zmw-view textarea:not(.zm-config-editor), html[data-theme="micro"] .zmw-input { background: #f7f8fb; color: #151a26; border: 1px solid #e3e6ee; border-radius: 14px; }
-html[data-theme="micro"] #zmw-view .zm-current-banner, html[data-theme="micro"] #zmw-view .zm-refresh-banner { background: #e6ecff; color: #151a26; border-color: #2d5bff; }
+html[data-theme="micro"] #zmw-view input, html[data-theme="micro"] #zmw-view select, html[data-theme="micro"] #zmw-view textarea:not(.zm-config-editor), html[data-theme="micro"] .zmw-input { background: #f7f8fb; color: #000000; border: 1px solid #e3e6ee; border-radius: 14px; }
+html[data-theme="micro"] #zmw-view .zm-current-banner, html[data-theme="micro"] #zmw-view .zm-refresh-banner { background: #e6ecff; color: #000000; border-color: #2d5bff; }
 html[data-theme="micro"] #zmw-view .zm-switch.zm-switch-on { background: #2d5bff; }
 html[data-theme="micro"] .zmw-check input:checked + .zmw-check-box { background: #2d5bff; } html[data-theme="micro"] .zmw-check input:checked + .zmw-check-box::after { border-color: #ffffff; }
-html[data-theme="micro"] .zmw-login-card, html[data-theme="micro"] .zmw-modal, html[data-theme="micro"] .zmw-theme-menu { background: #ffffff; color: #151a26; border: 1px solid #e3e6ee; backdrop-filter: none; -webkit-backdrop-filter: none; }
-html[data-theme="micro"] .zmw-theme-opt { color: #151a26; } html[data-theme="micro"] .zmw-theme-opt:hover { background: #f7f8fb; }
+html[data-theme="micro"] .zmw-login-card, html[data-theme="micro"] .zmw-modal, html[data-theme="micro"] .zmw-theme-menu { background: #ffffff; color: #000000; border: 1px solid #e3e6ee; backdrop-filter: none; -webkit-backdrop-filter: none; }
+html[data-theme="micro"] .zmw-theme-opt { color: #000000; } html[data-theme="micro"] .zmw-theme-opt:hover { background: #f7f8fb; }
 html[data-theme="micro"] .zmw-theme-opt.zmw-on { background: #2d5bff; color: #ffffff; } html[data-theme="micro"] .zmw-theme-opt.zmw-on .zmw-theme-mark, html[data-theme="micro"] .zmw-theme-opt.zmw-on .zmw-i { color: #ffffff; }
-html[data-theme="micro"] .zmw-theme-group { color: #5a6377; }
+html[data-theme="micro"] .zmw-theme-group { color: #000000; }
 html[data-theme="micro"] #zmw-view .cbi-button, html[data-theme="micro"] .zmw-icon-btn, html[data-theme="micro"] .zmw-btn-primary, html[data-theme="micro"] .zm-dock .cbi-button, html[data-theme="micro"] .zmw-modal .cbi-button { transition: transform .12s, box-shadow .12s, background .2s, border-radius .25s; }
 html[data-theme="micro"] #zmw-view .cbi-button:hover, html[data-theme="micro"] .zmw-icon-btn:hover, html[data-theme="micro"] .zm-dock .cbi-button:hover, html[data-theme="micro"] .zmw-modal .cbi-button:hover { transform: scale(1.03); }
 html[data-theme="micro"] #zmw-view .cbi-button:active, html[data-theme="micro"] .zmw-icon-btn:active, html[data-theme="micro"] .zmw-btn-primary:active, html[data-theme="micro"] .zm-dock .cbi-button:active, html[data-theme="micro"] .zmw-modal .cbi-button:active { transform: scale(.95); box-shadow: none; }
@@ -54748,6 +55469,8 @@ html[data-theme="micro"] #zmw-view .zm-badge .zm-dot, html[data-theme="micro"] .
 @keyframes zmw-micro-ring { 0% { box-shadow: 0 0 0 0 rgba(30,180,110,.45); } 70% { box-shadow: 0 0 0 7px rgba(30,180,110,0); } 100% { box-shadow: 0 0 0 0 rgba(30,180,110,0); } }
 html[data-theme="micro"] .zmw-nav-item { transition: background .2s, transform .15s; }
 html[data-theme="micro"] .zmw-nav-item:active { transform: scale(.97); }
+html[data-theme="micro"] .zmw-nav-group > span, html[data-theme="micro"] .zmw-foot, html[data-theme="micro"] #zmw-view .zm-row .zm-label, html[data-theme="micro"] #zmw-view .zm-hint, html[data-theme="micro"] .zm-dock .zm-hint, html[data-theme="micro"] #zmw-view .zm-fold-sum, html[data-theme="micro"] #zmw-view .zm-node-foot > span:first-child, html[data-theme="micro"] #zmw-view .zm-svc-sub, html[data-theme="micro"] #zmw-view .zm-sub-fact > span, html[data-theme="micro"] #zmw-view .zm-dns-text span, html[data-theme="micro"] #zmw-view .zm-rl-now, html[data-theme="micro"] #zmw-view .zm-fk-info > div > span, html[data-theme="micro"] #zmw-view .zm-fk-tile > span, html[data-theme="micro"] #zmw-view .zm-st-stat-label, html[data-theme="micro"] #zmw-view .zm-st-stat-sub, html[data-theme="micro"] #zmw-view .zm-gen-label, html[data-theme="micro"] #zmw-view .zm-gen-time, html[data-theme="micro"] #zmw-view .zm-si-group, html[data-theme="micro"] #zmw-view .zm-pg-sub, html[data-theme="micro"] #zmw-view .zm-pg-group-title, html[data-theme="micro"] #zmw-view .zm-fo-sub, html[data-theme="micro"] #zmw-view .zm-ab-auto-sub, html[data-theme="micro"] #zmw-view .zm-ab-grp-h span, html[data-theme="micro"] #zmw-view .zm-ab-doms, html[data-theme="micro"] #zmw-view .zm-tg-link-hint, html[data-theme="micro"] #zmw-view .zm-tg-edit-label, html[data-theme="micro"] #zmw-view .zm-tg-pick span, html[data-theme="micro"] #zmw-view .zm-tg-link-label, html[data-theme="micro"] #zmw-view .zm-dom-sub, html[data-theme="micro"] #zmw-view .zm-find-why, html[data-theme="micro"] #zmw-view .zm-find-note, html[data-theme="micro"] #zmw-view .zm-find-title, html[data-theme="micro"] #zmw-view .zm-tz-date, html[data-theme="micro"] #zmw-view .zm-tz-tile span, html[data-theme="micro"] #zmw-view .zm-reboot-meta > span:first-child, html[data-theme="micro"] #zmw-view .zm-link-sub, html[data-theme="micro"] #zmw-view .zm-ab-log-when, html[data-theme="micro"] #zmw-view .zm-list-path, html[data-theme="micro"] #zmw-view .zm-cat-src-url, html[data-theme="micro"] #zmw-view .zm-cat-src-state, html[data-theme="micro"] #zmw-view .zm-th-text p, html[data-theme="micro"] #zmw-view .zm-doh-var-desc, html[data-theme="micro"] #zmw-view .zm-rm-auto-last, html[data-theme="micro"] #zmw-view .zm-chk-tip, html[data-theme="micro"] #zmw-view .zm-header-by, html[data-theme="micro"] #zmw-view .zm-th-author, html[data-theme="micro"] #zmw-view .zm-sx-unlink, html[data-theme="micro"] #zmw-view .zm-ab-last .zm-label, html[data-theme="micro"] #zmw-view .zm-tt-rank, html[data-theme="micro"] #zmw-view .zm-seg-item, html[data-theme="micro"] #zmw-view .zm-au-row.zm-au-head > span, html[data-theme="micro"] #zmw-view .zm-au-ts { color: #000000; opacity: 1; }
+html[data-theme="micro"] #zmw-view .zm-seg-item.zm-active { color: #ffffff; }
 html[data-theme="ink"] #zmw-view .zm-actions.zmw-tabs { background: #ffffff; border: 2.5px solid #0a0a0a; border-radius: 6px; box-shadow: 4px 4px 0 #0a0a0a; backdrop-filter: none; }
 html[data-theme="ink"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="ink"] .zm-dock .zmw-tabs .cbi-button, html[data-theme="ink"] .zmw-modal .zmw-tabs .cbi-button { background: transparent; border: 2px solid transparent; border-radius: 4px; box-shadow: none; color: #0a0a0a; transform: none; }
 html[data-theme="ink"] #zmw-view .zmw-tabs .cbi-button:hover, html[data-theme="ink"] .zm-dock .zmw-tabs .cbi-button:hover, html[data-theme="ink"] .zmw-modal .zmw-tabs .cbi-button:hover { background: #e8f6ff; border-color: transparent; box-shadow: none; }
@@ -54769,8 +55492,8 @@ html[data-theme="depth"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="depth
 html[data-theme="depth"] #zmw-view .zmw-tabs .cbi-button:hover, html[data-theme="depth"] .zm-dock .zmw-tabs .cbi-button:hover, html[data-theme="depth"] .zmw-modal .zmw-tabs .cbi-button:hover { background: rgba(127,220,255,.08); color: #e8eefc; transform: none; }
 html[data-theme="depth"] #zmw-view .zmw-tabs .cbi-button-positive, html[data-theme="depth"] #zmw-view .zmw-tabs .cbi-button-positive:hover, html[data-theme="depth"] .zm-dock .zmw-tabs .cbi-button-positive, html[data-theme="depth"] .zm-dock .zmw-tabs .cbi-button-positive:hover, html[data-theme="depth"] .zmw-modal .zmw-tabs .cbi-button-positive, html[data-theme="depth"] .zmw-modal .zmw-tabs .cbi-button-positive:hover { background: linear-gradient(180deg, #33c6ff, #0090ff); color: #04111f; box-shadow: 0 3px 0 #005a9e; }
 html[data-theme="micro"] #zmw-view .zm-actions.zmw-tabs { background: #ffffff; border: 1px solid #e3e6ee; border-radius: 16px; box-shadow: 0 1px 2px rgba(0,0,0,.04); backdrop-filter: none; }
-html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button, html[data-theme="micro"] .zmw-modal .zmw-tabs .cbi-button { background: transparent; border: 0; border-radius: 11px; color: #5a6377; box-shadow: none; transform: none; }
-html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button:hover, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button:hover, html[data-theme="micro"] .zmw-modal .zmw-tabs .cbi-button:hover { background: #f0f3fa; color: #151a26; transform: none; }
+html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button, html[data-theme="micro"] .zmw-modal .zmw-tabs .cbi-button { background: transparent; border: 0; border-radius: 11px; color: #000000; box-shadow: none; transform: none; }
+html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button:hover, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button:hover, html[data-theme="micro"] .zmw-modal .zmw-tabs .cbi-button:hover { background: #f0f3fa; color: #000000; transform: none; }
 html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button-positive, html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button-positive:hover, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button-positive, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button-positive:hover, html[data-theme="micro"] .zmw-modal .zmw-tabs .cbi-button-positive, html[data-theme="micro"] .zmw-modal .zmw-tabs .cbi-button-positive:hover { background: #2d5bff; color: #ffffff; box-shadow: 0 6px 14px -8px rgba(45,91,255,.9); border-radius: 11px; }
 html[data-theme="micro"] #zmw-view .zmw-tabs .cbi-button:active, html[data-theme="micro"] .zm-dock .zmw-tabs .cbi-button:active, html[data-theme="micro"] .zmw-modal .zmw-tabs .cbi-button:active { transform: scale(.96); }
 html[data-theme="retro"] #zmw-view .zm-current-banner { background: #ffffe1; border: 1px solid #000000; border-radius: 0; color: #000000; }
