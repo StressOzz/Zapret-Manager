@@ -9,20 +9,6 @@
 [![StressKVN](https://img.shields.io/badge/StressKVN-обход_белых_списков-3C3489?style=for-the-badge)](http://stresskvn.lol/)
 [![Views](https://gitviews.com/repo/StressOzz/Zapret-Manager.svg?style=for-the-badge&label=Views&label-color=%23555&color=%2310B981&base=559060)](https://github.com/StressOzz/Zapret-Manager)
 
-![OpenWrt](https://img.shields.io/badge/OpenWrt-22.03%2B%20·%20лучше%2024.10%2B-00B5E2?style=flat-square&logo=openwrt&logoColor=white)
-![opkg и apk](https://img.shields.io/badge/пакеты-opkg%20и%20apk-6E56CF?style=flat-square)
-![LuCI + Web UI](https://img.shields.io/badge/интерфейс-LuCI%20+%20Web%20UI%20:7788-2563EB?style=flat-square)
-![Темы](https://img.shields.io/badge/темы-11%20+%20авто-F59E0B?style=flat-square)
-![Язык](https://img.shields.io/badge/язык-русский-16A34A?style=flat-square)
-
-<br>
-
-<a href="docs/screenshots/dashboard.png"><img src="docs/screenshots/dashboard.png" alt="Zapret Manager — Дашборд" width="900"></a>
-
-<sub>Дашборд Web UI: что установлено и работает, состояние роутера, версии компонентов</sub>
-
-**[🖼️ Скриншоты](#️-как-это-выглядит) · [💻 Установка](#-установка) · [🏁 Первые шаги](#-первые-шаги-после-установки) · [❓ Проблемы](#-частые-проблемы) · [🛠️ Для продвинутых](#️-техническая-документация-для-продвинутых)**
-
 </div>
 
 ---
@@ -41,11 +27,10 @@
 
 ---
 
-
 ### Для Windows - используйте: **https://github.com/StressOzz/ZapretOzz**
 
 ---
-
+<div align="center">
 <table>
   <tr>
     <td>
@@ -60,6 +45,18 @@
     </td>
   </tr>
 </table>
+</div>
+
+---
+
+<div align="center">
+<a href="docs/screenshots/dashboard.png"><img src="docs/screenshots/dashboard.png" alt="Zapret Manager — Дашборд" width="900"></a>
+
+<sub>Дашборд Web UI: что установлено и работает, состояние роутера, версии компонентов</sub>
+
+**[🖼️ Скриншоты](#️-как-это-выглядит) · [💻 Установка](#-установка) · [🏁 Первые шаги](#-первые-шаги-после-установки) · [❓ Проблемы](#-частые-проблемы) · [🛠️ Для продвинутых](#️-техническая-документация-для-продвинутых)**
+
+</div>
 
 ---
 
