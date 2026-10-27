@@ -668,4 +668,7 @@ icloud-content.com
 icloud-sandbox.com
 apple-livephotoskit.com
 axm-usercontent-apple.com
+#################################### Pinterest
+pinimg.com
+pinimg.map.fastly.net
 ####################################
