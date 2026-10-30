@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.86
+# Version: 4.87
 ZM_VERSION_EOF
 set -e
 
@@ -69,7 +69,12 @@ _zmi_say "Записываем файлы панели"
 mkdir -p /opt/zapret-manager-luci
 chmod 0755 /opt/zapret-manager-luci
 _zm_old_ver="$(sed -n 's/^ZM_VERSION="\([0-9][0-9.]*\)"$/\1/p' /opt/zapret-manager-luci/backend.sh 2>/dev/null | head -n 1)"
-cat > '/opt/zapret-manager-luci/backend.sh.zm-new' << 'ZM_INSTALLER_EOF'
+_zmi_free() { df -kP "$1" 2>/dev/null | awk 'NR == 2 { print $4 + 0; f = 1 } END { if (!f) print 0 }'; }
+_zmi_be=/opt/zapret-manager-luci/backend.sh
+_zmi_stage="$_zmi_be.zm-new"
+rm -f "$_zmi_stage" /tmp/zm-backend.sh.zm-new
+[ "$(_zmi_free /tmp)" -gt 4096 ] && _zmi_stage=/tmp/zm-backend.sh.zm-new
+sed "s/@ZM_VERSION@/$ZM_NEW_VER/" > "$_zmi_stage" << 'ZM_INSTALLER_EOF'
 #!/bin/sh
 umask 022
 if [ "$1" = zm_watch ]; then
@@ -29500,9 +29505,29 @@ zm_rc=$?
 [ -n "$ZC_LIFTED" ] && _zc_drop
 exit $zm_rc
 ZM_INSTALLER_EOF
-sed -i "s/@ZM_VERSION@/$ZM_NEW_VER/" '/opt/zapret-manager-luci/backend.sh.zm-new'
-chmod 0755 '/opt/zapret-manager-luci/backend.sh.zm-new'
-mv -f '/opt/zapret-manager-luci/backend.sh.zm-new' '/opt/zapret-manager-luci/backend.sh'
+chmod 0755 "$_zmi_stage"
+if [ "$_zmi_stage" = "$_zmi_be.zm-new" ]; then
+	mv -f "$_zmi_stage" "$_zmi_be"
+else
+	_zmi_need=$(( $(wc -c < "$_zmi_stage") / 1024 + 256 ))
+	if [ "$(_zmi_free /opt/zapret-manager-luci)" -ge "$_zmi_need" ] && cp "$_zmi_stage" "$_zmi_be.zm-new" 2>/dev/null && mv -f "$_zmi_be.zm-new" "$_zmi_be"; then
+		:
+	else
+		rm -f "$_zmi_be.zm-new"
+		_zmi_step "На флеше мало места ($(_zmi_free /opt/zapret-manager-luci) КБ) — заменяем основной файл панели на месте"
+		_zm_n=0
+		while pgrep -f '/opt/zapret-manager-luci/backend[.]sh' >/dev/null 2>&1 && [ "$_zm_n" -lt 15 ]; do sleep 1; _zm_n=$((_zm_n + 1)); done
+		rm -f "$_zmi_be"
+		if ! cp "$_zmi_stage" "$_zmi_be" 2>/dev/null; then
+			rm -f "$_zmi_be" "$_zmi_stage"
+			echo -e "${YELLOW}Не хватило места на флеше, чтобы записать панель (свободно $(_zmi_free /opt/zapret-manager-luci) КБ).${NC}"
+			echo -e "${YELLOW}Освободите место — например, удалите ненужные пакеты — и запустите установку ещё раз. Настройки панели сохранены.${NC}"
+			exit 1
+		fi
+		chmod 0755 "$_zmi_be"
+	fi
+	rm -f "$_zmi_stage"
+fi
 cat > '/opt/zapret-manager-luci/netshift.uc' << 'ZM_INSTALLER_EOF'
 let fs = require("fs");
 let uci = require("uci");
@@ -33285,19 +33310,19 @@ call_method() {
 		zapret_action)           json_get_var action action;   "$BACKEND" zapret_action "$action" ;;
 		zapret2_action)          json_get_var action action;   "$BACKEND" zapret2_action "$action" ;;
 		strategy_list_v)         "$BACKEND" strategy_list_v ;;
-		strategy_set_v)          json_get_var version version; ZM_UI_DEFER=1 "$BACKEND" strategy_set_v "$version" ;;
+		strategy_set_v)          json_get_var version version; "$BACKEND" strategy_set_v "$version" ;;
 		strategy_list_flowseal)  json_get_var action action;   "$BACKEND" strategy_list_flowseal "$action" ;;
-		strategy_set_flowseal)   json_get_var name name;       ZM_UI_DEFER=1 "$BACKEND" strategy_set_flowseal "$name" ;;
+		strategy_set_flowseal)   json_get_var name name;       "$BACKEND" strategy_set_flowseal "$name" ;;
 		strategy_list_youtube)   json_get_var action action;   "$BACKEND" strategy_list_youtube "$action" ;;
-		strategy_set_youtube)    json_get_var name name;       ZM_UI_DEFER=1 "$BACKEND" strategy_set_youtube "$name" ;;
-		youtube_quic_set)        json_get_var mode mode;       ZM_UI_DEFER=1 "$BACKEND" youtube_quic_set "$mode" ;;
+		strategy_set_youtube)    json_get_var name name;       "$BACKEND" strategy_set_youtube "$name" ;;
+		youtube_quic_set)        json_get_var mode mode;       "$BACKEND" youtube_quic_set "$mode" ;;
 		discord_status)          "$BACKEND" discord_status ;;
-		discord_set_dv)          json_get_var num num;         ZM_UI_DEFER=1 "$BACKEND" discord_set_dv "$num" ;;
-		discord_set_fake)        json_get_var file file;       ZM_UI_DEFER=1 "$BACKEND" discord_set_fake "$file" ;;
+		discord_set_dv)          json_get_var num num;         "$BACKEND" discord_set_dv "$num" ;;
+		discord_set_fake)        json_get_var file file;       "$BACKEND" discord_set_fake "$file" ;;
 		game_status)             "$BACKEND" game_status ;;
-		game_set)                json_get_var choice choice;   ZM_UI_DEFER=1 "$BACKEND" game_set "$choice" ;;
-		game_set_fake)           json_get_var file file;       ZM_UI_DEFER=1 "$BACKEND" game_set_fake "$file" ;;
-		game_toggle_xtreme)      ZM_UI_DEFER=1 "$BACKEND" game_toggle_xtreme ;;
+		game_set)                json_get_var choice choice;   "$BACKEND" game_set "$choice" ;;
+		game_set_fake)           json_get_var file file;       "$BACKEND" game_set_fake "$file" ;;
+		game_toggle_xtreme)      "$BACKEND" game_toggle_xtreme ;;
 		system_status)                 "$BACKEND" system_status ;;
 		system_check_connectivity)     "$BACKEND" system_check_connectivity ;;
 		system_toggle_quic) json_get_var mode mode; "$BACKEND" system_toggle_quic "$mode" ;;
@@ -33355,7 +33380,7 @@ call_method() {
 		dns_net_set)             json_get_var value value; "$BACKEND" dns_net_set "$value" ;;
 		test_status)             "$BACKEND" test_status ;;
 		test_action)             json_get_var action action; json_get_var mode mode; printf '%s' "$mode" | "$BACKEND" test_action "$action" @stdin ;;
-		zapret_opt_set)          json_get_var opt opt;         ZM_UI_DEFER=1 "$BACKEND" zapret_opt_set "$opt" ;;
+		zapret_opt_set)          json_get_var opt opt;         "$BACKEND" zapret_opt_set "$opt" ;;
 		zapret_ports_get)        "$BACKEND" zapret_ports_get ;;
 		zapret_ports_set)        json_get_var mode mode; json_get_var tcp tcp; json_get_var udp udp; "$BACKEND" zapret_ports_set "$mode" "$tcp" "$udp" ;;
 		system_time_set)         json_get_var value value;     "$BACKEND" system_time_set "$value" ;;
@@ -36936,18 +36961,19 @@ return view.extend({
 			return n + netPending();
 		}
 
-		function applyPick() {
+		function applyPick(only) {
 			if (busy) return;
+			if (typeof only !== 'string') only = '';
 			var steps = [];
 			var bw = bootWant();
-			if (bootChanged()) steps.push(function() {
+			if (!only && bootChanged()) steps.push(function() {
 				logLines.push('   → ' + (bw ? 'Ставим Bootstrap DNS: ' + bw.split(',').join(', ') : 'Возвращаем Bootstrap DNS в режим «Авто»'));
 				return zm.dohBootstrapSet(bw).then(function(res) {
 					if (res.error) throw new Error(res.error);
 					logLines.push('   ✓ Bootstrap DNS: ' + (res.bootstrap ? res.bootstrap.split(',').join(', ') : 'авто'));
 				});
 			});
-			if (pickProv && pickProv !== curMain()) steps.push(function() {
+			if ((!only || only === 'prov') && pickProv && pickProv !== curMain()) steps.push(function() {
 				var id = pickProv;
 				if (id === cur() && data.running && (data.failover || {}).mode === 'backup') {
 					logLines.push('   → Делаем ' + label(id) + ' основным — DNS уже идёт через него, перезапуск не нужен');
@@ -36973,7 +36999,7 @@ return view.extend({
 					else logLines.push('   · Bootstrap DNS: ' + (res.bootstrap ? bootFmt(res.bootstrap) : 'не задан — https-dns-proxy использует встроенные'));
 				});
 			});
-			if (foChanged()) steps.push(function() {
+			if (!only && foChanged()) steps.push(function() {
 				var w = foDraft, main = foMain(), ch = w.chain.filter(function(id) { return id !== main; });
 				logLines.push('   → ' + (w.on ? 'Сохраняем цепочку: ' + [ label(main) ].concat(ch.map(label)).join(' → ') + (w.direct ? ' → без DoH' : '') : 'Выключаем автопереключение'));
 				return zm.dohFailoverSet('fo=' + (w.on ? 1 : 0) + ' direct=' + (w.on && w.direct ? 1 : 0) + ' chain=' + ch.join(',')).then(function(r) {
@@ -36982,14 +37008,14 @@ return view.extend({
 					logLines.push('   ✓ ' + (r.fo || r.direct ? 'Автопереключение включено — основной сервер проверяется раз в 2 минуты' : 'Автопереключение выключено'));
 				});
 			});
-			if (pickForce && pickForce !== curForce()) steps.push(function() {
+			if ((!only || only === 'force') && pickForce && pickForce !== curForce()) steps.push(function() {
 				logLines.push('   → ' + (pickForce === 'off' ? 'Выключаем' : 'Включаем') + ' перехват DNS устройств');
 				return zm.dohForceSet(pickForce).then(function(res) {
 					if (res.error) throw new Error(res.error);
 					logLines.push('   ✓ Перехват DNS ' + (pickForce === 'off' ? 'выключен' : 'включён'));
 				});
 			});
-			if (netPending()) steps.push(function() {
+			if ((!only || only === 'net') && netPending()) steps.push(function() {
 				var c = pickCanary !== null ? pickCanary : curCanary(), r = pickRu || curRu();
 				if (c !== curCanary()) logLines.push('   → ' + (c ? 'Включаем' : 'Выключаем') + ' «Не давать браузерам свой DNS»');
 				if (r !== curRu()) logLines.push('   → Российские сайты: ' + RU_TEXT[r]);
@@ -37016,8 +37042,11 @@ return view.extend({
 			}).then(function() {
 				zm.renderLog(logEl, logLines.join('\n'));
 				busy = false;
-				pickProv = null; pickForce = null; foDraft = null; pickCanary = null; pickRu = null;
-				refresh().then(function() { bootReset(); render(); });
+				if (!only) { pickProv = null; pickForce = null; foDraft = null; pickCanary = null; pickRu = null; }
+				else if (only === 'prov') pickProv = null;
+				else if (only === 'force') pickForce = null;
+				else { pickCanary = null; pickRu = null; }
+				refresh().then(function() { if (!only) bootReset(); render(); });
 			});
 		}
 
@@ -37162,6 +37191,7 @@ return view.extend({
 					if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
 					pickProv = id === curMain() ? null : id;
 					render();
+					if (pickProv) applyPick('prov');
 				};
 				var mirror = function(id) {
 					var el = E('span', { 'class': 'zm-lat' });
@@ -37530,6 +37560,7 @@ return view.extend({
 						if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
 						pickForce = f.id === curForce() ? null : f.id;
 						render();
+						if (pickForce) applyPick('force');
 					}
 				}, f.label);
 			})));
@@ -37565,6 +37596,7 @@ return view.extend({
 					var v = !can;
 					pickCanary = v === curCanary() ? null : v;
 					render();
+					if (netPending()) applyPick('net');
 				}, auto || busy));
 			if (can || auto) netCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Подсказку не слушают только браузеры, где свой DNS включили вручную (например, Firefox в режиме «Максимальная защита»).'));
 			if (!(data.installed && !data.forkozz) && curRu() === 'off' && !pickRu) return;
@@ -37576,6 +37608,7 @@ return view.extend({
 				if (v === 'isp' && !isp.length) { zm.toast('Провайдер не выдал роутеру адреса DNS — выберите Яндекс DNS', 'warning'); return; }
 				pickRu = v === curRu() ? null : v;
 				render();
+				if (netPending()) applyPick('net');
 			}, 'zm-seg-stack') ]));
 			netCard.appendChild(E('p', { 'class': 'zm-hint' }, ru === 'yandex'
 				? 'Адреса сайтов в .ru, .su и .рф роутер узнаёт у Яндекс DNS (77.88.8.8, 77.88.8.1) — российские сайты открываются с ближайших к вам серверов. Эти запросы идут без шифрования, остальные — через DoH.'
@@ -40749,9 +40782,8 @@ return view.extend({
 				var pf = list.filter(function(f) { return f.name === extPick; })[0] || {};
 				var same = extOn && extPick === ext;
 				var btns = [ E('button', { 'class': 'cbi-button cbi-button-positive', 'disabled': (busy || same) ? '' : null, 'click': function() {
-					var go = function() { warpExitAfter = isMain() && data.exit === 'vpn'; act('warp_iface', pf.name, 'Подключаем Steer к ' + pf.name); }, wayPrompt = true;
+					var go = function() { warpExitAfter = isMain() && data.exit === 'vpn'; act('warp_iface', pf.name, 'Подключаем Steer к ' + pf.name); };
 					if (pf.route_all) return zm.ask('У ' + pf.name + ' включено «Весь трафик» — через него уже идёт весь интернет роутера, а не только сервисы Steer.\n\nВсё равно подключить? Выключить можно на вкладке AmneziaWG.').then(function(ok) { if (ok) go(); });
-					if (data.warp_on && !same && wayPrompt) return zm.ask('Пустить сервисы Steer через ' + pf.name + '?\n\n' + (extOn ? 'Интерфейс ' + ext + ' останется на вкладке AmneziaWG как был.' : own ? 'Свой туннель выключится, но сохранится — вернуться к нему можно в один клик.' : 'Автоматические туннели WARP выключатся, но сохранятся — вернуться к ним можно в один клик.')).then(function(ok) { if (ok) go(); });
 					go();
 				} }, same ? 'Сейчас через ' + ext : extOn ? 'Переключить на ' + (pf.name || '') : 'Подключить ' + (pf.name || '')) ];
 				if (cancelFn) btns.push(E('button', { 'class': 'cbi-button', 'click': cancelFn }, 'Отмена'));
@@ -42610,6 +42642,7 @@ return view.extend({
 			var c = cur();
 			if (data.on && p.list === c.list && p.tif === c.tif && p.doh === c.doh) pick = null;
 			renderHero(); renderLevel();
+			if (data.on && pick) job('apply', modeStr(pick), 'Применяем новый список — ход работы виден в окне вывода');
 		}
 
 		var bar = zm.saveBar({
@@ -44288,7 +44321,7 @@ return view.extend({
 							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
 							tsGate('v:' + it.id, function() {
 							busy = true;
-							zm.toast('Выбираем стратегию ' + it.id + '', 'warning');
+							zm.toast('Применяем стратегию ' + it.id + '', 'warning');
 							zm.strategySetV(it.id).then(function(res) {
 								busy = false;
 								if (!zm.notifyStrategyResult(res, it.id)) return;
@@ -44310,7 +44343,7 @@ return view.extend({
 							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
 							tsGate('flowseal:' + it.id, function() {
 							busy = true;
-							zm.toast('Выбираем стратегию ' + it.label + '', 'warning');
+							zm.toast('Применяем стратегию ' + it.label + '', 'warning');
 							zm.strategySetFlowseal(it.id).then(function(r2) {
 								busy = false;
 								if (!zm.notifyStrategyResult(r2, it.id)) return;
@@ -44353,7 +44386,7 @@ return view.extend({
 			function toggleExtra(what, on) {
 				if (busy || extraBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
 				extraBusy = what; renderExtra();
-				zm.toast(what === 'doh' ? (on ? 'Добавляем блок обхода DoH' : 'Убираем блок обхода DoH') : what === 'rkn' ? (on ? 'Скачиваем список РКН' : 'Выключаем списки РКН') : what === 'userlist' ? (on ? 'Переводим стратегию на ваш список' : 'Возвращаем обход для всех сайтов, кроме исключений') : (on ? 'Добавляем блок --wssize' : 'Убираем блок --wssize'), 'warning');
+				zm.toast(what === 'doh' ? (on ? 'Добавляем блок обхода DoH и перезапускаем Zapret' : 'Убираем блок обхода DoH') : what === 'rkn' ? (on ? 'Скачиваем список РКН и перезапускаем Zapret' : 'Выключаем списки РКН') : what === 'userlist' ? (on ? 'Переводим стратегию на ваш список и перезапускаем Zapret' : 'Возвращаем обход для всех сайтов, кроме исключений') : (on ? 'Добавляем блок --wssize' : 'Убираем блок --wssize'), 'warning');
 				zm.zapretOptSet(what + ':' + (on ? 'on' : 'off')).then(function(res) {
 					extraBusy = '';
 					if (!res || res.error) { zm.toast((res && res.error) || 'Роутер не ответил', 'error'); renderExtra(); return; }
@@ -45180,7 +45213,7 @@ return view.extend({
 						zm.toast('Стратегия ' + name + ' применена', 'info');
 						refreshAll();
 					}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
-				}, 'Применить стратегию ' + name + '?');
+				});
 			}
 
 			var WHY_TXT = { ip: 'по IP', dns: 'DNS' };
@@ -45386,7 +45419,7 @@ return view.extend({
 							if (current === it.id) return;
 							tsGate('youtube:' + it.id, function() {
 							busy = true;
-							zm.toast('Выбираем стратегию ' + it.id + '', 'warning');
+							zm.toast('Применяем стратегию ' + it.id + '', 'warning');
 							zm.strategySetYoutube(it.id).then(function(r2) {
 								busy = false;
 								if (!zm.notifyStrategyResult(r2, it.id)) return;
@@ -45450,7 +45483,7 @@ return view.extend({
 			function toggleIpid(on) {
 				if (busy || ipidBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
 				ipidBusy = true; renderIpid();
-				zm.toast(on ? 'Включаем маскировку' : 'Выключаем маскировку', 'warning');
+				zm.toast(on ? 'Включаем маскировку и перезапускаем Zapret' : 'Выключаем маскировку и перезапускаем Zapret', 'warning');
 				zm.zapretOptSet('ipid:' + (on ? 'on' : 'off')).then(function(res) {
 					ipidBusy = false;
 					if (!res || res.error) { zm.toast((res && res.error) || 'Роутер не ответил', 'error'); renderIpid(); return; }
@@ -45565,7 +45598,7 @@ return view.extend({
 							if (data.active && data.current === ('Gv' + n)) return;
 							tsGate('gv:' + n, function() {
 							busy = true;
-							zm.toast('Выбираем игровую стратегию Gv' + n + '', 'warning');
+							zm.toast('Применяем игровую стратегию Gv' + n + '', 'warning');
 							zm.gameSet(String(n)).then(function(res) {
 								busy = false;
 								if (res.error) { zm.toast(res.error, 'error'); return; }
@@ -45693,7 +45726,7 @@ return view.extend({
 							if (data.active && data.current === dv) return;
 							tsGate('dv:' + dv.replace('Dv', ''), function() {
 							busy = true;
-							zm.toast('Выбираем стратегию ' + dv + '', 'warning');
+							zm.toast('Применяем стратегию ' + dv + '', 'warning');
 							zm.discordSetDv(dv.replace('Dv', '')).then(function(res) {
 								busy = false;
 								if (!zm.notifyStrategyResult(res, dv)) return;
@@ -45735,7 +45768,7 @@ return view.extend({
 							if (s.id === cur || scriptBusy) return;
 							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
 							scriptBusy = 'script'; renderScripts();
-							zm.toast(s.id === 'off' ? 'Убираем скрипт' : 'Скачиваем ' + s.label, 'warning');
+							zm.toast(s.id === 'off' ? 'Убираем скрипт и перезапускаем Zapret' : 'Скачиваем ' + s.label + ' и перезапускаем Zapret', 'warning');
 							zm.zapretOptSet('script:' + s.id).then(function(r) {
 								scriptBusy = '';
 								if (!r || r.error) { zm.toast((r && r.error) || 'Роутер не ответил', 'error'); renderScripts(); return; }
@@ -45991,6 +46024,7 @@ return view.extend({
 				fn(m);
 				pick = m;
 				renderGrid();
+				if (dirty()) save(); else pick = null;
 			}
 			var bar = zm.saveBar({
 				saveLabel: 'Применить',
@@ -46032,6 +46066,7 @@ return view.extend({
 				if (busy) return Promise.resolve(false);
 				var ips = Object.keys(sel()).sort();
 				busy = true; renderGrid();
+				zm.toast('Применяем исключения и перезапускаем Zapret', 'warning');
 				return zm.exclusionsSet(ips.join(' ')).then(function(res) {
 					busy = false;
 					if (!res || res.error) { zm.toast((res && res.error) || 'Роутер не ответил', 'error'); renderGrid(); return false; }
@@ -46056,7 +46091,7 @@ return view.extend({
 			var card = E('div', { 'class': 'zm-card' }, [
 				E('h3', {}, 'Исключение устройств из Zapret'),
 				grid,
-				E('p', { 'class': 'zm-hint' }, 'Отмеченные устройства ходят мимо Zapret. Отметьте всё нужное и нажмите «Применить» — Zapret перезапустится один раз.'),
+				E('p', { 'class': 'zm-hint' }, 'Включённые устройства ходят мимо Zapret.'),
 				E('div', { 'class': 'zm-actions' }, [
 					E('button', {
 						'class': 'cbi-button',
@@ -46209,10 +46244,10 @@ return view.extend({
 				if (parts.length > 5) parts = parts.slice(0, 5).concat('…');
 				s2Bar.set(pending(), busy, 'Доп. секция, не применено: ' + parts.join(', ') + (d.on ? ' — Zapret перезапустится один раз' : ' — секция выключена, изменения просто сохранятся'), d.on ? 'Применить' : 'Сохранить');
 			}
-			function applyAll(want) {
+			function applyAll(want, stepsOnly) {
 				if (busy || pvBusy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return Promise.resolve(false); }
 				if (optBar.dirty()) { zm.toast('Сначала сохраните или отмените изменения в редакторе стратегии секции', 'warning'); return Promise.resolve(false); }
-				var devs = dirty() ? sel() : null, endOn = want ? want === 'on' : !!(d && d.on);
+				var devs = !stepsOnly && dirty() ? sel() : null, endOn = want ? want === 'on' : !!(d && d.on);
 				if (devs && !keys(devs).length && endOn) { zm.toast('Во включённой секции должно остаться хотя бы одно устройство — или выключите секцию', 'warning'); return Promise.resolve(false); }
 				var txt = serial(q, devs, want);
 				if (!txt) return Promise.resolve(true);
@@ -46223,7 +46258,8 @@ return view.extend({
 				return zm.zsec2Action('batch', txt).then(function(r) {
 					busy = false;
 					if (!r || r.error) { zm.toast((r && r.error) || 'Роутер не ответил', 'error'); renderAll(); return false; }
-					d = r; q = []; pv = null; pick = null;
+					d = r; q = []; pv = null;
+					if (!stepsOnly) pick = null;
 					if (!optBar.dirty()) optBar.reset(String(r.opt || '').replace(/\n+$/, ''));
 					zm.toast(want === 'on' ? 'Дополнительная секция включена' : want === 'off' ? 'Дополнительная секция выключена'
 						: r.on ? 'Изменения секции применены' : 'Изменения секции сохранены — заработают, когда вы включите секцию', 'info');
@@ -46245,6 +46281,7 @@ return view.extend({
 					if (sameStrat(pv, d)) { q = []; pv = null; }
 					if (!optBar.dirty()) optBar.reset(String(V().opt || '').replace(/\n+$/, ''));
 					renderAll();
+					if (q.length) applyAll('', true);
 				}).catch(function() { pvBusy = false; renderAll(); zm.toast('Роутер не ответил', 'error'); });
 			}
 
@@ -46268,7 +46305,7 @@ return view.extend({
 				if (d.fw && d.fw !== 'nftables') head.appendChild(E('div', { 'class': 'zm-zp-note zm-zp-warn' }, [ E('span', {}, 'Дополнительная секция работает только с файрволом nftables, а в настройках Zapret выбран ' + d.fw + '.') ]));
 				var exm = exMap(), selKeys = keys(sel()), n = selKeys.length, ex = selKeys.filter(function(ip) { return exm[ip]; }).length;
 				head.appendChild(zm.swRow(!!d.on, d.on ? 'Секция включена' : 'Включить секцию',
-					d.on ? '' : pending() ? 'Устройства и стратегия выбраны — включите секцию, и всё применится за один перезапуск Zapret.' : 'Выберите устройства и стратегию ниже, затем включите секцию — всё применится за один раз.', toggle, busy || pvBusy || d.fw && d.fw !== 'nftables'));
+					d.on ? '' : 'Выберите устройства и стратегию ниже — они сохранятся, а заработают, когда вы включите секцию.', toggle, busy || pvBusy || d.fw && d.fw !== 'nftables'));
 				var stat = E('div', { 'class': 'zm-s2-stats' });
 				stat.appendChild(E('div', { 'class': 'zm-s2-stat' }, [ E('span', {}, dirty() ? 'Устройства · не применено' : 'Устройства'), E('b', {}, String(n - ex) + (ex ? ' · исключено ' + ex : '')) ]));
 				stat.appendChild(E('div', { 'class': 'zm-s2-stat' }, [ E('span', {}, pv ? 'Стратегия · не применено' : 'Стратегия'), E('b', {}, [ String(V().label || '—') ]) ]));
@@ -46286,6 +46323,7 @@ return view.extend({
 						var m = {}; var s = sel(); Object.keys(s).forEach(function(k) { m[k] = s[k]; });
 						if (m.hasOwnProperty(ip)) delete m[ip]; else m[ip] = name || '';
 						pick = m; renderDevs();
+						if (dirty()) applyAll(''); else pick = null;
 					} });
 			}
 
@@ -46403,7 +46441,7 @@ return view.extend({
 					? (pv ? [ E('span', {}, 'Выбрано, ещё не применено: '), E('b', {}, [ String(pv.label || 'своя') ]), E('span', { 'style': 'opacity:.7' }, [ ' · сейчас: ' + String(d.label || '—') ]) ]
 						: [ E('span', {}, 'Сейчас в секции: '), E('b', {}, [ String(V().label || 'своя') ]) ])
 					: [ E('span', {}, 'Стратегия секции ещё не выбрана — начните с вкладки «Стратегии» ниже') ]));
-				navCard.appendChild(hint('Можно выбрать сразу несколько вещей — стратегию, YouTube, игры, Discord, дополнения, устройства — и применить всё одной кнопкой «Применить» внизу: Zapret перезапустится один раз.'));
+				navCard.appendChild(hint('Стратегия, YouTube, игры, Discord, дополнения и устройства применяются сразу по нажатию.'));
 				navCard.appendChild(hint('Выбор устроен так же, как у основной секции: стратегии v1–v10 и Flowseal, дополнения, YouTube с QUIC, игры с Xtreme и Discord. Всё это действует только на устройства секции — основная стратегия не меняется.'));
 				navCard.appendChild(E('div', { 'class': 'zm-seg zm-seg-wrap zm-s2-nav' }, S2_TABS.map(function(t) {
 					return E('div', { 'class': 'zm-seg-item' + (t.id === s2Tab ? ' zm-active' : ''), 'click': function() {
@@ -56083,8 +56121,7 @@ function renderInstalled(all) {
 					E('td', { 'class': 'bt-td-c' }, body),
 					E('td', { 'class': 'bt-td-a' }, [
 						isCur ? '' : btn('Применить', 'cbi-button-apply', function() {
-							var q = 'Применить стратегию и перезапустить службу?\n\n' + (p ? p.name + '\n' : '') + r.opts;
-							zm.ask(q, { okText: 'Применить' }).then(function(ok) { if (ok) setStrategy(r.opts, p ? (p.label || p.name) : 'Стратегия'); });
+							setStrategy(r.opts, p ? (p.label || p.name) : 'Стратегия');
 						})
 					])
 				]);
