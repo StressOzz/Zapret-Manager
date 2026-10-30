@@ -2,7 +2,7 @@
 # =========================================
 # Zapret Manager by StressOzz
 # =========================================
-ZAPRET_MANAGER_VERSION="9.90"; STR_VERSION_AUTOINSTALL="v7"
+ZAPRET_MANAGER_VERSION="9.91"; STR_VERSION_AUTOINSTALL="v7"
 GREEN="\033[1;32m"; RED="\033[1;31m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
 
 GH_RAW_HOST="https://raw.githubusercontent.com"; GH_MAIN_HOST="https://github.com"
@@ -923,10 +923,17 @@ uci commit firewall >/dev/null 2>&1; /etc/init.d/firewall restart >/dev/null 2>&
 # ==========================================
 # Системное меню
 # ==========================================
-install_zapret_manager_luci() {
-zm_luci_state
-if [ "$ZML_ACT" = remove ]; then
+remove_zapret_manager_luci() {
 echo -e "\n${MAGENTA}Удаляем Zapret Manager для WEB + LuCI${NC}"
+if [ ! -e "$LUCI_EDITION" ] && [ ! -d /opt/zapret-manager-luci ]; then echo -e "Zapret Manager ${GREEN}для ${NC}WEB ${GREEN}+ ${NC}LuCI ${GREEN}не установлен${NC}\n"; return 0; fi
+ZMU_OUT=""; [ -x "$ZMB" ] && ZMU_OUT="$("$ZMB" system_uninstall_panel 2>/dev/null)"
+case "$ZMU_OUT" in
+*'"ok":true'*)
+echo -e "${CYAN}Настройки панели сохраняются ${NC}— после установки всё вернётся"
+n=0; while [ -f /tmp/zm_uninstall_panel.sh ] && [ "$n" -lt 90 ]; do sleep 1; n=$((n + 1)); done ;;
+*'"error"'*)
+echo -e "${RED}$(printf '%s' "$ZMU_OUT" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')${NC}\n"; return 1 ;;
+*)
 [ -x /opt/zapret-manager-luci/backend.sh ] && /opt/zapret-manager-luci/backend.sh redbtn_panel_gone >/dev/null 2>&1
 rm -rf /opt/zapret-manager-luci /usr/lib/zapret-manager* /usr/libexec/rpcd/zapret-manager* \
 	/usr/share/luci/menu.d/luci-app-zapret-manager.json \
@@ -941,8 +948,18 @@ rm -rf /opt/zapret-manager-luci /usr/lib/zapret-manager* /usr/libexec/rpcd/zapre
 [ -s /etc/zm-steer/owned ] || rm -rf /usr/share/zm-redbtn
 uci -q delete uhttpd.zmweb && uci -q commit uhttpd
 /etc/init.d/rpcd restart >/dev/null 2>&1
-/etc/init.d/uhttpd restart >/dev/null 2>&1
-echo -e "Zapret Manager ${GREEN}для ${NC}WEB ${GREEN}+ ${NC}LuCI ${GREEN}удалён!${NC}\n"
+/etc/init.d/uhttpd restart >/dev/null 2>&1 ;;
+esac
+echo "sh <(wget -q -O - ${GH_RAW}/StressOzz/Zapret-Manager/main/Zapret-Manager.sh)" > /usr/bin/zms; chmod +x /usr/bin/zms
+echo "sh <(wget -q -O - ${GH_RAW}/StressOzz/Zapret-Manager/main/ZapretManager_LuCI.sh)" > /usr/bin/zmw; chmod +x /usr/bin/zmw
+rm -f "$ZM_LUCI_CACHE"
+ZMU_FREE="$(df -k /overlay 2>/dev/null | awk 'NR==2 {print $4}')"; [ -n "$ZMU_FREE" ] || ZMU_FREE="$(df -k / 2>/dev/null | awk 'NR==2 {print $4}')"
+echo -e "Zapret Manager ${GREEN}для ${NC}WEB ${GREEN}+ ${NC}LuCI ${GREEN}удалён!${NC}${ZMU_FREE:+ ${CYAN}Свободно на флеше: ${NC}$ZMU_FREE КБ}\n"
+}
+install_zapret_manager_luci() {
+zm_luci_state
+if [ "$ZML_ACT" = remove ]; then
+remove_zapret_manager_luci
 else
 [ "$ZML_ACT" = update ] && echo -e "\n${MAGENTA}Обновляем Zapret Manager для WEB + LuCI${NC} ${ZML_INST:-?} → $ZML_LAST"
 rm -f "$ZM_LUCI_CACHE"
@@ -2006,6 +2023,7 @@ fi
 echo -e "\n${CYAN}1) ${GREEN}Меню${NC} Zapret\n${CYAN}2) ${GREEN}$Z2_ACTION_TEXT${NC} Zapret2\n${CYAN}3) ${GREEN}Меню ${NC}Steer\n${CYAN}4) ${GREEN}Меню ${NC}Mixomo\n${CYAN}5) ${GREEN}Меню ${NC}ByeTube\n${CYAN}6) ${GREEN}Меню ${NC}NetShift\n${CYAN}7) ${GREEN}Меню ${NC}TG WS Proxy\n${CYAN}8) ${GREEN}Меню ${NC}DNS over HTTPS\n${CYAN}9) ${GREEN}Меню управления доменами в ${NC}hosts"
 echo -e "${CYAN}f) ${GREEN}Удалить ${NC}→${GREEN} установить ${NC}→${GREEN} настроить${NC} Zapret\n${CYAN}m) ${GREEN}Системное меню${NC}"; [ "$SHOW_S" = "1" ] && echo -e "${CYAN}s) ${GREEN}$S_ACTION${NC} $S_NAME"
 zm_luci_state; case "$ZML_ACT" in update) echo -e "${CYAN}w)${GREEN} Обновить ${NC}Zapret Manager ${GREEN}для ${NC}WEB ${GREEN}+ ${NC}LuCI ${GREEN}(${NC}${ZML_INST:-?} → $ZML_LAST${GREEN})${NC}" ;; remove) echo -e "${CYAN}w)${GREEN} Удалить ${NC}Zapret Manager ${GREEN}для ${NC}WEB ${GREEN}+ ${NC}LuCI" ;; *) echo -e "${CYAN}w)${GREEN} Установить ${NC}Zapret Manager ${GREEN}для ${NC}WEB ${GREEN}+ ${NC}LuCI" ;; esac
+[ "$ZML_ACT" = update ] && echo -e "${CYAN}w1)${GREEN} Удалить ${NC}Zapret Manager ${GREEN}для ${NC}WEB ${GREEN}+ ${NC}LuCI"
 [ "$SHOW_S" = "2" ] && echo -e "${CYAN}s1) ${GREEN}$S1_ACTION${NC} Zapret\n${CYAN}s2) ${GREEN}$S2_ACTION${NC} Zapret2"; echo -ne "${CYAN}Enter) ${GREEN}Выход${NC}\n\n${YELLOW}Выберите пункт:${NC} " && read choice
 case "$choice" in 999) echo; uninstall_zapret "1"; install_Zapret "1"; curl -fsSL ${GH_RAW}/StressOzz/Test/refs/heads/main/zapret -o "$CONF"; hosts_add "$ALL_BLOCKS"; rm -f "$EXCLUDE_FILE"; wget -q -U "Mozilla/5.0" -O "$EXCLUDE_FILE" "$EXCLUDE_URL"; ZAPRET_RESTART; PAUSE;;
 1) MENU_ZAPRET;;
@@ -2024,5 +2042,6 @@ s1|S1|ы1|Ы1) toggle_zapret1_only;;
 s2|S2|ы2|Ы2) toggle_zapret2_only;; 
 r|R|к|К) show_menu;;
 ц|Ц|W|w) install_zapret_manager_luci;;
+ц1|Ц1|W1|w1) remove_zapret_manager_luci; PAUSE;;
 *) echo; exit 0;; esac; }
 case "$1" in --auto-best) auto_apply_best_strategy; exit 0 ;; esac; while true; do show_menu; done
