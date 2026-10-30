@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.87
+# Version: 4.88
 ZM_VERSION_EOF
 set -e
 
@@ -19533,6 +19533,18 @@ _st_nodes() {
 }
 _st_key_in() { [ -s "$1" ] && ZM_W="$2" awk -F'\t' '$5 == ENVIRON["ZM_W"] { f = 1 } END { exit !f }' "$1"; }
 _st_nodes_kv() { local t; t="$(_st_nodes)" && cut -f1,5 "$t"; }
+_st_key_hidden() { [ -n "$1" ] && _st_nodes_kv | ZM_W="$1" awk -F'\t' '$2 == ENVIRON["ZM_W"]' | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | grep -q .; }
+_st_order_head() {
+	local t hid
+	[ "$(_st_pick)" = ping ] && [ -s "$ST_SUB_ORDER" ] && t="$(_st_nodes)" || return 0
+	hid=" $(cut -f1,5 "$t" | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | tr '\n' ' ') "
+	awk -F'\t' -v h="$hid" -v of="$ST_SUB_ORDER" 'index(h, " " $1 " ") { x[$5] = 1 } END { while ((getline l < of) > 0) if (l != "" && !(l in x)) { print l; exit } }' "$t"
+}
+_st_hidden_drop() {
+	[ -s "$ST_SUB_HOME" ] && _st_key_hidden "$(head -n1 "$ST_SUB_HOME")" && rm -f "$ST_SUB_HOME"
+	[ -s "$ST_SUB_FELL" ] && _st_key_hidden "$(head -n1 "$ST_SUB_FELL")" && rm -f "$ST_SUB_FELL"
+	return 0
+}
 
 _st_sub_names_fix() {
 	local t="$ST_SUB_NODES" node w f
@@ -19945,6 +19957,7 @@ _st_home_tick() {
 	if [ "$cur" = "$home" ] || [ "$(_st_node_pol)" != back ]; then rm -f "$ST_SUB_HOME"; return 0; fi
 	t="$(_st_nodes)" && i="$(ZM_W="$home" awk -F'\t' '$5 == ENVIRON["ZM_W"] { print $1; exit }' "$t")"
 	[ -n "$i" ] || { rm -f "$ST_SUB_HOME"; return 0; }
+	_st_key_hidden "$home" && { rm -f "$ST_SUB_HOME"; return 0; }
 	[ -n "$(find "$st" -mmin -10 2>/dev/null)" ] && return 0
 	mkdir -p "$JOBS_DIR"; : > "$st"
 	( [ "$(steer_sub_probe "$i" 2>/dev/null | jsonfilter -e '@.results[0].ok' 2>/dev/null)" = true ] &&
@@ -19958,6 +19971,7 @@ do_steer_home_back() {
 	home="$(head -n1 "$ST_SUB_HOME" 2>/dev/null)"
 	[ -n "$home" ] || { _rb_say "Возвращаться не на что — выбор узла уже изменён"; return 0; }
 	_st_key_in "$(_st_nodes)" "$home" || { rm -f "$ST_SUB_HOME"; _rb_say "Узла «$home» больше нет в подписке — остаёмся на текущем"; return 0; }
+	_st_key_hidden "$home" && { rm -f "$ST_SUB_HOME"; _rb_say "Узел «$home» скрыт — остаёмся на текущем"; return 0; }
 	prev="$(cat "$ST_SUB_NODE" 2>/dev/null)"; prev="${prev:-auto}"
 	_rb_say "Узел «$home» снова отвечает — возвращаемся на него"
 	logger -t zapret-manager "Steer: узел «$home» снова отвечает — возвращаемся на него"
@@ -20132,6 +20146,7 @@ steer_sub_action() {
 			if [ -s "$ST_SUB_NODE" ] && _st_nodes_kv | ZM_W="$(cat "$ST_SUB_NODE")" awk -F'\t' '$2 == ENVIRON["ZM_W"]' | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | grep -c . | grep -qv '^0$'; then
 				rm -f "$ST_SUB_NODE"
 			fi
+			_st_hidden_drop
 			if [ -s "$ST_SUB" ] && _st_use_vpn && _st_installed && [ ! -f "$ST_OFF" ] && [ -z "$(_st_blocker)" ] && _st_work; then
 				job_start steer do_steer_switch -
 			else
@@ -20164,6 +20179,7 @@ steer_sub_action() {
 				if [ -s "$ST_SUB_NODE" ] && printf '%s\n' "$tsv" | ZM_W="$(cat "$ST_SUB_NODE")" awk -F'\t' '$2 == ENVIRON["ZM_W"]' | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | grep -c . | grep -qv '^0$'; then
 					rm -f "$ST_SUB_NODE"
 				fi
+				_st_hidden_drop
 			fi
 			if _st_use_vpn && _st_installed && [ ! -f "$ST_OFF" ] && [ -z "$(_st_blocker)" ] && _st_work; then
 				job_start steer do_steer_switch -
@@ -20297,7 +20313,7 @@ steer_sub_status() {
 		"$(esc "$up")" "$(esc "$down")" "$(esc "$total")" "$(esc "$expire")" "${mt:-0}" "$list" "$vpn" "$hidden" "$(esc "$(cat "$ST_SUB_EXCL" 2>/dev/null)")" "$(_zm_json_lines "$ST_SUB_HIDE")" "$(esc "$(head -n1 "$ST_SUB_FELL" 2>/dev/null)")" \
 		"$(_st_pick)" "$(_st_pick_iv)" "$(_st_pick_tol)" "$(date -r "$ST_SUB_PING" +%s 2>/dev/null || echo 0)" \
 		"$([ -s "$ST_SUB_PING" ] && awk -F'\t' -v q='"' 'function j(s,    o, i, c, n) { o = ""; n = length(s); for (i = 1; i <= n; i++) { c = substr(s, i, 1); if (c == "\\") o = o "\\\\"; else if (c == "\"") o = o "\\\""; else if (c < " ") o = o " "; else o = o c } return o } { n = j($1); printf "%s%s%s%s:%d", (NR > 1 ? "," : ""), q, n, q, $2 + 0 }' "$ST_SUB_PING")" \
-		"$(esc "$([ "$(_st_pick)" = ping ] && head -n1 "$ST_SUB_ORDER" 2>/dev/null)")" \
+		"$(esc "$(_st_order_head)")" \
 		"$(_st_lat_mode)" "$([ -s "$ST_SUB_PING" ] && awk -F'\t' -v q='"' 'function j(s,    o, i, c, n) { o = ""; n = length(s); for (i = 1; i <= n; i++) { c = substr(s, i, 1); if (c == "\\") o = o "\\\\"; else if (c == "\"") o = o "\\\""; else if (c < " ") o = o " "; else o = o c } return o } $3 == "b" { n = j($1); printf "%s%s%s%s", (c++ ? "," : ""), q, n, q }' "$ST_SUB_PING")" \
 		"$([ -s "$ST_SUB_PING" ] && awk -F'\t' -v q='"' 'function j(s,    o, i, c, n) { o = ""; n = length(s); for (i = 1; i <= n; i++) { c = substr(s, i, 1); if (c == "\\") o = o "\\\\"; else if (c == "\"") o = o "\\\""; else if (c < " ") o = o " "; else o = o c } return o } $3 == "t" { n = j($1); printf "%s%s%s%s", (c++ ? "," : ""), q, n, q }' "$ST_SUB_PING")" \
 		"$(esc "$(head -n1 "$ST_SUB_HOME" 2>/dev/null)")" "$(_st_node_pol)"
@@ -24722,8 +24738,12 @@ _fk_sb_purge() {
 }
 
 _fk_dnsmasq_clean() {
-	local s v o x ch=0 left pre
+	local s v o x ch=0 left pre own bk
 	for s in $(uci -q show dhcp | sed -n "s/^dhcp\.\([^.=]*\)=dnsmasq\$/\1/p"); do
+		own=0
+		[ -n "$(uci -q get "dhcp.$s.netshift_configured")" ] && own=1
+		bk="$(uci -q get "dhcp.$s.netshift_dnsmasq_backup")"
+		[ "$bk" = 1 ] && own=1
 		for pre in netshift; do
 			for o in noresolv cachesize; do
 				if uci -q get "dhcp.$s.${pre}_$o" >/dev/null; then
@@ -24731,7 +24751,11 @@ _fk_dnsmasq_clean() {
 					if [ -n "$v" ]; then uci -q set "dhcp.$s.$o=$v"; else uci -q delete "dhcp.$s.$o"; fi
 					uci -q delete "dhcp.$s.${pre}_$o"
 					ch=1
+				elif [ "$bk" = 1 ] && [ "$(uci -q get "dhcp.$s.${pre}_${o}_set")" != 1 ] && uci -q get "dhcp.$s.$o" >/dev/null; then
+					uci -q delete "dhcp.$s.$o"
+					ch=1
 				fi
+				uci -q get "dhcp.$s.${pre}_${o}_set" >/dev/null && { uci -q delete "dhcp.$s.${pre}_${o}_set"; ch=1; }
 			done
 			if uci -q get "dhcp.$s.${pre}_server" >/dev/null; then
 				v="$(uci -q get "dhcp.$s.${pre}_server")"
@@ -24739,13 +24763,17 @@ _fk_dnsmasq_clean() {
 				for x in $v; do uci -q add_list "dhcp.$s.server=$x"; done
 				uci -q delete "dhcp.$s.${pre}_server"
 				ch=1
+			elif [ "$own" = 1 ] && uci -q get "dhcp.$s.server" >/dev/null; then
+				uci -q delete "dhcp.$s.server"
+				ch=1
 			fi
 		done
 		uci -q get "dhcp.$s.netshift_configured" >/dev/null && { uci -q delete "dhcp.$s.netshift_configured"; ch=1; }
+		uci -q get "dhcp.$s.netshift_dnsmasq_backup" >/dev/null && { uci -q delete "dhcp.$s.netshift_dnsmasq_backup"; ch=1; }
 		for v in $(uci -q get "dhcp.$s.server"); do
 			case "$v" in 127.0.0.4[0-9]|127.0.0.4[0-9]#*) uci -q del_list "dhcp.$s.server=$v"; ch=1 ;; esac
 		done
-		left="$(uci -q get "dhcp.$s.server")"
+		left="$(uci -q get "dhcp.$s.server" | tr ' ' '\n' | grep -v '^/')"
 		if [ -z "$left" ] && [ "$(uci -q get "dhcp.$s.noresolv")" = 1 ]; then
 			uci -q delete "dhcp.$s.noresolv"
 			ch=1
@@ -25144,7 +25172,7 @@ _fk_ru_watch() {
 	uci -q delete netshift.settings.zm_ru_ips
 	for ip in $now; do uci -q add_list "netshift.settings.zm_ru_ips=$ip"; done
 	uci -q commit netshift
-	if [ "$(uci -q get 'dhcp.@dnsmasq[0].netshift_configured')" = 1 ]; then
+	if [ "$(uci -q get 'dhcp.@dnsmasq[0].netshift_configured')" = 1 ] && [ "$(uci -q get netshift.settings.dont_touch_dhcp)" != 1 ]; then
 		sv=""
 		for e in $(uci -q get 'dhcp.@dnsmasq[0].server'); do
 			case "$e" in /ru/*|/su/*|/xn--p1ai/*) ch=1 ;; *) sv="${sv:+$sv }$e" ;; esac
@@ -27525,6 +27553,7 @@ do_fk_dns_fix() {
 	elif [ -x /etc/init.d/netshift ] && /etc/init.d/netshift enabled 2>/dev/null; then
 		echo "==> Перезапускаем Forkozz — он снова направит dnsmasq на себя"
 		_zm_run 180 /etc/init.d/netshift restart >/dev/null 2>&1 || echo "!! Forkozz перезапустился с ошибкой — смотрите журнал"
+		_fk_fwd_sync
 	fi
 	if [ "$(uci -q get 'dhcp.@dnsmasq[0].netshift_configured')" = 1 ] || [ "$(uci -q get netshift.settings.dont_touch_dhcp)" = 1 ]; then
 		echo "==> Готово: DNS роутера работает"
@@ -32544,6 +32573,10 @@ function cmd_hide(sec) {
 				if (length(real) && !length(filter(real, (t) => !excl_sub_hit(sub_disp(t, raw, px, own), f)))) fail("нельзя скрыть все серверы — тогда Forkozz работать не сможет");
 			}
 		}
+		let hm = home_read(sec), hn = hm ? s(hm.name || hm.tag) : "", fl = "";
+		if (hn != "" && (mode == "links" ? excl_hit(hn, f) : excl_sub_hit(hn, f))) home_drop(sec);
+		try { fl = trim(s(fs.readfile(fell_file(sec)))); } catch (e) { fl = ""; }
+		if (fl != "" && (mode == "links" ? excl_hit(fl, f) : excl_sub_hit(fl, f))) try { fs.unlink(fell_file(sec)); } catch (e) {}
 		if (length(names)) c.set(CFG, sec, "zm_hide", names); else c.delete(CFG, sec, "zm_hide");
 		if (xstr != null) {
 			if (xstr != "") c.set(CFG, sec, "zm_exclude", xstr); else c.delete(CFG, sec, "zm_exclude");
@@ -32583,6 +32616,14 @@ function mlkem_link(l) {
 }
 function mlkem_core_ok() { return rl_core(); }
 
+const DNS_IN = "127.0.0.42";
+function dm_first() {
+	let dir = getenv("ZM_FK_CONFDIR"), c = dir ? uci.cursor(dir) : uci.cursor(), r = null;
+	c.load("dhcp");
+	c.foreach("dhcp", "dnsmasq", (x) => { if (r == null) r = x; });
+	return r || {};
+}
+
 function cmd_diag() {
 	let checks = [];
 	function add(v, what, why) { push(checks, { verdict: v, what, why: why || "" }); }
@@ -32592,15 +32633,17 @@ function cmd_diag() {
 	add(nft ? "ok" : "fail", "Служба Forkozz", nft ? "запущена" + (en ? " и включена в автозапуск" : ", но не в автозапуске") : "не запущена — нажмите «Включить»");
 	add(sbr ? "ok" : "fail", "sing-box", sbr ? "работает" : "не работает — посмотрите журнал ниже");
 	let sb = jcmd(BIN + " get_sing_box_status") || {};
-	if (int(sb.dns_configured) == 1) add("ok", "DNS роутера", "запросы идут через Forkozz");
-	else {
-		let ks0 = cursor().get_all(CFG, "settings") || {};
-		let dm = fs.access("/usr/sbin/dnsmasq") && fs.access("/etc/init.d/dnsmasq"), dmr = dm && sh("pidof dnsmasq") != "";
-		if (!dm) push(checks, { verdict: "fail", what: "DNS роутера", why: "dnsmasq не установлен — у роутера нет DNS, а устройства не получают адреса по DHCP", fix: "dns_fix" });
-		else if (!dmr) push(checks, { verdict: "fail", what: "DNS роутера", why: "dnsmasq не запущен — сайты по именам не открываются", fix: "dns_fix" });
-		else if (flag(ks0.dont_touch_dhcp)) add("warn", "DNS роутера", "включено «Не менять настройки DNS роутера» — направьте dnsmasq на 127.0.0.42 вручную, иначе сайты по доменам пойдут мимо Forkozz");
-		else push(checks, { verdict: "fail", what: "DNS роутера", why: "dnsmasq не направлен на Forkozz — сайты по доменам идут мимо него", fix: "dns_fix" });
-	}
+	let ks0 = cursor().get_all(CFG, "settings") || {};
+	let dm = fs.access("/usr/sbin/dnsmasq") && fs.access("/etc/init.d/dnsmasq"), dmr = dm && sh("pidof dnsmasq") != "";
+	let dsv = rawlist(dm_first().server), dmain = filter(dsv, (x) => index(x, "/") != 0), dzone = filter(dsv, (x) => index(x, "/") == 0);
+	let dok = int(sb.dns_configured) == 1 || (length(dmain) == 1 && dmain[0] == DNS_IN);
+	let ru = index([ "yandex", "isp" ], s(ks0.zm_ru)) >= 0 ? s(ks0.zm_ru) : "", rz = filter(dzone, (x) => index(RU_ZONES, fwd_zone(x)) >= 0);
+	if (!dm) push(checks, { verdict: "fail", what: "DNS роутера", why: "dnsmasq не установлен — у роутера нет DNS, а устройства не получают адреса по DHCP", fix: "dns_fix" });
+	else if (!dmr) push(checks, { verdict: "fail", what: "DNS роутера", why: "dnsmasq не запущен — сайты по именам не открываются", fix: "dns_fix" });
+	else if (dok && ru != "" && !length(rz) && !flag(ks0.dont_touch_dhcp)) push(checks, { verdict: "warn", what: "DNS роутера", why: "запросы идут через Forkozz, но российские сайты пока не переключены на " + (ru == "yandex" ? "Яндекс DNS" : "DNS провайдера"), fix: "dns_fix" });
+	else if (dok) add("ok", "DNS роутера", "запросы идут через Forkozz" + (ru == "yandex" && length(rz) ? ", российские сайты — через Яндекс DNS" : ru == "isp" && length(rz) ? ", российские сайты — через DNS провайдера" : ""));
+	else if (flag(ks0.dont_touch_dhcp)) add("warn", "DNS роутера", "включено «Не менять настройки DNS роутера» — направьте dnsmasq на 127.0.0.42 вручную, иначе сайты по доменам пойдут мимо Forkozz");
+	else push(checks, { verdict: "fail", what: "DNS роутера", why: "dnsmasq не направлен на Forkozz — сайты по доменам идут мимо него", fix: "dns_fix" });
 	let fk = jcmd(BIN + " check_fakeip") || {};
 	add(fk.fakeip ? "ok" : "warn", "FakeIP", fk.fakeip ? "работает (" + s(fk.IP) + ")" : "тестовый домен не получил адрес FakeIP");
 	if (sbr) {
