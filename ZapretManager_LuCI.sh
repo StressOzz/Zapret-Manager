@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.97
+# Version: 4.98
 ZM_VERSION_EOF
 set -e
 
@@ -354,6 +354,27 @@ _zm_fetch_ok() {
 	return 0
 }
 _zm_fetch() {
+	_zm_fetch_one "$@" && return 0
+	[ -n "$ZM_ARCH_FB" ] || return 1
+	case "$1" in *"$ZM_A73"*) ;; *) return 1 ;; esac
+	case "$1" in *kmod*|*amneziawg*) return 1 ;; esac
+	case "$ZM_FETCH_ERR" in *"(HTTP 404)"*|*"(HTTP 410)"*) ;; *) return 1 ;; esac
+	[ "$(_zm_arch)" = "$ZM_A73" ] || return 1
+	local a u e="$ZM_FETCH_ERR"
+	for a in $ZM_A73_ALTS; do
+		u="$(printf '%s' "$1" | sed "s/$ZM_A73/$a/g")"
+		if _zm_fetch_one "$u" "$2" "$3" "$4"; then
+			ZM_ARCH_USED="$a"
+			echo "   · Сборки для $ZM_A73 нет — взята совместимая $a" >&2
+			_zm_arch_accept "$a"
+			return 0
+		fi
+		case "$ZM_FETCH_ERR" in *"(HTTP 404)"*|*"(HTTP 410)"*) ;; *) return 1 ;; esac
+	done
+	ZM_FETCH_ERR="$e"
+	return 1
+}
+_zm_fetch_one() {
 	local u="$1" o="$2" tm="${3:-120}" rg="$4" ef code rc e i
 	ZM_FETCH_ERR=""; ZM_FETCH_SIZE=0
 	ef="$o.zmerr"
@@ -820,6 +841,42 @@ _tg_arch_init() {
 	[ -n "$TG_ARCH" ] && return 0
 	if [ "$PKG" = "opkg" ]; then TG_ARCH="$(opkg print-architecture 2>/dev/null | awk '{print $2}' | tail -n1)"
 	else TG_ARCH="$(apk --print-arch 2>/dev/null)"; fi
+}
+
+ZM_A73="aarch64_cortex-a73"
+ZM_A73_ALTS="aarch64_cortex-a53 aarch64_generic"
+_zm_arch() { awk -F\' '/DISTRIB_ARCH/ {print $2}' /etc/openwrt_release 2>/dev/null; }
+_zm_arch_alts() {
+	echo "$1"
+	[ "$1" = "$ZM_A73" ] && printf '%s\n' $ZM_A73_ALTS
+	return 0
+}
+_zm_arch_accept() {
+	local a="$1" c="${ZM_OPKG_CONF:-/etc/opkg.conf}" f="${ZM_APK_ARCH:-/etc/apk/arch}" n
+	case " $ZM_A73_ALTS " in *" $a "*) ;; *) return 0 ;; esac
+	[ "$(_zm_arch)" = "$ZM_A73" ] || return 0
+	if [ "$PKG" = apk ]; then
+		[ -d "${f%/*}" ] || return 0
+		if [ ! -s "$f" ]; then
+			n="$(apk --print-arch 2>/dev/null)"
+			[ -n "$n" ] || return 0
+			echo "$n" > "$f" || return 1
+		fi
+		grep -qx "$a" "$f" && return 0
+		{ [ -z "$(tail -c 1 "$f")" ] || echo; echo "$a"; } >> "$f" || return 1
+	else
+		[ -f "$c" ] || return 0
+		if ! grep -q '^[[:space:]]*arch[[:space:]]' "$c"; then
+			n="$(opkg print-architecture 2>/dev/null | awk '$1 == "arch" && NF >= 3 { print "arch " $2 " " $3 }')"
+			case "$n" in *"$ZM_A73"*) ;; *) return 0 ;; esac
+			{ [ -z "$(tail -c 1 "$c")" ] || echo; printf '%s\n' "$n"; } >> "$c" || return 1
+		fi
+		grep -qE "^[[:space:]]*arch[[:space:]]+$a([[:space:]]|\$)" "$c" && return 0
+		{ [ -z "$(tail -c 1 "$c")" ] || echo; echo "arch $a 5"; } >> "$c" || return 1
+	fi
+	echo "   · Разрешили ставить пакеты $a — на $ZM_A73 они работают (тот же набор команд ARMv8.0)" >&2
+	logger -t zapret-manager "Разрешены пакеты $a (совместимы с $ZM_A73)"
+	return 0
 }
 
 ZM_NL='
@@ -2117,7 +2174,7 @@ _do_install_zapret_core() {
 		echo "ОШИБКА: установлен Zapret2, он несовместим с Zapret — сначала удалите Zapret2"
 		return 1
 	fi
-	local ver="$ZAPRET_VER" arch url tmp
+	local ver="$ZAPRET_VER" arch url tmp ZM_ARCH_FB=1
 	echo "==> Ставим Zapret $ver"
 	arch="$(awk -F\' '/DISTRIB_ARCH/ {print $2}' /etc/openwrt_release)"
 	url="${GH_MAIN}/remittor/zapret-openwrt/releases/download/v${ver}/zapret_v${ver}_${arch}.zip"
@@ -7048,7 +7105,15 @@ _gh_latest_tag() {
 	curl -Ls --connect-timeout 5 --max-time 12 -o /dev/null -w '%{url_effective}' "https://github.com/$1/releases/latest" 2>/dev/null |
 		sed -n 's#.*/releases/tag/##p' | head -n1 | grep -E '^[vV]?[0-9]+(\.[0-9]+)+(-rev[0-9]+)?$'
 }
-_tg_url_ok() { curl -sfIL --connect-timeout 6 --max-time 15 -o /dev/null "$1" 2>/dev/null; }
+_tg_url_ok1() { curl -sfIL --connect-timeout 6 --max-time 15 -o /dev/null "$1" 2>/dev/null; }
+_tg_url_ok() {
+	local a
+	_tg_url_ok1 "$1" && return 0
+	case "$1" in *"$ZM_A73"*) ;; *) return 1 ;; esac
+	[ "$(_zm_arch)" = "$ZM_A73" ] || return 1
+	for a in $ZM_A73_ALTS; do _tg_url_ok1 "$(printf '%s' "$1" | sed "s/$ZM_A73/$a/g")" && return 0; done
+	return 1
+}
 
 _tg_mt_url() {
 	local sfx="$3" raz="ipk" arch
@@ -8004,7 +8069,7 @@ _tg_watch() {
 do_tg_install_mtproto() {
 	_ensure_deps
 	echo "==> Устанавливаем TG WS Proxy MTProto"
-	local raz url tmp tag ver cur rev fb=""
+	local raz url tmp tag ver cur rev fb="" ZM_ARCH_FB=1
 	raz="ipk"; [ "$PKG" = "apk" ] && raz="apk"
 	echo "==> Узнаём последнюю версию на GitHub ($TG_REPO_MT)"
 	tag="$(ZM_VER_FORCE=1 _zm_cached tg_mt _tg_tag_mt)"
@@ -8235,7 +8300,7 @@ tgws_status() {
 do_tgws_install() {
 	_ensure_deps
 	echo "==> Устанавливаем sTGWS"
-	local ver arch file tmp
+	local ver arch file tmp ZM_ARCH_FB=1
 	echo "==> Узнаём последнюю версию sTGWS"
 	ver="$(ZM_VER_FORCE=1 _zm_cached tgws _tgws_latest)"
 	[ -n "$ver" ] || { [ -n "$ZM_AU" ] && { echo "ОШИБКА: не удалось узнать последнюю версию — обновление отложено, стоящая версия не тронута"; return 1; }; ver="$TGWS_VERSION"; }
@@ -9925,7 +9990,7 @@ _mt_files() {
 }
 
 _mt_install() {
-	local arch tag file url url2 tmp page n=0 ok=0
+	local arch tag file url url2 tmp page n=0 ok=0 ZM_ARCH_FB=1
 	arch="$(_mt_arch)"
 	[ -n "$arch" ] || { echo "!! Не удалось определить архитектуру роутера"; return 1; }
 	tag="$(_mt_tag_now)" || { echo "!! Не удалось узнать последнюю версию MagiTrickle — GitHub не ответил"; return 1; }
@@ -11848,15 +11913,24 @@ _bytetube_install_byedpi() {
 	rel_mm=$(echo "$DISTRIB_RELEASE" | cut -d. -f1,2)
 	echo "==> Ищем пакет byedpi ($arch, .$RAZ) в $BYEDPI_REPO"
 	json=$(_bytetube_fetch "https://api.github.com/repos/$BYEDPI_REPO/releases?per_page=40" - 2>/dev/null)
-	cands=$(printf '%s\n' "$json" \
-		| grep -o '"browser_download_url": *"[^"]*"' \
-		| sed 's/^[^:]*: *"//; s/"$//' \
-		| grep -E "/byedpi_[^/]*_${arch}\.${RAZ}\$")
-	url=$(printf '%s\n' "$cands" | grep -F "$rel_mm" | head -n 1)
-	[ -n "$url" ] || url=$(printf '%s\n' "$cands" | head -n 1)
+	local a pa=""
+	url=""
+	for a in $(_zm_arch_alts "$arch"); do
+		cands=$(printf '%s\n' "$json" \
+			| grep -o '"browser_download_url": *"[^"]*"' \
+			| sed 's/^[^:]*: *"//; s/"$//' \
+			| grep -E "/byedpi_[^/]*_${a}\.${RAZ}\$")
+		url=$(printf '%s\n' "$cands" | grep -F "$rel_mm" | head -n 1)
+		[ -n "$url" ] || url=$(printf '%s\n' "$cands" | head -n 1)
+		[ -n "$url" ] && { pa="$a"; break; }
+	done
 	if [ -z "$url" ]; then
 		echo "ОШИБКА: пакет byedpi для $arch (.$RAZ) не найден"
 		return 1
+	fi
+	if [ "$pa" != "$arch" ]; then
+		echo "   · Сборки для $arch нет — берём совместимую $pa"
+		_zm_arch_accept "$pa"
 	fi
 	echo "==> Скачиваем $url"
 	mkdir -p /tmp/ytb-dl
@@ -15160,9 +15234,18 @@ stl_engine_install() {
 	STL_NEW=""; STL_PKGS="$pkgs"
 	for p in $pkgs; do _pkg_is_installed "$p" || STL_NEW="$STL_NEW $p"; done
 	mkdir -p "$STL_TMP"
+	local pa a
 	for p in $pkgs; do
-		f="$STL_TMP/$p-$ver-1_$arch.$RAZ"
-		_stl_fetch "$ver" "$p-$ver-1_$arch.$RAZ" "$f" || { rm -f $files; echo "ОШИБКА: не скачался пакет $p $ver для $arch"; return 1; }
+		pa=""
+		for a in $(_zm_arch_alts "$arch"); do
+			f="$STL_TMP/$p-$ver-1_$a.$RAZ"
+			_stl_fetch "$ver" "$p-$ver-1_$a.$RAZ" "$f" && { pa="$a"; break; }
+		done
+		[ -n "$pa" ] || { rm -f $files; echo "ОШИБКА: не скачался пакет $p $ver для $arch"; return 1; }
+		if [ "$pa" != "$arch" ]; then
+			_stl_say "Сборки $p для $arch нет — берём совместимую $pa"
+			_zm_arch_accept "$pa"
+		fi
 		files="$files $f"
 	done
 	stl_enabled && was_on=1
@@ -22955,7 +23038,7 @@ _tsc_fetch() {
 }
 
 _tsc_gh_latest() {
-	local f="$JOBS_DIR/tsc.ver.$$" v
+	local f="$JOBS_DIR/tsc.ver.$$" v ZM_ARCH_FB=1
 	mkdir -p "$JOBS_DIR"
 	_tsc_fetch "$(_tsc_arch)/version" "$f" "$TSC_GH_BASES" 15 || return 1
 	v="$(head -c 64 "$f" | tr -d ' \r\n')"
@@ -22967,7 +23050,7 @@ _tsc_gh_latest() {
 _tsc_vnum() { printf '%s' "$1" | sed 's/-r[0-9]*$//; s/[^0-9.].*$//'; }
 
 _tsc_install_gh() {
-	local arch ver f sum want got
+	local arch ver f sum want got ZM_ARCH_FB=1
 	arch="$(_tsc_arch)"
 	[ -n "$arch" ] || { echo "   · Не удалось узнать архитектуру роутера"; return 1; }
 	echo "   → Архитектура: $arch, ищем сборку на GitHub"
@@ -24524,8 +24607,12 @@ _fk_naive_install() {
 	_zm_gh_get "https://api.github.com/repos/klzgrad/naiveproxy/releases/latest" "$d/rel.json" "" 30 || { rm -rf "$d"; echo "GitHub не ответил — ни напрямую, ни через WARP"; return 1; }
 	rel="$(jq -r '.tag_name // empty' "$d/rel.json" 2>/dev/null)"
 	[ -n "$rel" ] || { rm -rf "$d"; echo "GitHub прислал непонятный ответ"; return 1; }
-	asset="naiveproxy-$rel-openwrt-$arch.tar.xz"
-	url="$(jq -r --arg n "$asset" '[.assets[]? | select(.name == $n) | .browser_download_url] | first // empty' "$d/rel.json")"
+	local a
+	for a in $(_zm_arch_alts "$arch"); do
+		asset="naiveproxy-$rel-openwrt-$a.tar.xz"
+		url="$(jq -r --arg n "$asset" '[.assets[]? | select(.name == $n) | .browser_download_url] | first // empty' "$d/rel.json")"
+		[ -n "$url" ] && { [ "$a" = "$arch" ] || echo "   · Сборки NaiveProxy для $arch нет — берём совместимую $a"; arch="$a"; break; }
+	done
 	dig="$(jq -r --arg n "$asset" '[.assets[]? | select(.name == $n) | .digest] | first // empty' "$d/rel.json")"
 	[ -n "$url" ] || { rm -rf "$d"; echo "для архитектуры $arch сборки NaiveProxy нет"; return 1; }
 	if command -v xz >/dev/null 2>&1; then unx="xz -dc"
@@ -29599,6 +29686,7 @@ ZM_MULTI_EOF
 }
 
 OW_LEASES="${ZM_OW_LEASES:-/tmp/dhcp.leases}"
+OW_NAMES="$ZM_STATE_DIR/ow.names"
 OW_V6_BAK="$ZM_STATE_DIR/ipv6.off"
 OW_RB_TAG="# zm-sched-reboot"
 OW_V6_KEYS="network.wan6.disabled network.wan.ipv6 dhcp.lan.ra dhcp.lan.dhcpv6 dhcp.lan.ndp"
@@ -29692,10 +29780,40 @@ _ow_wchans() {
 	fi
 	echo "$o"
 }
+OW_WCONF="${ZM_OW_WCONF:-/etc/config/wireless}"
+OW_WGUARD="$ZM_STATE_DIR/wifi.guard"
+OW_WROLL="$ZM_STATE_DIR/wifi.rollback"
+_ow_wup() { ubus -t 5 call network.wireless status 2>/dev/null | jsonfilter -e "@.$1.up" 2>/dev/null; }
+_ow_wfail() { ubus -t 5 call network.wireless status 2>/dev/null | jsonfilter -e "@.$1.retry_setup_failed" 2>/dev/null; }
+_ow_txreg() {
+	local r="$1" ifn="$2" ch="$3" band="$4" phy=""
+	command -v iw >/dev/null 2>&1 || return 0
+	[ -n "$ifn" ] && phy="$(cat "/sys/class/net/$ifn/phy80211/name" 2>/dev/null)"
+	[ -n "$phy" ] || phy="$(iwinfo nl80211 phyname "$r" 2>/dev/null)"
+	[ -n "$phy" ] || return 0
+	iw phy "$phy" info 2>/dev/null | awk -v ch="$ch" -v band="$band" '
+		/disabled/ { next }
+		match($0, /[0-9]+(\.[0-9]+)? MHz \[[0-9]+\] \([0-9]+(\.[0-9]+)? dBm\)/) {
+			n = split(substr($0, RSTART, RLENGTH), a, /[][ ()]+/)
+			f = a[1] + 0; c = a[3] + 0; p = int(a[4] + 0)
+			if (band == "2g" && (f < 2400 || f > 2500)) next
+			if (band == "5g" && (f < 4900 || f > 5900)) next
+			if (band == "6g" && (f < 5925 || f > 7125)) next
+			if (band == "60g" && f < 50000) next
+			if (ch != "" && c == ch) { print p; done = 1; exit }
+			if (p > m) m = p
+		}
+		END { if (!done && m > 0) print m }'
+}
 _ow_wifi_json() {
-	local r i first=1 band lab ifn on ch cur txp txm enc ssid key chans info
-	printf '"wifi":{"present":%s,"country":"%s","radios":[' "$([ -n "$(_ow_wdevs)" ] && command -v wifi >/dev/null 2>&1 && echo true || echo false)" \
-		"$(esc "$(uci -q get "wireless.$(_ow_wdevs | head -n1).country")")"
+	local r i first=1 band lab ifn on ch cur txp txm txr txc enc ssid key chans info rb="null" g=false
+	if [ -s "$OW_WROLL" ]; then
+		set -- $(head -n1 "$OW_WROLL")
+		_ow_int "$1" && rb="$(printf '{"at":%s,"radios":"%s"}' "$1" "$(shift; echo "$*")")"
+	fi
+	[ -s "$OW_WGUARD" ] && kill -0 "$(cat "$OW_WGUARD" 2>/dev/null)" 2>/dev/null && g=true
+	printf '"wifi":{"present":%s,"country":"%s","guard":%s,"rollback":%s,"radios":[' "$([ -n "$(_ow_wdevs)" ] && command -v wifi >/dev/null 2>&1 && echo true || echo false)" \
+		"$(esc "$(uci -q get "wireless.$(_ow_wdevs | head -n1).country")")" "$g" "$rb"
 	for r in $(_ow_wdevs); do
 		i="$(_ow_wap "$r")" || i=""
 		band="$(_ow_wband "$r")"
@@ -29703,25 +29821,29 @@ _ow_wifi_json() {
 		on=true
 		[ "$(uci -q get "wireless.$r.disabled")" = 1 ] && on=false
 		[ -n "$i" ] && [ "$(uci -q get "wireless.$i.disabled")" = 1 ] && on=false
-		ifn=""; cur=""; txm=""; info=""
+		ifn=""; cur=""; txm=""; txc=""; info=""
 		[ -n "$i" ] && [ "$on" = true ] && ifn="$(_ow_wifname "$r" "$i")"
 		if [ -n "$ifn" ] && command -v iwinfo >/dev/null 2>&1; then
 			info="$(iwinfo "$ifn" info 2>/dev/null)"
 			cur="$(printf '%s\n' "$info" | sed -n 's/.*Channel: *\([0-9][0-9]*\).*/\1/p' | head -n1)"
+			txc="$(printf '%s\n' "$info" | sed -n 's/.*Tx-Power: *\([0-9][0-9]*\) *dBm.*/\1/p' | head -n1)"
 			txm="$(iwinfo "$ifn" txpowerlist 2>/dev/null | sed -n 's/^[* ]*\([0-9][0-9]*\) dBm.*/\1/p' | sort -n | tail -n1)"
 		fi
 		ch="$(uci -q get "wireless.$r.channel")"; [ -n "$ch" ] || ch=auto
 		txp="$(uci -q get "wireless.$r.txpower")"
 		_ow_int "$txp" || txp=""
 		_ow_int "$txm" || txm=""
+		_ow_int "$txc" || txc=""
+		txr="$(_ow_txreg "$r" "$ifn" "${cur:-$(_ow_int "$ch" && echo "$ch")}" "$band")"
+		_ow_int "$txr" && [ "$txr" -ge 5 ] && [ "$txr" -le 36 ] || txr=""
 		chans="$(_ow_wchans "$ifn" "$r" "$band")"
 		ssid=""; key=""; enc=""
 		if [ -n "$i" ]; then
 			ssid="$(uci -q get "wireless.$i.ssid")"; key="$(uci -q get "wireless.$i.key")"; enc="$(uci -q get "wireless.$i.encryption")"
 		fi
 		[ "$first" = 1 ] || printf ','; first=0
-		printf '{"id":"%s","iface":"%s","band":"%s","label":"%s","on":%s,"channel":"%s","cur":"%s","chans":[%s],"txp":"%s","txmax":"%s","ssid":"%s","key":"%s","enc":"%s","htmode":"%s"}' \
-			"$(esc "$r")" "$(esc "$i")" "$band" "$lab" "$on" "$(esc "$ch")" "$cur" "$chans" "$txp" "$txm" \
+		printf '{"id":"%s","iface":"%s","band":"%s","label":"%s","on":%s,"channel":"%s","cur":"%s","chans":[%s],"txp":"%s","txmax":"%s","txreg":"%s","txcur":"%s","ssid":"%s","key":"%s","enc":"%s","htmode":"%s"}' \
+			"$(esc "$r")" "$(esc "$i")" "$band" "$lab" "$on" "$(esc "$ch")" "$cur" "$chans" "$txp" "$txm" "$txr" "$txc" \
 			"$(esc "$ssid")" "$(esc "$key")" "$(esc "$enc")" "$(esc "$(uci -q get "wireless.$r.htmode")")"
 	done
 	printf ']}'
@@ -29748,7 +29870,10 @@ _ow_wifi_set() {
 			w="$(printf '%s' "$ssid" | wc -c | tr -d ' ')"
 			[ "$w" -ge 1 ] && [ "$w" -le 32 ] || { printf '{"error":"%s"}\n' "$(esc "Имя сети $(_ow_rlab "$r") — от 1 до 32 символов")"; return 1; }
 			w="$(printf '%s' "$key" | wc -c | tr -d ' ')"
-			if [ "$w" = 64 ]; then
+			enc="$([ -n "$i" ] && uci -q get "wireless.$i.encryption")"
+			case "$enc" in psk*|sae*) ;; ''|none) [ "$w" = 0 ] && w=skip ;; *) w=skip ;; esac
+			if [ "$w" = skip ]; then :
+			elif [ "$w" = 64 ]; then
 				case "$key" in *[!0-9A-Fa-f]*) printf '{"error":"%s"}\n' "$(esc "Пароль $(_ow_rlab "$r"): 64 символа можно только шестнадцатеричными цифрами")"; return 1 ;; esac
 			else
 				[ "$w" -ge 8 ] && [ "$w" -le 63 ] || { printf '{"error":"%s"}\n' "$(esc "Пароль $(_ow_rlab "$r") — от 8 до 63 символов")"; return 1; }
@@ -29767,7 +29892,7 @@ _ow_wifi_set() {
 		fi
 		k=$((k + 1))
 	done
-	[ -n "$c" ] && for r in $(_ow_wdevs); do uci -q set "wireless.$r.country=$c"; done
+	[ -n "$c" ] && for r in $(_ow_wdevs); do [ "$(uci -q get "wireless.$r.country")" = "$c" ] || uci -q set "wireless.$r.country=$c"; done
 	k=0
 	while [ "$k" -lt "$n" ]; do
 		r="$(_ow_jf "$d" "@.radios[$k].id")"
@@ -29783,27 +29908,69 @@ _ow_wifi_set() {
 			uci -q set "wireless.$i.network=lan"
 		fi
 		if [ "$on" = true ]; then
-			uci -q delete "wireless.$r.disabled"
-			uci -q delete "wireless.$i.disabled"
+			[ -n "$(uci -q get "wireless.$r.disabled")" ] && uci -q delete "wireless.$r.disabled"
+			[ -n "$i" ] && [ -n "$(uci -q get "wireless.$i.disabled")" ] && uci -q delete "wireless.$i.disabled"
 		else
-			uci -q set "wireless.$r.disabled=1"
+			[ "$(uci -q get "wireless.$r.disabled")" = 1 ] || uci -q set "wireless.$r.disabled=1"
 		fi
-		[ "$(uci -q get "wireless.$r.channel")" = "$ch" ] || uci -q set "wireless.$r.channel=$ch"
-		if [ -n "$txp" ]; then uci -q set "wireless.$r.txpower=$txp"; else uci -q delete "wireless.$r.txpower"; fi
+		[ "$(uci -q get "wireless.$r.channel")" = "$ch" ] || { [ "$ch" = auto ] && [ -z "$(uci -q get "wireless.$r.channel")" ]; } || uci -q set "wireless.$r.channel=$ch"
+		if [ -n "$txp" ]; then
+			[ "$(uci -q get "wireless.$r.txpower")" = "$txp" ] || uci -q set "wireless.$r.txpower=$txp"
+		else
+			[ -n "$(uci -q get "wireless.$r.txpower")" ] && uci -q delete "wireless.$r.txpower"
+		fi
 		if [ "$on" = true ] && [ -n "$i" ] && [ -n "$ssid" ]; then
 			[ "$(uci -q get "wireless.$i.ssid")" = "$ssid" ] || uci -q set "wireless.$i.ssid=$ssid"
-			[ "$(uci -q get "wireless.$i.key")" = "$key" ] || uci -q set "wireless.$i.key=$key"
 			enc="$(uci -q get "wireless.$i.encryption")"
-			case "$enc" in psk2|psk2+*|psk-mixed|psk-mixed+*|sae|sae-mixed|sae-mixed+*) ;; *) uci -q set "wireless.$i.encryption=psk2" ;; esac
+			case "$enc" in
+				''|none) [ -n "$key" ] && { uci -q set "wireless.$i.encryption=psk2"; uci -q set "wireless.$i.key=$key"; } ;;
+				psk*|sae*) [ "$(uci -q get "wireless.$i.key")" = "$key" ] || uci -q set "wireless.$i.key=$key" ;;
+			esac
 		fi
 		k=$((k + 1))
 	done
 	changed="$(uci -q changes wireless)"
 	if [ -z "$changed" ]; then printf '{"ok":true,"same":true}\n'; return 0; fi
+	local exp="" bak="$ZM_STATE_DIR/wireless.zmbak" op
+	mkdir -p "$ZM_STATE_DIR"
+	op="$(cat "$OW_WGUARD" 2>/dev/null)"
+	if _ow_int "$op" && kill -0 "$op" 2>/dev/null; then kill "$op" 2>/dev/null; else cp -f "$OW_WCONF" "$bak" 2>/dev/null; fi
+	[ -s "$bak" ] || cp -f "$OW_WCONF" "$bak" 2>/dev/null
+	for r in $(_ow_wdevs); do
+		[ "$(_ow_wup "$r")" = true ] || continue
+		[ "$(uci -q get "wireless.$r.disabled")" = 1 ] && continue
+		exp="$exp $r"
+	done
 	uci -q commit wireless
+	rm -f "$OW_WROLL"
 	logger -t zapret-manager "Wi-Fi: настройки изменены в панели"
-	command -v wifi >/dev/null 2>&1 && _ow_bg wifi reload
-	printf '{"ok":true}\n'
+	if command -v wifi >/dev/null 2>&1; then
+		( _ow_wifi_guard "$bak" "$exp" ) </dev/null >/dev/null 2>&1 &
+		echo $! > "$OW_WGUARD"
+	fi
+	printf '{"ok":true,"guard":true}\n'
+}
+_ow_wifi_guard() {
+	local bak="$1" exp="$2" t=0 r ok down mx="${OW_GMAX:-150}" sp="${OW_GSTEP:-5}"
+	sleep "${OW_GPRE:-2}"
+	wifi reload >/dev/null 2>&1
+	[ -n "$exp" ] || { rm -f "$bak" "$OW_WGUARD"; return 0; }
+	while [ "$t" -lt "$mx" ]; do
+		sleep "$sp"; t=$((t + sp))
+		ok=1; down=""
+		for r in $exp; do [ "$(_ow_wup "$r")" = true ] || { ok=0; down="$down $r"; }; done
+		[ "$ok" = 1 ] && [ "$t" -ge $((sp * 2)) ] && { rm -f "$bak" "$OW_WGUARD"; return 0; }
+		if [ "$t" -ge 45 ] && [ "$ok" = 0 ]; then
+			for r in $down; do [ "$(_ow_wfail "$r")" = true ] && t="$mx"; done
+		fi
+	done
+	if [ -s "$bak" ]; then
+		cp -f "$bak" "$OW_WCONF"
+		wifi reload >/dev/null 2>&1
+		echo "$(date +%s)$down" > "$OW_WROLL"
+		logger -t zapret-manager "Wi-Fi: после изменения не поднялись:$down — возвращены прежние настройки"
+	fi
+	rm -f "$bak" "$OW_WGUARD"
 }
 _ow_rlab() { case "$(_ow_wband "$1")" in 2g) echo "2,4 ГГц" ;; 5g) echo "5 ГГц" ;; 6g) echo "6 ГГц" ;; *) echo "$1" ;; esac; }
 
@@ -29960,23 +30127,43 @@ _ow_devs_json() {
 	lan="$(_ow_lan)"
 	h="$(_ow_hosts)"
 	printf '"devices":{"lan_ip":"%s","prefix":%s,"list":[' "$(esc "${lan% *}")" "${lan#* }"
-	{ printf '%s\n' "$h" | sed '/^$/d' | sed 's/^/H\t/'; [ -s "$OW_LEASES" ] && awk '{ print "L\t" $2 "\t" $3 "\t" $4 }' "$OW_LEASES"; } | awk -F'\t' '
+	{ printf '%s\n' "$h" | sed '/^$/d' | sed 's/^/H\t/'; [ -s "$OW_LEASES" ] && awk '{ print "L\t" $2 "\t" $3 "\t" $4 }' "$OW_LEASES"; [ -s "$OW_NAMES" ] && sed 's/^/N\t/' "$OW_NAMES"; } | awk -F'\t' '
 		function j(s,    o, i, c, n) { o = ""; n = length(s); for (i = 1; i <= n; i++) { c = substr(s, i, 1); if (c == "\\") o = o "\\\\"; else if (c == "\"") o = o "\\\""; else if (c < " ") o = o " "; else o = o c } return o }
 		$1 == "H" { split($3, ms, " "); for (k in ms) if (ms[k] != "") { hm[ms[k]] = $2; hip[ms[k]] = $4; hn[ms[k]] = $5; if (!(ms[k] in seen)) { seen[ms[k]] = 1; ord[++n] = ms[k] } } next }
 		$1 == "L" { m = tolower($2); if (m !~ /^([0-9a-f][0-9a-f]:){5}[0-9a-f][0-9a-f]$/) next; lip[m] = $3; ln[m] = ($4 == "*" ? "" : $4); if (!(m in seen)) { seen[m] = 1; ord[++n] = m } }
+		$1 == "N" { if ($3 != "") lb[tolower($2)] = $3; next }
 		END {
 			for (i = 1; i <= n; i++) {
 				m = ord[i]; nm = (m in hn && hn[m] != "") ? hn[m] : ln[m]
-				printf "%s{\"mac\":\"%s\",\"name\":\"%s\",\"ip\":\"%s\",\"pinned\":%s,\"pin_ip\":\"%s\",\"online\":%s}", (i > 1 ? "," : ""), m, j(nm), j(lip[m]), (m in hm ? "true" : "false"), j(hip[m]), (m in lip ? "true" : "false")
+				printf "%s{\"mac\":\"%s\",\"name\":\"%s\",\"orig\":\"%s\",\"label\":%s,\"ip\":\"%s\",\"pinned\":%s,\"pin_ip\":\"%s\",\"online\":%s}", (i > 1 ? "," : ""), m, j(m in lb ? lb[m] : nm), j(nm), (m in lb ? "true" : "false"), j(lip[m]), (m in hm ? "true" : "false"), j(hip[m]), (m in lip ? "true" : "false")
 			}
 		}'
 	printf ']}'
+}
+_ow_name_set() {
+	local mac="$1" lb hn s f="$OW_NAMES"
+	lb="$(printf '%s' "$2" | tr -d '\000-\037\\"\177' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]][[:space:]]*/ /g')"
+	[ "$(printf '%s' "$lb" | wc -c)" -le 96 ] || { echo '{"error":"имя слишком длинное — до 32 букв"}'; return 1; }
+	mkdir -p "$ZM_STATE_DIR"
+	{ [ -f "$f" ] && awk -F'\t' -v m="$mac" 'tolower($1) != m' "$f"; [ -n "$lb" ] && printf '%s\t%s\n' "$mac" "$lb"; } > "$f.zm"
+	if [ -s "$f.zm" ]; then mv -f "$f.zm" "$f"; else rm -f "$f.zm" "$f"; fi
+	hn="$(printf '%s' "$lb" | tr ' _' '--')"
+	if printf '%s' "$hn" | grep -Eq '^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$'; then
+		s="$(_ow_hosts | awk -F'\t' -v m="$mac" '{ n = split($2, a, " "); for (i = 1; i <= n; i++) if (a[i] == m) { print $1; exit } }')"
+		if [ -n "$s" ] && [ "$(uci -q get "dhcp.$s.name")" != "$hn" ]; then
+			uci -q set "dhcp.$s.name=$hn"
+			uci -q commit dhcp
+			/etc/init.d/dnsmasq reload >/dev/null 2>&1
+		fi
+	fi
+	printf '{"ok":true,%s}\n' "$(_ow_devs_json)"
 }
 _ow_pin() {
 	local d="$1" op mac ip name lan base pf n nb nl s dup x hit
 	command -v jsonfilter >/dev/null 2>&1 || { echo '{"error":"на роутере нет jsonfilter"}'; return 1; }
 	op="$(_ow_jf "$d" '@.op')"; mac="$(_ow_jf "$d" '@.mac' | tr 'A-F' 'a-f')"; ip="$(_ow_jf "$d" '@.ip')"; name="$(_ow_jf "$d" '@.name')"
 	printf '%s' "$mac" | grep -Eq '^([0-9a-f]{2}:){5}[0-9a-f]{2}$' || { echo '{"error":"неверный MAC-адрес"}'; return 1; }
+	[ "$op" = name ] && { _ow_name_set "$mac" "$name"; return; }
 	if [ "$op" = unpin ]; then
 		hit=0
 		for s in $(_ow_hosts | awk -F'\t' -v m="$mac" '{ n = split($2, a, " "); for (i = 1; i <= n; i++) if (a[i] == m) { print $1; break } }'); do
@@ -48822,8 +49009,10 @@ html.zm-theme-dark .zm-dock .zm-refresh-banner { background: #2f2a1c; color: #e3
 .zm-ow-pw { display: flex; gap: 8px; align-items: center; min-width: 0; }
 .zm-ow-pw .cbi-input-text { flex: 1 1 auto; width: auto; min-width: 0; }
 .zm-ow-pw .cbi-button { margin: 0; flex: 0 0 auto; }
-.zm-ow-seg4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.zm-ow-seg4 .zm-seg-item { text-align: center; padding: 5px 6px; }
+.zm-ow-seg3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.zm-ow-seg3 .zm-seg-item { text-align: center; padding: 5px 6px; }
+.zm-seg-item.zm-ow-dis { opacity: .35; cursor: not-allowed; }
+.zm-ow-txnote { font-size: 12px; opacity: .65; line-height: 1.4; }
 .zm-ow-acts { align-items: center; margin-top: 14px; }
 .zm-ow-grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .zm-ow-grid3 .zm-sx-tile > .zm-ow-pw, .zm-ow-grid3 .zm-sx-tile > .zm-seg { margin-top: 12px; }
@@ -48843,6 +49032,18 @@ html.zm-theme-dark .zm-dock .zm-refresh-banner { background: #2f2a1c; color: #e3
 .zm-ow-tr .zm-badge { margin-right: 8px; }
 .zm-ow-tr .cbi-button { margin: 0; }
 .zm-ow-muted { font-size: 12px; opacity: .55; }
+.zm-ow-name { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 4px; min-width: 0; }
+.zm-ow-name-btn { appearance: none; background: none; border: 0; padding: 2px 4px; margin: -2px -4px; border-radius: 6px; font: inherit; color: inherit; cursor: pointer; display: inline-flex; align-items: baseline; gap: 6px; text-align: left; max-width: 100%; }
+.zm-ow-name-btn b { overflow-wrap: anywhere; }
+.zm-ow-name-btn:hover { background: rgba(127,127,127,.12); }
+.zm-ow-name-btn:focus-visible { outline: 2px solid rgba(34,158,217,.55); outline-offset: 1px; }
+.zm-ow-name-btn[disabled] { cursor: default; }
+.zm-ow-pen { font-size: 12px; opacity: 0; transition: opacity .15s; }
+.zm-ow-name-btn:hover .zm-ow-pen, .zm-ow-name-btn:focus-visible .zm-ow-pen, .zm-ow-noname .zm-ow-pen { opacity: .55; }
+@media (hover: none) { .zm-ow-pen { opacity: .45; } }
+.zm-ow-noname b { font-weight: 500; font-style: italic; opacity: .7; }
+.zm-ow-name-edit { min-width: 260px; }
+.zm-ow-name-in { flex: 1 1 140px !important; min-width: 120px; }
 .zm-ow-rbrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
 .zm-ow-inl { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
 .zm-ow-inl .cbi-input-select { width: auto; min-width: 150px; }
@@ -48876,9 +49077,8 @@ html.zm-theme-dark .zm-ow-link { color: #79c0ff; }
 	.zm-ow-table td { border: 0; padding: 3px 0; }
 	.zm-ow-tr { text-align: left; }
 	.zm-ow-ip { flex: 1 1 auto !important; width: auto !important; }
-	.zm-ow-seg4 .zm-seg-item { padding: 5px 2px; font-size: 12px; }
+	.zm-ow-seg3 .zm-seg-item { padding: 5px 2px; font-size: 12px; }
 }
-@media (max-width: 360px) { .zm-ow-seg4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .zm-hide-grid .zm-node.zm-hide-on { opacity: .62; border-style: dashed; border-color: #cf222e; background: rgba(207,34,46,.07); }
 .zm-hide-grid .zm-node.zm-hide-on .zm-node-name { text-decoration: line-through; }
 .zm-hide-grid .zm-node.zm-hide-lock { opacity: .45; cursor: not-allowed; }
@@ -50984,7 +51184,7 @@ var FLOW = [
 	{ id: 'sw', label: 'Программное', sub: 'быстрее, работает на любом роутере' },
 	{ id: 'hw', label: 'Аппаратное', sub: 'быстрее всего, если чип умеет' }
 ];
-var POWER = [ { id: 'low', label: 'Низкая', d: 10 }, { id: 'mid', label: 'Средняя', d: 6 }, { id: 'high', label: 'Высокая', d: 3 }, { id: 'max', label: 'Макс', d: 0 } ];
+var POWER = [ { id: 'low', label: 'Низкая', d: 6 }, { id: 'mid', label: 'Средняя', d: 3 }, { id: 'high', label: 'Высокая', d: 0 } ];
 var DOWS = [ [ '1', 'понедельник' ], [ '2', 'вторник' ], [ '3', 'среду' ], [ '4', 'четверг' ], [ '5', 'пятницу' ], [ '6', 'субботу' ], [ '0', 'воскресенье' ] ];
 var DOW_SHORT = [ 'вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб' ];
 var MON_GEN = [ 'января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря' ];
@@ -51172,46 +51372,78 @@ return view.extend({
 
 		/* ---------- Wi-Fi ---------- */
 		var wifiCard = E('div', { 'class': 'zm-card' }), wd = null, wifiOrig = '', wifiSaving = false, showPw = {};
+		function txBase(r) {
+			var b = +r.txreg || 0;
+			if (!b && (r.txp === '' || r.txp == null) && +r.txcur >= 5) b = +r.txcur;
+			return b >= 5 ? b : 0;
+		}
+		function txFor(r, lvl) {
+			var b = txBase(r), p = POWER.filter(function(x) { return x.id === lvl; })[0];
+			if (!p || !p.d) return '';
+			return b ? String(Math.max(1, b - p.d)) : null;
+		}
 		function txLevel(r) {
-			var max = +r.txmax || 20, v = r.txp === '' || r.txp == null ? max : +r.txp;
-			if (v >= max) return 'max';
-			var best = 'max', bd = 1e9;
-			POWER.forEach(function(p) { var d = Math.abs((max - p.d) - v); if (d < bd) { bd = d; best = p.id; } });
-			return best;
+			if (r.txp === '' || r.txp == null) return 'high';
+			var b = txBase(r), v = +r.txp;
+			if (!b) return 'own';
+			if (v >= b) return 'high';
+			if (Math.abs(b - 3 - v) <= 1) return 'mid';
+			if (Math.abs(b - 6 - v) <= 1) return 'low';
+			return 'own';
 		}
-		function txValue(r, lvl) {
-			var max = +r.txmax || 20, p = POWER.filter(function(x) { return x.id === lvl; })[0];
-			return !p || p.id === 'max' ? '' : String(Math.max(1, max - p.d));
-		}
+		function mw(db) { var m = Math.pow(10, db / 10); return m >= 10 ? Math.round(m) : Math.round(m * 10) / 10; }
+		var wifiSavedAt = 0, wifiWatch = 0;
 		function wifiDraft() {
 			var w = st.wifi || {};
-			wd = { country: w.country || '00', radios: (w.radios || []).map(function(r) {
+			wd = { country: w.country || '', radios: (w.radios || []).map(function(r) {
 				return { id: r.id, on: !!r.on, ssid: r.ssid || '', key: r.key || '', channel: r.channel || 'auto', txp: r.txp || '', lvl: txLevel(r) };
 			}) };
 			wifiOrig = JSON.stringify(wd);
 		}
+		function wifiWatchStart() {
+			clearTimeout(wifiWatch);
+			var n = 0;
+			(function tick() {
+				wifiWatch = setTimeout(function() {
+					if (!document.body.contains(wifiCard)) return;
+					reload(function() {
+						var w = st.wifi || {}, rb = w.rollback;
+						if (rb && rb.at * 1000 >= wifiSavedAt - 60000) {
+							wifiSavedAt = 0;
+							zm.toast('Wi-Fi не поднялся с новыми настройками — панель вернула прежние. Попробуйте другой канал или уровень сигнала', 'error');
+						}
+						if (!wifiDirty()) wifiDraft();
+						renderWifi();
+						if (w.guard && ++n < 20) tick();
+						else if (wifiSavedAt && !w.guard) { wifiSavedAt = 0; zm.toast('Wi-Fi работает с новыми настройками', 'info'); }
+					});
+				}, n ? 8000 : 10000);
+			})();
+		}
 		function wifiDirty() { return JSON.stringify(wd) !== wifiOrig; }
 		function wifiSave() {
 			if (wifiSaving || !wifiDirty()) return;
-			var body = { country: wd.country, radios: wd.radios.map(function(d) {
-				var r = (st.wifi.radios || []).filter(function(x) { return x.id === d.id; })[0] || {};
-				return { id: d.id, on: d.on, ssid: d.ssid.trim() ? d.ssid : '', key: d.key, channel: d.channel, txp: txValue(r, d.lvl) };
+			var body = { country: wd.country && wd.country !== (st.wifi.country || '') ? wd.country : '', radios: wd.radios.map(function(d) {
+				return { id: d.id, on: d.on, ssid: d.ssid.trim() ? d.ssid : '', key: d.key, channel: d.channel, txp: d.txp };
 			}) };
 			for (var i = 0; i < body.radios.length; i++) {
 				var b = body.radios[i], lab = (st.wifi.radios[i] || {}).label || '';
 				if (!b.on) continue;
 				if (!b.ssid) { zm.toast('Задайте имя сети ' + lab, 'warning'); return; }
-				if (b.key.length < 8) { zm.toast('Пароль ' + lab + ' — не короче 8 символов', 'warning'); return; }
+				var enc = (st.wifi.radios[i] || {}).enc || '';
+				if ((/^(psk|sae)/.test(enc) || b.key) && /^(|none|psk.*|sae.*)$/.test(enc) && b.key.length < 8) { zm.toast('Пароль ' + lab + ' — не короче 8 символов', 'warning'); return; }
 			}
 			wifiSaving = true; renderWifi();
 			call('wifi', body, 'Сохраняем Wi-Fi').then(function(r) {
 				wifiSaving = false;
 				if (!r) { renderWifi(); return; }
 				if (r.same) { zm.toast('Без изменений', 'info'); wifiDraft(); renderWifi(); return; }
-				zm.toast('Сохранено — Wi-Fi перезапускается, устройства переподключатся за несколько секунд', 'info');
+				zm.toast('Сохранено — Wi-Fi перезапускается. Панель проверит, что сети поднялись, а если нет — сама вернёт прежние настройки', 'info');
 				wifiOrig = JSON.stringify(wd);
+				wifiSavedAt = Date.now();
+				st.wifi.guard = true;
 				renderWifi();
-				setTimeout(function() { reload(function() { if (!wifiDirty()) wifiDraft(); renderWifi(); }); }, 9000);
+				wifiWatchStart();
 			});
 		}
 		function field(label, input) { return E('label', { 'class': 'zm-ow-field' }, [ E('span', {}, label), input ]); }
@@ -51234,10 +51466,20 @@ return view.extend({
 			box.appendChild(field('Имя сети', ssid));
 			box.appendChild(field(r.enc && /^sae/.test(r.enc) ? 'Пароль · WPA2/WPA3' : 'Пароль · WPA2-PSK', E('span', { 'class': 'zm-ow-pw' }, [ pw, eye ])));
 			box.appendChild(field('Канал', ch));
+			var base = txBase(r), txNote;
+			if (d.lvl === 'own') txNote = 'Своё значение: ' + d.txp + ' дБм — выберите уровень, чтобы заменить его.';
+			else if (r.on && +r.txcur) txNote = 'Сейчас ' + r.txcur + ' дБм (' + mw(+r.txcur) + ' мВт)' + (base ? ' из ' + base + ' разрешённых' : '') + '.';
+			else txNote = base ? 'Разрешено до ' + base + ' дБм.' : '';
+			if (!base) txNote = (txNote ? txNote + ' ' : '') + 'Драйвер не сообщает допустимую мощность — доступна только «Высокая».';
+			else if (d.txp === (r.txp || '') && r.txp && r.on && +r.txcur && Math.abs(+r.txcur - +r.txp) > 2 && !(st.wifi || {}).guard) txNote += ' Драйвер этого роутера не меняет мощность — сигнал остаётся ' + r.txcur + ' дБм.';
 			box.appendChild(E('div', { 'class': 'zm-ow-field' }, [ E('span', {}, 'Сила сигнала'),
-				E('div', { 'class': 'zm-seg zm-ow-seg4' }, POWER.map(function(p) {
-					return E('div', { 'class': 'zm-seg-item' + (d.lvl === p.id ? ' zm-active' : ''), 'role': 'button', 'tabindex': '0', 'click': function() { if (d.lvl !== p.id) { d.lvl = p.id; renderWifi(); } } }, p.label);
-				})) ]));
+				E('div', { 'class': 'zm-seg zm-ow-seg3' }, POWER.map(function(p) {
+					var v = txFor(r, p.id), off = v === null;
+					return E('div', { 'class': 'zm-seg-item' + (d.lvl === p.id ? ' zm-active' : '') + (off ? ' zm-ow-dis' : ''), 'role': 'button', 'tabindex': '0', 'aria-disabled': off ? 'true' : null,
+						'title': off ? 'Драйвер не сообщает допустимую мощность' : p.id === 'high' ? 'Полная разрешённая мощность — как по умолчанию в OpenWrt' : 'Примерно ' + (p.id === 'mid' ? 'половина' : 'четверть') + ' мощности: ' + v + ' дБм',
+						'click': function() { if (off || d.lvl === p.id) return; d.lvl = p.id; d.txp = v; renderWifi(); } }, p.label);
+				})),
+				txNote ? E('span', { 'class': 'zm-ow-txnote' }, txNote) : E([]) ]));
 			return box;
 		}
 		var wifiBtn = null, wifiNote = null;
@@ -51256,11 +51498,13 @@ return view.extend({
 			if (!w.present || !wd || !wd.radios.length) { wifiCard.appendChild(E('p', { 'class': 'zm-hint' }, 'На этом роутере нет Wi-Fi или он не настроен в OpenWrt.')); wifiBtn = null; return; }
 			var known = COUNTRIES.some(function(c) { return c[0] === wd.country; });
 			var cs = E('select', { 'class': 'cbi-input-select', 'change': function(ev) { wd.country = ev.target.value; syncBar(); } },
-				(known ? [] : [ E('option', { 'value': wd.country, 'selected': '' }, wd.country) ]).concat(COUNTRIES.map(function(c) {
+				(known ? [] : [ E('option', { 'value': wd.country, 'selected': '' }, wd.country ? wd.country : 'Не задана — как в драйвере') ]).concat(COUNTRIES.map(function(c) {
 					return E('option', { 'value': c[0], 'selected': c[0] === wd.country ? '' : null }, c[1] + ' (' + c[0] + ')');
 				})));
 			wifiCard.appendChild(E('div', { 'class': 'zm-row' }, [ E('span', { 'class': 'zm-label' }, 'Страна'), cs ]));
-			wifiCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:0' }, 'От страны зависят разрешённые каналы и мощность. Одна на все диапазоны.'));
+			wifiCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:0' }, 'От страны зависят разрешённые каналы и мощность. Одна на все диапазоны — при смене перезапускаются все сети.'));
+			if (w.guard) wifiCard.appendChild(E('p', { 'class': 'zm-hint zm-ab-warn' }, 'Проверяем, что Wi-Fi поднялся с новыми настройками… Если сеть не заработает за пару минут, панель сама вернёт прежние настройки.'));
+			else if (w.rollback && w.rollback.at * 1000 > Date.now() - 15 * 60000) wifiCard.appendChild(E('p', { 'class': 'zm-hint zm-ab-warn' }, 'Последние изменения Wi-Fi не применились — сеть не поднялась, и панель вернула прежние настройки. Попробуйте другой канал, страну или уровень сигнала.'));
 			wifiCard.appendChild(E('div', { 'class': 'zm-ow-radios' }, wd.radios.map(function(d, i) { return radioBox(w.radios[i], d); })));
 			wifiBtn = E('button', { 'class': 'cbi-button cbi-button-positive', 'click': wifiSave }, 'Сохранить Wi-Fi');
 			wifiNote = E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, '');
@@ -51384,7 +51628,42 @@ return view.extend({
 		anchor('Роутер', rtCard);
 
 		/* ---------- Постоянные адреса ---------- */
-		var devCard = E('div', { 'class': 'zm-card' }), devEdit = {};
+		var devCard = E('div', { 'class': 'zm-card' }), devEdit = {}, nameEdit = null, nameDraft = '';
+		function nameCell(d) {
+			var tail = d.online ? E([]) : E('span', { 'class': 'zm-ow-muted' }, ' · не в сети');
+			if (nameEdit !== d.mac) {
+				return E('div', { 'class': 'zm-ow-name' }, [
+					E('button', { 'type': 'button', 'class': 'zm-ow-name-btn' + (d.name ? '' : ' zm-ow-noname'), 'title': 'Переименовать', 'aria-label': 'Переименовать: ' + (d.name || d.mac), 'disabled': busy ? '' : null, 'click': function() {
+						nameEdit = d.mac; nameDraft = d.name || ''; renderDevices();
+					} }, [ E('b', {}, d.name || 'Без имени'), E('span', { 'class': 'zm-ow-pen', 'aria-hidden': 'true' }, '✎') ]),
+					d.label && d.orig && d.orig.replace(/[\s_-]/g, '').toLowerCase() !== d.name.replace(/[\s_-]/g, '').toLowerCase() ? E('span', { 'class': 'zm-ow-muted', 'title': 'Как устройство называет себя само' }, ' · ' + d.orig) : E([]),
+					tail
+				]);
+			}
+			var inp = E('input', { 'type': 'text', 'class': 'cbi-input-text zm-ow-name-in', 'maxlength': '32', 'spellcheck': 'false', 'autocomplete': 'off', 'placeholder': d.orig || 'Например, Телевизор', 'value': nameDraft, 'aria-label': 'Имя устройства ' + d.mac });
+			function done() { nameEdit = null; renderDevices(); }
+			function save() {
+				var v = inp.value.replace(/\s+/g, ' ').trim();
+				if (v === (d.label ? d.name : '') || (!d.label && v === (d.orig || ''))) { done(); return; }
+				call('pin', { op: 'name', mac: d.mac, name: v }, '').then(function(r) {
+					if (!r) return;
+					st.devices = r.devices || st.devices;
+					zm.toast(v ? 'Имя сохранено: ' + v : 'Имя сброшено' + (d.orig ? ' — снова «' + d.orig + '»' : ''), 'info');
+					done();
+				});
+			}
+			inp.addEventListener('input', function() { nameDraft = inp.value; });
+			inp.addEventListener('keydown', function(ev) {
+				if (ev.key === 'Enter') { ev.preventDefault(); save(); }
+				else if (ev.key === 'Escape') { ev.preventDefault(); done(); }
+			});
+			setTimeout(function() { try { inp.focus(); inp.select(); } catch (e) {} }, 0);
+			return E('div', { 'class': 'zm-ow-pw zm-ow-name-edit' }, [
+				inp,
+				E('button', { 'class': 'cbi-button cbi-button-positive', 'disabled': busy ? '' : null, 'click': save }, 'Сохранить'),
+				E('button', { 'class': 'cbi-button', 'click': done }, 'Отмена')
+			]);
+		}
 		function devList() {
 			var l = ((st.devices || {}).list || []).slice();
 			l.sort(function(a, b) {
@@ -51394,7 +51673,7 @@ return view.extend({
 			return l;
 		}
 		function pin(d, ip) {
-			return call('pin', { op: 'pin', mac: d.mac, ip: ip, name: d.name || '' }, 'Закрепляем адрес').then(function(r) {
+			return call('pin', { op: 'pin', mac: d.mac, ip: ip, name: (d.label && /^[A-Za-z0-9 _-]+$/.test(d.name) ? d.name : d.orig) || '' }, 'Закрепляем адрес').then(function(r) {
 				if (!r) return;
 				st.devices = r.devices || st.devices;
 				delete devEdit[d.mac];
@@ -51435,7 +51714,7 @@ return view.extend({
 					act = E('button', { 'class': 'cbi-button cbi-button-positive', 'disabled': busy || !d.ip ? '' : null, 'click': function() { pin(d, d.ip); } }, 'Закрепить');
 				}
 				return E('tr', {}, [
-					E('td', {}, [ E('b', {}, d.name || 'Без имени'), d.online ? E([]) : E('span', { 'class': 'zm-ow-muted' }, ' · не в сети') ]),
+					E('td', { 'class': 'zm-ow-name-td' }, [ nameCell(d) ]),
 					E('td', {}, [ cell ]),
 					E('td', { 'class': 'zm-ow-mac' }, d.mac),
 					E('td', { 'class': 'zm-ow-tr' }, [ d.pinned ? badge(true, 'закреплён', '') : E([]), act ])
@@ -51445,6 +51724,7 @@ return view.extend({
 				E('thead', {}, [ E('tr', {}, [ E('th', {}, 'Устройство'), E('th', {}, 'Адрес'), E('th', {}, 'MAC'), E('th', { 'class': 'zm-ow-tr' }, 'Закрепление') ]) ]),
 				E('tbody', {}, rows)
 			]) ]));
+			devCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Нажмите на имя, чтобы переименовать устройство. Пустое имя вернёт исходное. Имя латиницей (буквы, цифры, дефис) роутер запишет и в настройки DHCP — у закреплённого устройства оно обычно появляется и в других списках после его переподключения.'));
 			devCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Телефоны с «случайным MAC-адресом» для этой сети нужно переключить на постоянный MAC в настройках Wi-Fi телефона — иначе закрепление не сработает.'));
 		}
 		renderDevices();
