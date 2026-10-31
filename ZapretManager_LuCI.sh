@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.98
+# Version: 4.99
 ZM_VERSION_EOF
 set -e
 
@@ -29744,12 +29744,17 @@ _ow_flow_set() {
 _ow_wdevs() { uci -q -X show wireless 2>/dev/null | sed -n "s/^wireless\.\([^.=]*\)=wifi-device\$/\1/p"; }
 _ow_wifaces() { uci -q -X show wireless 2>/dev/null | sed -n "s/^wireless\.\([^.=]*\)=wifi-iface\$/\1/p"; }
 _ow_wap() {
-	local i
+	local i best="" any=""
 	for i in $(_ow_wifaces); do
 		[ "$(uci -q get "wireless.$i.device")" = "$1" ] || continue
 		[ "$(uci -q get "wireless.$i.mode")" = ap ] || continue
-		echo "$i"; return 0
+		[ -n "$any" ] || any="$i"
+		[ "$(uci -q get "wireless.$i.disabled")" = 1 ] && continue
+		case " $(uci -q get "wireless.$i.network") " in *" lan "*) echo "$i"; return 0 ;; esac
+		[ -n "$best" ] || best="$i"
 	done
+	[ -n "$best" ] && { echo "$best"; return 0; }
+	[ -n "$any" ] && { echo "$any"; return 0; }
 	return 1
 }
 _ow_wband() {
@@ -29805,8 +29810,46 @@ _ow_txreg() {
 		}
 		END { if (!done && m > 0) print m }'
 }
+_ow_regmax() {
+	local phy="$1" band="$2" ch="$3" f
+	command -v iw >/dev/null 2>&1 || return 0
+	case "$band" in
+		2g) f=2437; _ow_int "$ch" && f=$((2407 + ch * 5)); [ "$ch" = 14 ] && f=2484 ;;
+		5g) f=5180; _ow_int "$ch" && f=$((5000 + ch * 5)) ;;
+		6g) f=5975; _ow_int "$ch" && f=$((5950 + ch * 5)) ;;
+		*) return 0 ;;
+	esac
+	iw reg get 2>/dev/null | awk -v P="phy#${phy#phy}" -v F="$f" '
+		/^global/ { sec = "global"; next }
+		/^phy#/ { sec = $1; next }
+		/^[ \t]*\(/ && /MHz|@/ {
+			if (!match($0, /\([0-9.]+ - [0-9.]+ @/)) next
+			split(substr($0, RSTART + 1, RLENGTH - 3), b, " - "); lo = b[1] + 0; hi = b[2] + 0
+			if (F < lo || F > hi) next
+			if (!match($0, /\), \([^)]*\)/)) next
+			x = substr($0, RSTART + 3, RLENGTH - 4); n = split(x, c, ", "); v = c[n]
+			if (v ~ /mW/) { v += 0; if (v <= 0) next; v = int(10 * log(v) / log(10) + 0.5) } else v = int(v + 0)
+			if (v <= 0) next
+			if (sec == P) pv = v; else if (sec == "global") gv = v
+		}
+		END { if (pv) print pv; else if (gv) print gv }'
+}
+_ow_wlive() {
+	local c
+	[ -n "$1" ] || return 1
+	c="$(iwinfo "$1" info 2>/dev/null | sed -n 's/.*Channel: *\([0-9][0-9]*\).*/\1/p' | head -n1)"
+	_ow_int "$c" && [ "$c" -gt 0 ]
+}
+_ow_rlive() {
+	local r="$1" n
+	command -v iwinfo >/dev/null 2>&1 || { [ "$(_ow_wup "$r")" = true ]; return; }
+	for n in $(ubus -t 5 call network.wireless status 2>/dev/null | jsonfilter -e "@.$r.interfaces[*].ifname" 2>/dev/null); do
+		_ow_wlive "$n" && return 0
+	done
+	return 1
+}
 _ow_wifi_json() {
-	local r i first=1 band lab ifn on ch cur txp txm txr txc enc ssid key chans info rb="null" g=false
+	local r i first=1 band lab ifn on ch cur txp txm txr txc enc ssid key chans info rb="null" g=false live phy rg
 	if [ -s "$OW_WROLL" ]; then
 		set -- $(head -n1 "$OW_WROLL")
 		_ow_int "$1" && rb="$(printf '{"at":%s,"radios":"%s"}' "$1" "$(shift; echo "$*")")"
@@ -29826,6 +29869,7 @@ _ow_wifi_json() {
 		if [ -n "$ifn" ] && command -v iwinfo >/dev/null 2>&1; then
 			info="$(iwinfo "$ifn" info 2>/dev/null)"
 			cur="$(printf '%s\n' "$info" | sed -n 's/.*Channel: *\([0-9][0-9]*\).*/\1/p' | head -n1)"
+			{ _ow_int "$cur" && [ "$cur" -gt 0 ]; } || cur=""
 			txc="$(printf '%s\n' "$info" | sed -n 's/.*Tx-Power: *\([0-9][0-9]*\) *dBm.*/\1/p' | head -n1)"
 			txm="$(iwinfo "$ifn" txpowerlist 2>/dev/null | sed -n 's/^[* ]*\([0-9][0-9]*\) dBm.*/\1/p' | sort -n | tail -n1)"
 		fi
@@ -29836,14 +29880,25 @@ _ow_wifi_json() {
 		_ow_int "$txc" || txc=""
 		txr="$(_ow_txreg "$r" "$ifn" "${cur:-$(_ow_int "$ch" && echo "$ch")}" "$band")"
 		_ow_int "$txr" && [ "$txr" -ge 5 ] && [ "$txr" -le 36 ] || txr=""
+		phy=""; [ -n "$ifn" ] && phy="$(cat "/sys/class/net/$ifn/phy80211/name" 2>/dev/null)"
+		[ -n "$phy" ] || phy="$(iwinfo nl80211 phyname "$r" 2>/dev/null)"
+		rg="$(_ow_regmax "$phy" "$band" "${cur:-$(_ow_int "$ch" && echo "$ch")}")"
+		if _ow_int "$rg" && [ "$rg" -ge 5 ] && [ "$rg" -le 36 ]; then
+			{ [ -z "$txr" ] || [ "$rg" -lt "$txr" ]; } && txr="$rg"
+		fi
+		live=false
+		if [ "$on" = true ]; then
+			if command -v iwinfo >/dev/null 2>&1; then [ -n "$ifn" ] && [ -n "$cur" ] && live=true
+			else [ "$(_ow_wup "$r")" = true ] && live=true; fi
+		fi
 		chans="$(_ow_wchans "$ifn" "$r" "$band")"
 		ssid=""; key=""; enc=""
 		if [ -n "$i" ]; then
 			ssid="$(uci -q get "wireless.$i.ssid")"; key="$(uci -q get "wireless.$i.key")"; enc="$(uci -q get "wireless.$i.encryption")"
 		fi
 		[ "$first" = 1 ] || printf ','; first=0
-		printf '{"id":"%s","iface":"%s","band":"%s","label":"%s","on":%s,"channel":"%s","cur":"%s","chans":[%s],"txp":"%s","txmax":"%s","txreg":"%s","txcur":"%s","ssid":"%s","key":"%s","enc":"%s","htmode":"%s"}' \
-			"$(esc "$r")" "$(esc "$i")" "$band" "$lab" "$on" "$(esc "$ch")" "$cur" "$chans" "$txp" "$txm" "$txr" "$txc" \
+		printf '{"id":"%s","iface":"%s","band":"%s","label":"%s","on":%s,"live":%s,"channel":"%s","cur":"%s","chans":[%s],"txp":"%s","txmax":"%s","txreg":"%s","txcur":"%s","ssid":"%s","key":"%s","enc":"%s","htmode":"%s"}' \
+			"$(esc "$r")" "$(esc "$i")" "$band" "$lab" "$on" "$live" "$(esc "$ch")" "$cur" "$chans" "$txp" "$txm" "$txr" "$txc" \
 			"$(esc "$ssid")" "$(esc "$key")" "$(esc "$enc")" "$(esc "$(uci -q get "wireless.$r.htmode")")"
 	done
 	printf ']}'
@@ -29937,7 +29992,7 @@ _ow_wifi_set() {
 	if _ow_int "$op" && kill -0 "$op" 2>/dev/null; then kill "$op" 2>/dev/null; else cp -f "$OW_WCONF" "$bak" 2>/dev/null; fi
 	[ -s "$bak" ] || cp -f "$OW_WCONF" "$bak" 2>/dev/null
 	for r in $(_ow_wdevs); do
-		[ "$(_ow_wup "$r")" = true ] || continue
+		[ "$(_ow_wup "$r")" = true ] && _ow_rlive "$r" || continue
 		[ "$(uci -q get "wireless.$r.disabled")" = 1 ] && continue
 		exp="$exp $r"
 	done
@@ -29958,7 +30013,7 @@ _ow_wifi_guard() {
 	while [ "$t" -lt "$mx" ]; do
 		sleep "$sp"; t=$((t + sp))
 		ok=1; down=""
-		for r in $exp; do [ "$(_ow_wup "$r")" = true ] || { ok=0; down="$down $r"; }; done
+		for r in $exp; do { [ "$(_ow_wup "$r")" = true ] && _ow_rlive "$r"; } || { ok=0; down="$down $r"; }; done
 		[ "$ok" = 1 ] && [ "$t" -ge $((sp * 2)) ] && { rm -f "$bak" "$OW_WGUARD"; return 0; }
 		if [ "$t" -ge 45 ] && [ "$ok" = 0 ]; then
 			for r in $down; do [ "$(_ow_wfail "$r")" = true ] && t="$mx"; done
@@ -29997,10 +30052,10 @@ _ow_v6_up() {
 }
 _ow_v6_on() {
 	local ra dv w6
-	[ -f "$OW_V6_BAK" ] && return 1
 	w6=1
 	{ [ -z "$(uci -q get network.wan6)" ] || [ "$(uci -q get network.wan6.disabled)" = 1 ]; } && w6=0
 	ra="$(uci -q get dhcp.lan.ra)"; dv="$(uci -q get dhcp.lan.dhcpv6)"
+	[ "$w6" = 0 ] && [ "$(uci -q get network.wan.proto)" = pppoe ] && [ "$(uci -q get network.wan.ipv6)" != 0 ] && [ -n "$(uci -q get network.wan.ipv6)" ] && w6=1
 	[ "$w6" = 0 ] && { [ -z "$ra" ] || [ "$ra" = disabled ]; } && { [ -z "$dv" ] || [ "$dv" = disabled ]; } && return 1
 	return 0
 }
@@ -46589,36 +46644,30 @@ return view.extend({
 					grid.appendChild(E('p', { 'class': 'zm-hint' }, 'Список пуст — нажмите «Обновить список».'));
 			}
 
-			var quicOn = !!status.quic_yt, quicBlocked = false;
+			var quicOn = !!status.quic_yt, quicBlocked = false, quicBusy = false;
 			var quicCard = E('div', { 'class': 'zm-card' });
 
 			function renderQuic() {
 				quicCard.innerHTML = '';
 				quicCard.appendChild(E('h3', {}, 'QUIC для YouTube'));
-				quicCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Браузеры и приложение YouTube часто грузят видео по QUIC (UDP 443), а не по TCP. Этот блок обходит блокировку и для QUIC. Работает вместе с выбранной стратегией.'));
-				quicCard.appendChild(E('div', { 'class': 'zm-row' }, [
-					E('span', { 'class': 'zm-label' }, 'Статус'),
-					zm.badge(quicOn, 'включён', 'выключен')
-				]));
-				if (quicBlocked) quicCard.appendChild(E('p', { 'class': 'zm-hint' }, quicOn
+				quicCard.appendChild(zm.swRow(quicOn, quicBusy ? 'Блок QUIC для YouTube — применяем…' : 'Блок QUIC для YouTube',
+					[ 'Браузеры и приложение YouTube часто грузят видео по QUIC (UDP 443), а не по TCP.', E('br'), 'Этот блок обходит блокировку и для QUIC. Работает вместе с выбранной стратегией.' ],
+					function() {
+						if (busy || quicBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
+						var want = !quicOn;
+						busy = true; quicBusy = true; renderQuic();
+						zm.toast(want ? 'Включаем QUIC для YouTube' : 'Выключаем QUIC для YouTube', 'warning');
+						zm.youtubeQuicSet(want ? 'on' : 'off').then(function(res) {
+							busy = false; quicBusy = false;
+							if (!res || res.error) { zm.toast((res && res.error) || 'Роутер не ответил', 'error'); renderQuic(); return; }
+							quicOn = !!res.quic; renderQuic();
+							zm.toast(res.quic ? 'QUIC для YouTube включён' : 'QUIC для YouTube выключен', 'info');
+							refreshAll();
+						}).catch(function() { busy = false; quicBusy = false; zm.toast('Роутер не ответил', 'error'); renderQuic(); });
+					}, quicBusy));
+				if (quicBlocked) quicCard.appendChild(E('p', { 'class': 'zm-hint zm-ab-warn' }, quicOn
 					? 'QUIC сейчас заблокирован на странице «Система» — блок не работает, пока блокировка включена.'
 					: 'QUIC сейчас заблокирован на странице «Система» — YouTube и так идёт по TCP, блок не нужен.'));
-				quicCard.appendChild(E('div', { 'class': 'zm-actions' }, [
-					E('button', {
-						'class': quicOn ? 'cbi-button cbi-button-remove' : 'cbi-button cbi-button-positive',
-						'click': function() {
-							if (busy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
-							busy = true;
-							zm.toast(quicOn ? 'Выключаем QUIC для YouTube' : 'Включаем QUIC для YouTube', 'warning');
-							zm.youtubeQuicSet(quicOn ? 'off' : 'on').then(function(res) {
-								busy = false;
-								if (res.error) { zm.toast(res.error, 'error'); return; }
-								zm.toast(res.quic ? 'QUIC для YouTube включён' : 'QUIC для YouTube выключен', 'info');
-								refreshAll();
-							}).catch(function() { busy = false; });
-						}
-					}, quicOn ? 'Выключить' : 'Включить')
-				]));
 			}
 
 			var ipidCard = E('div', { 'class': 'zm-card' }), ipidBusy = false;
@@ -51391,7 +51440,6 @@ return view.extend({
 			if (Math.abs(b - 6 - v) <= 1) return 'low';
 			return 'own';
 		}
-		function mw(db) { var m = Math.pow(10, db / 10); return m >= 10 ? Math.round(m) : Math.round(m * 10) / 10; }
 		var wifiSavedAt = 0, wifiWatch = 0;
 		function wifiDraft() {
 			var w = st.wifi || {};
@@ -51452,6 +51500,9 @@ return view.extend({
 			box.appendChild(E('div', { 'class': 'zm-ow-radio-head' }, [ E('b', {}, r.label || r.id),
 				E('label', { 'class': 'zm-ow-check' }, [ E('input', { 'type': 'checkbox', 'checked': d.on ? '' : null, 'change': function(ev) { d.on = ev.target.checked; renderWifi(); } }), d.on ? 'включена' : 'выключена' ]) ]));
 			if (!d.on) { box.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin:0' }, 'Сеть выключена — включите, чтобы настроить.')); return box; }
+			if (r.on && !r.live && !(st.wifi || {}).guard) box.appendChild(E('p', { 'class': 'zm-hint zm-ab-warn zm-ow-dead' }, (st.wifi || {}).country === '00' || !(st.wifi || {}).country
+				? 'Сеть включена, но не работает — роутер её не раздаёт. Скорее всего, из-за страны «' + ((st.wifi || {}).country || 'не задана') + '»: выберите свою страну выше и сохраните.'
+				: 'Сеть включена, но не работает — роутер её не раздаёт. Попробуйте канал «Авто» и сохраните; если не поможет — перезагрузите роутер.'));
 			var ssid = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'maxlength': '32', 'autocomplete': 'off', 'spellcheck': 'false', 'value': d.ssid });
 			ssid.addEventListener('input', function() { d.ssid = ssid.value; syncBar(); });
 			var pw = E('input', { 'type': showPw[r.id] ? 'text' : 'password', 'class': 'cbi-input-text zm-secret-in', 'maxlength': '64', 'autocomplete': 'new-password', 'spellcheck': 'false', 'value': d.key });
@@ -51460,18 +51511,13 @@ return view.extend({
 			var chans = (r.chans || []).map(String);
 			if (d.channel !== 'auto' && chans.indexOf(String(d.channel)) < 0) chans.unshift(String(d.channel));
 			var ch = E('select', { 'class': 'cbi-input-select', 'change': function(ev) { d.channel = ev.target.value; syncBar(); } },
-				[ E('option', { 'value': 'auto', 'selected': d.channel === 'auto' ? '' : null }, 'Авто' + (r.cur && r.channel === 'auto' ? ' (сейчас ' + r.cur + ')' : '')) ].concat(chans.map(function(c) {
+				[ E('option', { 'value': 'auto', 'selected': d.channel === 'auto' ? '' : null }, 'Авто' + (+r.cur > 0 && r.live && r.channel === 'auto' ? ' (сейчас ' + r.cur + ')' : '')) ].concat(chans.map(function(c) {
 					return E('option', { 'value': c, 'selected': String(d.channel) === c ? '' : null }, c);
 				})));
 			box.appendChild(field('Имя сети', ssid));
 			box.appendChild(field(r.enc && /^sae/.test(r.enc) ? 'Пароль · WPA2/WPA3' : 'Пароль · WPA2-PSK', E('span', { 'class': 'zm-ow-pw' }, [ pw, eye ])));
 			box.appendChild(field('Канал', ch));
-			var base = txBase(r), txNote;
-			if (d.lvl === 'own') txNote = 'Своё значение: ' + d.txp + ' дБм — выберите уровень, чтобы заменить его.';
-			else if (r.on && +r.txcur) txNote = 'Сейчас ' + r.txcur + ' дБм (' + mw(+r.txcur) + ' мВт)' + (base ? ' из ' + base + ' разрешённых' : '') + '.';
-			else txNote = base ? 'Разрешено до ' + base + ' дБм.' : '';
-			if (!base) txNote = (txNote ? txNote + ' ' : '') + 'Драйвер не сообщает допустимую мощность — доступна только «Высокая».';
-			else if (d.txp === (r.txp || '') && r.txp && r.on && +r.txcur && Math.abs(+r.txcur - +r.txp) > 2 && !(st.wifi || {}).guard) txNote += ' Драйвер этого роутера не меняет мощность — сигнал остаётся ' + r.txcur + ' дБм.';
+			var txNote = d.lvl === 'own' ? 'Своё значение: ' + d.txp + ' дБм — выберите уровень, чтобы заменить его.' : '';
 			box.appendChild(E('div', { 'class': 'zm-ow-field' }, [ E('span', {}, 'Сила сигнала'),
 				E('div', { 'class': 'zm-seg zm-ow-seg3' }, POWER.map(function(p) {
 					var v = txFor(r, p.id), off = v === null;
@@ -51493,8 +51539,13 @@ return view.extend({
 		function renderWifi() {
 			var w = st.wifi || {};
 			wifiCard.innerHTML = '';
-			var onCnt = wd ? wd.radios.filter(function(x) { return x.on; }).length : 0;
-			wifiCard.appendChild(E('h3', {}, [ 'Wi-Fi ', w.present ? badge(onCnt > 0, onCnt === 1 ? 'одна сеть работает' : 'сети работают', 'выключен') : E([]) ]));
+			var rs = w.radios || [], enCnt = rs.filter(function(x) { return x.on; }).length, liveCnt = rs.filter(function(x) { return x.on && x.live; }).length, wb;
+			if (!w.present) wb = E([]);
+			else if (!enCnt) wb = badge(false, '', 'выключен');
+			else if (w.guard) wb = E('span', { 'class': 'zm-badge zm-sx-info' }, [ E('span', { 'class': 'zm-dot' }), 'применяем…' ]);
+			else if (liveCnt === enCnt) wb = badge(true, liveCnt === 1 ? 'одна сеть работает' : 'сети работают', '');
+			else wb = E('span', { 'class': 'zm-badge zm-warn' }, [ E('span', { 'class': 'zm-dot' }), liveCnt ? 'работает ' + liveCnt + ' из ' + enCnt : (enCnt === 1 ? 'сеть не работает' : 'сети не работают') ]);
+			wifiCard.appendChild(E('h3', {}, [ 'Wi-Fi ', wb ]));
 			if (!w.present || !wd || !wd.radios.length) { wifiCard.appendChild(E('p', { 'class': 'zm-hint' }, 'На этом роутере нет Wi-Fi или он не настроен в OpenWrt.')); wifiBtn = null; return; }
 			var known = COUNTRIES.some(function(c) { return c[0] === wd.country; });
 			var cs = E('select', { 'class': 'cbi-input-select', 'change': function(ev) { wd.country = ev.target.value; syncBar(); } },
@@ -51503,6 +51554,7 @@ return view.extend({
 				})));
 			wifiCard.appendChild(E('div', { 'class': 'zm-row' }, [ E('span', { 'class': 'zm-label' }, 'Страна'), cs ]));
 			wifiCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:0' }, 'От страны зависят разрешённые каналы и мощность. Одна на все диапазоны — при смене перезапускаются все сети.'));
+			if (w.country === '00' && wd.country === '00') wifiCard.appendChild(E('p', { 'class': 'zm-hint zm-ab-warn' }, 'Страна «Без страны (мир)» — многие роутеры в этом режиме не включают Wi-Fi или сильно урезают каналы. Выберите свою страну и сохраните.'));
 			if (w.guard) wifiCard.appendChild(E('p', { 'class': 'zm-hint zm-ab-warn' }, 'Проверяем, что Wi-Fi поднялся с новыми настройками… Если сеть не заработает за пару минут, панель сама вернёт прежние настройки.'));
 			else if (w.rollback && w.rollback.at * 1000 > Date.now() - 15 * 60000) wifiCard.appendChild(E('p', { 'class': 'zm-hint zm-ab-warn' }, 'Последние изменения Wi-Fi не применились — сеть не поднялась, и панель вернула прежние настройки. Попробуйте другой канал, страну или уровень сигнала.'));
 			wifiCard.appendChild(E('div', { 'class': 'zm-ow-radios' }, wd.radios.map(function(d, i) { return radioBox(w.radios[i], d); })));
@@ -58918,11 +58970,16 @@ function toast(message, kind, duration) {
 }
 
 var RADIO = [
-	[ 'record', 'Record', 'rr_main96' ], [ 'russian_mix', 'Russian Mix', 'rus96' ], [ 'edm', 'EDM', 'club96' ], [ 'house_hits', 'House Hits', 'househits96' ],
-	[ 'deep', 'Deep', 'deep96' ], [ 'tech_house', 'Tech House', 'techouse96' ], [ 'techno', 'Techno', 'techno96' ], [ 'trancemission', 'Trancemission', 'tm96' ],
-	[ 'pirate_station', 'Pirate Station', 'ps96' ], [ 'rap_hits', 'Rap Hits', 'rap96' ], [ 'dubstep', 'Dubstep', 'dub96' ], [ 'hardstyle', 'Hardstyle', 'teo96' ],
-	[ 'eurodance', 'Eurodance', 'eurodance96' ], [ 'superdiskoteka_90', 'Дискотека 90-х', 'sd9096' ], [ 'rock', 'Rock', 'rock96' ], [ 'chill_out', 'Chill-Out', 'chil96' ],
-	[ 'lofi', 'LoFi', 'lofi96' ], [ 'ambient', 'Ambient', 'ambient96' ], [ 'remix', 'Remix', 'rmx96' ], [ 'russian_hits', 'Russian Hits', 'russianhits96' ]
+	[ 'record', 'Record', 'rr_main96', 'hits' ], [ 'russian_hits', 'Russian Hits', 'russianhits96', 'hits' ], [ 'russian_mix', 'Russian Mix', 'rus96', 'hits' ],
+	[ 'all_timers', 'Хиты всех времён', 'alltimers96', 'hits' ], [ 'remix', 'Remix', 'rmx96', 'hits' ], [ 'mashup', 'Mashup', 'mashup96', 'hits' ],
+	[ 'radio_80', 'Радио 80-х', '198096', 'retro' ], [ 'superdiskoteka_90', 'Дискотека 90-х', 'sd9096', 'retro' ], [ 'radio_00', 'Радио 00-х', '200096', 'retro' ], [ 'eurodance', 'Eurodance', 'eurodance96', 'retro' ],
+	[ 'edm', 'EDM', 'club96', 'house' ], [ 'house_hits', 'House Hits', 'househits96', 'house' ], [ 'future_house', 'Future House', 'fut96', 'house' ],
+	[ 'tech_house', 'Tech House', 'techouse96', 'house' ], [ 'deep', 'Deep', 'deep96', 'house' ],
+	[ 'trancemission', 'Trancemission', 'tm96', 'trance' ], [ 'trance_classics', 'Trance Classics', 'trancehits96', 'trance' ], [ 'progressive', 'Progressive', 'progr96', 'trance' ],
+	[ 'techno', 'Techno', 'techno96', 'trance' ], [ 'hardstyle', 'Hardstyle', 'teo96', 'trance' ],
+	[ 'rap_hits', 'Rap Hits', 'rap96', 'bass' ], [ 'trap', 'Trap', 'trap96', 'bass' ], [ 'dubstep', 'Dubstep', 'dub96', 'bass' ], [ 'pirate_station', 'Pirate Station', 'ps96', 'bass' ],
+	[ 'medlyak_fm', 'Медляк FM', 'mdl96', 'calm' ], [ 'tropical', 'Tropical', 'trop96', 'calm' ], [ 'chill_out', 'Chill-Out', 'chil96', 'calm' ], [ 'lofi', 'LoFi', 'lofi96', 'calm' ], [ 'ambient', 'Ambient', 'ambient96', 'calm' ],
+	[ 'rock', 'Rock', 'rock96', 'rock' ]
 ];
 var K_RADIO = 'zmw.radio';
 var radio = { idx: 0, vol: 70, show: true, state: 'off', audio: null, el: null, menu: null, saveT: 0, waitT: 0, synced: false };
@@ -59114,8 +59171,8 @@ function radioMenuClose() {
 }
 function radioMenuPaint() {
 	var m = radio.menu;
-	Array.prototype.forEach.call(m.querySelectorAll('.zmw-radio-st'), function (b, i) {
-		var cur = i === radio.idx;
+	Array.prototype.forEach.call(m.querySelectorAll('.zmw-radio-st'), function (b) {
+		var cur = +b.getAttribute('data-i') === radio.idx;
 		b.classList.toggle('zmw-on', cur);
 		b.classList.toggle('zmw-radio-live', cur && radio.state === 'play');
 		b.setAttribute('aria-checked', cur ? 'true' : 'false');
@@ -59134,7 +59191,7 @@ function radioMenuToggle() {
 	var m = E('div', { 'class': 'zmw-radio-menu', 'role': 'menu', 'aria-label': 'Станции Радио Record' }, [
 		E('div', { 'class': 'zmw-radio-menu-head' }, [ E('b', {}, [ 'Радио Record' ]) ]),
 		E('div', { 'class': 'zmw-radio-list' }, RADIO.map(function (s, i) {
-			return E('button', { 'class': 'zmw-radio-st', 'type': 'button', 'role': 'menuitemradio', 'click': function () { radioPick(i); radioMenuClose(); } }, [
+			return E('button', { 'class': 'zmw-radio-st', 'type': 'button', 'role': 'menuitemradio', 'data-i': String(i), 'click': function () { radioPick(i); radioMenuClose(); } }, [
 				E('span', { 'class': 'zmw-radio-eq', 'aria-hidden': 'true' }, [ E('i'), E('i'), E('i') ]), E('span', {}, [ s[1] ])
 			]);
 		})),
@@ -59144,8 +59201,10 @@ function radioMenuToggle() {
 	radio.menu = m;
 	radio.pick.setAttribute('aria-expanded', 'true');
 	radioMenuPaint();
-	var rc = radio.el.getBoundingClientRect(), vw = window.innerWidth, w = Math.min(340, vw - 16);
-	m.style.width = w + 'px';
+	var rc = radio.el.getBoundingClientRect(), vw = window.innerWidth, cols = vw <= 520 ? 2 : 3, w;
+	m.querySelector('.zmw-radio-list').style.gridTemplateRows = 'repeat(' + Math.ceil(RADIO.length / cols) + ', auto)';
+	m.style.maxWidth = (vw - 16) + 'px';
+	w = m.offsetWidth;
 	m.style.left = Math.max(8, Math.min(rc.left, vw - w - 8)) + 'px';
 	m.style.bottom = Math.max(8, window.innerHeight - rc.top + 8) + 'px';
 	document.addEventListener('mousedown', radioMenuOutside, true);
@@ -59153,7 +59212,7 @@ function radioMenuToggle() {
 	document.addEventListener('keydown', radioMenuKey, true);
 	window.addEventListener('resize', radioMenuClose);
 	window.addEventListener('hashchange', radioMenuClose);
-	var cur = m.querySelectorAll('.zmw-radio-st')[radio.idx];
+	var cur = m.querySelector('.zmw-radio-st[data-i="' + radio.idx + '"]');
 	if (cur) try { cur.focus({ preventScroll: true }); } catch (e) {}
 }
 window.zmwRadio = {
@@ -60778,11 +60837,13 @@ html[data-theme="matrix"] .zmw-side .zmw-mem-val.zmw-mem-fit { font-size: 10px; 
 .zmw-radio-btn:active { transform: scale(.92); }
 .zmw-radio-btn .zmw-i { width: 15px; height: 15px; }
 .zmw-radio-play .zmw-radio-main, .zmw-radio-wait .zmw-radio-main { color: var(--a1); }
-.zmw-radio-menu { position: fixed; z-index: 120; box-sizing: border-box; max-height: calc(100vh - 16px); overflow: auto; padding: 8px; border-radius: 13px; background: var(--surface-solid); border: 1px solid var(--border-2); box-shadow: var(--shadow-lg); color: var(--text); font: 13px/1.3 var(--font); }
-.zmw-radio-menu-head { display: flex; align-items: baseline; gap: 10px; padding: 2px 8px 6px; }
-.zmw-radio-menu-head b { font-size: 13px; }
-.zmw-radio-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1px 2px; }
-.zmw-radio-st { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 5px 8px; margin: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font: 500 12.5px/1.25 var(--font); text-align: left; cursor: pointer; }
+.zmw-radio-menu { position: fixed; z-index: 120; box-sizing: border-box; max-height: calc(100vh - 16px); overflow: auto; padding: 7px 6px 5px; border-radius: 12px; background: var(--surface-solid); border: 1px solid var(--border-2); box-shadow: var(--shadow-lg); color: var(--text); font: 13px/1.3 var(--font); }
+.zmw-radio-menu-head { display: flex; align-items: baseline; gap: 10px; padding: 0 7px 3px; }
+.zmw-radio-menu-head b { font-size: 14px; }
+.zmw-radio-menu { width: max-content; }
+.zmw-radio-list { display: grid; grid-auto-flow: column; grid-auto-columns: max-content; column-gap: 2px; padding-top: 2px; }
+.zmw-radio-list .zmw-radio-st { width: 100%; padding-right: 10px; }
+.zmw-radio-st { display: flex; align-items: center; gap: 7px; min-width: 0; box-sizing: border-box; padding: 3px 8px; margin: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font: 500 13.5px/1.25 var(--font); text-align: left; cursor: pointer; }
 .zmw-radio-st span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .zmw-radio-st:hover { background: var(--surface-2); color: var(--text); }
 .zmw-radio-st .zmw-radio-eq { display: flex; visibility: hidden; }
@@ -60791,10 +60852,10 @@ html[data-theme="matrix"] .zmw-side .zmw-mem-val.zmw-mem-fit { font-size: 10px; 
 .zmw-radio-st.zmw-radio-live .zmw-radio-eq i { animation: zmw-eq 1s ease-in-out infinite; }
 .zmw-radio-st.zmw-radio-live .zmw-radio-eq i:nth-child(2) { animation-duration: .8s; animation-delay: -.3s; }
 .zmw-radio-st.zmw-radio-live .zmw-radio-eq i:nth-child(3) { animation-duration: 1.15s; animation-delay: -.6s; }
-.zmw-radio-vol { display: flex; align-items: center; gap: 10px; margin-top: 6px; padding: 8px 8px 2px; border-top: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+.zmw-radio-vol { display: flex; align-items: center; gap: 10px; margin-top: 4px; padding: 6px 7px 1px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--muted); }
 .zmw-radio-vol input { flex: 1; min-width: 0; margin: 0; accent-color: var(--a1); }
 .zmw-radio-voltxt { width: 36px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-2); }
-@media (max-width: 420px) { .zmw-radio-list { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 520px) { .zmw-radio-list { grid-auto-columns: minmax(0, 1fr); } .zmw-radio-menu { width: auto; } }
 @media (prefers-reduced-motion: reduce) {
 	html .zmw-radio-play .zmw-radio-eq i, html .zmw-radio-wait .zmw-radio-eq i, html .zmw-radio-st.zmw-radio-live .zmw-radio-eq i { animation-duration: 1s !important; animation-iteration-count: infinite !important; }
 	html .zmw-radio-play .zmw-radio-eq i:nth-child(2), html .zmw-radio-st.zmw-radio-live .zmw-radio-eq i:nth-child(2) { animation-duration: .8s !important; }
