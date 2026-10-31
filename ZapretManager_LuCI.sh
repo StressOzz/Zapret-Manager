@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.99
+# Version: 4.991
 ZM_VERSION_EOF
 set -e
 
@@ -2009,6 +2009,56 @@ EOF_ZMR
 	mkdir -p "$ZM_STATE_DIR"
 	printf '%s %s %s\n' "$st" "$vol" "$show" > "$UI_RADIO_FILE.zm" && mv -f "$UI_RADIO_FILE.zm" "$UI_RADIO_FILE"
 	ui_radio_get
+}
+
+UI_ICY_DIR="/tmp/.zm-radio-icy"
+_ui_icy_age() { local t; t="$(date -r "$1" +%s 2>/dev/null)" || { echo 99999; return; }; echo $(( $(date +%s) - t )); }
+_ui_icy_byte() { if _zm_has hexdump; then hexdump -v -e '1/1 "%u"'; else od -An -v -tu1 | tr -d ' \n'; fi; }
+_ui_icy_hex() { if _zm_has hexdump; then hexdump -v -e '1/1 "%02x"'; else od -An -v -tx1 | tr -d ' \n'; fi; }
+_ui_icy_dl() {
+	local p="$1" f="$UI_ICY_DIR/$1" b="$UI_ICY_DIR/$1.$$" n l k sz off
+	if ! mkdir "$f.lock" 2>/dev/null; then
+		[ "$(_ui_icy_age "$f.lock")" -ge 30 ] || return 0
+		rm -rf "$f.lock"; mkdir "$f.lock" 2>/dev/null || return 0
+	fi
+	: > "$f.try"
+	if _zm_has curl; then
+		command curl -sS --connect-timeout 5 --max-time 8 -A 'Mozilla/5.0' -H 'Icy-MetaData: 1' -D "$b.h" \
+			"https://radiorecord.hostingradio.ru/$p.aacp" 2>/dev/null | head -c 40000 > "$b.bin"
+		n="$(grep -i '^icy-metaint:' "$b.h" 2>/dev/null | head -n 1 | tr -dc '0-9' | head -c 6)"
+		sz="$(wc -c < "$b.bin" 2>/dev/null | tr -d ' ')"
+		if [ -n "$n" ] && [ "$n" -gt 0 ] 2>/dev/null; then
+			off=0
+			for k in 1 2; do
+				off=$((off + n))
+				[ "${sz:-0}" -gt "$off" ] || break
+				l="$(tail -c +$((off + 1)) "$b.bin" | head -c 1 | _ui_icy_byte)"
+				case "$l" in ''|*[!0-9]*) break ;; esac
+				if [ "$l" -gt 0 ]; then
+					[ "$sz" -ge $((off + 1 + l * 16)) ] || break
+					tail -c +$((off + 2)) "$b.bin" | head -c $((l * 16)) | tr -d '\000' | _ui_icy_hex > "$b.t"
+					mv -f "$b.t" "$f"
+					break
+				fi
+				off=$((off + 1))
+			done
+		elif [ -s "$b.h" ] && [ "${sz:-0}" -gt 0 ]; then
+			: > "$f"
+		fi
+	fi
+	rm -f "$b.h" "$b.bin" "$b.t"
+	rmdir "$f.lock" 2>/dev/null
+	return 0
+}
+ui_radio_now() {
+	local p="$1" f t
+	printf '%s' "$p" | grep -qE '^[a-z0-9_]{1,32}$' || { echo '{"error":"неверная станция"}'; return 1; }
+	f="$UI_ICY_DIR/$p"
+	mkdir -p "$UI_ICY_DIR"
+	if [ "$(_ui_icy_age "$f")" -ge 12 ] && [ "$(_ui_icy_age "$f.try")" -ge 12 ]; then _ui_icy_dl "$p"; fi
+	if [ ! -f "$f" ] || [ "$(_ui_icy_age "$f")" -ge 120 ]; then printf '{"ok":false,"title":""}\n'; return 0; fi
+	t="$(head -c 8200 "$f" | tr -dc '0-9a-f')"
+	printf '{"ok":true,"title":"%s"}\n' "$t"
 }
 
 ZM_PEND_DIR="$JOBS_DIR/pend"
@@ -6130,6 +6180,7 @@ exclusions_status() {
 			[ -z "$ip" ] && continue
 			echo "$ip" | grep -qE '^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$' || continue
 			[ -z "$name" ] && name="*"
+			aname="$(_zm_dname "$mac")" && name="$aname"
 			[ "$name" = "*" ] && name="Неизвестное устройство"
 			[ "$first" -eq 1 ] || devjson="$devjson,"
 			first=0
@@ -6155,6 +6206,7 @@ exclusions_status() {
 				aname=$(grep -i "$aip" "$arp_tmp.log" | grep -i "$amac" | tail -n1 | awk '{print $NF}')
 			fi
 			[ "$aname" = "$amac" ] && aname=""
+			ip2="$(_zm_dname "$amac")" && aname="$ip2"
 			[ -n "$aname" ] || aname="Неизвестное устройство"
 			printf '%s|%s\n' "$aip" "$aname" >> "$arp_tmp"
 		done
@@ -16101,8 +16153,9 @@ _st_dev_model() {
 }
 _st_devs_json() {
 	[ -s "$ST_DEVS" ] || return 0
-	awk -F'\t' -v q='"' 'function j(v,  o, i, c) { o = ""; for (i = 1; i <= length(v); i++) { c = substr(v, i, 1); if (c == "\\" || c == q) o = o "\\" c; else if (c ~ /[\t\r\n]/) o = o " "; else o = o c } return o }
-		($1 == "all" || $1 == "byp" || $1 == "only") && $2 != "" { printf "%s{\"mode\":\"%s\",\"key\":\"%s\",\"name\":\"%s\"}", (n++ ? "," : ""), $1, j($2), j($3) }' "$ST_DEVS"
+	awk -F'\t' -v q='"' -v nf="$OW_NAMES" -v lf=/tmp/dhcp.leases 'function j(v,  o, i, c) { o = ""; for (i = 1; i <= length(v); i++) { c = substr(v, i, 1); if (c == "\\" || c == q) o = o "\\" c; else if (c ~ /[\t\r\n]/) o = o " "; else o = o c } return o }
+		BEGIN { while ((getline l < nf) > 0) { split(l, a, "\t"); if (a[2] != "") lb[tolower(a[1])] = a[2] } while ((getline l < lf) > 0) { split(l, a, " "); if (a[3] != "") im[a[3]] = tolower(a[2]) } }
+		($1 == "all" || $1 == "byp" || $1 == "only") && $2 != "" { k = tolower($2); m = (k in im) ? im[k] : k; printf "%s{\"mode\":\"%s\",\"key\":\"%s\",\"name\":\"%s\"}", (n++ ? "," : ""), $1, j($2), j(m in lb ? lb[m] : $3) }' "$ST_DEVS"
 }
 steer_devices() {
 	local lan t="$ST_RUN/devs.$$"
@@ -16116,13 +16169,14 @@ steer_devices() {
 			END { for (k in h) if (x[k, "mac"] != "") { split(x[k, "mac"], m, " "); print "S", tolower(m[1]), (x[k, "ip"] == "" ? "-" : x[k, "ip"]), (x[k, "name"] == "" ? "*" : x[k, "name"]) } }'
 		[ -f /proc/net/arp ] && awk -v lan="$lan" 'NR > 1 && $3 != "0x0" && index(lan, " " $6 " ") { print "A", tolower($4), $1, "*" }' /proc/net/arp
 	} > "$t" 2>/dev/null
-	awk -v q='"' 'function j(v,  o, i, c) { o = ""; for (i = 1; i <= length(v); i++) { c = substr(v, i, 1); if (c == "\\" || c == q) o = o "\\" c; else if (c ~ /[\t\r\n]/) o = o " "; else o = o c } return o }
+	awk -v q='"' -v nf="$OW_NAMES" 'function j(v,  o, i, c) { o = ""; for (i = 1; i <= length(v); i++) { c = substr(v, i, 1); if (c == "\\" || c == q) o = o "\\" c; else if (c ~ /[\t\r\n]/) o = o " "; else o = o c } return o }
+		BEGIN { while ((getline l < nf) > 0) { split(l, a, "\t"); if (a[2] != "") lb[tolower(a[1])] = a[2] } }
 		$2 !~ /^[0-9a-f][0-9a-f](:[0-9a-f][0-9a-f]){5}$/ || $2 == "00:00:00:00:00:00" { next }
 		$3 != "-" && $3 !~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ { $3 = "-" }
 		{ m = $2; if (!(m in seen)) { seen[m] = 1; ord[++n] = m }
 		  if ($3 != "-" && (ip[m] == "" || $1 == "L")) ip[m] = $3
 		  if ($4 != "*" && $4 != "" && (nm[m] == "" || $1 == "S")) nm[m] = $4 }
-		END { printf "{\"devices\":["; for (i = 1; i <= n; i++) { m = ord[i]; printf "%s{\"mac\":\"%s\",\"ip\":\"%s\",\"name\":\"%s\"}", (i > 1 ? "," : ""), m, ip[m], j(nm[m]) }; printf "]}\n" }' "$t"
+		END { printf "{\"devices\":["; for (i = 1; i <= n; i++) { m = ord[i]; printf "%s{\"mac\":\"%s\",\"ip\":\"%s\",\"name\":\"%s\"}", (i > 1 ? "," : ""), m, ip[m], j(m in lb ? lb[m] : nm[m]) }; printf "]}\n" }' "$t"
 	rm -f "$t"
 }
 _st_devs_save() {
@@ -27595,7 +27649,7 @@ _st_src_dev() {
 	for s in main $(_st_secs); do
 		if [ "$s" = main ]; then f="$ST_DIR/devices"; else f="$ST_SEC_DIR/$s/devices"; fi
 		[ -s "$f" ] || continue
-		line="$(awk -F'\t' -v k="$ip" -v m="$mac" '($1 == "all" || $1 == "byp" || $1 == "only") && ($2 == k || (m != "" && $2 == m)) { print $1 "\t" $2 "\t" $3; exit }' "$f")"
+		line="$(awk -F'\t' -v k="$ip" -v m="$mac" -v d="$(_zm_dname "$mac")" '($1 == "all" || $1 == "byp" || $1 == "only") && ($2 == k || (m != "" && $2 == m)) { print $1 "\t" $2 "\t" (d != "" ? d : $3); exit }' "$f")"
 		[ -n "$line" ] && { printf '%s\t%s\n' "$line" "$s"; return 0; }
 	done
 	return 1
@@ -28586,6 +28640,7 @@ _ab_devmap() {
 			p[3] == "name" { nm[p[2]] = v } p[3] == "mac" { mc[p[2]] = tolower(v) }
 			END { for (k in nm) if (k in mc) { n = split(mc[k], a, " "); for (i = 1; i <= n; i++) printf "N\t%s\t%s\n", a[i], nm[k] } }'
 		awk '$1 !~ /^#/ && $1 ~ /:/ && NF >= 2 { n = $NF; sub(/\..*/, "", n); if (n != "") printf "H\t%s\t%s\n", $1, n }' /tmp/hosts/odhcpd
+		[ -s "$OW_NAMES" ] && awk -F'\t' '$1 ~ /:/ && $2 != "" { printf "N\t%s\t%s\n", tolower($1), $2 }' "$OW_NAMES"
 	} 2>/dev/null
 }
 AB_KEY_AWK='
@@ -29339,9 +29394,9 @@ _ab_free_json() {
 	local run=false
 	_ab_free_alive && nft list table inet "$AB_FREE_NFT" >/dev/null 2>&1 && run=true
 	printf '{"running":%s,"free":[' "$run"
-	[ -s "$AB_FREE" ] && awk -F'|' 'BEGIN { s = "" } $1 ~ /^[0-9a-fA-F:]{17}$/ { gsub(/["\\]/, " ", $2); printf "%s{\"mac\":\"%s\",\"name\":\"%s\"}", s, tolower($1), $2; s = "," }' "$AB_FREE"
+	[ -s "$AB_FREE" ] && awk -F'|' -v nf="$OW_NAMES" 'BEGIN { s = ""; while ((getline l < nf) > 0) { split(l, a, "\t"); if (a[2] != "") lb[tolower(a[1])] = a[2] } } $1 ~ /^[0-9a-fA-F:]{17}$/ { m = tolower($1); n = (m in lb) ? lb[m] : $2; gsub(/["\\]/, " ", n); printf "%s{\"mac\":\"%s\",\"name\":\"%s\"}", s, m, n; s = "," }' "$AB_FREE"
 	printf '],"devices":['
-	[ -s /tmp/dhcp.leases ] && awk 'BEGIN { s = "" } $2 ~ /^[0-9a-fA-F:]{17}$/ { n = $4; if (n == "*") n = ""; gsub(/["\\]/, " ", n); printf "%s{\"mac\":\"%s\",\"ip\":\"%s\",\"name\":\"%s\"}", s, tolower($2), $3, n; s = "," }' /tmp/dhcp.leases
+	[ -s /tmp/dhcp.leases ] && awk -v nf="$OW_NAMES" 'BEGIN { s = ""; while ((getline l < nf) > 0) { split(l, a, "\t"); if (a[2] != "") lb[tolower(a[1])] = a[2] } } $2 ~ /^[0-9a-fA-F:]{17}$/ { m = tolower($2); n = $4; if (n == "*") n = ""; if (m in lb) n = lb[m]; gsub(/["\\]/, " ", n); printf "%s{\"mac\":\"%s\",\"ip\":\"%s\",\"name\":\"%s\"}", s, m, $3, n; s = "," }' /tmp/dhcp.leases
 	printf ']}\n'
 }
 
@@ -29687,6 +29742,7 @@ ZM_MULTI_EOF
 
 OW_LEASES="${ZM_OW_LEASES:-/tmp/dhcp.leases}"
 OW_NAMES="$ZM_STATE_DIR/ow.names"
+_zm_dname() { [ -n "$1" ] && [ -s "$OW_NAMES" ] && awk -F'\t' -v m="$(printf '%s' "$1" | tr 'A-F' 'a-f')" 'tolower($1) == m && $2 != "" { print $2; f = 1; exit } END { exit !f }' "$OW_NAMES"; }
 OW_V6_BAK="$ZM_STATE_DIR/ipv6.off"
 OW_RB_TAG="# zm-sched-reboot"
 OW_V6_KEYS="network.wan6.disabled network.wan.ipv6 dhcp.lan.ra dhcp.lan.dhcpv6 dhcp.lan.ndp"
@@ -30530,6 +30586,7 @@ case "$cmd" in
 	ui_flag_set)                          ui_flag_set "$1" ;;
 	ui_radio_get)                         ui_radio_get ;;
 	ui_radio_set)                         ui_radio_set "$1" ;;
+	ui_radio_now)                         ui_radio_now "$1" ;;
 	adblock_dns_sync)                     _ab_dns_sync ;;
 	dns_presets_migrate)                  dns_presets_migrate ;;
 	zapret_doh_migrate)                   [ -f "$ZO_DOH_FLAG" ] && [ -f "$CONF" ] && _zo_doh_stale && { _zo_doh_follow; echo '{"changed":true}'; } || echo '{"changed":false}' ;;
@@ -31091,12 +31148,16 @@ function legacy_bypass_info(c) {
 }
 
 function devices() {
-	let r = [], seen = {};
+	let r = [], seen = {}, lb = {};
+	for (let l in split(s(fs.readfile(STATE + "/ow.names")), "\n")) {
+		let p = split(l, "\t");
+		if (length(p) >= 2 && trim(p[1]) != "") lb[lc(trim(p[0]))] = trim(p[1]);
+	}
 	for (let l in split(s(fs.readfile(LEASES)), "\n")) {
 		let f = split(trim(l), /[ \t]+/);
 		if (length(f) < 4 || !match(f[2], /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) || seen[f[2]]) continue;
 		seen[f[2]] = true;
-		push(r, { ip: f[2], mac: lc(f[1]), name: f[3] == "*" ? "" : f[3] });
+		push(r, { ip: f[2], mac: lc(f[1]), name: lb[lc(f[1])] ?? (f[3] == "*" ? "" : f[3]) });
 	}
 	return sort(r, (a, b) => {
 		let x = map(split(a.ip, "."), (v) => int(v)), y = map(split(b.ip, "."), (v) => int(v));
@@ -34436,6 +34497,7 @@ list_methods() {
 	json_add_object "ui_flag_set";            json_add_string "name" "string"; json_close_object
 	json_add_object "ui_radio_get";           json_close_object
 	json_add_object "ui_radio_set";           json_add_string "mode" "string"; json_close_object
+	json_add_object "ui_radio_now";           json_add_string "mode" "string"; json_close_object
 	json_add_object "monitor";                json_close_object
 	json_add_object "monitor_procs";          json_close_object
 	json_add_object "monitor_action";         json_add_string "action" "string"; json_add_string "mode" "string"; json_close_object
@@ -34633,6 +34695,7 @@ call_method() {
 		ui_flag_set)             json_get_var name name;       "$BACKEND" ui_flag_set "$name" ;;
 		ui_radio_get)            "$BACKEND" ui_radio_get ;;
 		ui_radio_set)            json_get_var mode mode;       "$BACKEND" ui_radio_set "$mode" ;;
+		ui_radio_now)            json_get_var mode mode;       "$BACKEND" ui_radio_now "$mode" ;;
 		*) echo '{"error":"unknown method"}'; return 1 ;;
 	esac
 }
@@ -34716,6 +34779,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"sysinfo_get",
 					"ui_flags_get",
 					"ui_radio_get",
+					"ui_radio_now",
 					"events",
 					"zram_status",
 					"owrt_status"
@@ -49082,9 +49146,10 @@ html.zm-theme-dark .zm-dock .zm-refresh-banner { background: #2f2a1c; color: #e3
 .zm-ow-tr .cbi-button { margin: 0; }
 .zm-ow-muted { font-size: 12px; opacity: .55; }
 .zm-ow-name { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 4px; min-width: 0; }
-.zm-ow-name-btn { appearance: none; background: none; border: 0; padding: 2px 4px; margin: -2px -4px; border-radius: 6px; font: inherit; color: inherit; cursor: pointer; display: inline-flex; align-items: baseline; gap: 6px; text-align: left; max-width: 100%; }
+.zm-ow-name-btn { -webkit-appearance: none !important; appearance: none !important; background: transparent !important; border: 0 !important; box-shadow: none !important; padding: 2px 6px 2px 0 !important; margin: 0 !important; width: auto !important; height: auto !important; min-width: 0 !important; min-height: 0 !important; border-radius: 0 !important; font: inherit !important; line-height: 1.35 !important; letter-spacing: inherit !important; text-transform: none !important; text-shadow: none !important; color: inherit !important; cursor: pointer; display: inline-flex !important; align-items: baseline; gap: 6px; text-align: left; white-space: normal !important; max-width: 100%; overflow: visible !important; }
 .zm-ow-name-btn b { overflow-wrap: anywhere; }
-.zm-ow-name-btn:hover { background: rgba(127,127,127,.12); }
+.zm-ow-name-btn:hover b { text-decoration: underline; text-decoration-color: rgba(127,127,127,.5); text-underline-offset: 3px; }
+.zm-ow-name-btn:hover .zm-ow-pen { opacity: .8 !important; }
 .zm-ow-name-btn:focus-visible { outline: 2px solid rgba(34,158,217,.55); outline-offset: 1px; }
 .zm-ow-name-btn[disabled] { cursor: default; }
 .zm-ow-pen { font-size: 12px; opacity: 0; transition: opacity .15s; }
@@ -49109,8 +49174,6 @@ html.zm-theme-dark .zm-dock .zm-refresh-banner { background: #2f2a1c; color: #e3
 @media (max-width: 600px) { .zm-ow-clock-btns { margin-left: 0; width: 100%; } .zm-ow-clock-btns .cbi-button { flex: 1 1 auto; } }
 .zm-grid.zm-ow-mirrors { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 8px; }
 .zm-grid.zm-ow-mirrors .zm-tile { min-width: 0; padding: 8px 6px; display: flex; align-items: center; justify-content: center; line-height: 1.25; }
-.zm-ow-moved { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.zm-ow-moved .cbi-button { margin: 0; }
 html.zm-theme-dark .zm-ow-chip { border-color: rgba(255,255,255,.14); background: #22272e; }
 html.zm-theme-dark .zm-ow-chip:hover { border-color: #3fb950; background: rgba(63,185,80,.12); }
 html.zm-theme-dark .zm-ow-radio { border-color: rgba(255,255,255,.12); background: rgba(255,255,255,.03); }
@@ -49891,7 +49954,7 @@ return view.extend({
 	render: function(data) {
 		var sysData = data[0];
 		var wrap = E('div', { 'class': 'zm-wrap' });
-		var part = this.zmPart || '', SYS_MAIN = { status: 1, priv: 1, radio: 1, openwrt: 1, net: 1, zram: 1, ver: 1, ghmirror: 1, changelog: 1, thanks: 1 };
+		var part = this.zmPart || '', SYS_MAIN = { status: 1, priv: 1, radio: 1, net: 1, zram: 1, ver: 1, ghmirror: 1, changelog: 1, thanks: 1 };
 		function on(k) { return !part || (part === 'main' ? !!SYS_MAIN[k] : part === k); }
 		function put(k, el) { if (on(k)) wrap.appendChild(el); }
 		var netEl = E('div', {}, [ E('p', { 'class': 'zm-hint' }, 'Нажмите «Проверить», чтобы протестировать IPv4/IPv6') ]);
@@ -49933,7 +49996,7 @@ return view.extend({
 				radioCard.innerHTML = '';
 				radioCard.appendChild(E('h3', {}, [ 'Радио ', E('span', { 'class': 'zm-badge ' + (shown ? 'zm-ok' : 'zm-off') }, [ E('span', { 'class': 'zm-dot' }), shown ? 'показано' : 'скрыто' ]) ]));
 				radioCard.appendChild(zm.swRow(shown, 'Показывать радио внизу боковой панели',
-					shown ? 'Радио Record — 20 станций. Музыка играет в этом браузере и не прерывается при переходе между разделами панели. Станция и громкость запоминаются на роутере.'
+					shown ? 'Радио Record. Музыка играет в этом браузере и не прерывается при переходе между разделами панели. Станция и громкость запоминаются на роутере.'
 						: 'Плеер скрыт. Включите, чтобы слушать Радио Record прямо в панели.',
 					function() {
 						window.zmwRadio.set(!shown);
@@ -50148,12 +50211,6 @@ return view.extend({
 
 		siRender();
 		put('sysinfo', siCard);
-
-		var owCard = E('div', { 'class': 'zm-card zm-ow-moved' }, [
-			E('div', {}, [ E('b', {}, 'Время, зеркало OpenWrt и Flow Offloading'), E('div', { 'class': 'zm-hint', 'style': 'margin:2px 0 0' }, 'Теперь на отдельной странице — вместе с Wi-Fi, IPv6, UPnP, постоянными адресами устройств и перезагрузкой по расписанию.') ]),
-			E('a', { 'class': 'cbi-button cbi-button-action', 'href': zm.pageHref('openwrt') }, 'Настройка OpenWrt')
-		]);
-		put('openwrt', owCard);
 
 		var netBusy = false;
 		var msFmt = function(v) { var n = parseFloat(v); return isNaN(n) ? String(v || '') : n < 10 ? String(Math.round(n * 10) / 10) : String(Math.round(n)); };
@@ -51522,7 +51579,6 @@ return view.extend({
 				E('div', { 'class': 'zm-seg zm-ow-seg3' }, POWER.map(function(p) {
 					var v = txFor(r, p.id), off = v === null;
 					return E('div', { 'class': 'zm-seg-item' + (d.lvl === p.id ? ' zm-active' : '') + (off ? ' zm-ow-dis' : ''), 'role': 'button', 'tabindex': '0', 'aria-disabled': off ? 'true' : null,
-						'title': off ? 'Драйвер не сообщает допустимую мощность' : p.id === 'high' ? 'Полная разрешённая мощность — как по умолчанию в OpenWrt' : 'Примерно ' + (p.id === 'mid' ? 'половина' : 'четверть') + ' мощности: ' + v + ' дБм',
 						'click': function() { if (off || d.lvl === p.id) return; d.lvl = p.id; d.txp = v; renderWifi(); } }, p.label);
 				})),
 				txNote ? E('span', { 'class': 'zm-ow-txnote' }, txNote) : E([]) ]));
@@ -58971,18 +59027,18 @@ function toast(message, kind, duration) {
 
 var RADIO = [
 	[ 'record', 'Record', 'rr_main96', 'hits' ], [ 'russian_hits', 'Russian Hits', 'russianhits96', 'hits' ], [ 'russian_mix', 'Russian Mix', 'rus96', 'hits' ],
-	[ 'all_timers', 'Хиты всех времён', 'alltimers96', 'hits' ], [ 'remix', 'Remix', 'rmx96', 'hits' ], [ 'mashup', 'Mashup', 'mashup96', 'hits' ],
-	[ 'radio_80', 'Радио 80-х', '198096', 'retro' ], [ 'superdiskoteka_90', 'Дискотека 90-х', 'sd9096', 'retro' ], [ 'radio_00', 'Радио 00-х', '200096', 'retro' ], [ 'eurodance', 'Eurodance', 'eurodance96', 'retro' ],
+	[ 'all_timers', 'Вечные хиты', 'alltimers96', 'hits' ], [ 'remix', 'Remix', 'rmx96', 'hits' ], [ 'mashup', 'Mashup', 'mashup96', 'hits' ],
+	[ 'radio_80', 'Радио 80-х', '198096', 'retro' ], [ 'superdiskoteka_90', 'Радио 90-х', 'sd9096', 'retro' ], [ 'radio_00', 'Радио 00-х', '200096', 'retro' ], [ 'radio_10', 'Радио 10-х', '201096', 'retro' ],
 	[ 'edm', 'EDM', 'club96', 'house' ], [ 'house_hits', 'House Hits', 'househits96', 'house' ], [ 'future_house', 'Future House', 'fut96', 'house' ],
 	[ 'tech_house', 'Tech House', 'techouse96', 'house' ], [ 'deep', 'Deep', 'deep96', 'house' ],
 	[ 'trancemission', 'Trancemission', 'tm96', 'trance' ], [ 'trance_classics', 'Trance Classics', 'trancehits96', 'trance' ], [ 'progressive', 'Progressive', 'progr96', 'trance' ],
 	[ 'techno', 'Techno', 'techno96', 'trance' ], [ 'hardstyle', 'Hardstyle', 'teo96', 'trance' ],
 	[ 'rap_hits', 'Rap Hits', 'rap96', 'bass' ], [ 'trap', 'Trap', 'trap96', 'bass' ], [ 'dubstep', 'Dubstep', 'dub96', 'bass' ], [ 'pirate_station', 'Pirate Station', 'ps96', 'bass' ],
-	[ 'medlyak_fm', 'Медляк FM', 'mdl96', 'calm' ], [ 'tropical', 'Tropical', 'trop96', 'calm' ], [ 'chill_out', 'Chill-Out', 'chil96', 'calm' ], [ 'lofi', 'LoFi', 'lofi96', 'calm' ], [ 'ambient', 'Ambient', 'ambient96', 'calm' ],
+	[ 'medlyak_fm', 'Медляк FM', 'mdl96', 'calm' ], [ 'tropical', 'Tropical', 'trop96', 'calm' ], [ 'chill_out', 'Chill-Out', 'chil96', 'calm' ], [ 'lofi', 'Lo-Fi', 'lofi96', 'calm' ], [ 'ambient', 'Ambient', 'ambient96', 'calm' ],
 	[ 'rock', 'Rock', 'rock96', 'rock' ]
 ];
 var K_RADIO = 'zmw.radio';
-var radio = { idx: 0, vol: 70, show: true, state: 'off', audio: null, el: null, menu: null, saveT: 0, waitT: 0, synced: false };
+var radio = { idx: 0, vol: 70, show: true, state: 'off', audio: null, el: null, menu: null, saveT: 0, waitT: 0, synced: false, track: null, nowT: 0, nowSeq: 0, nowOff: false, subTxt: null };
 (function () {
 	try {
 		var c = JSON.parse(sget(K_RADIO) || 'null');
@@ -59042,7 +59098,7 @@ function radioAudio() {
 		radioFail();
 	});
 	a.addEventListener('pause', function () {
-		if (radio.state === 'play' && a.getAttribute('src')) { radio.state = 'off'; radioRelease(); radioPaint(); }
+		if (radio.state === 'play' && a.getAttribute('src')) { radio.state = 'off'; radioRelease(); radioNowStop(); radioPaint(); }
 	});
 	radio.audio = a;
 	return a;
@@ -59066,11 +59122,13 @@ function radioStart() {
 	radioPaint();
 	a.src = 'https://radiorecord.hostingradio.ru/' + RADIO[radio.idx][2] + '.aacp';
 	radioWaitGuard();
+	if (radio.track && radio.track.idx !== radio.idx) radio.track = null;
+	radioNow();
 	var p = a.play();
 	if (p && p.catch) p.catch(function (e) {
 		if (e && e.name === 'AbortError') return;
 		if (radio.state !== 'wait' && radio.state !== 'play') return;
-		if (e && e.name === 'NotAllowedError') { radio.state = 'off'; radioRelease(); radioPaint(); toast('Браузер не дал включить звук — нажмите «Играть» ещё раз', 'warning'); return; }
+		if (e && e.name === 'NotAllowedError') { radio.state = 'off'; radioRelease(); radioNowStop(); radioPaint(); toast('Браузер не дал включить звук — нажмите «Играть» ещё раз', 'warning'); return; }
 		radioFail();
 	});
 	radioMedia();
@@ -59078,11 +59136,13 @@ function radioStart() {
 function radioStop() {
 	radio.state = 'off';
 	radioRelease();
+	radioNowStop();
 	radioPaint();
 }
 function radioFail() {
 	var name = RADIO[radio.idx][1];
 	radioRelease();
+	radioNowStop();
 	radio.state = 'err';
 	radioPaint();
 	toast('Радио: станция «' + name + '» сейчас не отвечает — попробуйте позже или выберите другую', 'warning');
@@ -59100,12 +59160,65 @@ function radioStep(d) {
 	radio.idx = (radio.idx + d + RADIO.length) % RADIO.length;
 	radioSave();
 	if (on) radioStart();
-	else { radio.state = 'off'; radioPaint(); radioMedia(); }
+	else { radio.state = 'off'; radioNowStop(); radioPaint(); radioMedia(); }
+}
+function radioNowStop() {
+	clearTimeout(radio.nowT);
+	radio.nowT = 0;
+	radio.nowSeq++;
+	if (radio.track) { radio.track = null; radioMedia(); }
+}
+function radioNowSet(idx, t) {
+	var a = t && typeof t.artist === 'string' ? t.artist.replace(/\s+/g, ' ').trim() : '';
+	var s = t && typeof t.song === 'string' ? t.song.replace(/\s+/g, ' ').trim() : '';
+	var nt = a || s ? { idx: idx, artist: a, song: s, text: a && s ? a + ' — ' + s : a || s } : null;
+	var old = radio.track;
+	if ((old ? old.text + old.idx : '') === (nt ? nt.text + nt.idx : '')) return;
+	radio.track = nt;
+	radioMedia();
+	radioPaint();
+}
+function radioIcy(hex) {
+	if (typeof hex !== 'string' || !hex || hex.length % 2 || /[^0-9a-f]/.test(hex)) return null;
+	var b = new Uint8Array(hex.length / 2), i, s = '';
+	for (i = 0; i < b.length; i++) b[i] = parseInt(hex.substr(i * 2, 2), 16);
+	try { s = new TextDecoder('utf-8', { fatal: true }).decode(b); }
+	catch (e) { try { s = new TextDecoder('windows-1251').decode(b); } catch (e2) { return null; } }
+	i = s.indexOf("StreamTitle='");
+	if (i < 0) return null;
+	s = s.slice(i + 13);
+	i = s.search(/';\s*Stream[A-Za-z]+=/);
+	if (i < 0) i = s.lastIndexOf("';");
+	if (i >= 0) s = s.slice(0, i);
+	s = s.replace(/[\u0000-\u001f]+/g, ' ').replace(/\s+/g, ' ').trim();
+	if (!s || /^[-\s]*$/.test(s)) return null;
+	i = s.indexOf(' - ');
+	return i > 0 ? { artist: s.slice(0, i).trim(), song: s.slice(i + 3).trim() } : { artist: '', song: s };
+}
+function radioNow() {
+	clearTimeout(radio.nowT);
+	radio.nowT = 0;
+	var idx = radio.idx, seq = ++radio.nowSeq, got = false;
+	if (radio.nowOff || !sid || (radio.state !== 'wait' && radio.state !== 'play')) return;
+	ubus('zapret-manager', 'ui_radio_now', { mode: RADIO[idx][2] }).then(function (res) {
+		if (seq !== radio.nowSeq || idx !== radio.idx) return;
+		var c = res && res[0] === 0 ? res[1] : null;
+		if (res && (res[0] === 3 || res[0] === 6)) { radio.nowOff = true; return; }
+		if (c && c.ok) { got = true; radioNowSet(idx, radioIcy(c.title)); }
+		else if (c && c.ok === false && radio.track) radioNowSet(idx, null);
+	}, function (e) {
+		if (e && e.rpcCode === -32002) radio.nowOff = true;
+	}).then(function () {
+		if (seq === radio.nowSeq && !radio.nowOff && (radio.state === 'wait' || radio.state === 'play')) radio.nowT = setTimeout(radioNow, got ? 15000 : 8000);
+	});
 }
 function radioMedia() {
 	try {
 		if (!('mediaSession' in navigator) || !window.MediaMetadata) return;
-		navigator.mediaSession.metadata = new MediaMetadata({ title: RADIO[radio.idx][1], artist: 'Радио Record', album: 'Zapret Manager' });
+		var tr = radio.track && radio.track.idx === radio.idx ? radio.track : null, st = RADIO[radio.idx][1];
+		navigator.mediaSession.metadata = new MediaMetadata(tr ? {
+			title: tr.song || tr.artist, artist: tr.song ? tr.artist : '', album: st + ' · Радио Record'
+		} : { title: st, artist: 'Радио Record', album: 'Zapret Manager' });
 		if (radio.mediaSet) return;
 		radio.mediaSet = true;
 		navigator.mediaSession.setActionHandler('play', function () { radioStart(); });
@@ -59118,20 +59231,25 @@ function radioMedia() {
 function radioBuild() {
 	var r = radio;
 	r.nameEl = E('span', { 'class': 'zmw-radio-name' });
-	r.subEl = E('span', { 'class': 'zmw-radio-sub' });
+	r.subEl = E('div', { 'class': 'zmw-radio-track', 'hidden': '' });
 	r.pick = E('button', { 'class': 'zmw-radio-pick', 'type': 'button', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'title': 'Выбрать станцию', 'click': radioMenuToggle }, [
 		E('span', { 'class': 'zmw-radio-eq', 'aria-hidden': 'true' }, [ E('i'), E('i'), E('i') ]),
 		icon('radio', 'zmw-radio-ico'),
-		E('span', { 'class': 'zmw-radio-text' }, [ r.subEl, r.nameEl ])
+		E('span', { 'class': 'zmw-radio-text' }, [ r.nameEl ])
 	]);
 	r.playBtn = E('button', { 'class': 'zmw-radio-btn zmw-radio-main', 'type': 'button', 'click': radioToggle });
 	r.el = E('div', { 'class': 'zmw-radio', 'role': 'group', 'aria-label': 'Радио Record' }, [
 		r.pick,
 		E('button', { 'class': 'zmw-radio-btn', 'type': 'button', 'aria-label': 'Предыдущая станция', 'title': 'Предыдущая станция', 'click': function () { radioStep(-1); } }, [ icon('rprev') ]),
 		r.playBtn,
-		E('button', { 'class': 'zmw-radio-btn', 'type': 'button', 'aria-label': 'Следующая станция', 'title': 'Следующая станция', 'click': function () { radioStep(1); } }, [ icon('rnext') ])
+		E('button', { 'class': 'zmw-radio-btn', 'type': 'button', 'aria-label': 'Следующая станция', 'title': 'Следующая станция', 'click': function () { radioStep(1); } }, [ icon('rnext') ]),
+		r.subEl
 	]);
 	radioPaint();
+	if (window.ResizeObserver) {
+		var lastW = -1;
+		new ResizeObserver(function () { var w = r.subEl.clientWidth; if (w !== lastW) { lastW = w; radioMarquee(); } }).observe(r.subEl);
+	}
 	return r.el;
 }
 function radioPaint() {
@@ -59142,15 +59260,36 @@ function radioPaint() {
 	r.el.classList.toggle('zmw-radio-play', r.state === 'play');
 	r.el.classList.toggle('zmw-radio-wait', r.state === 'wait');
 	r.el.classList.toggle('zmw-radio-err', r.state === 'err');
-	r.subEl.textContent = r.state === 'wait' ? 'Подключаемся…' : r.state === 'err' ? 'Не отвечает' : 'Радио Record';
+	var tr = r.state === 'play' && r.track && r.track.idx === r.idx ? r.track : null;
+	radioSub(r.state === 'wait' ? 'Подключаемся…' : r.state === 'err' ? 'Не отвечает' : tr ? tr.text : '', !!tr);
 	r.nameEl.textContent = RADIO[r.idx][1];
-	r.pick.title = RADIO[r.idx][1] + ' — нажмите, чтобы выбрать станцию и громкость';
+	r.pick.title = (tr ? 'Сейчас играет: ' + tr.text + '\n' : '') + RADIO[r.idx][1] + ' — нажмите, чтобы выбрать станцию и громкость';
 	r.playBtn.innerHTML = '';
 	r.playBtn.appendChild(icon(on ? 'rstop' : 'rplay'));
 	r.playBtn.setAttribute('aria-label', on ? 'Остановить' : 'Играть');
 	r.playBtn.title = on ? 'Остановить' : 'Играть «' + RADIO[r.idx][1] + '»';
 	try { if ('mediaSession' in navigator) navigator.mediaSession.playbackState = on ? 'playing' : 'paused'; } catch (e) {}
 	if (r.menu) radioMenuPaint();
+}
+function radioSub(txt, isTrack) {
+	var r = radio;
+	if (r.subTxt === txt) return;
+	r.subTxt = txt;
+	r.subEl.hidden = !txt;
+	r.subEl.innerHTML = '';
+	r.subEl.appendChild(E('span', { 'class': 'zmw-radio-mq' }, [ txt ]));
+	r.subEl.classList.toggle('zmw-radio-trk', isTrack);
+	radioMarquee();
+}
+function radioMarquee() {
+	var box = radio.subEl;
+	if (!box) return;
+	box.classList.remove('zmw-radio-scroll');
+	var w = box.clientWidth, d = box.scrollWidth - w;
+	if (!w || d <= 2 || !box.classList.contains('zmw-radio-trk')) return;
+	box.style.setProperty('--zmw-mq', -(d + 2) + 'px');
+	box.style.setProperty('--zmw-mqt', Math.min(24, Math.max(6, d / 18 + 4)).toFixed(1) + 's');
+	box.classList.add('zmw-radio-scroll');
 }
 function radioMenuOutside(ev) {
 	if (!radio.menu) return;
@@ -59170,7 +59309,10 @@ function radioMenuClose() {
 	window.removeEventListener('hashchange', radioMenuClose);
 }
 function radioMenuPaint() {
-	var m = radio.menu;
+	var m = radio.menu, tr = radio.state === 'play' && radio.track && radio.track.idx === radio.idx ? radio.track : null, nowEl = m.querySelector('.zmw-radio-now');
+	nowEl.hidden = !tr;
+	nowEl.textContent = tr ? tr.text : '';
+	nowEl.title = tr ? tr.text : '';
 	Array.prototype.forEach.call(m.querySelectorAll('.zmw-radio-st'), function (b) {
 		var cur = +b.getAttribute('data-i') === radio.idx;
 		b.classList.toggle('zmw-on', cur);
@@ -59190,6 +59332,7 @@ function radioMenuToggle() {
 	});
 	var m = E('div', { 'class': 'zmw-radio-menu', 'role': 'menu', 'aria-label': 'Станции Радио Record' }, [
 		E('div', { 'class': 'zmw-radio-menu-head' }, [ E('b', {}, [ 'Радио Record' ]) ]),
+		E('div', { 'class': 'zmw-radio-now', 'hidden': '' }),
 		E('div', { 'class': 'zmw-radio-list' }, RADIO.map(function (s, i) {
 			return E('button', { 'class': 'zmw-radio-st', 'type': 'button', 'role': 'menuitemradio', 'data-i': String(i), 'click': function () { radioPick(i); radioMenuClose(); } }, [
 				E('span', { 'class': 'zmw-radio-eq', 'aria-hidden': 'true' }, [ E('i'), E('i'), E('i') ]), E('span', {}, [ s[1] ])
@@ -60810,15 +60953,23 @@ html[data-theme="matrix"] .zmw-side .zmw-mem-val.zmw-mem-fit { font-size: 10px; 
 .zmw-side .zmw-mem-val { font-size: 12px; line-height: 1.3; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
 .zmw-side .zmw-mem-val.zmw-mem-fit { font-size: 10.5px; letter-spacing: -.02em; }
 .zmw-side .zmw-mem-bar { height: 4px; }
-.zmw-radio { display: flex; align-items: center; gap: 1px; padding: 4px 2px 4px 3px; border-radius: 11px; background: var(--surface-2); border: 1px solid var(--border); min-width: 0; }
+.zmw-radio { display: flex; flex-wrap: wrap; align-items: center; gap: 0; padding: 4px 2px 4px 3px; border-radius: 11px; background: var(--surface-2); border: 1px solid var(--border); min-width: 0; }
 .zmw-radio[hidden] { display: none; }
-.zmw-radio-pick { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 3px 5px; margin: 0; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.zmw-radio-pick { flex: 1; min-width: 0; display: flex; align-items: center; gap: 7px; padding: 3px 4px; margin: 0; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .zmw-radio-pick:hover { background: var(--surface-3); }
 .zmw-radio-pick:focus-visible, .zmw-radio-btn:focus-visible, .zmw-radio-st:focus-visible { outline: none; box-shadow: var(--ring); }
 .zmw-radio-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
-.zmw-radio-sub { font-size: 11px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zmw-radio-track { flex: 1 1 100%; min-width: 0; box-sizing: border-box; margin: -1px 5px 2px; font-size: 11px; line-height: 1.25; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.zmw-radio-track[hidden] { display: none; }
+.zmw-radio-trk { color: var(--text-2); }
+.zmw-radio-scroll { text-overflow: clip; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 10px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 10px), transparent); }
+.zmw-radio-scroll .zmw-radio-mq { display: inline-block; padding-right: 2px; animation: zmw-mq var(--zmw-mqt, 8s) ease-in-out infinite alternate; }
+@keyframes zmw-mq { 0%, 18% { transform: translateX(0); } 82%, 100% { transform: translateX(var(--zmw-mq, 0)); } }
+.zmw-radio-now { width: 0; min-width: 100%; box-sizing: border-box; padding: 0 7px 5px; font-size: 12.5px; line-height: 1.3; color: var(--text-2); overflow-wrap: anywhere; }
+.zmw-radio-now[hidden] { display: none; }
+.zmw-radio-now::before { content: 'Играет: '; color: var(--muted); }
 .zmw-radio-name { font-size: 12.5px; font-weight: 650; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.zmw-radio-ico { width: 18px; height: 18px; flex: none; color: var(--muted); }
+.zmw-radio-ico { width: 16px; height: 16px; flex: none; color: var(--muted); }
 .zmw-radio-eq { display: none; align-items: flex-end; gap: 2px; width: 13px; height: 14px; flex: none; }
 .zmw-radio-eq i { display: block; width: 3px; height: 40%; border-radius: 2px; background: var(--grad); }
 .zmw-radio-play .zmw-radio-pick .zmw-radio-eq, .zmw-radio-wait .zmw-radio-pick .zmw-radio-eq { display: flex; }
@@ -60831,11 +60982,12 @@ html[data-theme="matrix"] .zmw-side .zmw-mem-val.zmw-mem-fit { font-size: 10px; 
 .zmw-radio-wait .zmw-radio-eq i:nth-child(3) { animation-delay: .3s; }
 @keyframes zmw-eq { 0%, 100% { height: 30%; } 50% { height: 100%; } }
 @keyframes zmw-eqwait { 0%, 100% { opacity: .35; height: 35%; } 50% { opacity: 1; height: 55%; } }
-.zmw-radio-err .zmw-radio-sub { color: var(--warn); }
-.zmw-radio-btn { width: 26px; height: 28px; flex: none; display: grid; place-items: center; padding: 0; margin: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); cursor: pointer; transition: background .15s, color .15s, transform .1s; }
+.zmw-radio-err .zmw-radio-track { color: var(--warn); }
+.zmw-radio-btn { width: 32px; height: 34px; flex: none; display: grid; place-items: center; padding: 0; margin: 0; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); cursor: pointer; transition: background .15s, color .15s, transform .1s; }
 .zmw-radio-btn:hover { background: var(--surface-3); color: var(--text); }
 .zmw-radio-btn:active { transform: scale(.92); }
-.zmw-radio-btn .zmw-i { width: 15px; height: 15px; }
+.zmw-radio-btn .zmw-i { width: 21px; height: 21px; }
+.zmw-radio-main .zmw-i { width: 23px; height: 23px; }
 .zmw-radio-play .zmw-radio-main, .zmw-radio-wait .zmw-radio-main { color: var(--a1); }
 .zmw-radio-menu { position: fixed; z-index: 120; box-sizing: border-box; max-height: calc(100vh - 16px); overflow: auto; padding: 7px 6px 5px; border-radius: 12px; background: var(--surface-solid); border: 1px solid var(--border-2); box-shadow: var(--shadow-lg); color: var(--text); font: 13px/1.3 var(--font); }
 .zmw-radio-menu-head { display: flex; align-items: baseline; gap: 10px; padding: 0 7px 3px; }
@@ -60860,6 +61012,7 @@ html[data-theme="matrix"] .zmw-side .zmw-mem-val.zmw-mem-fit { font-size: 10px; 
 	html .zmw-radio-play .zmw-radio-eq i, html .zmw-radio-wait .zmw-radio-eq i, html .zmw-radio-st.zmw-radio-live .zmw-radio-eq i { animation-duration: 1s !important; animation-iteration-count: infinite !important; }
 	html .zmw-radio-play .zmw-radio-eq i:nth-child(2), html .zmw-radio-st.zmw-radio-live .zmw-radio-eq i:nth-child(2) { animation-duration: .8s !important; }
 	html .zmw-radio-play .zmw-radio-eq i:nth-child(3), html .zmw-radio-st.zmw-radio-live .zmw-radio-eq i:nth-child(3) { animation-duration: 1.15s !important; }
+	html .zmw-radio-scroll .zmw-radio-mq { animation-duration: var(--zmw-mqt, 8s) !important; animation-iteration-count: infinite !important; }
 }
 html.zm-dust-on .zmw-side .zmw-mem-row, html.zm-dust-on .zmw-side .zmw-radio { background: transparent; }
 #zmw-view .zm-meter .zmw-mem-head { font-size: 13px; margin-bottom: 6px; align-items: baseline; }
