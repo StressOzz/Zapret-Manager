@@ -57,6 +57,37 @@ BACKUP_FILE="/opt/zapret/tmp/hosts_temp.txt"; STR_FILE="$TMP_SF/str_test.txt"; T
 RESULTS="/opt/zapret/tmp/zapret_bench.txt"; BACK="$TMP_SF/zapret_back.txt"; TMP_RES="$TMP_SF/zapret_results_all.$$"; TEST_STOP_FLAG="$TMP_SF/zapret_test_stop.flag"
 FINAL_STR="$TMP_SF/StrFINAL.txt"; NEW_STR="$TMP_SF/StrNEW.txt"; OLD_STR="$TMP_SF/StrOLD.txt"; SECRET_FILE="/etc/tg-ws-proxy/secret.conf"
 ARCH_FULL="$(cat /etc/openwrt_release | grep DISTRIB_ARCH | cut -d"'" -f2)"; MODEL="$(cat /tmp/sysinfo/model 2>/dev/null)"
+# a73-compat: Xiaomi BE7000 (IPQ9554) and other IPQ95xx routers use aarch64_cortex-a73,
+# but most projects don't build for it (no OpenWrt Docker SDK image). The binaries are
+# identical to a53/a72/a76/generic (same ARM64 ISA). Add compatible architectures so
+# any aarch64 package installs without --arch or --force overrides.
+zm_arch_compat_setup() {
+    local arch_file="/etc/apk/arch" a changed=0
+    [ -f "$arch_file" ] || return 0
+    for a in aarch64_cortex-a53 aarch64_cortex-a72 aarch64_cortex-a73 aarch64_cortex-a76 aarch64_generic; do
+        grep -q "^${a}$" "$arch_file" 2>/dev/null || { echo "$a" >> "$arch_file"; changed=1; }
+    done
+    [ "$changed" = "1" ] && echo -e "${CYAN}a73-compat: добавлены совместимые архитектуры в /etc/apk/arch${NC}"
+    return 0
+}
+# Download a package, falling back to compatible architectures on 404.
+# Usage: zm_arch_download <url> <output_file>
+zm_arch_download() {
+    local url="$1" out="$2" fallback fallback_url
+    wget -q -O "$out" "$url" 2>/dev/null && return 0
+    case "$ARCH_FULL" in
+        aarch64_cortex-a73)
+            for fallback in aarch64_generic aarch64_cortex-a53 aarch64_cortex-a72 aarch64_cortex-a76; do
+                fallback_url="${url//$ARCH_FULL/$fallback}"
+                [ "$fallback_url" = "$url" ] && continue
+                echo -e "${YELLOW}Пакет для $ARCH_FULL не найден, пробуем $fallback${NC}"
+                wget -q -O "$out" "$fallback_url" 2>/dev/null && return 0
+            done
+            ;;
+    esac
+    return 1
+}
+zm_arch_compat_setup
 RES1="/opt/zapret/tmp/results_flowseal.txt"; RES2="/opt/zapret/tmp/results_versions.txt"; RES3="/opt/zapret/tmp/results_all.txt"
 LUCI_EDITION="/usr/libexec/rpcd/zapret-manager"
 ZM_LUCI_URL="${GH_RAW}/StressOzz/Zapret-Manager/main/ZapretManager_LuCI.sh"; ZM_LUCI_CACHE="/tmp/zm_luci_latest"; ZM_YV_OFF="/opt/zapret-manager-luci/yv_off"; ZM_DV_OFF="/opt/zapret-manager-luci/dv_off"
@@ -1473,7 +1504,7 @@ chmod +x "$INIT_PATH_GO"; "$INIT_PATH_GO" enable >/dev/null 2>&1; fi; "$INIT_PAT
 # УСТАНОВКА MTProto
 install_update_TG_PKG() { echo -e "\n${MAGENTA}Устанавливаем TG WS Proxy MTProto${NC}"; rm -f /etc/tg-ws-proxy.conf /etc/tg-ws-proxy.conf-opkg; URL="${GH_MAIN}/spatiumstas/tg-ws-proxy-go/releases/download/${TG_MTProto}/tg-ws-proxy_${TG_MTProto}-${GO_SUF}_openwrt_${ARCH_FULL}.${RAZ}"
 update_packages || return; FILE_NAME_GO="$(basename "$URL")"; echo -e "${CYAN}Скачиваем и устанавливаем${NC} $FILE_NAME_GO"
-wget -q -O "$TMP_FILE_GO" "$URL" || { echo -e "\n${RED}Ошибка скачивания $URL${NC}\n"; PAUSE; return 1; }; $INSTALL "$TMP_FILE_GO" >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка установки $TMP_FILE_GO!${NC}\n"; rm -f "$TMP_FILE_GO"; PAUSE; return 1; }
+zm_arch_download "$URL" "$TMP_FILE_GO" || { echo -e "\n${RED}Ошибка скачивания $URL${NC}\n"; PAUSE; return 1; }; $INSTALL "$TMP_FILE_GO" >/dev/null 2>&1 || { echo -e "\n${RED}Ошибка установки $TMP_FILE_GO!${NC}\n"; rm -f "$TMP_FILE_GO"; PAUSE; return 1; }
 rm -f "$TMP_FILE_GO"; if ! grep -q '^SECRET=.' "$SECRET_FILE" 2>/dev/null; then echo "SECRET=$SECRET" > "$SECRET_FILE"; fi; rm -f /etc/tg-ws-proxy.conf /etc/tg-ws-proxy.conf-opkg; /etc/init.d/tg-ws-proxy enable >/dev/null 2>&1; /etc/init.d/tg-ws-proxy restart >/dev/null 2>&1
 if pidof tg-ws-proxy >/dev/null 2>&1; then echo -e "TG WS Proxy MTProto ${GREEN}установлен!${NC}\n"; else echo -e "${RED}TG WS Proxy MTProto не установлен!${NC}\n"; fi; PAUSE; }
 remove_TG_PKG() { echo -e "\n${MAGENTA}Удаляем TG WS Proxy MTProto${NC}"; /etc/init.d/tg-ws-proxy stop >/dev/null 2>&1; /etc/init.d/tg-ws-proxy disable >/dev/null 2>&1; $DELETE tg-ws-proxy >/dev/null 2>&1; rm -rf /etc/tg-ws-proxy /etc/tg-ws-proxy.conf /etc/tg-ws-proxy.conf-opkg; echo -e "TG WS Proxy MTProto ${GREEN}удалён!${NC}\n"; PAUSE; }
@@ -1568,7 +1599,7 @@ BYEDPI_RESTORE_DNS_STATE() { [ ! -f "$BYEDPI_DNS_BACKUP" ] && return; . "$BYEDPI
 else uci set dhcp.@dnsmasq[0].localuse="$LOCALUSE"; fi; if [ "$SERVER" = "__UNSET__" ]; then uci -q delete dhcp.@dnsmasq[0].server; else uci set dhcp.@dnsmasq[0].server="$SERVER"; fi; if [ "$NORESOLV" = "__UNSET__" ]
 then uci -q delete dhcp.@dnsmasq[0].noresolv; else uci set dhcp.@dnsmasq[0].noresolv="$NORESOLV"; fi; uci commit dhcp >/dev/null 2>&1; echo -e "${CYAN}Перезапускаем ${NC}dnsmasq"; /etc/init.d/dnsmasq restart >/dev/null 2>&1; rm -f "$BYEDPI_DNS_BACKUP"; }
 BYEDPI_INSTALL() { if pkg_is_installed byedpi; then BYEDPI_DELETE; return; fi; echo -e "\n${MAGENTA}Установка ByeDPI${NC}"; rm -rf "$tmpDIR"; mkdir -p "$tmpDIR"; BYEDPI_FILE="byedpi_${BYEDPI_LATEST_VER}-r1_${LOCAL_ARCH}.${RAZ}"
-BYEDPI_URL="${GH_MAIN}/DPITrickster/ByeDPI-OpenWrt/releases/download/${RELEASE_TAG}/${BYEDPI_FILE}"; echo -e "${CYAN}Скачиваем ${NC}$BYEDPI_FILE"; cd "$tmpDIR" || return 1; wget -q -U "Mozilla/5.0" -O "$BYEDPI_FILE" "$BYEDPI_URL" || { echo -e "\n${RED}Не удалось скачать:${NC}\n"; echo "$BYEDPI_URL"; rm -rf "$tmpDIR"; PAUSE; return 1; }
+BYEDPI_URL="${GH_MAIN}/DPITrickster/ByeDPI-OpenWrt/releases/download/${RELEASE_TAG}/${BYEDPI_FILE}"; echo -e "${CYAN}Скачиваем ${NC}$BYEDPI_FILE"; cd "$tmpDIR" || return 1; zm_arch_download "$BYEDPI_URL" "$BYEDPI_FILE" || { echo -e "\n${RED}Не удалось скачать:${NC}\n"; echo "$BYEDPI_URL"; rm -rf "$tmpDIR"; PAUSE; return 1; }
 echo -e "${CYAN}Устанавливаем ${NC}ByeDPI"; if ! $INSTALL "$BYEDPI_FILE" >/dev/null 2>&1; then echo -e "\n${RED}Не удалось установить ByeDPI!${NC}\n"; rm -rf "$tmpDIR"; PAUSE; return 1; fi; rm -rf "$tmpDIR"; if [ -f /etc/init.d/byedpi ]
 then /etc/init.d/byedpi enable >/dev/null 2>&1; /etc/init.d/byedpi start >/dev/null 2>&1; fi; echo -e "ByeDPI ${GREEN}установлен!${NC}\n"; PAUSE; }
 BYEDPI_DELETE() { echo -e "\n${MAGENTA}Удаление ByeDPI${NC}"; echo -e "${CYAN}Останавливаем ${NC}ByeDPI"; /etc/init.d/byedpi stop >/dev/null 2>&1; /etc/init.d/byedpi disable >/dev/null 2>&1; if bt_installed; then BYEDPI_RESTORE_DNS_STATE; echo -e "${YELLOW}Пакет используется ${NC}ByeTube${YELLOW} — служба ByeDPI остановлена, пакет оставлен${NC}\n"; PAUSE; return; fi; echo -e "${CYAN}Удаляем пакет ${NC}ByeDPI"
