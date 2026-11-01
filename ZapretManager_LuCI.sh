@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.992
+# Version: 4.993
 ZM_VERSION_EOF
 set -e
 
@@ -2018,16 +2018,38 @@ UI_ICY_DIR="/tmp/.zm-radio-icy"
 _ui_icy_age() { local t; t="$(date -r "$1" +%s 2>/dev/null)" || { echo 99999; return; }; echo $(( $(date +%s) - t )); }
 _ui_icy_byte() { if _zm_has hexdump; then hexdump -v -e '1/1 "%u"'; else od -An -v -tu1 | tr -d ' \n'; fi; }
 _ui_icy_hex() { if _zm_has hexdump; then hexdump -v -e '1/1 "%02x"'; else od -An -v -tx1 | tr -d ' \n'; fi; }
+_ui_icy_url() {
+	case "$1" in
+		o_europa) echo "https://ep256.hostingradio.ru:8052/europaplus256.mp3" ;;
+		o_rusradio) echo "https://rusradio.hostingradio.ru/rusradio96.aacp" ;;
+		o_hitfm) echo "https://hitfm.hostingradio.ru/hitfm96.aacp" ;;
+		o_novoe) echo "http://icecast.newradio.cdnvideo.ru/newradio3" ;;
+		o_dfm) echo "https://dfm.hostingradio.ru/dfm96.aacp" ;;
+		o_dfmclub) echo "https://dfm-dfmclub.hostingradio.ru/dfmclub96.aacp" ;;
+		o_dfmrus) echo "https://dfm-dfmrusdance.hostingradio.ru/dfmrusdance96.aacp" ;;
+		o_retro) echo "https://retro128.streamr.ru/" ;;
+		o_avto) echo "http://ic4.101.ru:8000/stream/air/aac/64/100" ;;
+		o_dor) echo "http://dor2server.streamr.ru:8000/dor_64_no" ;;
+		o_dacha) echo "http://listen2.vdfm.ru:8000/dacha" ;;
+		o_nashe) echo "http://nashe128.streamr.ru" ;;
+		o_maximum) echo "http://nashe2.hostingradio.ru/rock-128.mp3" ;;
+		o_rockarsenal) echo "https://online.rockarsenal.ru/rockarsenal_aacplus" ;;
+		o_*) return 1 ;;
+		*) echo "https://radiorecord.hostingradio.ru/$1.aacp" ;;
+	esac
+}
 _ui_icy_dl() {
-	local p="$1" f="$UI_ICY_DIR/$1" b="$UI_ICY_DIR/$1.$$" n l k sz off
+	local p="$1" f="$UI_ICY_DIR/$1" b="$UI_ICY_DIR/$1.$$" n l k sz off u
 	if ! mkdir "$f.lock" 2>/dev/null; then
 		[ "$(_ui_icy_age "$f.lock")" -ge 30 ] || return 0
 		rm -rf "$f.lock"; mkdir "$f.lock" 2>/dev/null || return 0
 	fi
 	: > "$f.try"
-	if _zm_has curl; then
-		command curl -sS --connect-timeout 5 --max-time 8 -A 'Mozilla/5.0' -H 'Icy-MetaData: 1' -D "$b.h" \
-			"https://radiorecord.hostingradio.ru/$p.aacp" 2>/dev/null | head -c 40000 > "$b.bin"
+	u="$(_ui_icy_url "$p")" || u=""
+	if [ -z "$u" ]; then : > "$f"
+	elif _zm_has curl; then
+		command curl -sSL --max-redirs 3 --connect-timeout 5 --max-time 8 -A 'Mozilla/5.0' -H 'Icy-MetaData: 1' -D "$b.h" \
+			"$u" 2>/dev/null | head -c 40000 > "$b.bin"
 		n="$(grep -i '^icy-metaint:' "$b.h" 2>/dev/null | head -n 1 | tr -dc '0-9' | head -c 6)"
 		sz="$(wc -c < "$b.bin" 2>/dev/null | tr -d ' ')"
 		if [ -n "$n" ] && [ "$n" -gt 0 ] 2>/dev/null; then
@@ -4309,11 +4331,11 @@ _flow_offloading_fix_applied() {
 _expert_mode() { [ -f "$EXPERT_MODE_FILE" ] && echo true || echo false; }
 
 system_status() {
-	printf '{"quic_blocked":%s,"ipv6_enabled":%s,"flow_offloading_fix":%s,"flow_mode":"%s","fw4_tpl":%s,"steer_installed":%s,"steer_offload_fix":%s,"steer_offload_off":%s,"zapret_fix_off":%s,"zapret_installed":%s,"watch_off":%s,"expert_mode":%s,"pkg":"%s",%s}\n' \
+	printf '{"quic_blocked":%s,"ipv6_enabled":%s,"flow_offloading_fix":%s,"flow_mode":"%s","fw4_tpl":%s,"steer_installed":%s,"steer_offload_fix":%s,"steer_offload_off":%s,"zapret_fix_off":%s,"zapret_installed":%s,"watch_off":%s,"expert_mode":%s,"pkg":"%s",%s,"zm_total":%s}\n' \
 		"$(_quic_blocked)" "$(_ipv6_enabled_in_zapret)" "$(_flow_offloading_fix_applied)" "$(_fw4_offload_mode)" "$([ -f "$FW4_TPL" ] && echo true || echo false)" \
 		"$(stl_present && echo true || echo false)" "$(_ft_steer_applied && echo true || echo false)" "$([ -f "$FT_STEER_OFF" ] && echo true || echo false)" \
 		"$([ -f "$FT_ZAPRET_OFF" ] && echo true || echo false)" "$([ -x /etc/init.d/zapret ] || [ -x /etc/init.d/zapret2 ] && echo true || echo false)" "$([ -f "$WATCH_OFF" ] && echo true || echo false)" \
-		"$(_expert_mode)" "$PKG" "$(_zt_json)"
+		"$(_expert_mode)" "$PKG" "$(_zt_json)" "$(_zm_stats_cached)"
 }
 
 ZM_V6_ADDRS="2001:4860:4860::8888 2606:4700:4700::1111 2a02:6b8::feed:0ff"
@@ -9878,15 +9900,19 @@ _zm_stats_id() {
 	fi
 	printf '%s' "$id" | cut -c1-64
 }
+_zm_stats_age() { local t; t="$(date -r "$1" +%s 2>/dev/null)" || { echo 999999; return; }; echo $(( $(date +%s) - t )); }
 _zm_stats_fetch() {
 	mkdir -p "$JOBS_DIR"
-	rm -f "$2.t"
-	: > "$2.try"
-	if _zm_has curl; then command curl -fsS --connect-timeout 5 --max-time 8 -A "zapret-manager/$ZM_VERSION" -o "$2.t" "$1" 2>/dev/null
-	else command wget -q -T 8 -O "$2.t" "$1" 2>/dev/null; fi
-	grep -q '"total":[0-9]' "$2.t" 2>/dev/null && mv -f "$2.t" "$2"
-	rm -f "$2.t"
+	rm -f "$2.t.$$"
+	if _zm_has curl; then command curl -fsS --connect-timeout 4 --max-time 6 -A "zapret-manager/$ZM_VERSION" -o "$2.t.$$" "$1" 2>/dev/null
+	else command wget -q -T 6 -O "$2.t.$$" "$1" 2>/dev/null; fi
+	if grep -q '"total":[0-9]' "$2.t.$$" 2>/dev/null; then mv -f "$2.t.$$" "$2"; rm -f "$2.fail"; return 0; fi
+	rm -f "$2.t.$$"
+	: > "$2.fail"
+	return 1
 }
+_zm_stats_due() { [ "$(_zm_stats_age "$1")" -ge "$2" ] && [ "$(_zm_stats_age "$1.fail")" -ge 120 ]; }
+_zm_stats_total() { sed -n 's/.*"total":\([0-9]*\).*/\1/p' "$1" 2>/dev/null | head -n1; }
 zm_stats_hit() {
 	_zm_stats_on || return 0
 	local id
@@ -9894,13 +9920,18 @@ zm_stats_hit() {
 	_zm_stats_fetch "$ZM_STATS_URL/hit?id=$id&v=$ZM_VERSION" "$JOBS_DIR/stats.json"
 	return 0
 }
+_zm_stats_cached() {
+	_zm_stats_on || { echo null; return 0; }
+	local f="$JOBS_DIR/stats.json" t
+	t="$(_zm_stats_total "$f")"
+	_zm_stats_due "$f" 60 && ( _zm_stats_fetch "$ZM_STATS_URL/count" "$f" ) >/dev/null 2>&1 </dev/null &
+	echo "${t:-null}"
+}
 zm_stats_get() {
 	_zm_stats_on || { echo '{"on":false}'; return 0; }
 	local f="$JOBS_DIR/stats.json" t
-	if { [ ! -s "$f" ] || [ -n "$(find "$f" -mmin +360 2>/dev/null)" ]; } && { [ ! -f "$f.try" ] || [ -n "$(find "$f.try" -mmin +30 2>/dev/null)" ]; }; then
-		_zm_stats_fetch "$ZM_STATS_URL/count" "$f"
-	fi
-	t="$(sed -n 's/.*"total":\([0-9]*\).*/\1/p' "$f" 2>/dev/null | head -n1)"
+	_zm_stats_due "$f" 10 && _zm_stats_fetch "$ZM_STATS_URL/count" "$f"
+	t="$(_zm_stats_total "$f")"
 	printf '{"on":true,"total":%s}\n' "${t:-null}"
 }
 
@@ -11337,6 +11368,28 @@ _fk_dash_info() {
 		*) echo "свои серверы" ;;
 	esac
 }
+# Секции Forkozz для дашборда: «состояние<TAB>имя» по включённым секциям, кэш 20 с.
+_fk_dash_secs() {
+	local f="$JOBS_DIR/fk.dash" now t=""
+	now="$(date +%s)"
+	[ -f "$f" ] && read -r t < "$f"
+	case "$t" in ''|*[!0-9]*) t=0 ;; esac
+	if [ $((now - t)) -ge 20 ] || [ "$now" -lt "$t" ]; then
+		mkdir -p "$JOBS_DIR"
+		{ echo "$now"; _fk_uc secdash 2>/dev/null | grep "$(printf '\t')"; } > "$f.$$" && mv -f "$f.$$" "$f"
+	fi
+	tail -n +2 "$f" 2>/dev/null
+}
+# Итог для дашборда: «код<TAB>подпись». 1 — все секции работают, 3 — часть, 2 — ни одна.
+_fk_dash_sum() {
+	_fk_dash_secs | awk -F'\t' '$2 != "" { n++; nm = nm (n > 1 ? ", " : "") $2; if ($1 == "bad" || $1 == "stopped" || $1 == "direct") { b++; bn = bn (b > 1 ? ", " : "") $2 } }
+		END {
+			if (!n) exit
+			if (!b) { if (n > 1) print 1 "\t" (n <= 3 ? "через " nm : n " " (n % 10 >= 2 && n % 10 <= 4 && (n % 100 < 10 || n % 100 >= 20) ? "секции" : "секций")); exit }
+			w = (b > 1 ? "не отвечают " : "не отвечает ") bn
+			if (b == n) print 2 "\t" (n == 1 ? "через " bn " — не отвечает" : w); else print 3 "\t" (n - b) " из " n " · " w
+		}'
+}
 _tg_dash_info() {
 	local l=""
 	[ -f /etc/init.d/tg-ws-proxy ] && l="Go"
@@ -11406,7 +11459,16 @@ health() {
 	[ "$mx" = 2 ] && ! ls /etc/rc.d/S*mihomo >/dev/null 2>&1 && d_mx=4
 	if [ "$doh" = 2 ]; then ls /etc/rc.d/S*https-dns-proxy >/dev/null 2>&1 || d_doh=4; fi
 	[ "$sr" = 5 ] && d_sr=4
-	fkh="$(_fk_health)"; d_fk="$fkh"; [ "$d_fk" = 5 ] && d_fk=4
+	local fki="" fks
+	fkh="$(_fk_health)"
+	if [ "$fkh" = 1 ] || [ "$fkh" = 2 ]; then
+		fki="$(_fk_dash_info)"
+		if [ "$fkh" = 1 ] && fks="$(_fk_dash_sum)" && [ -n "$fks" ]; then
+			fkh="${fks%%	*}"
+			fki="${fks#*	}"
+		fi
+	fi
+	d_fk="$fkh"; [ "$d_fk" = 5 ] && d_fk=4
 	awgj="$(_awg_health)"; d_awg="${awgj%%,*}"
 	case "$awgj" in *'"awg_total":0') [ "$d_awg" = 1 ] && d_awg=4; [ "$d_awg" = 3 ] && d_awg=2 ;; esac
 	if _term_installed; then
@@ -11423,7 +11485,7 @@ health() {
 	printf '"zapret":%s,"zapret2":%s,"bytetube":%s,"tg":%s,"mixomo":%s,"doh":%s,"hosts":%s,"steer":%s,"steer_off":%s,"steer_fail":%s,"steer_exit":"%s","awg":%s,"forkop":%s,"flow_warn":%s,"steer_flow_warn":%s,"ipv6_warn":%s,"gh_warn":%s,"reboot_hint":"%s","nav_hidden":"%s","tsc":%s,"htop":%s,"fk_info":"%s","tg_info":"%s","oom":%s}\n' \
 		"$zr" "$zr2" "$bt" "$tg" "$mx" "$doh" "$hs" "$sr" \
 		"$([ -f /etc/zm-steer/stopped ] && echo true || echo false)" "$sf" "$sx" "$awgj" "$fkh" "$fw" "$fws" "$v6" "$(_zm_ghp_warn && echo true || echo false)" "$(esc "$(_zm_reboot_hint_get)")" "$(esc "$(ui_nav_get)")" "$tss" "$([ -x /usr/bin/htop ] && echo true || echo false)" \
-		"$([ "${fkh:-0}" != 0 ] && esc "$(_fk_dash_info)")" "$([ "$tg" != 0 ] && esc "$(_tg_dash_info)")" "$(_zm_oom_json)"
+		"$(esc "$fki")" "$([ "$tg" != 0 ] && esc "$(_tg_dash_info)")" "$(_zm_oom_json)"
 }
 
 VERSIONS_CACHE="$ZM_STATE_DIR/versions.json"
@@ -33933,7 +33995,7 @@ function hs_age(dev) {
 	return null;
 }
 
-function cmd_secstate(probe) {
+function cmd_secstate(probe, dash) {
 	let c = cursor(), p = pick(c), px = proxies(), r = [];
 	for (let x in sec_list(c, p)) {
 		let e = { name: x.name, label: x.label, main: x.main, enabled: x.enabled, mode: x.mode, iface: x.iface,
@@ -33968,6 +34030,10 @@ function cmd_secstate(probe) {
 			if (ms > 0) e.delay = ms;
 		}
 		push(r, e);
+	}
+	if (dash) {
+		for (let e in r) if (e.enabled) print(e.state, "\t", replace(s(e.mode == "iface" ? e.iface : (e.label || e.name)), /[\t\n]/g, " "), "\n");
+		return;
 	}
 	out({ running: !!px, sections: r });
 }
@@ -34352,7 +34418,7 @@ if (mode == "rs_initial") cmd_rs_initial(ARGV[1], ARGV[2]);
 if (mode == "rs_cap") cmd_rs_cap(ARGV[1], ARGV[2]);
 if (mode == "rs_plan") cmd_rs_plan();
 if (mode != "route" && sec != "" && (ml(sec) || !match(sec, /^[A-Za-z0-9_]+$/))) fail("неверное имя секции");
-if (sec == "" && index([ "get", "set", "secdel", "route", "diag", "secnames", "secstate", "stats", "conns", "dnsvpn", "fallback_config", "guard", "latmode", "nodepol", "rlinfo", "rllearn" ], mode) < 0) sec = pick(cursor()).sec;
+if (sec == "" && index([ "get", "set", "secdel", "route", "diag", "secnames", "secstate", "secdash", "stats", "conns", "dnsvpn", "fallback_config", "guard", "latmode", "nodepol", "rlinfo", "rllearn" ], mode) < 0) sec = pick(cursor()).sec;
 
 if (mode == "device_setup") cmd_device_setup();
 else if (mode == "fallback_config") cmd_fallback_config();
@@ -34377,6 +34443,7 @@ else if (mode == "rlinfo") cmd_rlinfo();
 else if (mode == "rllearn") cmd_rllearn();
 else if (mode == "diag") cmd_diag();
 else if (mode == "secstate") cmd_secstate(sec == "probe");
+else if (mode == "secdash") cmd_secstate(false, true);
 else if (mode == "subinfo") cmd_subinfo(sec);
 else if (mode == "stats") cmd_stats();
 else if (mode == "conns") cmd_conns();
@@ -37672,6 +37739,7 @@ return view.extend({
 			var fkSt = st(h, 'forkop', 0);
 			var fkInfo = h.fk_info ? ' · ' + h.fk_info : '';
 			if (fkSt !== 0) items.push(row('Forkozz', fkSt === 1 ? zm.badge(true, 'работает' + fkInfo, '')
+				: fkSt === 3 ? warnBadge('работает ' + (h.fk_info || 'не полностью'))
 				: fkSt === 2 ? zm.badge(false, '', 'не работает' + fkInfo)
 				: fkSt === 5 ? offBadge('выключен')
 				: zm.badge(false, '', 'не установлен')));
@@ -49231,8 +49299,9 @@ html.zm-theme-dark .zm-dock .zm-refresh-banner { background: #2f2a1c; color: #e3
 .zm-ow-name-edit { min-width: 260px; }
 .zm-ow-name-in { flex: 1 1 140px !important; min-width: 120px; }
 .zm-ow-rbrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
-.zm-ow-rbhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; }
-.zm-ow-rbhead .cbi-button { margin: -5px 0 8px; flex: none; }
+.zm-ow-rbrow .zm-ow-rbnow { margin: 0; flex: none; }
+.zm-ow-rbsep { width: 1px; align-self: stretch; margin: 4px 2px; background: rgba(127,127,127,.28); }
+@media (max-width: 600px) { .zm-ow-rbsep { display: none; } }
 .zm-ow-inl { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
 .zm-ow-inl .cbi-input-select { width: auto; min-width: 150px; }
 .zm-ow-time { width: 110px !important; }
@@ -51327,8 +51396,7 @@ return view.extend({
 			thanksList
 		]);
 		setThanks(thanksOpen);
-		if (on('thanks')) zm.statsGet().then(function(r) {
-			var n = r && r.on ? +r.total : 0;
+		function thShow(n) {
 			if (!(n > 0)) return;
 			var a = n % 10, b = n % 100;
 			thCount.innerHTML = '';
@@ -51336,7 +51404,11 @@ return view.extend({
 			thCount.appendChild(E('b', {}, n.toLocaleString('ru-RU')));
 			thCount.appendChild(document.createTextNode(a === 1 && b !== 11 ? ' роутере' : ' роутерах'));
 			thCount.hidden = false;
-		}).catch(function() {});
+		}
+		if (on('thanks')) {
+			if (sysData && +sysData.zm_total > 0) thShow(+sysData.zm_total);
+			zm.statsGet().then(function(r) { if (r && r.on) thShow(+r.total); }).catch(function() {});
+		}
 		put('changelog', clCard);
 		put('thanks', creditsCard);
 
@@ -51952,22 +52024,19 @@ return view.extend({
 		function renderReboot() {
 			var rb = st.reboot || { mode: 'off', time: '04:30', dow: '1' };
 			rbCard.innerHTML = '';
-			rbCard.appendChild(E('div', { 'class': 'zm-ow-rbhead' }, [
-				E('h3', {}, [ 'Перезагрузка по расписанию ', badge(rb.mode !== 'off', rb.mode === 'daily' ? 'каждый день' : 'раз в неделю', 'выключена', 'zm-sx-info') ]),
-				E('button', { 'type': 'button', 'class': 'cbi-button', 'click': function(ev) {
-					var b = ev.currentTarget;
-					b.disabled = true;
-					zm.rebootRouter().then(function(ok) { if (!ok) b.disabled = false; }, function() { b.disabled = false; });
-				} }, 'Перезагрузить сейчас')
-			]));
-			rbCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:-6px' }, 'Помогает роутерам, которые со временем начинают тормозить. Если в это время идёт тест стратегий или обновление — роутер дождётся их окончания.'));
+			rbCard.appendChild(E('h3', {}, [ 'Перезагрузка роутера ', badge(rb.mode !== 'off', rb.mode === 'daily' ? 'каждый день' : 'раз в неделю', 'выключена', 'zm-sx-info') ]));
+			rbCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:-6px' }, 'Сразу или по расписанию. Если в это время идёт обновление или тест, роутер дождётся его окончания.'));
 			var seg = E('div', { 'class': 'zm-seg' + (busy ? ' zm-seg-busy' : '') }, [ [ 'off', 'Не перезагружать' ], [ 'daily', 'Каждый день' ], [ 'weekly', 'Раз в неделю' ] ].map(function(x) {
 				return E('div', { 'class': 'zm-seg-item' + (rb.mode === x[0] ? ' zm-active' : ''), 'role': 'button', 'tabindex': '0', 'click': function() {
 					if (rb.mode === x[0] || busy) return;
 					rbSet({ mode: x[0], time: rb.time || '04:30', dow: rb.dow || '1' }, x[0] === 'off' ? 'Перезагрузка по расписанию выключена' : x[0] === 'daily' ? 'Роутер будет перезагружаться каждый день в ' + (rb.time || '04:30') : 'Роутер будет перезагружаться раз в неделю');
 				} }, x[1]);
 			}));
-			var row = [ seg ];
+			var row = [ E('button', { 'type': 'button', 'class': 'cbi-button cbi-button-remove zm-ow-rbnow', 'title': 'Перезагрузить роутер сейчас', 'click': function(ev) {
+				var b = ev.currentTarget;
+				b.disabled = true;
+				zm.rebootRouter().then(function(ok) { if (!ok) b.disabled = false; }, function() { b.disabled = false; });
+			} }, 'Перезагрузить'), E('span', { 'class': 'zm-ow-rbsep', 'aria-hidden': 'true' }), seg ];
 			if (rb.mode !== 'off') {
 				if (rb.mode === 'weekly') row.push(E('label', { 'class': 'zm-ow-inl' }, [ 'в ', E('select', { 'class': 'cbi-input-select', 'disabled': busy ? '' : null, 'change': function(ev) {
 					rbSet({ mode: 'weekly', time: rb.time, dow: ev.target.value }, 'День перезагрузки сохранён');
@@ -59128,10 +59197,37 @@ var RADIO = [
 	[ 'techno', 'Techno', 'techno96', 'trance' ], [ 'hardstyle', 'Hardstyle', 'teo96', 'trance' ],
 	[ 'rap_hits', 'Rap Hits', 'rap96', 'bass' ], [ 'trap', 'Trap', 'trap96', 'bass' ], [ 'dubstep', 'Dubstep', 'dub96', 'bass' ], [ 'pirate_station', 'Pirate Station', 'ps96', 'bass' ],
 	[ 'medlyak_fm', 'Медляк FM', 'mdl96', 'calm' ], [ 'tropical', 'Tropical', 'trop96', 'calm' ], [ 'chill_out', 'Chill-Out', 'chil96', 'calm' ], [ 'lofi', 'Lo-Fi', 'lofi96', 'calm' ], [ 'ambient', 'Ambient', 'ambient96', 'calm' ],
-	[ 'rock', 'Rock', 'rock96', 'rock' ]
+	[ 'rock', 'Rock', 'rock96', 'rock' ],
+	[ 'o_europa', 'Европа Плюс', 'https://ep256.hostingradio.ru:8052/europaplus256.mp3', 'pop' ],
+	[ 'o_rusradio', 'Русское Радио', 'https://rusradio.hostingradio.ru/rusradio96.aacp', 'pop' ],
+	[ 'o_hitfm', 'Хит FM', 'https://hitfm.hostingradio.ru/hitfm96.aacp', 'pop' ],
+	[ 'o_novoe', 'Новое Радио', 'http://icecast.newradio.cdnvideo.ru/newradio3', 'pop' ],
+	[ 'o_likefm', 'Like FM', 'https://hls-01-gpm.hostingradio.ru/likefm495/playlist.m3u8', 'pop' ],
+	[ 'o_dfm', 'DFM', 'https://dfm.hostingradio.ru/dfm96.aacp', 'dance' ],
+	[ 'o_dfmclub', 'DFM Club', 'https://dfm-dfmclub.hostingradio.ru/dfmclub96.aacp', 'dance' ],
+	[ 'o_dfmrus', 'DFM Russian Dance', 'https://dfm-dfmrusdance.hostingradio.ru/dfmrusdance96.aacp', 'dance' ],
+	[ 'o_retro', 'Ретро FM', 'https://retro128.streamr.ru/', 'retro' ],
+	[ 'o_radio7', 'Радио 7', 'https://hls-01-radio7.emgsound.ru/13/playlist.m3u8', 'retro' ],
+	[ 'o_avto', 'Авторадио', 'http://ic4.101.ru:8000/stream/air/aac/64/100', 'road' ],
+	[ 'o_dor', 'Дорожное Радио', 'http://dor2server.streamr.ru:8000/dor_64_no', 'road' ],
+	[ 'o_dacha', 'Радио Дача', 'http://listen2.vdfm.ru:8000/dacha', 'road' ],
+	[ 'o_keks', 'Кекс FM', 'https://hls-01-keks.emgsound.ru/7/96/playlist.m3u8', 'kids' ],
+	[ 'o_nashe', 'Наше Радио', 'http://nashe128.streamr.ru', 'rock' ],
+	[ 'o_maximum', 'Радио Maximum', 'http://nashe2.hostingradio.ru/rock-128.mp3', 'rock' ],
+	[ 'o_rockarsenal', 'Rock Arsenal', 'https://online.rockarsenal.ru/rockarsenal_aacplus', 'rock' ],
+	[ 'o_comedy', 'Comedy Radio', 'https://hls-01-gpm.hostingradio.ru/comedyradio391/128/playlist.m3u8', 'humor' ],
+	[ 'o_humor_vtv', 'Юмор FM', 'https://hls-01-vtv.webcaramba.com/vtv-humorfm/playlist.m3u8', 'humor' ],
+	[ 'o_humorfm', 'Юмор', 'https://hls-01-gpm.hostingradio.ru/humorfm495/playlist.m3u8', 'humor' ]
 ];
+var RADIO_SETS = [ { id: 'r', name: 'Радио Record' }, { id: 'o', name: 'Разные станции' } ];
+var HLS_SRC = [ 'https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.light.min.js', 'https://unpkg.com/hls.js@1/dist/hls.light.min.js' ];
+function radioSetOf(i) { return /^https?:\/\//.test(RADIO[i][2]) ? 'o' : 'r'; }
+function radioSetName(i) { return radioSetOf(i) === 'o' ? '' : 'Радио Record'; }
+function radioUrl(i) { var p = RADIO[i][2]; return /^https?:\/\//.test(p) ? p : 'https://radiorecord.hostingradio.ru/' + p + '.aacp'; }
+function radioIsHls(i) { return /\.m3u8(\?|$)/.test(radioUrl(i)); }
+function radioIdx(set) { var r = []; for (var i = 0; i < RADIO.length; i++) if (radioSetOf(i) === set) r.push(i); return r; }
 var K_RADIO = 'zmw.radio';
-var radio = { idx: 0, vol: 70, show: true, state: 'off', audio: null, el: null, menu: null, saveT: 0, waitT: 0, synced: false, track: null, nowT: 0, nowSeq: 0, nowOff: false, subTxt: null };
+var radio = { idx: 0, vol: 70, show: true, state: 'off', audio: null, el: null, menu: null, saveT: 0, waitT: 0, synced: false, track: null, nowT: 0, nowSeq: 0, nowOff: false, subTxt: null, hls: null, hlsP: null, startSeq: 0, tab: 'r' };
 (function () {
 	try {
 		var c = JSON.parse(sget(K_RADIO) || 'null');
@@ -59200,8 +59296,32 @@ function radioWaitGuard() {
 	clearTimeout(radio.waitT);
 	radio.waitT = setTimeout(function () { if (radio.state === 'wait') radioFail(); }, 20000);
 }
+function radioHlsDrop() {
+	if (!radio.hls) return;
+	try { radio.hls.destroy(); } catch (e) {}
+	radio.hls = null;
+}
+function radioHlsLib() {
+	if (window.Hls) return Promise.resolve(window.Hls);
+	if (radio.hlsP) return radio.hlsP;
+	radio.hlsP = new Promise(function (ok, no) {
+		var i = 0;
+		(function next() {
+			if (i >= HLS_SRC.length) { radio.hlsP = null; no(new Error('hls')); return; }
+			var sc = document.createElement('script');
+			sc.src = HLS_SRC[i++];
+			sc.async = true;
+			sc.onload = function () { if (window.Hls) ok(window.Hls); else next(); };
+			sc.onerror = function () { sc.remove(); next(); };
+			document.head.appendChild(sc);
+		})();
+	});
+	return radio.hlsP;
+}
 function radioRelease() {
 	clearTimeout(radio.waitT);
+	radio.startSeq++;
+	radioHlsDrop();
 	var a = radio.audio;
 	if (!a) return;
 	try { a.pause(); } catch (e) {}
@@ -59209,14 +59329,40 @@ function radioRelease() {
 	try { a.load(); } catch (e) {}
 }
 function radioStart() {
-	var a = radioAudio();
+	var a = radioAudio(), i = radio.idx, seq = ++radio.startSeq;
 	a.volume = radio.vol / 100;
 	radio.state = 'wait';
+	radioHlsDrop();
 	radioPaint();
-	a.src = 'https://radiorecord.hostingradio.ru/' + RADIO[radio.idx][2] + '.aacp';
 	radioWaitGuard();
 	if (radio.track && radio.track.idx !== radio.idx) radio.track = null;
 	radioNow();
+	radioMedia();
+	if (radioIsHls(i) && !a.canPlayType('application/vnd.apple.mpegurl')) {
+		radioHlsLib().then(function (Hls) {
+			if (seq !== radio.startSeq || radio.state !== 'wait') return;
+			if (!Hls.isSupported()) { radioFail(); return; }
+			var h = new Hls({ enableWorker: true });
+			radio.hls = h;
+			h.on(Hls.Events.ERROR, function (ev, d) {
+				if (d && d.fatal && radio.hls === h && (radio.state === 'wait' || radio.state === 'play')) radioFail();
+			});
+			h.loadSource(radioUrl(i));
+			h.attachMedia(a);
+			radioPlay(a);
+		}, function () {
+			if (seq !== radio.startSeq || radio.state !== 'wait') return;
+			radioRelease();
+			radio.state = 'err';
+			radioPaint();
+			toast('Радио: «' + RADIO[i][1] + '» идёт в формате HLS, а проигрыватель для него не загрузился — проверьте интернет или выберите другую станцию', 'warning');
+		});
+		return;
+	}
+	a.src = radioUrl(i);
+	radioPlay(a);
+}
+function radioPlay(a) {
 	var p = a.play();
 	if (p && p.catch) p.catch(function (e) {
 		if (e && e.name === 'AbortError') return;
@@ -59224,7 +59370,6 @@ function radioStart() {
 		if (e && e.name === 'NotAllowedError') { radio.state = 'off'; radioRelease(); radioNowStop(); radioPaint(); toast('Браузер не дал включить звук — нажмите «Играть» ещё раз', 'warning'); return; }
 		radioFail();
 	});
-	radioMedia();
 }
 function radioStop() {
 	radio.state = 'off';
@@ -59249,8 +59394,8 @@ function radioPick(i) {
 	radioStart();
 }
 function radioStep(d) {
-	var on = radio.state === 'wait' || radio.state === 'play';
-	radio.idx = (radio.idx + d + RADIO.length) % RADIO.length;
+	var on = radio.state === 'wait' || radio.state === 'play', g = radioIdx(radioSetOf(radio.idx)), k = g.indexOf(radio.idx);
+	radio.idx = g[((k < 0 ? 0 : k) + d + g.length) % g.length];
 	radioSave();
 	if (on) radioStart();
 	else { radio.state = 'off'; radioNowStop(); radioPaint(); radioMedia(); }
@@ -59292,8 +59437,8 @@ function radioNow() {
 	clearTimeout(radio.nowT);
 	radio.nowT = 0;
 	var idx = radio.idx, seq = ++radio.nowSeq, got = false;
-	if (radio.nowOff || !sid || (radio.state !== 'wait' && radio.state !== 'play')) return;
-	ubus('zapret-manager', 'ui_radio_now', { mode: RADIO[idx][2] }).then(function (res) {
+	if (radio.nowOff || !sid || (radio.state !== 'wait' && radio.state !== 'play') || radioIsHls(idx)) return;
+	ubus('zapret-manager', 'ui_radio_now', { mode: radioSetOf(idx) === 'o' ? RADIO[idx][0] : RADIO[idx][2] }).then(function (res) {
 		if (seq !== radio.nowSeq || idx !== radio.idx) return;
 		var c = res && res[0] === 0 ? res[1] : null;
 		if (res && (res[0] === 3 || res[0] === 6)) { radio.nowOff = true; return; }
@@ -59308,10 +59453,10 @@ function radioNow() {
 function radioMedia() {
 	try {
 		if (!('mediaSession' in navigator) || !window.MediaMetadata) return;
-		var tr = radio.track && radio.track.idx === radio.idx ? radio.track : null, st = RADIO[radio.idx][1];
+		var tr = radio.track && radio.track.idx === radio.idx ? radio.track : null, st = RADIO[radio.idx][1], sn = radioSetName(radio.idx);
 		navigator.mediaSession.metadata = new MediaMetadata(tr ? {
-			title: tr.song || tr.artist, artist: tr.song ? tr.artist : '', album: st + ' · Радио Record'
-		} : { title: st, artist: 'Радио Record', album: 'Zapret Manager' });
+			title: tr.song || tr.artist, artist: tr.song ? tr.artist : '', album: st + (sn ? ' · ' + sn : '')
+		} : { title: st, artist: sn || 'Радио', album: 'Zapret Manager' });
 		if (radio.mediaSet) return;
 		radio.mediaSet = true;
 		navigator.mediaSession.setActionHandler('play', function () { radioStart(); });
@@ -59423,26 +59568,50 @@ function radioMenuToggle() {
 		if (radio.audio) radio.audio.volume = radio.vol / 100;
 		radioSave();
 	});
-	var m = E('div', { 'class': 'zmw-radio-menu', 'role': 'menu', 'aria-label': 'Станции Радио Record' }, [
-		E('div', { 'class': 'zmw-radio-menu-head' }, [ E('b', {}, [ 'Радио Record' ]) ]),
+	radio.tab = radioSetOf(radio.idx);
+	var list = E('div', { 'class': 'zmw-radio-list' });
+	var tabs = E('div', { 'class': 'zmw-radio-tabs', 'role': 'tablist' }, RADIO_SETS.map(function (t) {
+		return E('button', { 'class': 'zmw-radio-tab', 'type': 'button', 'role': 'tab', 'data-set': t.id, 'click': function () {
+			if (radio.tab === t.id) return;
+			radio.tab = t.id;
+			fill();
+		} }, [ t.name ]);
+	}));
+	var m = E('div', { 'class': 'zmw-radio-menu', 'role': 'menu', 'aria-label': 'Радиостанции' }, [
+		E('div', { 'class': 'zmw-radio-menu-head' }, [ tabs ]),
 		E('div', { 'class': 'zmw-radio-now', 'hidden': '' }),
-		E('div', { 'class': 'zmw-radio-list' }, RADIO.map(function (s, i) {
-			return E('button', { 'class': 'zmw-radio-st', 'type': 'button', 'role': 'menuitemradio', 'data-i': String(i), 'click': function () { radioPick(i); radioMenuClose(); } }, [
-				E('span', { 'class': 'zmw-radio-eq', 'aria-hidden': 'true' }, [ E('i'), E('i'), E('i') ]), E('span', {}, [ s[1] ])
-			]);
-		})),
+		list,
 		E('label', { 'class': 'zmw-radio-vol' }, [ E('span', {}, [ 'Громкость' ]), vol, volTxt ])
 	]);
+	function place() {
+		var rc = radio.el.getBoundingClientRect(), vw = window.innerWidth, w;
+		m.style.maxWidth = (vw - 16) + 'px';
+		w = m.offsetWidth;
+		m.style.left = Math.max(8, Math.min(rc.left, vw - w - 8)) + 'px';
+		m.style.bottom = Math.max(8, window.innerHeight - rc.top + 8) + 'px';
+	}
+	function fill() {
+		var ids = radioIdx(radio.tab), cols = window.innerWidth <= 520 ? 2 : 3;
+		Array.prototype.forEach.call(tabs.children, function (b) {
+			var on = b.getAttribute('data-set') === radio.tab;
+			b.classList.toggle('zmw-on', on);
+			b.setAttribute('aria-selected', on ? 'true' : 'false');
+		});
+		list.innerHTML = '';
+		ids.forEach(function (i) {
+			list.appendChild(E('button', { 'class': 'zmw-radio-st', 'type': 'button', 'role': 'menuitemradio', 'data-i': String(i), 'click': function () { radioPick(i); radioMenuClose(); } }, [
+				E('span', { 'class': 'zmw-radio-eq', 'aria-hidden': 'true' }, [ E('i'), E('i'), E('i') ]), E('span', {}, [ RADIO[i][1] ])
+			]));
+		});
+		list.style.gridTemplateRows = 'repeat(' + Math.ceil(ids.length / cols) + ', auto)';
+		if (radio.menu) { radioMenuPaint(); place(); }
+	}
 	document.body.appendChild(m);
 	radio.menu = m;
 	radio.pick.setAttribute('aria-expanded', 'true');
+	fill();
 	radioMenuPaint();
-	var rc = radio.el.getBoundingClientRect(), vw = window.innerWidth, cols = vw <= 520 ? 2 : 3, w;
-	m.querySelector('.zmw-radio-list').style.gridTemplateRows = 'repeat(' + Math.ceil(RADIO.length / cols) + ', auto)';
-	m.style.maxWidth = (vw - 16) + 'px';
-	w = m.offsetWidth;
-	m.style.left = Math.max(8, Math.min(rc.left, vw - w - 8)) + 'px';
-	m.style.bottom = Math.max(8, window.innerHeight - rc.top + 8) + 'px';
+	place();
 	document.addEventListener('mousedown', radioMenuOutside, true);
 	document.addEventListener('touchstart', radioMenuOutside, true);
 	document.addEventListener('keydown', radioMenuKey, true);
@@ -61083,8 +61252,13 @@ html[data-theme="matrix"] .zmw-side .zmw-mem-val.zmw-mem-fit { font-size: 10px; 
 .zmw-radio-main .zmw-i { width: 23px; height: 23px; }
 .zmw-radio-play .zmw-radio-main, .zmw-radio-wait .zmw-radio-main { color: var(--a1); }
 .zmw-radio-menu { position: fixed; z-index: 120; box-sizing: border-box; max-height: calc(100vh - 16px); overflow: auto; padding: 7px 6px 5px; border-radius: 12px; background: var(--surface-solid); border: 1px solid var(--border-2); box-shadow: var(--shadow-lg); color: var(--text); font: 13px/1.3 var(--font); }
-.zmw-radio-menu-head { display: flex; align-items: baseline; gap: 10px; padding: 0 7px 3px; }
+.zmw-radio-menu-head { display: flex; align-items: baseline; gap: 10px; padding: 0 7px 4px; }
 .zmw-radio-menu-head b { font-size: 14px; }
+.zmw-radio-tabs { display: flex; align-items: flex-end; gap: 18px; }
+.zmw-radio-tab { -webkit-appearance: none; appearance: none; margin: 0; padding: 0 0 5px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); font: 600 14px/1.3 var(--font); cursor: pointer; white-space: nowrap; transition: color .15s, border-color .15s; }
+.zmw-radio-tab:hover { color: var(--text); }
+.zmw-radio-tab.zmw-on { color: var(--text); font-weight: 700; border-bottom-color: var(--a1); }
+.zmw-radio-tab:focus-visible { outline: none; box-shadow: var(--ring); border-radius: 4px; }
 .zmw-radio-menu { width: max-content; }
 .zmw-radio-list { display: grid; grid-auto-flow: column; grid-auto-columns: max-content; column-gap: 2px; padding-top: 2px; }
 .zmw-radio-list .zmw-radio-st { width: 100%; padding-right: 10px; }
