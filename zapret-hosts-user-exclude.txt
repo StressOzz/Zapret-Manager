@@ -14,6 +14,7 @@ z.ai
 hf.co
 box.ca
 2ip.io
+itch.io
 uc.zone
 msi.com
 qwen.ai
@@ -77,6 +78,7 @@ voidboost.one
 kaspersky.com
 canonical.com
 mediafire.com
+nexusmods.com
 huggingface.co
 mozaracing.com
 vivoglobal.com
@@ -469,6 +471,7 @@ samsungcloud.com
 samsunghealth.com
 samsungmobile.com
 samsung-sm-ds.com
+samsungcloudcdn.com
 samsungcloudplatform.com
 samsungcloudsolution.com
 #################################### Tuya
