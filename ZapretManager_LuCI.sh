@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.99
+# Version: 4.992
 ZM_VERSION_EOF
 set -e
 
