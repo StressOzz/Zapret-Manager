@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.993
+# Version: 4.994
 ZM_VERSION_EOF
 set -e
 
@@ -2027,10 +2027,9 @@ _ui_icy_url() {
 		o_dfm) echo "https://dfm.hostingradio.ru/dfm96.aacp" ;;
 		o_dfmclub) echo "https://dfm-dfmclub.hostingradio.ru/dfmclub96.aacp" ;;
 		o_dfmrus) echo "https://dfm-dfmrusdance.hostingradio.ru/dfmrusdance96.aacp" ;;
+		o_clubcz) echo "http://radio.ipip.cz:7996/" ;;
 		o_retro) echo "https://retro128.streamr.ru/" ;;
 		o_avto) echo "http://ic4.101.ru:8000/stream/air/aac/64/100" ;;
-		o_dor) echo "http://dor2server.streamr.ru:8000/dor_64_no" ;;
-		o_dacha) echo "http://listen2.vdfm.ru:8000/dacha" ;;
 		o_nashe) echo "http://nashe128.streamr.ru" ;;
 		o_maximum) echo "http://nashe2.hostingradio.ru/rock-128.mp3" ;;
 		o_rockarsenal) echo "https://online.rockarsenal.ru/rockarsenal_aacplus" ;;
@@ -48753,7 +48752,7 @@ html.zm-theme-dark .zm-tg-chip-ok { color: #3fb950; } html.zm-theme-dark .zm-tg-
 .zm-tg-board .zm-card { display: flex; flex-direction: column; }
 .zm-tg-board .zm-card > .zm-actions:last-child { margin-top: auto; padding-top: 6px; margin-bottom: 0; }
 .zm-tg-board .zm-card > .zm-tg-x { margin-top: auto; }
-@media (max-width: 720px) { .zm-tg-cols { display: flex; flex-direction: column; } .zm-tg-col { display: contents; } }
+@media (max-width: 720px) { .zm-tg-cols { display: flex; flex-direction: column; align-items: stretch; } .zm-tg-col { display: contents; } }
 .zm-tg-x-row { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 6px 14px; align-items: start; padding: 12px 0; border-bottom: 1px dashed rgba(110,118,129,.25); }
 .zm-tg-x-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .zm-tg-x-field > .zm-swrow { margin: 0; }
@@ -49052,7 +49051,7 @@ html.zm-theme-dark .zm-fk-chip.zm-fk-chip-x { border-color: rgba(255,255,255,.25
 @media (max-width: 600px) { .zm-kv .zm-row > .zm-label:first-child { min-width: 0; width: 100%; } }
 .zm-nodes.zm-nodes-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 @media (max-width: 600px) { .zm-nodes.zm-nodes-3 { grid-template-columns: 1fr; } }
-@media (max-width: 600px) { .zm-seg { display: flex; flex-wrap: wrap; max-width: 100%; box-sizing: border-box; } .zm-seg-item { white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; } }
+@media (max-width: 600px) { .zm-seg { display: flex; flex-wrap: wrap; max-width: 100%; box-sizing: border-box; } .zm-seg-item { flex: 1 1 auto; text-align: center; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; } }
 .zm-log-wait { color: #e3c04a; font-weight: 600; white-space: pre-wrap; }
 .zm-si-group { margin: 22px 0 10px; font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; opacity: .6; }
 .zm-si-mas { display: flex; align-items: flex-start; gap: 14px; }
@@ -49267,9 +49266,15 @@ html.zm-theme-dark .zm-dock .zm-refresh-banner { background: #2f2a1c; color: #e3
 .zm-seg-item.zm-ow-dis { opacity: .35; cursor: not-allowed; }
 .zm-ow-txnote { font-size: 12px; opacity: .65; line-height: 1.4; }
 .zm-ow-acts { align-items: center; margin-top: 14px; }
-.zm-ow-grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.zm-sx-grid.zm-ow-grid3 { display: flex; flex-wrap: wrap; align-items: stretch; }
+.zm-ow-grid3 > .zm-sx-tile { flex: 1 1 280px; }
 .zm-ow-grid3 .zm-sx-tile > .zm-ow-pw, .zm-ow-grid3 .zm-sx-tile > .zm-seg { margin-top: 12px; }
-.zm-ow-grid3 .zm-sx-tile > .zm-seg { align-self: flex-start; }
+.zm-ow-grid3 .zm-ow-pw { flex-wrap: wrap; }
+.zm-ow-grid3 .zm-ow-pw .cbi-input-text { flex: 999 1 120px; }
+.zm-ow-grid3 .zm-ow-pw .cbi-button { flex: 1 0 auto; }
+.zm-ow-grid3 .zm-seg { display: flex; flex-wrap: nowrap; width: 100%; align-self: stretch; }
+.zm-ow-grid3 .zm-seg-item { flex: 1 1 0; min-width: 0; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding-left: 8px; padding-right: 8px; }
+.zm-ow-grid3 .zm-ow-side { flex-direction: column; align-items: stretch; gap: 6px; }
 .zm-ow-link { appearance: none; background: none; border: 0; padding: 0; margin: 8px 0 0; font: inherit; font-size: 13px; color: #2563eb; cursor: pointer; text-align: left; align-self: flex-start; }
 .zm-ow-link:hover { text-decoration: underline; }
 .zm-ow-ports { margin-top: 6px; font-size: 12px; line-height: 1.6; max-height: 140px; overflow: auto; overflow-wrap: anywhere; }
@@ -49323,9 +49328,8 @@ html.zm-theme-dark .zm-ow-radio { border-color: rgba(255,255,255,.12); backgroun
 html.zm-theme-dark .zm-ow-table th { border-color: rgba(255,255,255,.12); }
 html.zm-theme-dark .zm-ow-table td { border-color: rgba(255,255,255,.07); }
 html.zm-theme-dark .zm-ow-link { color: #79c0ff; }
-@media (max-width: 900px) { .zm-ow-grid3 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 720px) {
-	.zm-ow-modes, .zm-ow-radios, .zm-ow-grid3 { grid-template-columns: minmax(0, 1fr); }
+	.zm-ow-modes, .zm-ow-radios { grid-template-columns: minmax(0, 1fr); }
 	.zm-ow-table thead { display: none; }
 	.zm-ow-table, .zm-ow-table tbody, .zm-ow-table tr, .zm-ow-table td { display: block; width: 100%; box-sizing: border-box; }
 	.zm-ow-table tr { padding: 10px 0; border-bottom: 1px solid rgba(0,0,0,.08); }
@@ -49333,6 +49337,31 @@ html.zm-theme-dark .zm-ow-link { color: #79c0ff; }
 	.zm-ow-tr { text-align: left; }
 	.zm-ow-ip { flex: 1 1 auto !important; width: auto !important; }
 	.zm-ow-seg3 .zm-seg-item { padding: 5px 2px; font-size: 12px; }
+}
+.zm-ow-modes { grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr)) !important; }
+.zm-ow-radios { grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)) !important; align-items: start; }
+.zm-ow-time { width: auto !important; min-width: 120px; }
+.zm-ow-tbox { container-type: inline-size; overflow-x: visible; margin: 0; }
+.zm-ow-table td.zm-ow-name-td { min-width: 150px; }
+.zm-ow-table th.zm-ow-tr { text-align: right; }
+@media (max-width: 600px) { .zm-ow-rbrow .zm-seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; } .zm-ow-rbrow .zm-seg-item { white-space: normal; overflow: visible; line-height: 1.25; padding: 6px 4px; font-size: 12.5px; hyphens: auto; display: flex; align-items: center; justify-content: center; } }
+@container (max-width: 860px) {
+	.zm-ow-table thead { display: none; }
+	.zm-ow-table, .zm-ow-table tbody { display: block; width: 100%; }
+	.zm-ow-table tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "name act" "addr mac"; align-items: center; gap: 8px 12px; padding: 12px 0; border-bottom: 1px solid rgba(127,127,127,.16); }
+	.zm-ow-table tr:last-child { border-bottom: 0; }
+	.zm-ow-table td { display: block; width: auto; min-width: 0; padding: 0; border: 0; }
+	.zm-ow-table td.zm-ow-name-td { grid-area: name; min-width: 0; }
+	.zm-ow-table td:nth-child(2) { grid-area: addr; }
+	.zm-ow-table td.zm-ow-mac { grid-area: mac; text-align: right; }
+	.zm-ow-table td.zm-ow-tr { grid-area: act; text-align: right; }
+	.zm-ow-table .zm-ow-ip { flex: 1 1 120px !important; width: auto !important; max-width: 190px !important; }
+}
+@container (max-width: 460px) {
+	.zm-ow-table tr { grid-template-areas: "name act" "addr addr" "mac mac"; }
+	.zm-ow-table td.zm-ow-mac { text-align: left; }
+	.zm-ow-table .zm-ow-ip { max-width: none !important; }
+	.zm-ow-table td.zm-ow-tr .zm-badge { display: none; }
 }
 .zm-hide-grid .zm-node.zm-hide-on { opacity: .62; border-style: dashed; border-color: #cf222e; background: rgba(207,34,46,.07); }
 .zm-hide-grid .zm-node.zm-hide-on .zm-node-name { text-decoration: line-through; }
@@ -51400,7 +51429,7 @@ return view.extend({
 			if (!(n > 0)) return;
 			var a = n % 10, b = n % 100;
 			thCount.innerHTML = '';
-			thCount.appendChild(document.createTextNode('Zapret Manager стоит на '));
+			thCount.appendChild(document.createTextNode('Zapret Manager установлен на '));
 			thCount.appendChild(E('b', {}, n.toLocaleString('ru-RU')));
 			thCount.appendChild(document.createTextNode(a === 1 && b !== 11 ? ' роутере' : ' роутерах'));
 			thCount.hidden = false;
@@ -52002,11 +52031,11 @@ return view.extend({
 		function routerNow() { return nowLocal(); }
 		function nextText(rb) {
 			var n = routerNow();
-			if (!n || rb.mode === 'off') return '';
+			if (!n || isNaN(n.getTime()) || rb.mode === 'off') return '';
 			var hm = String(rb.time || '04:30').split(':'), h = +hm[0], m = +hm[1];
 			var t = new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate(), h, m));
 			if (t <= n) t = new Date(t.getTime() + 864e5);
-			if (rb.mode === 'weekly') { var w = +rb.dow; while (t.getUTCDay() !== w) t = new Date(t.getTime() + 864e5); }
+			if (rb.mode === 'weekly') { var w = +rb.dow % 7, k = 0; while (t.getUTCDay() !== w && k++ < 7) t = new Date(t.getTime() + 864e5); }
 			var days = Math.round((Date.UTC(t.getUTCFullYear(), t.getUTCMonth(), t.getUTCDate()) - Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate())) / 864e5);
 			var when = days === 0 ? 'сегодня' : days === 1 ? 'завтра' : DOW_SHORT[t.getUTCDay()] + ', ' + t.getUTCDate() + ' ' + MON_GEN[t.getUTCMonth()];
 			return 'Следующая перезагрузка — ' + when + ' в ' + rb.time + ' (по времени роутера).';
@@ -59203,21 +59232,20 @@ var RADIO = [
 	[ 'o_hitfm', 'Хит FM', 'https://hitfm.hostingradio.ru/hitfm96.aacp', 'pop' ],
 	[ 'o_novoe', 'Новое Радио', 'http://icecast.newradio.cdnvideo.ru/newradio3', 'pop' ],
 	[ 'o_likefm', 'Like FM', 'https://hls-01-gpm.hostingradio.ru/likefm495/playlist.m3u8', 'pop' ],
-	[ 'o_dfm', 'DFM', 'https://dfm.hostingradio.ru/dfm96.aacp', 'dance' ],
-	[ 'o_dfmclub', 'DFM Club', 'https://dfm-dfmclub.hostingradio.ru/dfmclub96.aacp', 'dance' ],
-	[ 'o_dfmrus', 'DFM Russian Dance', 'https://dfm-dfmrusdance.hostingradio.ru/dfmrusdance96.aacp', 'dance' ],
 	[ 'o_retro', 'Ретро FM', 'https://retro128.streamr.ru/', 'retro' ],
 	[ 'o_radio7', 'Радио 7', 'https://hls-01-radio7.emgsound.ru/13/playlist.m3u8', 'retro' ],
-	[ 'o_avto', 'Авторадио', 'http://ic4.101.ru:8000/stream/air/aac/64/100', 'road' ],
-	[ 'o_dor', 'Дорожное Радио', 'http://dor2server.streamr.ru:8000/dor_64_no', 'road' ],
-	[ 'o_dacha', 'Радио Дача', 'http://listen2.vdfm.ru:8000/dacha', 'road' ],
-	[ 'o_keks', 'Кекс FM', 'https://hls-01-keks.emgsound.ru/7/96/playlist.m3u8', 'kids' ],
-	[ 'o_nashe', 'Наше Радио', 'http://nashe128.streamr.ru', 'rock' ],
-	[ 'o_maximum', 'Радио Maximum', 'http://nashe2.hostingradio.ru/rock-128.mp3', 'rock' ],
-	[ 'o_rockarsenal', 'Rock Arsenal', 'https://online.rockarsenal.ru/rockarsenal_aacplus', 'rock' ],
+	[ 'o_dfm', 'DFM', 'https://dfm.hostingradio.ru/dfm96.aacp', 'dance' ],
+	[ 'o_dfmclub', 'DFM Club', 'https://dfm-dfmclub.hostingradio.ru/dfmclub96.aacp', 'dance' ],
+	[ 'o_dfmrus', 'DFM Russian', 'https://dfm-dfmrusdance.hostingradio.ru/dfmrusdance96.aacp', 'dance' ],
+	[ 'o_clubcz', 'Club Radio CZ', 'http://radio.ipip.cz:7996/', 'dance' ],
 	[ 'o_comedy', 'Comedy Radio', 'https://hls-01-gpm.hostingradio.ru/comedyradio391/128/playlist.m3u8', 'humor' ],
 	[ 'o_humor_vtv', 'Юмор FM', 'https://hls-01-vtv.webcaramba.com/vtv-humorfm/playlist.m3u8', 'humor' ],
-	[ 'o_humorfm', 'Юмор', 'https://hls-01-gpm.hostingradio.ru/humorfm495/playlist.m3u8', 'humor' ]
+	[ 'o_humorfm', 'Юмор', 'https://hls-01-gpm.hostingradio.ru/humorfm495/playlist.m3u8', 'humor' ],
+	[ 'o_avto', 'Авторадио', 'http://ic4.101.ru:8000/stream/air/aac/64/100', 'road' ],
+	[ 'o_nashe', 'Наше Радио', 'http://nashe128.streamr.ru', 'rock' ],
+	[ 'o_maximum', 'Rock FM', 'http://nashe2.hostingradio.ru/rock-128.mp3', 'rock' ],
+	[ 'o_maxhls', 'Maximum', 'https://hls-01-maximum.hostingradio.ru/maximum/playlist.m3u8', 'rock' ],
+	[ 'o_rockarsenal', 'Rock Arsenal', 'https://online.rockarsenal.ru/rockarsenal_aacplus', 'rock' ],
 ];
 var RADIO_SETS = [ { id: 'r', name: 'Радио Record' }, { id: 'o', name: 'Разные станции' } ];
 var HLS_SRC = [ 'https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.light.min.js', 'https://unpkg.com/hls.js@1/dist/hls.light.min.js' ];
@@ -59491,6 +59519,7 @@ function radioBuild() {
 	return r.el;
 }
 function radioPaint() {
+	if (radio.navBtn) radio.navBtn();
 	var r = radio;
 	if (!r.el) return;
 	var on = r.state === 'play' || r.state === 'wait';
@@ -59619,6 +59648,14 @@ function radioMenuToggle() {
 	window.addEventListener('hashchange', radioMenuClose);
 	var cur = m.querySelector('.zmw-radio-st[data-i="' + radio.idx + '"]');
 	if (cur) try { cur.focus({ preventScroll: true }); } catch (e) {}
+}
+function navRadioBtn() {
+	var b = E('button', { 'class': 'zmw-nav-btn zmw-nav-btn-wide zmw-nav-btn-radio', 'type': 'button' });
+	function txt() { b.textContent = radio.show ? 'Скрыть радио' : 'Показать радио'; }
+	b.addEventListener('click', function () { window.zmwRadio.set(!radio.show); txt(); });
+	txt();
+	radio.navBtn = txt;
+	return b;
 }
 window.zmwRadio = {
 	shown: function () { return radio.show; },
@@ -60267,6 +60304,7 @@ function buildShell() {
 	});
 	nav.appendChild(E('div', { 'class': 'zmw-nav-editfoot' }, [
 		E('button', { 'class': 'zmw-nav-btn zmw-nav-btn-wide', 'type': 'button', 'click': function () { navUninstalled(); } }, [ 'Скрыть неустановленные' ]),
+		navRadioBtn(),
 		E('button', { 'class': 'zmw-nav-btn', 'type': 'button', 'click': function () { navAll(); } }, [ 'Показать все' ]),
 		E('button', { 'class': 'zmw-nav-btn zmw-nav-btn-done', 'type': 'button', 'click': function () { navDone(); } }, [ 'Готово' ])
 	]));
@@ -61133,6 +61171,7 @@ html[data-theme="dark"] .zmw-brand-name b, html[data-theme="depth"] .zmw-brand-n
 .zmw-nav-editing .zmw-nav-editfoot { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; padding: 10px 4px 4px; }
 .zmw-nav-editfoot .zmw-nav-btn { min-width: 0; padding: 8px 10px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .zmw-nav-editfoot .zmw-nav-btn-wide { grid-column: 1 / -1; }
+.zmw-nav-editfoot .zmw-nav-btn-radio { padding: 4px 10px; font-size: 12px; }
 .zmw-nav-editfoot .zmw-nav-btn-done { color: #fff; background: var(--grad); border-color: transparent; }
 .zmw-nav-editfoot .zmw-nav-btn-done:hover { color: #fff; border-color: transparent; filter: brightness(1.08); }
 .zmw-nav-btn { border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); border-radius: 9px; padding: 6px 10px; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
