@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.991
+# Version: 4.99
 ZM_VERSION_EOF
 set -e
 
@@ -139,6 +139,9 @@ fi
 CONF="/etc/config/zapret"
 ZM_VERSION="@ZM_VERSION@"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
+ZM_STATS_URL="http://89.191.225.101:8787"
+ZM_STATS_OFF="/etc/zapret-manager.nostats"
+ZM_STATS_IDF="/etc/zapret-manager.id"
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
 MT_URL_ITDOG="${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/MagiTrickle/configAD.yaml"
@@ -8401,10 +8404,9 @@ do_tgws_install() {
 		echo "ОШИБКА: установка sTGWS не удалась"
 		return 1
 	fi
-	echo "==> Подбираем домен"
+	echo "==> Запускаем sTGWS"
 	/etc/init.d/tgws enable >/dev/null 2>&1
 	/etc/init.d/tgws restart >/dev/null 2>&1
-	tgws pick >/dev/null 2>&1
 	local i started=0
 	for i in $(seq 1 20); do
 		if [ -n "$(tgws status 2>/dev/null)" ]; then
@@ -8414,9 +8416,11 @@ do_tgws_install() {
 		sleep 5
 	done
 	if [ "$started" != "1" ]; then
-		echo "ОШИБКА: не удалось подобрать домен"
+		echo "ОШИБКА: sTGWS не запустился"
 		return 1
 	fi
+	echo "==> Подбираем домен — как кнопка «Подобрать новый домен»"
+	_tgws_pick || echo "!! Домен пока не подобрался — sTGWS установлен, нажмите «Подобрать новый домен» через минуту"
 	local domain
 	domain=$(_tgws_domain)
 	echo "==> Используем домен: ${domain:-не определён}"
@@ -8455,19 +8459,28 @@ do_tgws_restart() {
 	echo "==> Готово, sTGWS перезапущен"
 }
 
+_tgws_pick() {
+	local n=0
+	while [ "$n" -lt 2 ]; do
+		tgws pick >/dev/null 2>&1
+		sleep 6
+		/etc/init.d/tgws restart >/dev/null 2>&1
+		sleep 3
+		[ -n "$(tgws status 2>/dev/null)" ] && [ -n "$(_tgws_domain)" ] && return 0
+		n=$((n + 1))
+		[ "$n" -lt 2 ] && echo "   · Домен не подобрался — пробуем ещё раз"
+	done
+	return 1
+}
 do_tgws_reconfigure() {
 	[ -x /etc/init.d/tgws ] || { echo "ОШИБКА: sTGWS не установлен"; return 1; }
 	echo "==> Подбираем новый домен"
-	tgws pick >/dev/null 2>&1
-	sleep 6
-	/etc/init.d/tgws restart >/dev/null 2>&1
-	sleep 3
 	local domain
-	domain=$(_tgws_domain)
-	if [ -z "$(tgws status 2>/dev/null)" ] || [ -z "$domain" ]; then
+	if ! _tgws_pick; then
 		echo "ОШИБКА: не удалось подобрать домен"
 		return 1
 	fi
+	domain=$(_tgws_domain)
 	echo "==> Новый домен: $domain"
 	echo "==> Готово, домен перенастроен"
 }
@@ -9852,6 +9865,44 @@ _zm_panel_latest() {
 }
 
 _zm_newer() { [ -n "$1" ] && _st_ver_lt "$ZM_VERSION" "$1"; }
+
+_zm_stats_on() { [ -n "$ZM_STATS_URL" ] && [ ! -e "$ZM_STATS_OFF" ] && [ -z "$ZM_NO_STATS" ]; }
+_zm_stats_id() {
+	local id=""
+	[ -s "$ZM_STATS_IDF" ] && id="$(head -c 80 "$ZM_STATS_IDF" | tr -cd '0-9a-f')"
+	if [ "${#id}" -lt 32 ]; then
+		id="$(head -c 16 /dev/urandom 2>/dev/null | hexdump -v -e '1/1 "%02x"' 2>/dev/null)"
+		[ "${#id}" -ge 32 ] || id="$(tr -cd '0-9a-f' < /proc/sys/kernel/random/uuid 2>/dev/null)"
+		[ "${#id}" -ge 32 ] || return 1
+		printf '%s\n' "$id" > "$ZM_STATS_IDF" 2>/dev/null || return 1
+	fi
+	printf '%s' "$id" | cut -c1-64
+}
+_zm_stats_fetch() {
+	mkdir -p "$JOBS_DIR"
+	rm -f "$2.t"
+	: > "$2.try"
+	if _zm_has curl; then command curl -fsS --connect-timeout 5 --max-time 8 -A "zapret-manager/$ZM_VERSION" -o "$2.t" "$1" 2>/dev/null
+	else command wget -q -T 8 -O "$2.t" "$1" 2>/dev/null; fi
+	grep -q '"total":[0-9]' "$2.t" 2>/dev/null && mv -f "$2.t" "$2"
+	rm -f "$2.t"
+}
+zm_stats_hit() {
+	_zm_stats_on || return 0
+	local id
+	id="$(_zm_stats_id)" || return 0
+	_zm_stats_fetch "$ZM_STATS_URL/hit?id=$id&v=$ZM_VERSION" "$JOBS_DIR/stats.json"
+	return 0
+}
+zm_stats_get() {
+	_zm_stats_on || { echo '{"on":false}'; return 0; }
+	local f="$JOBS_DIR/stats.json" t
+	if { [ ! -s "$f" ] || [ -n "$(find "$f" -mmin +360 2>/dev/null)" ]; } && { [ ! -f "$f.try" ] || [ -n "$(find "$f.try" -mmin +30 2>/dev/null)" ]; }; then
+		_zm_stats_fetch "$ZM_STATS_URL/count" "$f"
+	fi
+	t="$(sed -n 's/.*"total":\([0-9]*\).*/\1/p' "$f" 2>/dev/null | head -n1)"
+	printf '{"on":true,"total":%s}\n' "${t:-null}"
+}
 
 zm_update_status() {
 	local latest
@@ -30509,6 +30560,8 @@ case "$cmd" in
 	system_time_set)                      system_time_set "$1" ;;
 	zm_update_status)                     zm_update_status ;;
 	zm_update_action)                     zm_update_action ;;
+	zm_stats_get)                         zm_stats_get ;;
+	zm_stats_hit)                         zm_stats_hit ;;
 	zm_changelog)                         case "$1" in local|remote|all) zm_changelog "$1" ;; *) echo '{"error":"неизвестный режим"}' ;; esac ;;
 	zm_changelog_seen)                    zm_changelog seen ;;
 	zm_changelog_sync)                    _zm_cl_sync ;;
@@ -34454,6 +34507,7 @@ list_methods() {
 	json_add_object "zm_update_status";        json_close_object
 	json_add_object "zm_update_action";        json_close_object
 	json_add_object "zm_changelog";            json_add_string "mode" "string"; json_close_object
+	json_add_object "zm_stats_get";            json_close_object
 	json_add_object "zm_changelog_seen";       json_close_object
 	json_add_object "mixomo_status";           json_close_object
 	json_add_object "mixomo_action";           json_add_string "action" "string"; json_close_object
@@ -34638,6 +34692,7 @@ call_method() {
 		zm_update_status)        "$BACKEND" zm_update_status ;;
 		zm_update_action)        "$BACKEND" zm_update_action ;;
 		zm_changelog)            json_get_var mode mode;       "$BACKEND" zm_changelog "$mode" ;;
+		zm_stats_get)            "$BACKEND" zm_stats_get ;;
 		zm_changelog_seen)       "$BACKEND" zm_changelog_seen ;;
 		mixomo_status)           "$BACKEND" mixomo_status ;;
 		mixomo_action)           json_get_var action action; "$BACKEND" mixomo_action "$action" ;;
@@ -34756,6 +34811,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"test_results",
 					"zm_update_status",
 					"zm_changelog",
+					"zm_stats_get",
 					"purge_scan",
 					"backup_list",
 					"mixomo_status",
@@ -35146,6 +35202,7 @@ var callBackupUp = zmDeclare({ object: 'zapret-manager', method: 'backup_up', pa
 var callBackupDown = zmDeclare({ object: 'zapret-manager', method: 'backup_down', params: ['id', 'off'], expect: {} });
 var callSysinfoRun = zmDeclare({ object: 'zapret-manager', method: 'sysinfo_run', expect: {} });
 var callSysinfoGet = zmDeclare({ object: 'zapret-manager', method: 'sysinfo_get', expect: {} });
+var callStatsGet = zmDeclare({ object: 'zapret-manager', method: 'zm_stats_get', expect: {} });
 var callMirrorStatus = zmDeclare({ object: 'zapret-manager', method: 'mirror_status', expect: {} });
 var callMirrorSet = zmDeclare({ object: 'zapret-manager', method: 'mirror_set', params: ['id'], expect: {} });
 var callExclusionsStatus = zmDeclare({ object: 'zapret-manager', method: 'exclusions_status', expect: {} });
@@ -37360,6 +37417,8 @@ return baseclass.extend({
 	backupDown: callBackupDown,
 	sysinfoRun: callSysinfoRun,
 	sysinfoGet: callSysinfoGet,
+	rebootRouter: rebootRouter,
+	statsGet: callStatsGet,
 	mirrorStatus: callMirrorStatus,
 	mirrorSet: callMirrorSet,
 	exclusionsStatus: callExclusionsStatus,
@@ -47518,7 +47577,7 @@ return view.extend({
 					if (st) { q = []; pv = null; optBar.reset(String(r.opt || '').replace(/\n+$/, '')); }
 					zm.toast(st && !r.on ? ok.replace(/ применена$/, ' выбрана') + ' — заработает, когда вы включите секцию' : ok, 'info');
 					renderAll();
-					if (r.on && r.ready && r.zapret_running && !r.running) setTimeout(load, 3000);
+					followN = 0; follow(r);
 					return true;
 				}).catch(function() { busy = false; renderAll(); zm.toast('Роутер не ответил', 'error'); return false; });
 			}
@@ -47613,7 +47672,7 @@ return view.extend({
 					zm.toast(want === 'on' ? 'Дополнительная секция включена' : want === 'off' ? 'Дополнительная секция выключена'
 						: r.on ? 'Изменения секции применены' : 'Изменения секции сохранены — заработают, когда вы включите секцию', 'info');
 					renderAll();
-					if (r.on && r.ready && r.zapret_running && !r.running) setTimeout(load, 3000);
+					followN = 0; follow(r);
 					return true;
 				}).catch(function() { busy = false; renderAll(); zm.toast('Роутер не ответил', 'error'); return false; });
 			}
@@ -47908,6 +47967,15 @@ return view.extend({
 
 			function renderAll() { renderHead(); renderDevs(); renderNav(); renderSub(); }
 
+			var followT = 0, followN = 0;
+			function follow(r) {
+				clearTimeout(followT);
+				if (!r || !r.on || !r.ready || (r.zapret_running && r.running) || ++followN > 10) { followN = 0; return; }
+				followT = setTimeout(function() {
+					if (!document.body.contains(head)) return;
+					load().then(function() { if (refreshers.strategy) refreshers.strategy(); follow(d); });
+				}, followN < 4 ? 2000 : 4000);
+			}
 			function loadDevs(toast) {
 				return zm.exclusionsStatus().then(function(r) { devList = r || {}; renderDevs(); if (toast) zm.toast('Список устройств обновлён', 'info'); }, function() {});
 			}
@@ -47924,6 +47992,7 @@ return view.extend({
 					renderAll();
 					if (rs[2] && rs[2].running && !fsBusy) fsFollow();
 					if (s2Tab === 'youtube') ytLoad();
+					if (!followN) follow(r);
 				}).catch(function() { loadErr = 'Роутер не ответил'; renderAll(); });
 			}
 			renderAll();
@@ -48968,6 +49037,9 @@ html.zm-theme-dark .zm-sysline .zm-badge:hover { filter: brightness(1.18); }
 .zm-si-val { overflow-wrap: anywhere; }
 
 .zm-si-pre { margin: 0; white-space: pre-wrap; word-break: break-all; font-size: 12px; max-height: 260px; overflow: auto; }
+.zm-th-count { margin: 8px 0 0 !important; font-size: 13px; opacity: .85; }
+.zm-th-count[hidden] { display: none; }
+.zm-th-count b { font-variant-numeric: tabular-nums; }
 .zm-si-pre.zm-si-fk { max-height: 420px; }
 .zm-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .zm-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; background: rgba(110,118,129,.14); }
@@ -49159,6 +49231,8 @@ html.zm-theme-dark .zm-dock .zm-refresh-banner { background: #2f2a1c; color: #e3
 .zm-ow-name-edit { min-width: 260px; }
 .zm-ow-name-in { flex: 1 1 140px !important; min-width: 120px; }
 .zm-ow-rbrow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.zm-ow-rbhead { display: flex; align-items: flex-start; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; }
+.zm-ow-rbhead .cbi-button { margin: -5px 0 8px; flex: none; }
 .zm-ow-inl { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
 .zm-ow-inl .cbi-input-select { width: auto; min-width: 150px; }
 .zm-ow-time { width: 110px !important; }
@@ -51238,19 +51312,31 @@ return view.extend({
 			thanksBtn.appendChild(document.createTextNode(open ? 'Свернуть ' : 'Все авторы '));
 			thanksBtn.appendChild(E('span', { 'class': 'zm-th-caret' + (open ? ' zm-th-up' : '') }, '▾'));
 		}
+		var thCount = E('p', { 'class': 'zm-th-count', 'hidden': '' });
 		var creditsCard = E('div', { 'class': 'zm-card' }, [
 			E('h3', {}, 'Спасибо'),
 			E('div', { 'class': 'zm-th-hero' }, [
 				E('div', { 'class': 'zm-th-heart', 'aria-hidden': 'true' }, '♥'),
 				E('div', { 'class': 'zm-th-text' }, [
 					E('h4', {}, 'Спасибо авторам и всем пользователям'),
-					E('p', {}, 'Работа открытых проектов и помощь людей, которые тестируют и поддерживают Zapret Manager. Без вас его бы не было.')
+					E('p', {}, 'Работа открытых проектов и помощь людей, которые тестируют и поддерживают Zapret Manager. Без вас его бы не было.'),
+					thCount
 				]),
 				thanksBtn
 			]),
 			thanksList
 		]);
 		setThanks(thanksOpen);
+		if (on('thanks')) zm.statsGet().then(function(r) {
+			var n = r && r.on ? +r.total : 0;
+			if (!(n > 0)) return;
+			var a = n % 10, b = n % 100;
+			thCount.innerHTML = '';
+			thCount.appendChild(document.createTextNode('Zapret Manager стоит на '));
+			thCount.appendChild(E('b', {}, n.toLocaleString('ru-RU')));
+			thCount.appendChild(document.createTextNode(a === 1 && b !== 11 ? ' роутере' : ' роутерах'));
+			thCount.hidden = false;
+		}).catch(function() {});
 		put('changelog', clCard);
 		put('thanks', creditsCard);
 
@@ -51866,7 +51952,14 @@ return view.extend({
 		function renderReboot() {
 			var rb = st.reboot || { mode: 'off', time: '04:30', dow: '1' };
 			rbCard.innerHTML = '';
-			rbCard.appendChild(E('h3', {}, [ 'Перезагрузка по расписанию ', badge(rb.mode !== 'off', rb.mode === 'daily' ? 'каждый день' : 'раз в неделю', 'выключена', 'zm-sx-info') ]));
+			rbCard.appendChild(E('div', { 'class': 'zm-ow-rbhead' }, [
+				E('h3', {}, [ 'Перезагрузка по расписанию ', badge(rb.mode !== 'off', rb.mode === 'daily' ? 'каждый день' : 'раз в неделю', 'выключена', 'zm-sx-info') ]),
+				E('button', { 'type': 'button', 'class': 'cbi-button', 'click': function(ev) {
+					var b = ev.currentTarget;
+					b.disabled = true;
+					zm.rebootRouter().then(function(ok) { if (!ok) b.disabled = false; }, function() { b.disabled = false; });
+				} }, 'Перезагрузить сейчас')
+			]));
 			rbCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:-6px' }, 'Помогает роутерам, которые со временем начинают тормозить. Если в это время идёт тест стратегий или обновление — роутер дождётся их окончания.'));
 			var seg = E('div', { 'class': 'zm-seg' + (busy ? ' zm-seg-busy' : '') }, [ [ 'off', 'Не перезагружать' ], [ 'daily', 'Каждый день' ], [ 'weekly', 'Раз в неделю' ] ].map(function(x) {
 				return E('div', { 'class': 'zm-seg-item' + (rb.mode === x[0] ? ' zm-active' : ''), 'role': 'button', 'tabindex': '0', 'click': function() {
@@ -62828,6 +62921,7 @@ sh "$t"; r=$?; rm -f "$t"; exit $r
 ZM_GET_EOF
 	chmod +x "/usr/bin/${_zm_c%% *}"
 done
+( /opt/zapret-manager-luci/backend.sh zm_stats_hit ) >/dev/null 2>&1 </dev/null &
 if [ "$ZMW_OK" = 1 ]; then _zmi_ok "Web UI включён на порту ${ZMW_PORT:-7788}"
 else _zmi_warn "Web UI не включён: на роутере нет веб-сервера uhttpd или не установился uhttpd-mod-ubus"; fi
 echo -e "\n${GREEN}Готово: Zapret Manager для LuCI и Web $ZM_NEW_VER установлен${NC}\n"
