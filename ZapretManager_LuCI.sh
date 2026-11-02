@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 4.995
+# Version: 4.996
 ZM_VERSION_EOF
 set -e
 
@@ -1220,9 +1220,34 @@ job_start() {
 		return 0
 	fi
 	: > "$log"
-	( ZM_JOB_LOG="$log"; export ZM_JOB_LOG; _bk_auto "$@" >>"$log" 2>&1; "$@" >>"$log" 2>&1; rc=$?; _zm_net_restore >>"$log" 2>&1; [ -n "$(tail -c 1 "$log" 2>/dev/null)" ] && echo >>"$log"; echo "__DONE__ $rc" >>"$log" ) &
+	( ZM_JOB_LOG="$log"; export ZM_JOB_LOG; _bk_auto "$@" >>"$log" 2>&1; "$@" >>"$log" 2>&1; rc=$?; _zm_net_restore >>"$log" 2>&1; [ -n "$(tail -c 1 "$log" 2>/dev/null)" ] && echo >>"$log"
+		[ "$rc" = 0 ] && _zm_rm_job "$1" && _zm_clean_job "$name" >>"$log" 2>&1
+		echo "__DONE__ $rc" >>"$log" ) &
 	echo $! > "$pid"
 	printf '{"started":true,"job":"%s"}\n' "$name"
+}
+
+_zm_rm_job() {
+	case "$1" in
+		do_steer_sub_remove) return 1 ;;
+		do_remove_*|do_*_remove|do_*_remove_*|do_*_uninstall|do_*_purge|do_purge) return 0 ;;
+	esac
+	return 1
+}
+
+_zm_clean_job() {
+	local r n f t
+	r="$(ZM_CLEAN_SELF="$1" zm_cleanup job 2>/dev/null)"
+	case "$r" in *'"ok":true'*) ;; *) return 0 ;; esac
+	n="$(printf '%s' "$r" | sed -n 's/.*"removed":\([0-9]*\).*/\1/p')"
+	f="$(printf '%s' "$r" | sed -n 's/.*"freed_flash_kb":\([0-9]*\).*/\1/p')"
+	t="$(printf '%s' "$r" | sed -n 's/.*"freed_tmp_kb":\([0-9]*\).*/\1/p')"
+	echo "==> Убираем мусор — как кнопка «Очистить мусор»"
+	if [ "${n:-0}" -gt 0 ] 2>/dev/null; then
+		echo "   ✓ Удалено файлов и папок: $n · освобождено на флеше $(_zm_size_txt $(( ${f:-0} * 1024 ))), в ОЗУ $(_zm_size_txt $(( ${t:-0} * 1024 )))"
+	else
+		echo "   ✓ Мусора не осталось"
+	fi
 }
 
 _zm_wait() {
@@ -2032,7 +2057,8 @@ _ui_icy_url() {
 		o_nashe) echo "http://nashe128.streamr.ru" ;;
 		o_maximum) echo "http://nashe2.hostingradio.ru/rock-128.mp3" ;;
 		o_rockarsenal) echo "https://online.rockarsenal.ru/rockarsenal_aacplus" ;;
-		o_smoothjazz) echo "https://streaming.live365.com/a55660" ;;
+		o_smoothjazz) echo "https://das-edge62-live365-dal03.cdnstream.com/a55660" ;;
+		o_shokolad) echo "https://choco.hostingradio.ru:10010/fm" ;;
 		o_*) return 1 ;;
 		*) echo "https://radiorecord.hostingradio.ru/$1.aacp" ;;
 	esac
@@ -2169,7 +2195,7 @@ zapret_restart() {
 
 _strat_label() {
 	local s
-	s=$(_nfq_names | sed 's/^#[[:space:]]*//; s/[[:space:]]*$//; /^udp443$/d; /^DoH$/d; /^gvideo[12]$/d; /^[Nn][Oo][Cc][Hh][Aa][Nn][Gg][Ee]$/d' | tr '\n' ' ' | sed 's/ $//')
+	s=$(_nfq_names | sed 's/^#[[:space:]]*//; s/[[:space:]]*$//; /^udp443$/d; /^DoH$/d; /^gvideo[123]$/d; /^[Nn][Oo][Cc][Hh][Aa][Nn][Gg][Ee]$/d' | tr '\n' ' ' | sed 's/ $//')
 	_yv_ipid_on && s="$(printf '%s' "$s" | sed -E 's/(^| )(Yv[0-9]+)( |$)/\1\2z\3/')"
 	_udp443_on && s="${s:+$s }QUIC"
 	_zo_doh_on && s="${s:+$s }DoH"
@@ -2617,7 +2643,7 @@ DV_OFF_FLAG="/opt/zapret-manager-luci/dv_off"
 DISCORD_RX='^--filter-l7=discord,stun$|^--filter-udp=19294-19344,50000-50100$|^--filter-tcp=2053,2083,2087,2096,8443$|^--hostlist-domains=discord[.]media$|^#[ \t]*Dv[0-9]+$'
 
 YV_RX='^#[ \t]*Yv[0-9]+$|^--hostlist=/opt/zapret/ipset/zapret-hosts-google[.]txt$'
-NFQ_MARK_RX='^[ \t]*#[ \t]*((Yv|Dv|Gv)[0-9]|udp443[ \t]*$|DoH[ \t]*$|gvideo[12][ \t]*$)'
+NFQ_MARK_RX='^[ \t]*#[ \t]*((Yv|Dv|Gv)[0-9]|udp443[ \t]*$|DoH[ \t]*$|gvideo[123][ \t]*$)'
 UDP443_MARK_RX='^[ \t]*#[ \t]*udp443[ \t]*$'
 
 _nfq_drop_profiles() {
@@ -5078,7 +5104,7 @@ do_zpg_restore() {
 	return 0
 }
 zm_pages() {
-	local a="$1" v="$2" id off="" lk need=""
+	local a="$1" v="$2" id off="" lk need="" was gone=""
 	case "$a" in
 		status) _job_running pages || _zpg_enforce; _zpg_status ;;
 		set)
@@ -5089,9 +5115,12 @@ zm_pages() {
 				case " $off " in *" $id "*) ;; *) off="$off $id" ;; esac
 			done
 			off="${off# }"
+			was="$(_zpg_offlist)"
+			for id in $off; do case " $was " in *" $id "*) ;; *) _zpg_have "$id" && gone=1 ;; esac; done
 			mkdir -p "$ZM_STATE_DIR"
 			if [ -n "$off" ]; then printf '%s\n' "$off" > "$ZPG_OFF"; else rm -f "$ZPG_OFF"; fi
 			_zpg_enforce
+			if [ -n "$gone" ]; then ( zm_cleanup after ) >/dev/null 2>&1 </dev/null & fi
 			for id in $ZPG_IDS; do _zpg_is_off "$id" || _zpg_have "$id" || need=1; done
 			if [ -n "$need" ]; then
 				if id="$(_zm_busy_job)"; then printf '{"error":"%s"}\n' "$(esc "Выбор сохранён, но докачать страницы сейчас нельзя: идёт операция «$id». Нажмите «Применить» ещё раз, когда она закончится")"; return 1; fi
@@ -5105,9 +5134,13 @@ zm_pages() {
 zm_cleanup() {
 	local mode="$1" j f k n=0 tk=0 fk=0 m0 m1 list="$JOBS_DIR/cleanup.$$" w=0
 	[ "$mode" = install ] && _zpg_enforce >/dev/null 2>&1
-	if [ "$mode" = postupd ]; then
+	if [ "$mode" = postupd ] || [ "$mode" = after ]; then
 		while { [ -f /tmp/zm_update_install.sh ] || _zm_busy_job >/dev/null 2>&1 || _au_live; } && [ "$w" -lt 600 ]; do sleep 15; w=$((w + 15)); done
-		mode=auto
+		if [ "$mode" = postupd ]; then mode=auto; else mode=""; fi
+	fi
+	if [ "$mode" = job ]; then
+		{ _au_live || [ -f /tmp/zm_update_install.sh ] || _zm_busy_job >/dev/null 2>&1; } && { echo '{"skipped":true}'; return 0; }
+		mode=""
 	fi
 	if [ "$mode" != install ]; then
 		if _au_live; then
@@ -9662,16 +9695,21 @@ _yv_ipid_sync() {
 	return 0
 }
 ZO_GV_FLAG="$ZM_STATE_DIR/zapret_gv"
-ZO_GV_RX='^[ \t]*#[ \t]*gvideo[12][ \t]*$'
-_zo_gv_want() { local w=""; [ -s "$ZO_GV_FLAG" ] && read -r w < "$ZO_GV_FLAG"; case "$w" in 1|2) echo "$w" ;; esac; return 0; }
+ZO_GV_RX='^[ \t]*#[ \t]*gvideo[123][ \t]*$'
+_zo_gv_want() { local w=""; [ -s "$ZO_GV_FLAG" ] && read -r w < "$ZO_GV_FLAG"; case "$w" in 1|2|3) echo "$w" ;; esac; return 0; }
 _zo_gv_blk() {
+	if [ "$1" = 3 ]; then
+		printf '%s\n' "#gvideo3" "--filter-tcp=443" "--hostlist-domains=googlevideo.com" "--dpi-desync=multidisorder" \
+			"--dpi-desync-split-pos=1,midsld" "--wssize=1:1" "--wssize-cutoff=n8"
+		return 0
+	fi
 	printf '%s\n' "#gvideo$1" "--filter-tcp=443" "--filter-l7=tls" "--hostlist-domains=googlevideo.com" \
 		"--dpi-desync=fake,multidisorder" "--dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin" \
 		"--dpi-desync-fake-tls-mod=rnd" "--dpi-desync-fooling=badseq,badsum" "--dpi-desync-badseq-increment=0" "--dpi-desync-badack-increment=-66000"
 	if [ "$1" = 2 ]; then echo "--dpi-desync-split-pos=1,sniext+2,host-1,midsld,endsld"
 	else echo "--dpi-desync-split-pos=1,2,3,5,105,host+5,sld-1,endsld-5,endsld"; fi
 }
-_zo_gv_cur() { _nfq_opt_body | sed -n 's/^[ \t]*#[ \t]*gvideo\([12]\)[ \t]*$/\1/p' | head -n 1; }
+_zo_gv_cur() { _nfq_opt_body | sed -n 's/^[ \t]*#[ \t]*gvideo\([123]\)[ \t]*$/\1/p' | head -n 1; }
 _zo_gv_count() { _nfq_opt_body | grep -cE "$ZO_GV_RX"; }
 _zo_gv_first() {
 	_nfq_opt_body | sed '1d;$d' | awk -v D="$ZO_DOH_MK" -v G="$ZO_GV_RX" -v CS="$ZC_START_RX" '
@@ -9803,7 +9841,7 @@ zapret_opt_set() {
 		gv)
 			_nochange_guard || return 1
 			case "$val" in
-				1|2) mkdir -p "$ZM_STATE_DIR"; echo "$val" > "$ZO_GV_FLAG" ;;
+				1|2|3) mkdir -p "$ZM_STATE_DIR"; echo "$val" > "$ZO_GV_FLAG" ;;
 				off) rm -f "$ZO_GV_FLAG" ;;
 				*) echo '{"error":"неизвестное значение"}'; return 1 ;;
 			esac
@@ -10466,7 +10504,7 @@ _zm_busy_job() {
 	for f in "$JOBS_DIR"/*.pid; do
 		[ -f "$f" ] || continue
 		j="$(basename "$f" .pid)"
-		case "$j" in versions|sysinfo|*_download|fk-guard) continue ;; esac
+		case "$j" in versions|sysinfo|*_download|fk-guard|"$ZM_CLEAN_SELF") continue ;; esac
 		_job_running "$j" && { _zm_job_label "$j"; return 0; }
 	done
 	return 1
@@ -29264,7 +29302,7 @@ _ab_devmap() {
 }
 AB_KEY_AWK='
 function abmap(f,   l, a) { while ((getline l < f) > 0) { split(l, a, "\t"); if (a[1] == "R") R[a[2]] = 1; else if (a[1] == "M") M[a[2]] = a[3]; else if (a[1] == "F") F4[a[2]] = a[3]; else if (a[1] == "N") N[a[2]] = a[3]; else if (a[1] == "H") H[a[2]] = a[3] } close(f) }
-function abkey(k) { if (k == "r" || k ~ /^[mn]:/) return k; if (k in R) return "r"; if (k in M) return "m:" M[k]; if (k in H) return "n:" H[k]; return k }
+function abkey(k) { if (k == "r" || k == "s" || k ~ /^[mn]:/) return k; if (k in R) return "r"; if (k in M) return "m:" M[k]; if (k in H) return "n:" H[k]; return k }
 '
 AB_URL_GH="${GH_RAW}/hagezi/dns-blocklists/main/dnsmasq"
 AB_URL_CDN="https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/dnsmasq"
@@ -29653,6 +29691,11 @@ _ab_unplug() {
 	done
 }
 _ab_stats_on() { [ "$(_ab_get stats 0)" = 1 ]; }
+_ab_steer_dns() {
+	stl_running 2>/dev/null || return 1
+	command -v netstat >/dev/null 2>&1 || return 0
+	netstat -lnu 2>/dev/null | grep -qE '[:.]5300[[:space:]]'
+}
 AB_LF="$AB_DIR/logfacility.saved"
 _ab_kw_in() {
 	local kw="$1" f
@@ -29786,7 +29829,7 @@ adblock_stats_tick() {
 		hour=$(( $(date +%s) / 3600 )); hf="$AB_STATS_DIR/h.$hour"
 		lan="$(sed -n 's#^local=/\([^/]*\)/$#\1#p' /var/etc/dnsmasq.conf.* 2>/dev/null | sort -u | tr '\n' ' ')"
 		jc="$(_ab_jcap)"; now="$(date +%s)"; sod="$(date +%H:%M:%S | awk -F: '{ print $1 * 3600 + $2 * 60 + $3 }')"
-		awk -v lan="$lan" -v hf="$hf" -v other="$tmp.other" -v jn="$([ "$jc" -gt 0 ] && echo 1 || echo 0)" -v jf="$tmp.j" -v now="$now" -v mid="$((now - ${sod:-0}))" '
+		awk -v lan="$lan" -v hf="$hf" -v other="$tmp.other" -v jn="$([ "$jc" -gt 0 ] && echo 1 || echo 0)" -v jf="$tmp.j" -v now="$now" -v mid="$((now - ${sod:-0}))" -v st="$(_ab_steer_dns && echo 1)" '
 			function lts(p,   h, mi, s, t) {
 				if (!match(p, /[0-9][0-9]:[0-9][0-9]:[0-9][0-9]/)) return now
 				h = substr(p, RSTART, 2) + 0; mi = substr(p, RSTART + 3, 2) + 0; s = substr(p, RSTART + 6, 2) + 0
@@ -29814,16 +29857,17 @@ adblock_stats_tick() {
 				m = split(substr($0, RSTART + RLENGTH), f, " ")
 				i = 1; cl = ""
 				if (f[1] ~ /\/[0-9]+$/) { cl = f[1]; sub(/\/[0-9]+$/, "", cl); i = 2 }
+				jcl = st && (cl == "127.0.0.1" || cl == "::1") ? "s" : cl
 				if (f[i] ~ /^query\[/) {
 					T++; if (cl != "") C[cl]++
-					if (jn && cl != "") { n = tolower(f[i + 1]); if (n != "" && !local_name(n) && n !~ /\.arpa$/) { Q[sid] = n; QC[sid] = cl; QT[sid] = lts(pre) } }
+					if (jn && cl != "") { n = tolower(f[i + 1]); if (n != "" && !local_name(n) && n !~ /\.arpa$/) { Q[sid] = n; QC[sid] = jcl; QT[sid] = lts(pre) } }
 					next
 				}
 				if (f[i] == "config" && f[i + 2] == "is" && f[i + 3] ~ /^(NXDOMAIN|NODATA)/) {
 					n = tolower(f[i + 1])
 					if (local_name(n)) next
 					B++; D[n]++; if (cl != "") X[cl]++
-					if (jn && cl != "") { BL[sid] = 1; k = cl "\t" n; JB[k]++; t = lts(pre); if (t > JBT[k]) JBT[k] = t }
+					if (jn && cl != "") { BL[sid] = 1; k = jcl "\t" n; JB[k]++; t = lts(pre); if (t > JBT[k]) JBT[k] = t }
 				}
 				next
 			}
@@ -29944,7 +29988,7 @@ _ab_stats_json() {
 	mkdir -p "$AB_STATS_DIR"
 	_ab_devmap > "$AB_STATS_DIR/devmap.$$"
 	via=""
-	stl_running 2>/dev/null && via="Steer"
+	_ab_steer_dns && via="Steer"
 	awk -v per="$([ "$per" = all ] && echo 0 || echo "$per")" -v since="${since:-0}" -v mf="$AB_STATS_DIR/devmap.$$" -v via="$via" -v jc="$(_ab_jcap)" "$AB_KEY_AWK"'
 		function js(v) { gsub(/[\\"]/, "", v); gsub(/[\001-\037]/, "", v); return v }
 		BEGIN { abmap(mf) }
@@ -30013,12 +30057,13 @@ _ab_journal() {
 		}
 		function dname(k,   m) {
 			if (k == "r") return "Роутер"
+			if (k == "s") return "Через Steer"
 			m = k ~ /^m:/ ? substr(k, 3) : ""
 			if (m != "") return N[m]
 			if (k ~ /^n:/) return substr(k, 3)
 			return ""
 		}
-		function daddr(k, ip,   m) { m = k ~ /^m:/ ? substr(k, 3) : ""; if (m != "" && (m in F4)) return F4[m]; return ip }
+		function daddr(k, ip,   m) { if (k == "s") return ""; m = k ~ /^m:/ ? substr(k, 3) : ""; if (m != "" && (m in F4)) return F4[m]; return ip }
 		function pick(arr, cnt, lim,   i, j, best, bn, out, n) {
 			n = 0
 			for (j = 0; j < lim; j++) {
@@ -30066,7 +30111,7 @@ _ab_journal() {
 				for (i = 1; i <= n; i++) { k = ORD[i]; printf "%s{\"k\":\"%s\",\"ip\":\"%s\",\"n\":\"%s\",\"b\":%d,\"a\":%d,\"t\":%d}", (i > 1 ? "," : ""), js(k), js(daddr(k, DI[k])), js(dname(k)), DB[k], DA[k], DT[k] }
 				printf "]}\n"
 			} else {
-				printf ",\"k\":\"%s\",\"n\":\"%s\",\"ip\":\"%s\",\"tb\":%d,\"ta\":%d", js(arg), js(dname(arg)), js(wip == "" && arg !~ /^[mnr]/ ? arg : wip), tb, ta
+				printf ",\"k\":\"%s\",\"n\":\"%s\",\"ip\":\"%s\",\"tb\":%d,\"ta\":%d", js(arg), js(dname(arg)), js(wip == "" && arg !~ /^[mnrs]/ ? arg : wip), tb, ta
 				for (x in XL) { split(x, p, "\t"); if (p[1] == "b") { BLx[x] = 1; BC[x] = XC[x] } else { ALx[x] = 1; AC[x] = XC[x] } }
 				printf ",\"blocked\":["
 				n = pick(BLx, BC, 150)
@@ -44832,7 +44877,8 @@ return view.extend({
 			return diff === 0 ? t : diff === 1 ? 'вчера ' + t.slice(0, 5) : two(d.getDate()) + '.' + two(d.getMonth() + 1) + ' ' + t.slice(0, 5);
 		}
 		function reqs(n) { var a = n % 10, b = n % 100; return num(n) + ' ' + (a === 1 && b !== 11 ? 'запрос' : a >= 2 && a <= 4 && (b < 12 || b > 14) ? 'запроса' : 'запросов'); }
-		function devLabel(x) { return x.k === 'r' ? 'Роутер' : (x.n || (x.ip && !/:/.test(x.ip) ? x.ip : 'Устройство без имени')); }
+		var STEER_NOTE = 'Steer пересылает DNS-запросы устройств от своего имени — какое именно устройство, не видно. Без Steer журнал показывает каждое устройство.';
+		function devLabel(x) { return x.k === 'r' ? 'Роутер' : x.k === 's' ? 'Через Steer' : (x.n || (x.ip && !/:/.test(x.ip) ? x.ip : 'Устройство без имени')); }
 		function journalOpen(first) {
 			var stack = [ first ], jd = null, jBusy = false, jFlt = 'all', jQ = '', qTimer = 0, seq = 0, sizeBusy = false;
 			var head = E('div', { 'class': 'zm-abj-head' }), tools = E('div', { 'class': 'zm-abj-tools' }), body = E('div', { 'class': 'zm-abj-body' }), foot = E('div', { 'class': 'zm-abj-foot' });
@@ -44879,7 +44925,7 @@ return view.extend({
 			}
 			function link(text, title, fn, cls) { return E('button', { 'type': 'button', 'class': 'zm-abj-link' + (cls ? ' ' + cls : ''), 'title': title, 'click': fn }, text); }
 			function domLink(d) { return link(d, 'Кто обращался к ' + d, function() { go({ mode: 'dom', d: d }); }, 'zm-abj-dom'); }
-			function devLink(x) { var l = devLabel(x); return link(l, 'Куда обращалось ' + l + (x.ip && l !== x.ip ? ' (' + x.ip + ')' : ''), function() { go({ mode: 'dev', k: x.k, label: l, ip: x.ip }); }); }
+			function devLink(x) { var l = devLabel(x); return link(l, x.k === 's' ? STEER_NOTE : 'Куда обращалось ' + l + (x.ip && l !== x.ip ? ' (' + x.ip + ')' : ''), function() { go({ mode: 'dev', k: x.k, label: l, ip: x.ip }); }, x.k === 's' ? 'zm-abj-via' : ''); }
 			function chip(b) { return E('span', { 'class': 'zm-abj-st ' + (b ? 'zm-abj-st-b' : 'zm-abj-st-a') }, b ? 'заблокирован' : 'разрешён'); }
 			function act(d, b) {
 				return b ? E('button', { 'class': 'cbi-button zm-ab-rank-btn', 'title': 'Добавить ' + d + ' в белый список', 'click': function() { allowAdd(d); } }, 'Разблокировать')
@@ -44889,9 +44935,9 @@ return view.extend({
 			function drawHead() {
 				var v = cur(), t, sub;
 				head.innerHTML = '';
-				if (v.mode === 'dom') { t = v.d; sub = 'Кто обращался к домену'; }
-				else if (v.mode === 'dev') { t = v.label || v.k; sub = 'Куда обращалось устройство' + (v.ip && v.ip !== t && !/:/.test(v.ip) ? ' · ' + v.ip : ''); }
-				else { t = 'Журнал запросов'; sub = 'Кто и куда обращался через DNS роутера. Нажмите на домен или устройство, чтобы увидеть подробности.'; }
+				if (v.mode === 'dom') { t = v.d; sub = 'Кто обращался'; }
+				else if (v.mode === 'dev') { t = v.label || v.k; sub = v.k === 's' ? 'Запросы, пришедшие через Steer' : 'Куда обращалось' + (v.ip && v.ip !== t && !/:/.test(v.ip) ? ' · ' + v.ip : ''); }
+				else { t = 'Журнал запросов'; sub = 'Нажмите на домен или устройство — откроются подробности'; }
 				head.appendChild(stack.length > 1 ? E('button', { 'type': 'button', 'class': 'cbi-button zm-abj-back', 'title': 'Назад', 'aria-label': 'Назад', 'click': back }, '←') : E([]));
 				head.appendChild(E('div', { 'class': 'zm-abj-title' }, [ E('h3', { 'class': v.mode === 'dom' ? 'zm-abj-mono' : '' }, t), E('span', { 'class': 'zm-hint' }, sub) ]));
 				head.appendChild(E('button', { 'type': 'button', 'class': 'cbi-button zm-abj-x', 'title': 'Закрыть', 'aria-label': 'Закрыть', 'click': close }, '×'));
@@ -44912,7 +44958,8 @@ return view.extend({
 			}
 			function drawLog() {
 				var rows = jd.rows || [];
-				if (!rows.length) { body.appendChild(note(jQ || jFlt !== 'all' ? 'Ничего не нашлось — попробуйте другой запрос или фильтр.' : 'Записей пока нет — первые появятся в течение пары минут.')); return; }
+				if (!rows.length) { body.appendChild(note(jQ || jFlt !== 'all' ? 'Ничего не найдено.' : 'Записей пока нет — появятся через пару минут.')); return; }
+				if (rows.some(function(x) { return x.k === 's'; })) body.appendChild(note(STEER_NOTE));
 				var list = E('div', { 'class': 'zm-abj-list zm-abj-log' }, [ E('div', { 'class': 'zm-abj-row zm-abj-row-h' }, [ E('span', {}, 'Время'), E('span', {}, 'Устройство'), E('span', {}, 'Домен'), E('span', {}, 'Ответ'), E('span', {}, '') ]) ]);
 				rows.forEach(function(x) {
 					list.appendChild(E('div', { 'class': 'zm-abj-row' + (x.b ? ' zm-abj-row-b' : '') }, [
@@ -44924,7 +44971,7 @@ return view.extend({
 					]));
 				});
 				body.appendChild(list);
-				if (jd.more) body.appendChild(note('Показаны последние 300 записей. Уточните поиск, чтобы найти нужное.'));
+				if (jd.more) body.appendChild(note('Показаны последние 300 записей — уточните поиск.'));
 			}
 			function drawDom() {
 				var v = cur(), devs = jd.devs || [];
@@ -44934,7 +44981,8 @@ return view.extend({
 					E('span', { 'class': 'zm-abj-sum-act' }, [ jd.tb ? act(v.d, true) : E([]), !jd.tb && jd.ta ? act(v.d, false) : E([]),
 						E('button', { 'class': 'cbi-button zm-ab-rank-btn', 'title': 'Найти ' + v.d + ' в журнале', 'click': function() { jFlt = 'all'; jQ = v.d; qIn.value = v.d; stack = [ { mode: 'log' } ]; jd = null; load(); } }, 'Все записи') ])
 				]));
-				if (!devs.length) { body.appendChild(note('В журнале нет обращений к этому домену — возможно, они были раньше, чем хранит журнал.')); return; }
+				if (!devs.length) { body.appendChild(note('Обращений нет — или они старше журнала.')); return; }
+				if (devs.some(function(x) { return x.k === 's'; })) body.appendChild(note(STEER_NOTE));
 				var list = E('div', { 'class': 'zm-abj-list zm-abj-devs' }, [ E('div', { 'class': 'zm-abj-row zm-abj-row-h' }, [ E('span', {}, 'Устройство'), E('span', {}, 'Заблокировано'), E('span', {}, 'Разрешено'), E('span', {}, 'Последний раз') ]) ]);
 				devs.forEach(function(x) {
 					list.appendChild(E('div', { 'class': 'zm-abj-row' }, [
@@ -44966,7 +45014,8 @@ return view.extend({
 					E('span', { 'class': 'zm-abj-st zm-abj-st-b' }, 'заблокировано: ' + num(jd.tb || 0)),
 					E('span', { 'class': 'zm-abj-st zm-abj-st-a' }, 'разрешено: ' + num(jd.ta || 0))
 				]));
-				if (!(jd.blocked || []).length && !(jd.allowed || []).length) { body.appendChild(note('В журнале нет запросов этого устройства — возможно, они были раньше, чем хранит журнал.')); return; }
+				if (cur().k === 's') body.appendChild(note(STEER_NOTE));
+				if (!(jd.blocked || []).length && !(jd.allowed || []).length) { body.appendChild(note('Запросов нет — или они старше журнала.')); return; }
 				body.appendChild(E('div', { 'class': 'zm-abj-cols' }, [ domList('Заблокировано', jd.blocked || [], true), domList('Разрешено', jd.allowed || [], false) ]));
 			}
 			function drawFoot() {
@@ -44978,8 +45027,8 @@ return view.extend({
 					seg.appendChild(E('div', { 'class': 'zm-seg-item' + (on ? ' zm-active' : ''), 'role': 'radio', 'tabindex': '0', 'aria-checked': on ? 'true' : 'false', 'title': s[2] || 'Не записывать запросы', 'click': pick,
 						'keydown': function(ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pick(); } } }, s[1]));
 				});
-				var info = !jc ? 'Журнал выключен — статистика считается как обычно.'
-					: (jd && jd.oldest ? 'Хранит записи с ' + tm(jd.oldest, jd.now) + ' · ' : '') + (jd ? num(jd.kb || 0) + ' КБ' : '…') + ' в памяти роутера, на флеш не пишется. Старые записи вытесняются новыми.';
+				var info = !jc ? 'Журнал выключен, статистика считается.'
+					: (jd && jd.oldest ? 'С ' + tm(jd.oldest, jd.now) + ' · ' : '') + (jd ? num(jd.kb || 0) + ' КБ' : '…') + ' в памяти роутера, не на флеше';
 				foot.appendChild(E('div', { 'class': 'zm-abj-foot-row' }, [ E('span', { 'class': 'zm-label' }, 'Размер журнала'), seg,
 					jc ? E('button', { 'class': 'cbi-button', 'disabled': sizeBusy ? '' : null, 'click': function() { setSize('clear'); } }, 'Очистить') : E([]) ]));
 				foot.appendChild(E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, info));
@@ -44989,8 +45038,8 @@ return view.extend({
 				body.innerHTML = '';
 				if (!jd) body.appendChild(note('Загружаем…'));
 				else if (jd.error) body.appendChild(note('Не удалось открыть журнал: ' + jd.error, 'zm-ab-warn'));
-				else if (jd.on === false) body.appendChild(note('Статистика выключена — журнал ведётся только вместе с ней.', 'zm-ab-warn'));
-				else if (!jd.journal) body.appendChild(note('Журнал выключен. Выберите размер ниже — и панель начнёт записывать, кто и куда обращался.'));
+				else if (jd.on === false) body.appendChild(note('Журнал работает только при включённой статистике.', 'zm-ab-warn'));
+				else if (!jd.journal) body.appendChild(note('Журнал выключен — выберите размер ниже.'));
 				else if (cur().mode === 'dom') drawDom();
 				else if (cur().mode === 'dev') drawDev();
 				else drawLog();
@@ -47743,7 +47792,8 @@ return view.extend({
 			var GV_OPTS = [
 				[ '', 'Выключен', '' ],
 				[ '1', 'Вариант 1', 'Полный: fake с поддельным ClientHello google.com (badsum, ack −66000) и multidisorder по 9 точкам — 1, 2, 3, 5, 105, host+5, sld−1, endsld−5, endsld.' ],
-				[ '2', 'Вариант 2 · лёгкий', 'Тот же fake, но multidisorder по 5 точкам — 1, sniext+2, host−1, midsld, endsld. Кэш-серверы YouTube не отбрасывают пакеты, а ТСПУ не видит аномалии. Пробуйте, если на первом варианте видео подвисает.' ]
+				[ '2', 'Вариант 2 · лёгкий', 'Тот же fake, но multidisorder по 5 точкам — 1, sniext+2, host−1, midsld, endsld. Кэш-серверы YouTube не отбрасывают пакеты, а ТСПУ не видит аномалии. Пробуйте, если на первом варианте видео подвисает.' ],
+				[ '3', 'Вариант 3 · wssize', 'Без fake: multidisorder по 2 точкам — 1 и midsld, плюс маленькое окно TCP на первые 8 пакетов (--wssize 1:1): устройство само отправляет начало соединения мелкими кусками. Старт видео может быть чуть медленнее. Пробуйте, если первые два варианта не помогли.' ]
 			];
 			function renderGv() {
 				gvCard.innerHTML = '';
@@ -50640,6 +50690,7 @@ html.zm-theme-dark .zm-dlg-note-bad { color: #ff7b72; }
 .zm-abj-open { margin: 0; gap: 8px; flex-wrap: wrap; }
 .zm-abj-link { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: #0b6fa4; cursor: pointer; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; min-width: 0; border-radius: 4px; }
 .zm-abj-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.zm-abj-link.zm-abj-via { font-style: italic; opacity: .8; }
 .zm-abj-link:focus-visible { outline: 2px solid #1aa3ff; outline-offset: 1px; }
 html.zm-theme-dark .zm-abj-link { color: #58a6ff; }
 .zm-ab-rank-name.zm-abj-link { display: block; font-size: 13px; }
@@ -60414,6 +60465,7 @@ var RADIO = [
 	[ 'o_hitfm', 'Хит FM', 'https://hitfm.hostingradio.ru/hitfm96.aacp', 'pop' ],
 	[ 'o_novoe', 'Новое Радио', 'http://icecast.newradio.cdnvideo.ru/newradio3', 'pop' ],
 	[ 'o_likefm', 'Like FM', 'https://hls-01-gpm.hostingradio.ru/likefm495/playlist.m3u8', 'pop' ],
+	[ 'o_shokolad', 'Шоколад', 'https://choco.hostingradio.ru:10010/fm', 'pop' ],
 	[ 'o_retro', 'Ретро FM', 'https://retro128.streamr.ru/', 'retro' ],
 	[ 'o_radio7', 'Радио 7', 'https://hls-01-radio7.emgsound.ru/13/playlist.m3u8', 'retro' ],
 	[ 'o_dfm', 'DFM', 'https://dfm.hostingradio.ru/dfm96.aacp', 'dance' ],
@@ -60428,7 +60480,7 @@ var RADIO = [
 	[ 'o_maximum', 'Rock FM', 'http://nashe2.hostingradio.ru/rock-128.mp3', 'rock' ],
 	[ 'o_maxhls', 'Maximum', 'https://hls-01-maximum.hostingradio.ru/maximum/playlist.m3u8', 'rock' ],
 	[ 'o_rockarsenal', 'Rock Arsenal', 'https://online.rockarsenal.ru/rockarsenal_aacplus', 'rock' ],
-	[ 'o_smoothjazz', 'Smooth Jazz', 'https://streaming.live365.com/a55660', 'jazz' ],
+	[ 'o_smoothjazz', 'Smooth Jazz', 'https://das-edge62-live365-dal03.cdnstream.com/a55660', 'jazz' ],
 ];
 var RADIO_SETS = [ { id: 'r', name: 'Радио Record' }, { id: 'o', name: 'Разные станции' } ];
 var HLS_SRC = [ 'https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.light.min.js', 'https://unpkg.com/hls.js@1/dist/hls.light.min.js' ];
@@ -64193,14 +64245,12 @@ fi
 
 _zmi_ok "Файлы Web UI записаны"
 _zmi_say "Включаем Web UI"
-ZMW_RESTART=0
 ZMW_OK=1
 if [ ! -f /etc/config/uhttpd ]; then
 	ZMW_OK=0
 elif [ ! -e /usr/lib/uhttpd_ubus.so ]; then
 	_zmi_pkg uhttpd-mod-ubus "Web UI без него не откроется, панель в LuCI работает." || true
 	[ -e /usr/lib/uhttpd_ubus.so ] || ZMW_OK=0
-	ZMW_RESTART=1
 fi
 if [ "$ZMW_OK" = 0 ]; then
 	:
@@ -64220,9 +64270,7 @@ elif ! uci -q get uhttpd.zmweb >/dev/null; then
 	uci set uhttpd.zmweb.http_keepalive='20'
 	uci set uhttpd.zmweb.tcp_keepalive='1'
 	uci commit uhttpd
-	ZMW_RESTART=1
 fi
-[ "$ZMW_RESTART" = "1" ] && { /etc/init.d/uhttpd restart >/dev/null 2>&1 || true; }
 
 if [ -x /usr/bin/netshift ] && [ -f /usr/lib/netshift/constants.sh ] && ! _zmi_has netshift && ! _zmi_has luci-app-netshift; then
 	_zmi_say "Сверяем настройки Forkozz с новой версией панели"
@@ -64325,6 +64373,14 @@ ZM_GET_EOF
 	chmod +x "/usr/bin/${_zm_c%% *}"
 done
 ( /opt/zapret-manager-luci/backend.sh zm_stats_hit ) >/dev/null 2>&1 </dev/null &
+if [ -x /etc/init.d/uhttpd ]; then
+	_zmi_say "Перезапускаем веб-сервер uhttpd, чтобы LuCI и Web UI сразу открыли новую версию"
+	/etc/init.d/uhttpd restart >/dev/null 2>&1 || true
+	sleep 2
+	pidof uhttpd >/dev/null 2>&1 || { /etc/init.d/uhttpd start >/dev/null 2>&1 || true; sleep 2; }
+	if pidof uhttpd >/dev/null 2>&1; then _zmi_ok "uhttpd перезапущен"
+	else _zmi_warn "uhttpd не запустился — выполните: service uhttpd restart"; fi
+fi
 if [ "$ZMW_OK" = 1 ]; then _zmi_ok "Web UI включён на порту ${ZMW_PORT:-7788}"
 else _zmi_warn "Web UI не включён: на роутере нет веб-сервера uhttpd или не установился uhttpd-mod-ubus"; fi
 echo -e "\n${GREEN}Готово: Zapret Manager для LuCI и Web $ZM_NEW_VER установлен${NC}\n"
