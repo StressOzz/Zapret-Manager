@@ -710,4 +710,12 @@ alibabacorp.com
 jdcloud-oss.com
 aliyuncsslbintl.com
 alibabachengdun.com
+#################################### Kaspersky
+kaspersky.ru
+kaspersky.com
+kasperskylab.ru
+mykaspersky.com
+kasperskylab.net
+kasperskylab.com
+kaspersky-labs.com
 ####################################
