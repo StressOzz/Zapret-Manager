@@ -94,7 +94,6 @@ dahuasecurity.com
 rockstargames.com
 docs.altlinux.org
 battleye.b-cdn.net
-download.nvidia.com
 tiktoklinksafety.com
 documentfoundation.org
 marketplace.visualstudio.com
@@ -718,4 +717,7 @@ mykaspersky.com
 kasperskylab.net
 kasperskylab.com
 kaspersky-labs.com
+#################################### nVidia
+nvidia.com
+geforce.com
 ####################################
