@@ -1,10 +1,10 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.003
+# Version: 5.004
 ZM_VERSION_EOF
 set -e
 
-GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; BLUE="\033[0;34m"; NC="\033[0m"; DGRAY="\033[38;5;244m"
+GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; NC="\033[0m"
 
 _zmi_say() { echo -e "${CYAN}==>${NC} $*"; }
 _zmi_ok() { echo -e "   ${GREEN}✓${NC} $*"; }
@@ -12387,11 +12387,7 @@ do_versions_refresh() {
 	sed 's/},{/}\n{/g' "$VERSIONS_CACHE" 2>/dev/null | sed -n 's/.*"name":"\([^"]*\)","installed":"[^"]*","latest":"\([^"]*\)".*/\1\t\2/p' > "$ZM_VER_OLD"
 	add() { [ -n "$1" ] && { out="$out$sep$1"; sep=","; }; }
 	j="$(zm_update_status)"
-	if [ "$(_jf "$j" '@.newer')" = true ]; then
-		add "$(_ver_item 'Zapret Manager' "$(_jf "$j" '@.current')" "$(_jf "$j" '@.latest')")"
-	else
-		add "$(_ver_item 'Zapret Manager' "$(_jf "$j" '@.current')" "$(_jf "$j" '@.current')")"
-	fi
+	add "$(_ver_item 'Zapret Manager' "$(_jf "$j" '@.current')" "$(_jf "$j" '@.latest')")"
 	[ -f /etc/init.d/zapret ] && add "$(_ver_item Zapret "$ZAPRET_VER" "$ZAPRET_VER")"
 	if [ -x "$MIHOMO_BIN" ] || [ -x /etc/init.d/magitrickle ] || [ -x /etc/init.d/hev-socks5-tunnel ]; then
 		j="$(mixomo_status)"
@@ -39616,11 +39612,10 @@ return view.extend({
 					: d.ts === '' && !checked ? 'Версии ещё не проверялись — нажмите «Проверить».' : 'Пакеты Zapret Manager пока не установлены.'));
 			} else {
 				var rows = items.map(function(it) {
-					var fresh = !it.latest || it.latest === it.installed;
 					return row(it.name, E('span', { 'style': 'display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap' }, [
 						E('span', {}, [ String(it.installed || '') ]),
-						!it.latest && !checked ? E('span', { 'class': 'zm-badge zm-off', 'title': 'Нажмите «Проверить», чтобы узнать, есть ли версия новее' }, [ E('span', { 'class': 'zm-dot' }), 'не проверялась' ])
-							: fresh ? E('span', { 'class': 'zm-badge zm-ok' }, [ E('span', { 'class': 'zm-dot' }), 'актуальна' ])
+						!it.latest ? E('span', { 'class': 'zm-badge zm-off', 'title': d.pending ? 'Идёт проверка новых версий' : checked ? 'Последнюю версию узнать не удалось — источник не ответил или не сообщает версию. Нажмите «Проверить», чтобы попробовать ещё раз' : 'Нажмите «Проверить», чтобы узнать, есть ли версия новее' }, [ E('span', { 'class': 'zm-dot' }), d.pending ? 'проверяем…' : checked ? 'нет данных' : 'не проверялась' ])
+							: it.latest === it.installed ? E('span', { 'class': 'zm-badge zm-ok' }, [ E('span', { 'class': 'zm-dot' }), 'актуальна' ])
 							: E('span', { 'class': 'zm-badge zm-warn' }, [ E('span', { 'class': 'zm-dot' }), 'доступна ' + it.latest ])
 					]));
 				});
@@ -61256,7 +61251,7 @@ _zm_rpcd_wait() {
 	return 1
 }
 _zmi_say "Подключаем панель к LuCI"
-/etc/init.d/rpcd reload >/dev/null 2>&1 || /etc/init.d/rpcd restart >/dev/null 2>&1 || true
+/etc/init.d/rpcd restart >/dev/null 2>&1 || true
 if [ -x /etc/init.d/rpcd ] && command -v ubus >/dev/null 2>&1; then
 	if _zm_rpcd_wait 10; then _zmi_ok "LuCI видит панель"
 	else
@@ -63272,29 +63267,29 @@ function toggleTheme(ev) {
 
 var ROUTES = [
 	{ id: 'dashboard', title: 'Дашборд', sub: 'Состояние всех компонентов', icon: 'dashboard', group: 'Обзор' },
-	{ id: 'strategy', title: 'Zapret', sub: 'Стратегии, тесты, YouTube, игры, Discord и списки', icon: 'shield', group: 'Обход блокировок', dot: 'zapret' },
-	{ id: 'zapret2', title: 'Zapret2', sub: 'Установка и управление Zapret2', icon: 'bolt', group: 'Обход блокировок', dot: 'zapret2' },
-	{ id: 'steer', title: 'Steer', sub: 'Выбранные сервисы через WARP или VPN', icon: 'route', group: 'Обход блокировок', dot: 'steer' },
-	{ id: 'forkozz', title: 'Forkozz', sub: 'Выбранные сервисы через ваш сервер, подписку или туннель', icon: 'fork', group: 'Обход блокировок', dot: 'forkop' },
+	{ id: 'strategy', title: 'Zapret', sub: 'Стратегии, тесты и списки', icon: 'shield', group: 'Обход блокировок', dot: 'zapret' },
+	{ id: 'zapret2', title: 'Zapret2', sub: 'Установка и управление', icon: 'bolt', group: 'Обход блокировок', dot: 'zapret2' },
+	{ id: 'steer', title: 'Steer', sub: 'Сервисы через WARP или VPN', icon: 'route', group: 'Обход блокировок', dot: 'steer' },
+	{ id: 'forkozz', title: 'Forkozz', sub: 'Сервисы через ваш VPN-сервер', icon: 'fork', group: 'Обход блокировок', dot: 'forkop' },
 	{ id: 'bytetube', title: 'ByeTube', sub: 'YouTube через ByeDPI', icon: 'play', group: 'Обход блокировок', dot: 'bytetube' },
 	{ id: 'tgproxy', title: 'TG WS Proxy', sub: 'Прокси для Telegram', icon: 'send', group: 'Обход блокировок', dot: 'tg' },
 	{ id: 'mixomo', title: 'Mixomo', sub: 'Mihomo, MagiTrickle и WARP', icon: 'layers', group: 'Обход блокировок', dot: 'mixomo' },
-	{ id: 'hosts', title: 'Hosts', sub: 'Домены в hosts и списки GeoHide', icon: 'list', group: 'Сеть', dot: 'hosts' },
-	{ id: 'adblock', title: 'Блокировка рекламы', sub: 'Реклама, трекеры и фишинг — для всех устройств в сети', icon: 'adblock', group: 'Сеть', dot: 'adblock' },
+	{ id: 'hosts', title: 'Hosts', sub: 'Свои IP-адреса для сайтов', icon: 'list', group: 'Сеть', dot: 'hosts' },
+	{ id: 'adblock', title: 'Блокировка рекламы', sub: 'Реклама и трекеры для всей сети', icon: 'adblock', group: 'Сеть', dot: 'adblock' },
 	{ id: 'doh', title: 'DNS over HTTPS', sub: 'Шифрованный DNS для всей сети', icon: 'globe', group: 'Сеть', dot: 'doh' },
-	{ id: 'awg', title: 'AmneziaWG', sub: 'Туннели AmneziaWG и WARP: установка, ключи, интерфейсы', icon: 'anarchy', group: 'Сеть', dot: 'awg' },
-	{ id: 'tailscale', title: 'Удалённый доступ', sub: '', icon: 'phone', group: 'Сеть', dot: 'ts' },
-	{ id: 'terminal', title: 'Терминал', sub: 'Командная строка роутера в браузере (ttyd)', icon: 'terminal', group: 'Сеть', dot: 'term' },
-	{ id: 'system', title: 'Система', sub: 'Состояние, поправки, обновления и ZRAM', icon: 'cpu', group: 'Сервис', view: 'system', part: 'main' },
-	{ id: 'look', title: 'Оформление', sub: 'Тема, цвет, шрифт, масштаб, живой фон и плавность', icon: 'palette', group: 'Сервис', local: function () { return lookPage(); } },
-	{ id: 'backup', title: 'Резервная копия', sub: 'Сохранение и восстановление настроек', icon: 'archive', group: 'Сервис', view: 'system', part: 'backup' },
-	{ id: 'monitor', title: 'Монитор ресурсов', sub: 'Процессор, память, температура и процессы', icon: 'activity', group: 'Сервис' },
-	{ id: 'watch', title: 'Фоновые проверки', sub: 'Что роутер проверяет сам по расписанию', icon: 'clock', group: 'Сервис', view: 'system', part: 'watch' },
-	{ id: 'pages', title: 'Компоненты панели', sub: 'Какие страницы панели установлены и сколько места они занимают', icon: 'layers', group: 'Сервис', view: 'system', part: 'pages' },
-	{ id: 'openwrt', title: 'Настройка OpenWrt', sub: 'Время, ускорение, Wi-Fi, роутер, адреса устройств, перезагрузка и зеркало', icon: 'sliders', group: 'Сервис' },
-	{ id: 'cleanup', title: 'Очистка и удаление', sub: 'Освобождение памяти и удаление компонентов', icon: 'trash', group: 'Сервис', view: 'system', part: 'cleanup' },
-	{ id: 'thanks', title: 'Спасибо и поддержка', sub: 'Автор, поддержка проекта и благодарности', icon: 'heart', group: 'Сервис' },
-	{ id: 'sysinfo', title: 'Системная информация', sub: 'Отчёт о роутере, сети и компонентах', icon: 'info', group: 'Сервис', view: 'system', part: 'sysinfo' }
+	{ id: 'awg', title: 'AmneziaWG', sub: 'Туннели AmneziaWG и WARP', icon: 'anarchy', group: 'Сеть', dot: 'awg' },
+	{ id: 'tailscale', title: 'Удалённый доступ', sub: 'Вход в роутер из любой сети', icon: 'phone', group: 'Сеть', dot: 'ts' },
+	{ id: 'terminal', title: 'Терминал', sub: 'Командная строка в браузере', icon: 'terminal', group: 'Сеть', dot: 'term' },
+	{ id: 'system', title: 'Система', sub: 'Поправки, обновления и ZRAM', icon: 'cpu', group: 'Сервис', view: 'system', part: 'main' },
+	{ id: 'look', title: 'Оформление', sub: 'Тема, цвета, шрифт и фон', icon: 'palette', group: 'Сервис', local: function () { return lookPage(); } },
+	{ id: 'backup', title: 'Резервная копия', sub: 'Сохранение и возврат настроек', icon: 'archive', group: 'Сервис', view: 'system', part: 'backup' },
+	{ id: 'monitor', title: 'Монитор ресурсов', sub: 'Процессор, память и процессы', icon: 'activity', group: 'Сервис' },
+	{ id: 'watch', title: 'Фоновые проверки', sub: 'Что роутер проверяет сам', icon: 'clock', group: 'Сервис', view: 'system', part: 'watch' },
+	{ id: 'pages', title: 'Компоненты панели', sub: 'Страницы панели и их размер', icon: 'layers', group: 'Сервис', view: 'system', part: 'pages' },
+	{ id: 'openwrt', title: 'Настройка OpenWrt', sub: 'Время, Wi-Fi и другие настройки', icon: 'sliders', group: 'Сервис' },
+	{ id: 'cleanup', title: 'Очистка и удаление', sub: 'Освобождение места и удаление', icon: 'trash', group: 'Сервис', view: 'system', part: 'cleanup' },
+	{ id: 'thanks', title: 'Спасибо и поддержка', sub: 'Автор и поддержка проекта', icon: 'heart', group: 'Сервис' },
+	{ id: 'sysinfo', title: 'Системная информация', sub: 'Отчёт о роутере и сети', icon: 'info', group: 'Сервис', view: 'system', part: 'sysinfo' }
 ];
 
 var LOOK_PV = {
@@ -64098,6 +64093,7 @@ function route(force) {
 	navReveal(); setTimeout(navReveal, 400);
 	titleEl.textContent = r.title;
 	subEl.textContent = r.sub || '';
+	subEl.title = r.sub || '';
 	subEl.hidden = !r.sub;
 	document.title = r.title + ' · Zapret Manager';
 
@@ -64822,7 +64818,7 @@ html[data-theme="light"] .zmw-top { --zmw-top-bg: rgb(243,245,250); }
 .zmw-link-kvn .zmw-lbl-full { text-align: left; font-weight: 500; line-height: 1.25; }
 .zmw-link-kvn .zmw-kvn-l1 { display: block; font-size: 17px; font-weight: 500; white-space: nowrap; padding-left: 6px; }
 .zmw-link-kvn .zmw-kvn-l2 { display: block; font-size: 11px; font-weight: 400; opacity: .85; white-space: nowrap; }
-@media (min-width: 1361px) {
+@media (min-width: 1141px), (max-width: 960px) and (min-width: 881px) {
 	.zmw-link-kvn { height: auto; min-height: 40px; padding: 6px 14px; gap: 10px; }
 	.zmw-link-kvn .zmw-i { width: 24px; height: 24px; }
 }
@@ -65361,16 +65357,26 @@ html body.zmw-body .zm-toast { background: var(--toast-bg); color: var(--toast-f
 html.zm-theme-dark .zmw-body .zm-toast-spin, html.zm-theme-dark.zmw-body .zm-toast-spin { border-color: rgba(124,92,255,.25); border-top-color: var(--a1, #7c5cff); }
 
 @media (max-width: 1360px) {
-	.zmw-lbl-full { display: none; }
-	.zmw-lbl-short { display: inline; }
+	.zmw-link-tg .zmw-lbl-full { display: none; }
+	.zmw-link-tg .zmw-lbl-short { display: inline; }
 }
 @media (max-width: 1180px) {
 	.zmw-logout span { display: none; }
+	.zmw-link-tg .zmw-lbl-short { display: none; }
+	.zmw-link-tg { padding: 0 10px; }
 }
 @media (max-width: 1080px) and (min-width: 961px), (max-width: 760px) {
-	.zmw-lbl-short { display: none; }
-	.zmw-link-btn { padding: 0 10px; }
 	.zmw-sub { display: none; }
+}
+@media (max-width: 1140px) and (min-width: 961px), (max-width: 880px) {
+	.zmw-link-kvn .zmw-lbl-full { display: none; }
+	.zmw-link-kvn .zmw-lbl-short { display: inline; }
+}
+@media (max-width: 760px) {
+	.zmw-link-btn { padding: 0 10px; }
+}
+@media (max-width: 1000px) and (min-width: 961px), (max-width: 720px) {
+	.zmw-link-kvn .zmw-lbl-short { display: none; }
 }
 
 @media (max-width: 960px) {
@@ -67111,13 +67117,50 @@ ZM_GET_EOF
 	chmod +x "/usr/bin/${_zm_c%% *}"
 done
 ( /opt/zapret-manager-luci/backend.sh zm_stats_hit ) >/dev/null 2>&1 </dev/null &
-if [ -x /etc/init.d/uhttpd ]; then
-	_zmi_say "Перезапускаем веб-сервер uhttpd, чтобы LuCI и Web UI сразу открыли новую версию"
-	/etc/init.d/uhttpd restart >/dev/null 2>&1 || true
-	sleep 2
-	pidof uhttpd >/dev/null 2>&1 || { /etc/init.d/uhttpd start >/dev/null 2>&1 || true; sleep 2; }
-	if pidof uhttpd >/dev/null 2>&1; then _zmi_ok "uhttpd перезапущен"
-	else _zmi_warn "uhttpd не запустился — выполните: service uhttpd restart"; fi
+_zm_login_restart() {
+	if [ -x /etc/init.d/rpcd ]; then
+		/etc/init.d/rpcd restart >/dev/null 2>&1 || true
+		sleep 2
+		pidof rpcd >/dev/null 2>&1 || { /etc/init.d/rpcd start >/dev/null 2>&1 || true; sleep 2; }
+		_zm_i=0
+		while command -v ubus >/dev/null 2>&1 && [ "$_zm_i" -lt 15 ] && ! ubus -t 3 list zapret-manager >/dev/null 2>&1; do sleep 1; _zm_i=$((_zm_i + 1)); done
+	fi
+	if [ -x /etc/init.d/uhttpd ]; then
+		/etc/init.d/uhttpd restart >/dev/null 2>&1 || true
+		sleep 2
+		pidof uhttpd >/dev/null 2>&1 || { /etc/init.d/uhttpd start >/dev/null 2>&1 || true; sleep 2; }
+	fi
+}
+_zm_login_ok() {
+	local q t rc=0 r=""
+	q='{"ubus_rpc_session":"00000000000000000000000000000000","scope":"ubus","object":"session","function":"access"}'
+	[ -x /etc/init.d/rpcd ] && { pidof rpcd >/dev/null 2>&1 || return 1; }
+	[ -x /etc/init.d/uhttpd ] && { pidof uhttpd >/dev/null 2>&1 || return 1; }
+	if command -v ubus >/dev/null 2>&1; then
+		t="$(date +%s)"
+		ubus -t 5 call session access "$q" >/dev/null 2>&1 || rc=$?
+		[ "$rc" = 7 ] && return 1
+		[ $(( $(date +%s) - t )) -le 3 ] || return 1
+	fi
+	if [ "$ZMW_OK" = 1 ] && command -v curl >/dev/null 2>&1; then
+		t="$(date +%s)"
+		r="$(curl -s -m 8 -H 'Content-Type: application/json' -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"call\",\"params\":[\"00000000000000000000000000000000\",\"session\",\"access\",$q]}" "http://127.0.0.1:${ZMW_PORT:-7788}/ubus" 2>/dev/null || true)"
+		case "$r" in *'"jsonrpc"'*) ;; *) return 1 ;; esac
+		[ $(( $(date +%s) - t )) -le 4 ] || return 1
+	fi
+	return 0
+}
+if [ -x /etc/init.d/rpcd ] || [ -x /etc/init.d/uhttpd ]; then
+	_zmi_say "Перезапускаем службы входа rpcd и uhttpd, чтобы LuCI и Web UI сразу открыли новую версию"
+	_zm_login_restart
+	if _zm_login_ok; then _zmi_ok "rpcd и uhttpd перезапущены, вход в панель отвечает быстро"
+	else
+		_zmi_step "Вход в панель отвечает медленно — перезапускаем rpcd и uhttpd ещё раз"
+		sleep 3
+		_zm_login_restart
+		if _zm_login_ok; then _zmi_ok "rpcd и uhttpd перезапущены, вход в панель отвечает быстро"
+		else _zmi_warn "Вход в панель всё ещё отвечает медленно — выполните: /etc/init.d/rpcd restart; sleep 3; /etc/init.d/uhttpd restart"; fi
+	fi
 fi
 if [ "$ZMW_OK" = 1 ]; then _zmi_ok "Web UI включён на порту ${ZMW_PORT:-7788}"
 else _zmi_warn "Web UI не включён: на роутере нет веб-сервера uhttpd или не установился uhttpd-mod-ubus"; fi
