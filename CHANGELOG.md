@@ -1,13 +1,13 @@
 ## 5.001 — 04.11.2026
 
 ### 🛡 Zapret
-- ➕ Новые варианты обхода googlevideo.com: gVideo4 (multisplit с seqovl), gVideo5 (multidisorder с md5sig) и gVideo6 (fake + multidisorder с поддельным ClientHello google.com). Всего вариантов теперь шесть
-- ➕ Тест «Подбор gVideo»: берёт одну стратегию YouTube как основу и сравнивает её без gVideo и с каждым из gVideo1–gVideo6, по желанию с маскировкой подменных пакетов
+- ➕ Новые варианты обхода googlevideo.com: gVideo4 (multisplit с seqovl), gVideo5 (multidisorder с md5sig), gVideo6 (fake + multidisorder с поддельным ClientHello google.com), а также лёгкие gVideo7 (multidisorder по host+1 и midsld), gVideo8 (multidisorder по midsld) и gVideo9 (fakeddisorder с md5sig) — только для TLS. Всего вариантов теперь девять
+- ➕ Тест «Подбор gVideo»: берёт одну стратегию YouTube как основу и сравнивает её без gVideo и с каждым из gVideo1–gVideo9, по желанию с маскировкой подменных пакетов
 - ➕ Режим «Без основы» в подборе: каждый вариант gVideo проверяется один, только на серверах googlevideo.com
 - ➕ Победителя подбора можно применить из результатов: ставится стратегия-основа вместе с выбранным gVideo, а без основы — только gVideo, стратегия YouTube не меняется. Текущий вариант отмечен «сейчас»
-- ⚡ Режим «Все» в тесте YouTube — 7 тестов: без gVideo и gVideo1–gVideo6
+- ⚡ Режим «Все» в тесте YouTube — 10 тестов: без gVideo и gVideo1–gVideo9
 - ⚡ Во время теста видно, что именно проверяется: номер и название стратегии, полоса прогресса и метки блоков в стратегии (Yv, gvideo, DoH и т. д.), а в режиме «Все» — номер теста
-- ⚡ Карточка «Отдельный обход googlevideo.com» стоит на вкладке YouTube выше, описания вариантов убраны
+- ⚡ Карточка «Отдельный обход googlevideo.com» стоит на вкладке YouTube выше, описания вариантов убраны, а сами варианты разложены сеткой
 
 ### 🎨 Web UI
 - ⚡ Переключатели-сегменты стали отдельными кнопками с рамкой — их легче различить во всех темах, на телефоне варианты gVideo раскладываются сеткой

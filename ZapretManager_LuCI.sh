@@ -2211,7 +2211,7 @@ zapret_restart() {
 
 _strat_label() {
 	local s g
-	s=$(_nfq_names | sed 's/^#[[:space:]]*//; s/[[:space:]]*$//; /^udp443$/d; /^DoH$/d; /^gvideo[1-6]$/d; /^[Nn][Oo][Cc][Hh][Aa][Nn][Gg][Ee]$/d' | tr '\n' ' ' | sed 's/ $//')
+	s=$(_nfq_names | sed 's/^#[[:space:]]*//; s/[[:space:]]*$//; /^udp443$/d; /^DoH$/d; /^gvideo[1-9]$/d; /^[Nn][Oo][Cc][Hh][Aa][Nn][Gg][Ee]$/d' | tr '\n' ' ' | sed 's/ $//')
 	_yv_ipid_on && s="$(printf '%s' "$s" | sed -E 's/(^| )(Yv[0-9]+)( |$)/\1\2z\3/')"
 	_udp443_on && s="${s:+$s }QUIC"
 	_zo_doh_on && s="${s:+$s }DoH"
@@ -2660,7 +2660,7 @@ DV_OFF_FLAG="/opt/zapret-manager-luci/dv_off"
 DISCORD_RX='^--filter-l7=discord,stun$|^--filter-udp=19294-19344,50000-50100$|^--filter-tcp=2053,2083,2087,2096,8443$|^--hostlist-domains=discord[.]media$|^#[ \t]*Dv[0-9]+$'
 
 YV_RX='^#[ \t]*Yv[0-9]+$|^--hostlist=/opt/zapret/ipset/zapret-hosts-google[.]txt$'
-NFQ_MARK_RX='^[ \t]*#[ \t]*((Yv|Dv|Gv)[0-9]|udp443[ \t]*$|DoH[ \t]*$|gvideo[1-6][ \t]*$)'
+NFQ_MARK_RX='^[ \t]*#[ \t]*((Yv|Dv|Gv)[0-9]|udp443[ \t]*$|DoH[ \t]*$|gvideo[1-9][ \t]*$)'
 UDP443_MARK_RX='^[ \t]*#[ \t]*udp443[ \t]*$'
 
 _nfq_drop_profiles() {
@@ -9044,7 +9044,7 @@ tgws_action() {
 
 TEST_DIR="$JOBS_DIR/strategy_test"
 _test_results_file() { echo "$TEST_DIR/results_$1.txt"; }
-ZT_YX_ALL="ipid gv1 gv2 gv3 gv4 gv5 gv6 ipid_gv1 ipid_gv2 ipid_gv3 ipid_gv4 ipid_gv5 ipid_gv6"
+ZT_YX_ALL="ipid gv1 gv2 gv3 gv4 gv5 gv6 gv7 gv8 gv9 ipid_gv1 ipid_gv2 ipid_gv3 ipid_gv4 ipid_gv5 ipid_gv6 ipid_gv7 ipid_gv8 ipid_gv9"
 _test_keys() {
 	local b x
 	echo "current domain v flowseal v_flowseal"
@@ -9055,7 +9055,7 @@ _test_key_ok() { case " $(_test_keys | tr '\n' ' ') " in *" $1 "*) [ -n "$1" ] ;
 _test_vkey() {
 	local k="$1"
 	case " $2 " in *" ipid "*) k="${k}_ipid" ;; esac
-	case " $2 " in *" gv1 "*) k="${k}_gv1" ;; *" gv2 "*) k="${k}_gv2" ;; *" gv3 "*) k="${k}_gv3" ;; *" gv4 "*) k="${k}_gv4" ;; *" gv5 "*) k="${k}_gv5" ;; *" gv6 "*) k="${k}_gv6" ;; esac
+	case " $2 " in *" gv1 "*) k="${k}_gv1" ;; *" gv2 "*) k="${k}_gv2" ;; *" gv3 "*) k="${k}_gv3" ;; *" gv4 "*) k="${k}_gv4" ;; *" gv5 "*) k="${k}_gv5" ;; *" gv6 "*) k="${k}_gv6" ;; *" gv7 "*) k="${k}_gv7" ;; *" gv8 "*) k="${k}_gv8" ;; *" gv9 "*) k="${k}_gv9" ;; esac
 	echo "$k"
 }
 _test_key_base() { case "$1" in custom_yt*) echo custom_yt ;; youtube*) echo youtube ;; *) echo "$1" ;; esac; }
@@ -9248,14 +9248,14 @@ _test_build_candidates() {
 			;;
 		gvonly)
 			if [ "$ZT_GVB" = none ]; then
-				printf '%s\n' "#gVideo1" "#gVideo2" "#gVideo3" "#gVideo4" "#gVideo5" "#gVideo6" >> "$out"
+				printf '%s\n' "#gVideo1" "#gVideo2" "#gVideo3" "#gVideo4" "#gVideo5" "#gVideo6" "#gVideo7" "#gVideo8" "#gVideo9" >> "$out"
 				return 0
 			fi
 			f="$(_yv_file)"
 			[ -s "$f" ] || do_yv_download >/dev/null 2>&1
 			[ -s "$f" ] && _test_block_of "$f" "$ZT_GVB" | sed 1d > "$out.b"
 			if grep -q '^--' "$out.b" 2>/dev/null; then
-				for n in "без gVideo" gVideo1 gVideo2 gVideo3 gVideo4 gVideo5 gVideo6; do echo "#$n"; cat "$out.b"; done >> "$out"
+				for n in "без gVideo" gVideo1 gVideo2 gVideo3 gVideo4 gVideo5 gVideo6 gVideo7 gVideo8 gVideo9; do echo "#$n"; cat "$out.b"; done >> "$out"
 			fi
 			rm -f "$out.b"
 			;;
@@ -9387,7 +9387,7 @@ _test_yt_pick() {
 	fi
 	ZT_IPID=none; ZT_GV=""
 	case " $yx " in *" ipid "*) ZT_IPID=on ;; esac
-	case " $yx " in *" gv1 "*) ZT_GV=1 ;; *" gv2 "*) ZT_GV=2 ;; *" gv3 "*) ZT_GV=3 ;; *" gv4 "*) ZT_GV=4 ;; *" gv5 "*) ZT_GV=5 ;; *" gv6 "*) ZT_GV=6 ;; esac
+	case " $yx " in *" gv1 "*) ZT_GV=1 ;; *" gv2 "*) ZT_GV=2 ;; *" gv3 "*) ZT_GV=3 ;; *" gv4 "*) ZT_GV=4 ;; *" gv5 "*) ZT_GV=5 ;; *" gv6 "*) ZT_GV=6 ;; *" gv7 "*) ZT_GV=7 ;; *" gv8 "*) ZT_GV=8 ;; *" gv9 "*) ZT_GV=9 ;; esac
 	ZT_YX="$([ "$ZT_IPID" = on ] && echo ipid)${ZT_GV:+ gv$ZT_GV}"
 	ZT_YX="${ZT_YX# }"
 }
@@ -9422,11 +9422,11 @@ do_test_run() {
 _test_run_gvall() {
 	local ip="" x n=0 rc=0 first=""
 	case " $2 " in *" ipid "*) ip=ipid ;; esac
-	echo "==> Режим «Все»: 7 тестов по очереди — без gVideo, затем gVideo1–gVideo6$([ -n "$ip" ] && echo ", везде с маскировкой подменных пакетов")"
-	for x in "${ip:--}" "${ip:+$ip }gv1" "${ip:+$ip }gv2" "${ip:+$ip }gv3" "${ip:+$ip }gv4" "${ip:+$ip }gv5" "${ip:+$ip }gv6"; do
+	echo "==> Режим «Все»: 10 тестов по очереди — без gVideo, затем gVideo1–gVideo9$([ -n "$ip" ] && echo ", везде с маскировкой подменных пакетов")"
+	for x in "${ip:--}" "${ip:+$ip }gv1" "${ip:+$ip }gv2" "${ip:+$ip }gv3" "${ip:+$ip }gv4" "${ip:+$ip }gv5" "${ip:+$ip }gv6" "${ip:+$ip }gv7" "${ip:+$ip }gv8" "${ip:+$ip }gv9"; do
 		n=$((n + 1))
 		echo ""
-		echo "==> Тест $n из 7: $(case "$x" in *gv*) echo "gVideo${x##*gv}" ;; *) echo "без gVideo" ;; esac)"
+		echo "==> Тест $n из 10: $(case "$x" in *gv*) echo "gVideo${x##*gv}" ;; *) echo "без gVideo" ;; esac)"
 		ZT_KEY=""; ZT_STOPPED=""
 		_do_test_run_core "$1" "$x"; rc=$?
 		ZT_IPID=""; ZT_GV=""
@@ -9437,7 +9437,7 @@ _test_run_gvall() {
 	[ -n "$first" ] && echo "$first" > "$TEST_DIR/key"
 	if [ "$rc" = 0 ] && [ -z "$ZT_STOPPED" ]; then
 		echo ""
-		echo "==> Все 7 тестов готовы — каждый результат отдельной кнопкой в «Результатах»"
+		echo "==> Все 10 тестов готовы — каждый результат отдельной кнопкой в «Результатах»"
 	elif [ -n "$ZT_STOPPED" ]; then
 		echo "==> Остальные тесты из «Все» не запускались"
 	fi
@@ -9543,9 +9543,9 @@ _do_test_run_core() {
 	if [ "$mode" = gvonly ]; then
 		printf 'G|%s|%s\n' "$ZT_GVB" "$ZT_YX" >> "$detail"
 		if [ "$ZT_GVB" = none ]; then
-			echo "==> Без основы: каждый вариант gVideo проверяется один, только на серверах googlevideo.com. Сравниваем: gVideo1–gVideo6"
+			echo "==> Без основы: каждый вариант gVideo проверяется один, только на серверах googlevideo.com. Сравниваем: gVideo1–gVideo9"
 		else
-			echo "==> Основа: $ZT_GVB$([ "$ZT_IPID" = on ] && echo " с маскировкой подменных пакетов"). Сравниваем: без gVideo, gVideo1–gVideo6"
+			echo "==> Основа: $ZT_GVB$([ "$ZT_IPID" = on ] && echo " с маскировкой подменных пакетов"). Сравниваем: без gVideo, gVideo1–gVideo9"
 		fi
 	fi
 	_test_detail_domains "$detail" "$urls"
@@ -9575,7 +9575,7 @@ _do_test_run_core() {
 		[ "$mode" = custom_dom ] && _test_hl_inject "$TEST_DIR/block.txt" > "$TEST_DIR/block.hl" && mv -f "$TEST_DIR/block.hl" "$TEST_DIR/block.txt"
 		[ "$mode" = custom_yt ] && _test_ipid_wrap "$TEST_DIR/block.txt"
 		if [ "$mode" = gvonly ]; then
-			ZT_GV="$(printf '%s' "$name" | sed -n 's/^gVideo\([1-6]\)$/\1/p')"
+			ZT_GV="$(printf '%s' "$name" | sed -n 's/^gVideo\([1-9]\)$/\1/p')"
 			if [ "$ZT_GVB" = none ]; then _zo_gv_blk "$ZT_GV" > "$TEST_DIR/block.txt"; ZT_GV=""
 			else sed -i "1s/.*/#$ZT_GVB/" "$TEST_DIR/block.txt"; fi
 		fi
@@ -9632,7 +9632,7 @@ test_action() {
 					grep -q '^#' "$TEST_CUSTOM_FILE" 2>/dev/null || case "$mode" in custom_yt:*) echo '{"error":"список своих стратегий пуст — добавьте их и сохраните"}'; return 1 ;; esac
 					x="${mode#*:}"; mode="${mode%%:*}"
 					case ",$x," in *[!a-z0-9,]*) echo '{"error":"неизвестные дополнения теста"}'; return 1 ;; esac
-					for d in $(printf '%s' "$x" | tr ',' ' '); do case "$d" in ipid|gv1|gv2|gv3|gv4|gv5|gv6|gvall) ;; *) echo '{"error":"неизвестные дополнения теста"}'; return 1 ;; esac; done
+					for d in $(printf '%s' "$x" | tr ',' ' '); do case "$d" in ipid|gv[1-9]|gvall) ;; *) echo '{"error":"неизвестные дополнения теста"}'; return 1 ;; esac; done
 					[ "$(printf '%s\n' "$x" | tr ',' '\n' | grep -c '^gv')" -le 1 ] || { echo '{"error":"выберите один вариант gVideo"}'; return 1; }
 					x="$(printf '%s' "$x" | tr ',' ' ')"
 					;;
@@ -9988,9 +9988,14 @@ _yv_ipid_sync() {
 	return 0
 }
 ZO_GV_FLAG="$ZM_STATE_DIR/zapret_gv"
-ZO_GV_RX='^[ \t]*#[ \t]*gvideo[1-6][ \t]*$'
-_zo_gv_want() { local w=""; [ -s "$ZO_GV_FLAG" ] && read -r w < "$ZO_GV_FLAG"; case "$w" in [1-6]) echo "$w" ;; esac; return 0; }
+ZO_GV_RX='^[ \t]*#[ \t]*gvideo[1-9][ \t]*$'
+_zo_gv_want() { local w=""; [ -s "$ZO_GV_FLAG" ] && read -r w < "$ZO_GV_FLAG"; case "$w" in [1-9]) echo "$w" ;; esac; return 0; }
 _zo_gv_blk() {
+	case "$1" in
+		7) printf '%s\n' "#gvideo7" "--filter-tcp=443" "--filter-l7=tls" "--hostlist-domains=googlevideo.com" "--dpi-desync=multidisorder" "--dpi-desync-split-pos=host+1,midsld"; return 0 ;;
+		8) printf '%s\n' "#gvideo8" "--filter-tcp=443" "--filter-l7=tls" "--hostlist-domains=googlevideo.com" "--dpi-desync=multidisorder" "--dpi-desync-split-pos=midsld"; return 0 ;;
+		9) printf '%s\n' "#gvideo9" "--filter-tcp=443" "--filter-l7=tls" "--hostlist-domains=googlevideo.com" "--dpi-desync=fakeddisorder" "--dpi-desync-split-pos=midsld" "--dpi-desync-fooling=md5sig"; return 0 ;;
+	esac
 	if [ "$1" = 5 ]; then
 		printf '%s\n' "#gvideo5" "--filter-tcp=443" "--hostlist-domains=googlevideo.com" "--dpi-desync=multidisorder" \
 			"--dpi-desync-split-pos=1,midsld,endhost-1" "--dpi-desync-repeats=2" "--dpi-desync-fooling=md5sig" \
@@ -10021,7 +10026,7 @@ _zo_gv_blk() {
 	if [ "$1" = 2 ]; then echo "--dpi-desync-split-pos=1,sniext+2,host-1,midsld,endsld"
 	else echo "--dpi-desync-split-pos=1,2,3,5,105,host+5,sld-1,endsld-5,endsld"; fi
 }
-_zo_gv_cur() { _nfq_opt_body | sed -n 's/^[ \t]*#[ \t]*gvideo\([1-6]\)[ \t]*$/\1/p' | head -n 1; }
+_zo_gv_cur() { _nfq_opt_body | sed -n 's/^[ \t]*#[ \t]*gvideo\([1-9]\)[ \t]*$/\1/p' | head -n 1; }
 _zo_gv_count() { _nfq_opt_body | grep -cE "$ZO_GV_RX"; }
 _zo_gv_first() {
 	_nfq_opt_body | sed '1d;$d' | awk -v D="$ZO_DOH_MK" -v G="$ZO_GV_RX" -v CS="$ZC_START_RX" '
@@ -10153,7 +10158,7 @@ zapret_opt_set() {
 		gv)
 			_nochange_guard || return 1
 			case "$val" in
-				[1-6]) mkdir -p "$ZM_STATE_DIR"; echo "$val" > "$ZO_GV_FLAG" ;;
+				[1-9]) mkdir -p "$ZM_STATE_DIR"; echo "$val" > "$ZO_GV_FLAG" ;;
 				off) rm -f "$ZO_GV_FLAG" ;;
 				*) echo '{"error":"неизвестное значение"}'; return 1 ;;
 			esac
@@ -10203,7 +10208,7 @@ test_apply() {
 	yx="$(_test_key_yx "$key")"
 	ip=""; gv=""
 	case " $yx " in *" ipid "*) ip=on ;; esac
-	case " $yx " in *" gv1 "*) gv=1 ;; *" gv2 "*) gv=2 ;; *" gv3 "*) gv=3 ;; *" gv4 "*) gv=4 ;; *" gv5 "*) gv=5 ;; *" gv6 "*) gv=6 ;; esac
+	case " $yx " in *" gv1 "*) gv=1 ;; *" gv2 "*) gv=2 ;; *" gv3 "*) gv=3 ;; *" gv4 "*) gv=4 ;; *" gv5 "*) gv=5 ;; *" gv6 "*) gv=6 ;; *" gv7 "*) gv=7 ;; *" gv8 "*) gv=8 ;; *" gv9 "*) gv=9 ;; esac
 	f="$JOBS_DIR/test_apply"
 	mkdir -p "$JOBS_DIR" "$ZM_STATE_DIR"
 	if [ "$base" = custom_yt ]; then
@@ -47030,14 +47035,14 @@ var TEST_MODE_LABELS = {
 	v: 'v1–v10', flowseal: 'Flowseal', v_flowseal: 'v + Flowseal', youtube: 'YouTube', current: 'Текущая', domain: 'По домену',
 	custom: 'Свои', custom_yt: 'Свои · YouTube', custom_dom: 'Свои · ваши сайты', gvonly: 'Подбор gVideo', auto: 'Автоподбор'
 };
-var TEST_YX = [ '', 'ipid', 'gv1', 'gv2', 'gv3', 'gv4', 'gv5', 'gv6', 'ipid_gv1', 'ipid_gv2', 'ipid_gv3', 'ipid_gv4', 'ipid_gv5', 'ipid_gv6' ];
+var TEST_YX = [ '', 'ipid', 'gv1', 'gv2', 'gv3', 'gv4', 'gv5', 'gv6', 'gv7', 'gv8', 'gv9', 'ipid_gv1', 'ipid_gv2', 'ipid_gv3', 'ipid_gv4', 'ipid_gv5', 'ipid_gv6', 'ipid_gv7', 'ipid_gv8', 'ipid_gv9' ];
 function testKeys(b) { return TEST_YX.map(function(x) { return x ? b + '_' + x : b; }); }
 var TEST_RESULT_MODES = ['current', 'domain', 'v', 'flowseal', 'v_flowseal'].concat(testKeys('youtube'), ['gvonly', 'custom'], testKeys('custom_yt'), ['custom_dom']);
 function testBase(k) { return /^custom_yt/.test(k) ? 'custom_yt' : /^youtube/.test(k) ? 'youtube' : k; }
 function testYt(k) { var b = testBase(k); return b === 'youtube' || b === 'custom_yt'; }
 function testYx(k) { return k.slice(testBase(k).length).replace(/^_/, ''); }
 function testYxLabel(x) {
-	var g = /gv([1-6])/.exec(x || ''), a = [];
+	var g = /gv([1-9])/.exec(x || ''), a = [];
 	if (/ipid/.test(x || '')) a.push('Маскировка');
 	if (g) a.push('gVideo' + g[1]);
 	return a.length ? a.join(' + ') : 'Как есть';
@@ -47857,20 +47862,20 @@ return view.extend({
 				{ id: 'domain', title: 'По домену', sub: 'Все стратегии v и Flowseal на ваших сайтах. Через пробел, до 30 штук.', domain: true },
 				{ id: 'main', title: 'Стратегии v и Flowseal', sub: 'Выберите, что перебирать, и нажмите «Проверить». Проверка идёт по списку заблокированных сайтов.', choice: [ { id: 'v', label: 'v1–v10' }, { id: 'flowseal', label: 'Flowseal' }, { id: 'v_flowseal', label: 'v + Flowseal' } ] },
 				{ id: 'youtube', title: 'YouTube', sub: 'Перебирает стратегии Yv на адресах YouTube. Выбранные дополнения добавляются к каждой стратегии — так, как они будут работать у вас.', yt: true },
-				{ id: 'gvonly', title: 'Подбор gVideo', sub: 'Видео YouTube идёт с серверов googlevideo.com. Тест берёт одну стратегию YouTube и сравнивает 7 вариантов обхода этих серверов: без gVideo и gVideo1–gVideo6. Около двух минут.', subNone: 'Видео YouTube идёт с серверов googlevideo.com. Без основы каждый вариант gVideo проверяется сам по себе, без стратегии Yv, и только на серверах googlevideo.com: gVideo1–gVideo6. Около минуты.', gvo: true },
+				{ id: 'gvonly', title: 'Подбор gVideo', sub: 'Видео YouTube идёт с серверов googlevideo.com. Тест берёт одну стратегию YouTube и сравнивает 10 вариантов обхода этих серверов: без gVideo и gVideo1–gVideo9. Около трёх минут.', subNone: 'Видео YouTube идёт с серверов googlevideo.com. Без основы каждый вариант gVideo проверяется сам по себе, без стратегии Yv, и только на серверах googlevideo.com: gVideo1–gVideo9. Около двух минут.', gvo: true },
 				{ id: 'custom', title: 'Свои стратегии', sub: 'Ваш список стратегий: на заблокированных сайтах, на YouTube или на ваших сайтах. Список хранится в /root/custom_test.txt — так же, как в консольном Zapret Manager.', custom: true }
 			];
 			var customPick = /^custom(_yt|_dom)?$/.test(testData.mode || '') ? testData.mode : 'custom', customOpen = false, customText = testData.custom || '';
 			var ytOpt;
 			if (typeof testData.yt_extra === 'string') {
-				var ytm = /(^| )gv([1-6]|all)( |$)/.exec(testData.yt_extra);
+				var ytm = /(^| )gv([1-9]|all)( |$)/.exec(testData.yt_extra);
 				ytOpt = { ipid: /(^| )ipid( |$)/.test(testData.yt_extra), gv: ytm ? ytm[2] : '' };
 			} else {
 				var ytw = String(statusData.gv_want || statusData.gv || '');
-				ytOpt = { ipid: statusData.ipid_want === 'on' || (!statusData.ipid_want && !!statusData.ipid), gv: /^[1-6]$/.test(ytw) ? ytw : '' };
+				ytOpt = { ipid: statusData.ipid_want === 'on' || (!statusData.ipid_want && !!statusData.ipid), gv: /^[1-9]$/.test(ytw) ? ytw : '' };
 			}
 			function ytExtra() { return [ ytOpt.ipid ? 'ipid' : '', ytOpt.gv ? 'gv' + ytOpt.gv : '' ].filter(Boolean).join(','); }
-			var YT_GV = [ { id: '', label: 'Нет', title: 'Без отдельного блока googlevideo.com' }, { id: '1', label: 'gVideo1', title: 'gVideo1' }, { id: '2', label: 'gVideo2', title: 'gVideo2' }, { id: '3', label: 'gVideo3', title: 'gVideo3' }, { id: '4', label: 'gVideo4', title: 'gVideo4' }, { id: '5', label: 'gVideo5', title: 'gVideo5' }, { id: '6', label: 'gVideo6', title: 'gVideo6' }, { id: 'all', label: 'Все', title: '7 тестов подряд: без gVideo, затем gVideo1–gVideo6' } ];
+			var YT_GV = [ { id: '', label: 'Нет', title: 'Без отдельного блока googlevideo.com' }, { id: '1', label: 'gVideo1', title: 'gVideo1' }, { id: '2', label: 'gVideo2', title: 'gVideo2' }, { id: '3', label: 'gVideo3', title: 'gVideo3' }, { id: '4', label: 'gVideo4', title: 'gVideo4' }, { id: '5', label: 'gVideo5', title: 'gVideo5' }, { id: '6', label: 'gVideo6', title: 'gVideo6' }, { id: '7', label: 'gVideo7', title: 'gVideo7' }, { id: '8', label: 'gVideo8', title: 'gVideo8' }, { id: '9', label: 'gVideo9', title: 'gVideo9' }, { id: 'all', label: 'Все', title: '10 тестов подряд: без gVideo, затем gVideo1–gVideo9' } ];
 			function ytGv(own) {
 				var out = [ E('div', { 'class': 'zm-tt-gv' }, [
 					E('span', { 'class': 'zm-tt-gv-l', 'title': 'Отдельный блок googlevideo.com ставится в начало каждой ' + (own ? 'вашей стратегии' : 'стратегии') + '. Варианты те же, что на вкладке YouTube' }, 'Обход googlevideo.com'),
@@ -47879,8 +47884,8 @@ return view.extend({
 					}))
 				]) ];
 				if (ytOpt.gv === 'all') out.push(E('p', { 'class': 'zm-tt-all' }, [
-					E('b', {}, '7 тестов по очереди: '),
-					'без gVideo, затем gVideo1–gVideo6' + (ytOpt.ipid ? ' — в каждом с маскировкой' : '') + '. Займёт примерно в 7 раз больше времени. Результат каждого теста — отдельной кнопкой в «Результатах».'
+					E('b', {}, '10 тестов по очереди: '),
+					'без gVideo, затем gVideo1–gVideo9' + (ytOpt.ipid ? ' — в каждом с маскировкой' : '') + '. Займёт примерно в 10 раз больше времени. Результат каждого теста — отдельной кнопкой в «Результатах».'
 				]));
 				return out;
 			}
@@ -47926,7 +47931,7 @@ return view.extend({
 				for (var i = 0; i < w.length; i++) if (/^Yv[0-9]+z?$/.test(w[i])) return w[i].replace(/z$/, '');
 				return '';
 			}
-			function gvoCurGv() { return gvoNow ? gvoNow.gv : (/^[1-6]$/.test(String(statusData.gv || '')) ? String(statusData.gv) : ''); }
+			function gvoCurGv() { return gvoNow ? gvoNow.gv : (/^[1-9]$/.test(String(statusData.gv || '')) ? String(statusData.gv) : ''); }
 			var gvoOpt = { base: '', ipid: statusData.ipid_want === 'on' || (!statusData.ipid_want && !!statusData.ipid) };
 			function gvoLoad() {
 				if (gvoLoading || gvoList) return;
@@ -47949,7 +47954,7 @@ return view.extend({
 				return E('div', { 'class': 'zm-tt-ctl' }, [
 					E('div', { 'class': 'zm-gvo-base' }, [
 						E('span', { 'class': 'zm-tt-gv-l' }, 'Основа'), sel,
-						E('label', { 'class': 'zm-tt-opt' + (gvoOpt.ipid && !none ? ' zm-on' : '') + (busy || none ? ' zm-tt-opt-dis' : ''), 'title': none ? 'Маскировка добавляется в стратегию Yv — без основы её некуда добавить' : 'Добавляет --ip-id=zero в стратегию-основу во всех 7 проверках' }, [ cb, E('span', {}, 'Маскировка') ])
+						E('label', { 'class': 'zm-tt-opt' + (gvoOpt.ipid && !none ? ' zm-on' : '') + (busy || none ? ' zm-tt-opt-dis' : ''), 'title': none ? 'Маскировка добавляется в стратегию Yv — без основы её некуда добавить' : 'Добавляет --ip-id=zero в стратегию-основу во всех 10 проверках' }, [ cb, E('span', {}, 'Маскировка') ])
 					]),
 					E('button', { 'class': 'cbi-button cbi-button-positive', 'disabled': busy || !gvoOpt.base ? '' : null, 'click': function() {
 						if (!gvoOpt.base) return;
@@ -48253,7 +48258,7 @@ return view.extend({
 
 			function hasAny(b) { return TEST_RESULT_MODES.some(function(m) { return testBase(m) === b && status['has_results_' + m]; }); }
 			function extraText(s) {
-				var g = /gv([1-6])/.exec(s), a = [];
+				var g = /gv([1-9])/.exec(s), a = [];
 				if (/(^| )ipid( |$)/.test(s)) a.push('маскировка подменных пакетов');
 				if (g) a.push('gVideo' + g[1]);
 				return a.length ? 'с дополнениями: ' + a.join(', ') : 'без дополнений';
@@ -48344,7 +48349,7 @@ return view.extend({
 			function applyGvo(name) {
 				var d = resData.gvonly;
 				if (!d || !d.gvBase) { zm.toast('Не удалось понять, с какой стратегией шёл тест — запустите его ещё раз', 'warning'); return; }
-				var g = /^gVideo([1-6])$/.exec(name), base = d.gvBase, ipid = d.gvIpid;
+				var g = /^gVideo([1-9])$/.exec(name), base = d.gvBase, ipid = d.gvIpid;
 				if (base === 'none') {
 					if (!g) return;
 					if (busy) { zm.toast('Дождитесь окончания теста', 'warning'); return; }
@@ -48426,7 +48431,7 @@ return view.extend({
 				var key = mode + ':' + r.name, open = !!openRows[key], pct = r.tot ? Math.round(r.ok * 100 / r.tot) : 0;
 				var cls = isCtrl ? 'zm-tt-ctrl' : scoreCls(r, ctrl);
 				var canApply = !isCtrl && mode !== 'current';
-				var gm = mode === 'gvonly' && !isCtrl && resData.gvonly ? /^(?:gVideo([1-6])|без gVideo)$/.exec(r.name) : null;
+				var gm = mode === 'gvonly' && !isCtrl && resData.gvonly ? /^(?:gVideo([1-9])|без gVideo)$/.exec(r.name) : null;
 				var isNow = !!gm && (resData.gvonly.gvBase === 'none' || resData.gvonly.gvBase === gvoCur()) && (gm[1] || '') === gvoCurGv();
 				var head = E('div', { 'class': 'zm-tt-row-head', 'click': function() {
 					if (!r.doms.length) return;
@@ -48700,14 +48705,17 @@ return view.extend({
 				[ '3', 'gVideo3', '' ],
 				[ '4', 'gVideo4', '' ],
 				[ '5', 'gVideo5', '' ],
-				[ '6', 'gVideo6', '' ]
+				[ '6', 'gVideo6', '' ],
+				[ '7', 'gVideo7', '' ],
+				[ '8', 'gVideo8', '' ],
+				[ '9', 'gVideo9', '' ]
 			];
 			function renderGv() {
 				gvCard.innerHTML = '';
 				var sel = gv.want || gv.cur || '';
 				gvCard.appendChild(E('h3', {}, [ 'Отдельный обход googlevideo.com ', gv.cur ? E('span', { 'class': 'zm-badge zm-ok' }, [ E('span', { 'class': 'zm-dot' }), 'gVideo' + gv.cur ]) : E('span', { 'class': 'zm-badge zm-off' }, [ E('span', { 'class': 'zm-dot' }), 'выключен' ]) ]));
 				gvCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:-6px' }, 'Видео и Shorts YouTube идут с серверов googlevideo.com. Этот блок встаёт в самое начало стратегии и обходит только их, а остальной YouTube работает на выбранной выше стратегии. Помогает, если видео подгружается рывками и подвисает на телефоне, ТВ и приставке.'));
-				var seg = E('div', { 'class': 'zm-seg' + (gvBusy ? ' zm-seg-busy' : ''), 'role': 'radiogroup', 'aria-label': 'Обход googlevideo.com' });
+				var seg = E('div', { 'class': 'zm-seg zm-gv-seg' + (gvBusy ? ' zm-seg-busy' : ''), 'role': 'radiogroup', 'aria-label': 'Обход googlevideo.com' });
 				GV_OPTS.forEach(function(o) {
 					var on = sel === o[0], pick = function() { if (!on) setGv(o[0]); };
 					seg.appendChild(E('div', { 'class': 'zm-seg-item' + (on ? ' zm-active' : ''), 'role': 'radio', 'tabindex': '0', 'aria-checked': on ? 'true' : 'false', 'click': pick,
@@ -51014,6 +51022,9 @@ html.zm-theme-dark .zm-tt-tile { border-color: rgba(255,255,255,.12); background
 .zm-tt-opt.zm-tt-opt-dis { opacity: .55; cursor: default; }
 .zm-tt-gv { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; flex: 1 1 100%; min-width: 0; }
 .zm-tt-gv-l { font-size: 13px; font-weight: 600; }
+.zm-seg.zm-gv-seg { display: inline-grid; grid-template-columns: repeat(5, minmax(0, auto)); }
+.zm-gv-seg .zm-seg-item { text-align: center; white-space: nowrap; }
+@media (max-width: 600px) { .zm-seg.zm-gv-seg { display: grid; width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); } .zm-gv-seg .zm-seg-item:first-child { grid-column: 1 / -1; } }
 .zm-gvo-base { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1 1 100%; min-width: 0; }
 .zm-gvo-base .zm-gvo-sel { width: auto; min-width: 150px; max-width: 100%; }
 .zm-tt-runtxt { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
