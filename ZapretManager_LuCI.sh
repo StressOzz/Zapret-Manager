@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.000
+# Version: 5.001
 ZM_VERSION_EOF
 set -e
 
@@ -2211,7 +2211,7 @@ zapret_restart() {
 
 _strat_label() {
 	local s g
-	s=$(_nfq_names | sed 's/^#[[:space:]]*//; s/[[:space:]]*$//; /^udp443$/d; /^DoH$/d; /^gvideo[123]$/d; /^[Nn][Oo][Cc][Hh][Aa][Nn][Gg][Ee]$/d' | tr '\n' ' ' | sed 's/ $//')
+	s=$(_nfq_names | sed 's/^#[[:space:]]*//; s/[[:space:]]*$//; /^udp443$/d; /^DoH$/d; /^gvideo[1-6]$/d; /^[Nn][Oo][Cc][Hh][Aa][Nn][Gg][Ee]$/d' | tr '\n' ' ' | sed 's/ $//')
 	_yv_ipid_on && s="$(printf '%s' "$s" | sed -E 's/(^| )(Yv[0-9]+)( |$)/\1\2z\3/')"
 	_udp443_on && s="${s:+$s }QUIC"
 	_zo_doh_on && s="${s:+$s }DoH"
@@ -2660,7 +2660,7 @@ DV_OFF_FLAG="/opt/zapret-manager-luci/dv_off"
 DISCORD_RX='^--filter-l7=discord,stun$|^--filter-udp=19294-19344,50000-50100$|^--filter-tcp=2053,2083,2087,2096,8443$|^--hostlist-domains=discord[.]media$|^#[ \t]*Dv[0-9]+$'
 
 YV_RX='^#[ \t]*Yv[0-9]+$|^--hostlist=/opt/zapret/ipset/zapret-hosts-google[.]txt$'
-NFQ_MARK_RX='^[ \t]*#[ \t]*((Yv|Dv|Gv)[0-9]|udp443[ \t]*$|DoH[ \t]*$|gvideo[123][ \t]*$)'
+NFQ_MARK_RX='^[ \t]*#[ \t]*((Yv|Dv|Gv)[0-9]|udp443[ \t]*$|DoH[ \t]*$|gvideo[1-6][ \t]*$)'
 UDP443_MARK_RX='^[ \t]*#[ \t]*udp443[ \t]*$'
 
 _nfq_drop_profiles() {
@@ -9044,18 +9044,18 @@ tgws_action() {
 
 TEST_DIR="$JOBS_DIR/strategy_test"
 _test_results_file() { echo "$TEST_DIR/results_$1.txt"; }
-ZT_YX_ALL="ipid gv1 gv2 gv3 ipid_gv1 ipid_gv2 ipid_gv3"
+ZT_YX_ALL="ipid gv1 gv2 gv3 gv4 gv5 gv6 ipid_gv1 ipid_gv2 ipid_gv3 ipid_gv4 ipid_gv5 ipid_gv6"
 _test_keys() {
 	local b x
 	echo "current domain v flowseal v_flowseal"
 	for b in youtube custom_yt; do echo "$b"; for x in $ZT_YX_ALL; do echo "${b}_$x"; done; done
-	echo "custom custom_dom"
+	echo "custom custom_dom gvonly"
 }
 _test_key_ok() { case " $(_test_keys | tr '\n' ' ') " in *" $1 "*) [ -n "$1" ] ;; *) return 1 ;; esac; }
 _test_vkey() {
 	local k="$1"
 	case " $2 " in *" ipid "*) k="${k}_ipid" ;; esac
-	case " $2 " in *" gv1 "*) k="${k}_gv1" ;; *" gv2 "*) k="${k}_gv2" ;; *" gv3 "*) k="${k}_gv3" ;; esac
+	case " $2 " in *" gv1 "*) k="${k}_gv1" ;; *" gv2 "*) k="${k}_gv2" ;; *" gv3 "*) k="${k}_gv3" ;; *" gv4 "*) k="${k}_gv4" ;; *" gv5 "*) k="${k}_gv5" ;; *" gv6 "*) k="${k}_gv6" ;; esac
 	echo "$k"
 }
 _test_key_base() { case "$1" in custom_yt*) echo custom_yt ;; youtube*) echo youtube ;; *) echo "$1" ;; esac; }
@@ -9246,6 +9246,19 @@ _test_build_candidates() {
 			[ -s "$f" ] && cat "$f" >> "$out"
 			for n in 1 2 3 4 5 6 7 8 9 10; do strategy_v"$n" >> "$out"; done
 			;;
+		gvonly)
+			if [ "$ZT_GVB" = none ]; then
+				printf '%s\n' "#gVideo1" "#gVideo2" "#gVideo3" "#gVideo4" "#gVideo5" "#gVideo6" >> "$out"
+				return 0
+			fi
+			f="$(_yv_file)"
+			[ -s "$f" ] || do_yv_download >/dev/null 2>&1
+			[ -s "$f" ] && _test_block_of "$f" "$ZT_GVB" | sed 1d > "$out.b"
+			if grep -q '^--' "$out.b" 2>/dev/null; then
+				for n in "без gVideo" gVideo1 gVideo2 gVideo3 gVideo4 gVideo5 gVideo6; do echo "#$n"; cat "$out.b"; done >> "$out"
+			fi
+			rm -f "$out.b"
+			;;
 		youtube)
 			f="$(_yv_file)"
 			[ -s "$f" ] || do_yv_download >/dev/null 2>&1
@@ -9255,7 +9268,7 @@ _test_build_candidates() {
 			[ -s "$TEST_CUSTOM_FILE" ] && _test_custom_clean < "$TEST_CUSTOM_FILE" >> "$out"
 			;;
 	esac
-	case "$mode" in youtube|custom|custom_yt) ;; *) sed -i '/^#Y/d' "$out" ;; esac
+	case "$mode" in youtube|custom|custom_yt|gvonly) ;; *) sed -i '/^#Y/d' "$out" ;; esac
 }
 
 _test_apply_block() {
@@ -9299,6 +9312,10 @@ _test_ipblock_note() {
 	printf 'X|%s\n' "$x" >> "$d"
 	echo "!! До этих адресов соединение не устанавливается вообще, ни с одной стратегией: $(printf '%s' "$x" | sed 's/_/ /g; s/ \([^ ]\)/, \1/g')"
 	echo "   Их блокируют по IP-адресу — Zapret тут не поможет, для них нужен VPN (Forkozz, Steer, Mixomo)"
+}
+
+_test_tags() {
+	awk '{ sub(/^[ \t]+/, ""); sub(/[ \t\r]+$/, "") } /^#/ && !s[$0]++ { printf "%s%s", (n++ ? " · " : ""), $0 } END { if (n) print "" }'
 }
 
 _test_block_of() {
@@ -9370,7 +9387,7 @@ _test_yt_pick() {
 	fi
 	ZT_IPID=none; ZT_GV=""
 	case " $yx " in *" ipid "*) ZT_IPID=on ;; esac
-	case " $yx " in *" gv1 "*) ZT_GV=1 ;; *" gv2 "*) ZT_GV=2 ;; *" gv3 "*) ZT_GV=3 ;; esac
+	case " $yx " in *" gv1 "*) ZT_GV=1 ;; *" gv2 "*) ZT_GV=2 ;; *" gv3 "*) ZT_GV=3 ;; *" gv4 "*) ZT_GV=4 ;; *" gv5 "*) ZT_GV=5 ;; *" gv6 "*) ZT_GV=6 ;; esac
 	ZT_YX="$([ "$ZT_IPID" = on ] && echo ipid)${ZT_GV:+ gv$ZT_GV}"
 	ZT_YX="${ZT_YX# }"
 }
@@ -9405,11 +9422,11 @@ do_test_run() {
 _test_run_gvall() {
 	local ip="" x n=0 rc=0 first=""
 	case " $2 " in *" ipid "*) ip=ipid ;; esac
-	echo "==> Режим «Все»: 4 теста по очереди — без gVideo, затем gVideo1, gVideo2, gVideo3$([ -n "$ip" ] && echo ", везде с маскировкой подменных пакетов")"
-	for x in "${ip:--}" "${ip:+$ip }gv1" "${ip:+$ip }gv2" "${ip:+$ip }gv3"; do
+	echo "==> Режим «Все»: 7 тестов по очереди — без gVideo, затем gVideo1–gVideo6$([ -n "$ip" ] && echo ", везде с маскировкой подменных пакетов")"
+	for x in "${ip:--}" "${ip:+$ip }gv1" "${ip:+$ip }gv2" "${ip:+$ip }gv3" "${ip:+$ip }gv4" "${ip:+$ip }gv5" "${ip:+$ip }gv6"; do
 		n=$((n + 1))
 		echo ""
-		echo "==> Тест $n из 4: $(case "$x" in *gv*) echo "gVideo${x##*gv}" ;; *) echo "без gVideo" ;; esac)"
+		echo "==> Тест $n из 7: $(case "$x" in *gv*) echo "gVideo${x##*gv}" ;; *) echo "без gVideo" ;; esac)"
 		ZT_KEY=""; ZT_STOPPED=""
 		_do_test_run_core "$1" "$x"; rc=$?
 		ZT_IPID=""; ZT_GV=""
@@ -9420,7 +9437,7 @@ _test_run_gvall() {
 	[ -n "$first" ] && echo "$first" > "$TEST_DIR/key"
 	if [ "$rc" = 0 ] && [ -z "$ZT_STOPPED" ]; then
 		echo ""
-		echo "==> Все 4 теста готовы — каждый результат отдельной кнопкой в «Результатах»"
+		echo "==> Все 7 тестов готовы — каждый результат отдельной кнопкой в «Результатах»"
 	elif [ -n "$ZT_STOPPED" ]; then
 		echo "==> Остальные тесты из «Все» не запускались"
 	fi
@@ -9428,14 +9445,15 @@ _test_run_gvall() {
 }
 
 _do_test_run_core() {
-	local mode="$1" results detail
-	ZT_CTRL=""; ZT_CTRL_HIGH=""; ZT_IPID=""; ZT_GV=""; ZT_YX=""
+	local mode="$1" results detail x
+	ZT_CTRL=""; ZT_CTRL_HIGH=""; ZT_IPID=""; ZT_GV=""; ZT_YX=""; ZT_GVB=""
 	mkdir -p "$TEST_DIR"
 	rm -f "$TEST_STOP_FLAG"
 	ZT_KEY="$mode"
 	case "$mode" in
 		youtube) _test_yt_pick "$2"; ZT_KEY="$(_test_vkey "$mode" "$ZT_YX")" ;;
 		custom_yt) _test_yt_pick "${2:--}"; ZT_KEY="$(_test_vkey "$mode" "$ZT_YX")" ;;
+		gvonly) _test_gvo_pick "$2" ;;
 	esac
 	results="$(_test_results_file "$ZT_KEY")"
 	detail="$(_test_detail_file "$ZT_KEY")"
@@ -9450,6 +9468,7 @@ _do_test_run_core() {
 		_add_gp_domains
 		_refresh_exclude_file
 		echo "==> Проверяем текущую стратегию, ничего не меняя"
+		x="$(_nfq_opt_body | _test_tags)"; [ -n "$x" ] && echo "   в стратегии: $x"
 		zapret_restart
 		local urls_file="$TEST_DIR/urls.txt" dpi_urls yt_urls
 		echo "==> Собираем список сайтов"
@@ -9475,6 +9494,10 @@ _do_test_run_core() {
 	local urls total_domains
 	case "$mode" in
 		youtube|custom_yt) urls="$(_test_yt_urls)" ;;
+		gvonly)
+			urls="$(_test_yt_urls)"
+			[ "$ZT_GVB" = none ] && urls="$(printf '%s\n' "$urls" | grep '\.googlevideo\.com|')"
+			;;
 		domain)
 			urls="$(_test_domain_urls)"
 			[ -n "$urls" ] || { echo "ОШИБКА: не указаны домены"; return 1; }
@@ -9502,6 +9525,11 @@ _do_test_run_core() {
 	[ "$mode" = custom_dom ] && cmode=custom
 	echo "==> Собираем стратегии"
 	_test_build_candidates "$cmode" "$cand"
+	if [ ! -s "$cand" ] && [ "$mode" = gvonly ]; then
+		echo "ОШИБКА: стратегии $ZT_GVB нет в списке YouTube — обновите список на вкладке YouTube"
+		rm -f "$TEST_BACKUP"
+		return 1
+	fi
 	if [ ! -s "$cand" ]; then
 		echo "ОШИБКА: не удалось собрать ни одной стратегии"
 		rm -f "$TEST_BACKUP"
@@ -9512,6 +9540,14 @@ _do_test_run_core() {
 	echo "==> Стратегий: $total_str, адресов: $total_domains"
 	[ "$mode" = custom_dom ] && grep -qE '^--hostlist(-domains|-auto)?=' "$cand" && echo "==> В стратегиях есть списки сайтов — на время теста ваши сайты добавляются в них"
 	case "$mode" in youtube|custom_yt) _test_yt_extra "$detail" ;; esac
+	if [ "$mode" = gvonly ]; then
+		printf 'G|%s|%s\n' "$ZT_GVB" "$ZT_YX" >> "$detail"
+		if [ "$ZT_GVB" = none ]; then
+			echo "==> Без основы: каждый вариант gVideo проверяется один, только на серверах googlevideo.com. Сравниваем: gVideo1–gVideo6"
+		else
+			echo "==> Основа: $ZT_GVB$([ "$ZT_IPID" = on ] && echo " с маскировкой подменных пакетов"). Сравниваем: без gVideo, gVideo1–gVideo6"
+		fi
+	fi
 	_test_detail_domains "$detail" "$urls"
 
 	echo "==> Контрольный тест: Zapret выключен"
@@ -9538,8 +9574,14 @@ _do_test_run_core() {
 		name="${name#\#}"
 		[ "$mode" = custom_dom ] && _test_hl_inject "$TEST_DIR/block.txt" > "$TEST_DIR/block.hl" && mv -f "$TEST_DIR/block.hl" "$TEST_DIR/block.txt"
 		[ "$mode" = custom_yt ] && _test_ipid_wrap "$TEST_DIR/block.txt"
+		if [ "$mode" = gvonly ]; then
+			ZT_GV="$(printf '%s' "$name" | sed -n 's/^gVideo\([1-6]\)$/\1/p')"
+			if [ "$ZT_GVB" = none ]; then _zo_gv_blk "$ZT_GV" > "$TEST_DIR/block.txt"; ZT_GV=""
+			else sed -i "1s/.*/#$ZT_GVB/" "$TEST_DIR/block.txt"; fi
+		fi
 		_test_gv_wrap "$TEST_DIR/block.txt"
 		echo "==> [$cur/$total_str] $name"
+		x="$(_test_tags < "$TEST_DIR/block.txt")"; [ -n "$x" ] && echo "   в стратегии: $x"
 		_test_apply_block "$(cat "$TEST_DIR/block.txt")"
 		zapret_restart
 		_test_run_set "$urls" "$name" "$results" "$detail"
@@ -9590,8 +9632,19 @@ test_action() {
 					grep -q '^#' "$TEST_CUSTOM_FILE" 2>/dev/null || case "$mode" in custom_yt:*) echo '{"error":"список своих стратегий пуст — добавьте их и сохраните"}'; return 1 ;; esac
 					x="${mode#*:}"; mode="${mode%%:*}"
 					case ",$x," in *[!a-z0-9,]*) echo '{"error":"неизвестные дополнения теста"}'; return 1 ;; esac
-					for d in $(printf '%s' "$x" | tr ',' ' '); do case "$d" in ipid|gv1|gv2|gv3|gvall) ;; *) echo '{"error":"неизвестные дополнения теста"}'; return 1 ;; esac; done
+					for d in $(printf '%s' "$x" | tr ',' ' '); do case "$d" in ipid|gv1|gv2|gv3|gv4|gv5|gv6|gvall) ;; *) echo '{"error":"неизвестные дополнения теста"}'; return 1 ;; esac; done
 					[ "$(printf '%s\n' "$x" | tr ',' '\n' | grep -c '^gv')" -le 1 ] || { echo '{"error":"выберите один вариант gVideo"}'; return 1; }
+					x="$(printf '%s' "$x" | tr ',' ' ')"
+					;;
+				gvonly:*)
+					x="${mode#*:}"; mode=gvonly
+					case ",$x," in *[!A-Za-z0-9,]*) echo '{"error":"неизвестные дополнения теста"}'; return 1 ;; esac
+					h=""
+					for d in $(printf '%s' "$x" | tr ',' ' '); do
+						case "$d" in ipid) ;; none|Yv[0-9]|Yv[0-9][0-9]|Yv[0-9][0-9][0-9]) [ -z "$h" ] || { echo '{"error":"выберите одну стратегию-основу"}'; return 1; }; h="$d" ;; *) echo '{"error":"неизвестные дополнения теста"}'; return 1 ;; esac
+					done
+					[ -n "$h" ] || { echo '{"error":"выберите стратегию YouTube, к которой подбирать gVideo"}'; return 1; }
+					[ "$h" != none ] && [ -s "$(_yv_file)" ] && ! grep -qx "#$h" "$(_yv_file)" && { printf '{"error":"%s"}\n' "$(esc "стратегии $h нет в списке YouTube — обновите список")"; return 1; }
 					x="$(printf '%s' "$x" | tr ',' ' ')"
 					;;
 				v|flowseal|v_flowseal|youtube|current) ;;
@@ -9607,6 +9660,8 @@ test_action() {
 				[ "$x" = - ] && x=""
 				printf '%s\n' "$x" > "$TEST_DIR/yt_extra"
 				job_start strategy_test do_test_run "$mode" "${x:--}"
+			elif [ "$mode" = gvonly ]; then
+				job_start strategy_test do_test_run "$mode" "$x"
 			else
 				job_start strategy_test do_test_run "$mode"
 			fi
@@ -9914,6 +9969,16 @@ _yv_ipid_apply() {
 		END { if (inb) exit 1 }' "$CONF" > "$CONF.ipid" && [ -s "$CONF.ipid" ] && { cmp -s "$CONF" "$CONF.ipid" || cat "$CONF.ipid" > "$CONF"; }
 	rm -f "$CONF.ipid"
 }
+_test_gvo_pick() {
+	local w
+	ZT_IPID=none; ZT_GV=""; ZT_GVB=""
+	for w in $1; do
+		case "$w" in ipid) ZT_IPID=on ;; Yv[0-9]*|none) ZT_GVB="$w" ;; esac
+	done
+	[ "$ZT_GVB" = none ] && ZT_IPID=none
+	ZT_YX="$([ "$ZT_IPID" = on ] && echo ipid)"
+}
+
 _yv_ipid_sync() {
 	local w
 	w="$(_yv_ipid_want)"
@@ -9923,9 +9988,28 @@ _yv_ipid_sync() {
 	return 0
 }
 ZO_GV_FLAG="$ZM_STATE_DIR/zapret_gv"
-ZO_GV_RX='^[ \t]*#[ \t]*gvideo[123][ \t]*$'
-_zo_gv_want() { local w=""; [ -s "$ZO_GV_FLAG" ] && read -r w < "$ZO_GV_FLAG"; case "$w" in 1|2|3) echo "$w" ;; esac; return 0; }
+ZO_GV_RX='^[ \t]*#[ \t]*gvideo[1-6][ \t]*$'
+_zo_gv_want() { local w=""; [ -s "$ZO_GV_FLAG" ] && read -r w < "$ZO_GV_FLAG"; case "$w" in [1-6]) echo "$w" ;; esac; return 0; }
 _zo_gv_blk() {
+	if [ "$1" = 5 ]; then
+		printf '%s\n' "#gvideo5" "--filter-tcp=443" "--hostlist-domains=googlevideo.com" "--dpi-desync=multidisorder" \
+			"--dpi-desync-split-pos=1,midsld,endhost-1" "--dpi-desync-repeats=2" "--dpi-desync-fooling=md5sig" \
+			"--dpi-desync-fake-tls-mod=rnd,dupsid,sni=www.google.com"
+		return 0
+	fi
+	if [ "$1" = 6 ]; then
+		printf '%s\n' "#gvideo6" "--filter-tcp=443" "--hostlist-domains=googlevideo.com" "--dpi-desync=fake,multidisorder" \
+			"--dpi-desync-split-pos=10,midsld" "--dpi-desync-fake-tls=0x00000000" \
+			"--dpi-desync-fake-tls=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin" \
+			"--dpi-desync-fake-tls-mod=rnd,dupsid,sni=fonts.google.com" "--dpi-desync-split-seqovl=336" \
+			"--dpi-desync-split-seqovl-pattern=/opt/zapret/files/fake/tls_clienthello_www_google_com.bin" "--dpi-desync-fooling=badsum,badseq"
+		return 0
+	fi
+	if [ "$1" = 4 ]; then
+		printf '%s\n' "#gvideo4" "--filter-tcp=443" "--hostlist-domains=googlevideo.com" "--dpi-desync=multisplit" \
+			"--dpi-desync-split-pos=midsld" "--dpi-desync-split-seqovl=8" "--dpi-desync-split-seqovl-pattern=0x000100502112A442"
+		return 0
+	fi
 	if [ "$1" = 3 ]; then
 		printf '%s\n' "#gvideo3" "--filter-tcp=443" "--hostlist-domains=googlevideo.com" "--dpi-desync=multidisorder" \
 			"--dpi-desync-split-pos=1,midsld" "--wssize=1:1" "--wssize-cutoff=n8"
@@ -9937,7 +10021,7 @@ _zo_gv_blk() {
 	if [ "$1" = 2 ]; then echo "--dpi-desync-split-pos=1,sniext+2,host-1,midsld,endsld"
 	else echo "--dpi-desync-split-pos=1,2,3,5,105,host+5,sld-1,endsld-5,endsld"; fi
 }
-_zo_gv_cur() { _nfq_opt_body | sed -n 's/^[ \t]*#[ \t]*gvideo\([123]\)[ \t]*$/\1/p' | head -n 1; }
+_zo_gv_cur() { _nfq_opt_body | sed -n 's/^[ \t]*#[ \t]*gvideo\([1-6]\)[ \t]*$/\1/p' | head -n 1; }
 _zo_gv_count() { _nfq_opt_body | grep -cE "$ZO_GV_RX"; }
 _zo_gv_first() {
 	_nfq_opt_body | sed '1d;$d' | awk -v D="$ZO_DOH_MK" -v G="$ZO_GV_RX" -v CS="$ZC_START_RX" '
@@ -10069,7 +10153,7 @@ zapret_opt_set() {
 		gv)
 			_nochange_guard || return 1
 			case "$val" in
-				1|2|3) mkdir -p "$ZM_STATE_DIR"; echo "$val" > "$ZO_GV_FLAG" ;;
+				[1-6]) mkdir -p "$ZM_STATE_DIR"; echo "$val" > "$ZO_GV_FLAG" ;;
 				off) rm -f "$ZO_GV_FLAG" ;;
 				*) echo '{"error":"неизвестное значение"}'; return 1 ;;
 			esac
@@ -10119,7 +10203,7 @@ test_apply() {
 	yx="$(_test_key_yx "$key")"
 	ip=""; gv=""
 	case " $yx " in *" ipid "*) ip=on ;; esac
-	case " $yx " in *" gv1 "*) gv=1 ;; *" gv2 "*) gv=2 ;; *" gv3 "*) gv=3 ;; esac
+	case " $yx " in *" gv1 "*) gv=1 ;; *" gv2 "*) gv=2 ;; *" gv3 "*) gv=3 ;; *" gv4 "*) gv=4 ;; *" gv5 "*) gv=5 ;; *" gv6 "*) gv=6 ;; esac
 	f="$JOBS_DIR/test_apply"
 	mkdir -p "$JOBS_DIR" "$ZM_STATE_DIR"
 	if [ "$base" = custom_yt ]; then
@@ -37054,7 +37138,7 @@ function pollJob(job, logEl, onDone, onTick) {
 			var was = _stuck[job] != null;
 			if (!done && idle >= 120) _stuck[job] = idle; else delete _stuck[job];
 			if (was || _stuck[job] != null) renderStopBar();
-			if (typeof onTick === 'function') onTick();
+			if (typeof onTick === 'function') onTick(txt);
 			if (!done && st && st.running === false) deadPolls++; else deadPolls = 0;
 			if (deadPolls >= 6) {
 				renderLog(logEl, (txt ? txt.replace(/\s+$/, '') + '\n' : '') + '==> Операция прервалась: процесс на роутере завершился, не оставив итога. Обновите страницу и проверьте состояние.');
@@ -46944,16 +47028,16 @@ var TABS = [
 
 var TEST_MODE_LABELS = {
 	v: 'v1–v10', flowseal: 'Flowseal', v_flowseal: 'v + Flowseal', youtube: 'YouTube', current: 'Текущая', domain: 'По домену',
-	custom: 'Свои', custom_yt: 'Свои · YouTube', custom_dom: 'Свои · ваши сайты', auto: 'Автоподбор'
+	custom: 'Свои', custom_yt: 'Свои · YouTube', custom_dom: 'Свои · ваши сайты', gvonly: 'Подбор gVideo', auto: 'Автоподбор'
 };
-var TEST_YX = [ '', 'ipid', 'gv1', 'gv2', 'gv3', 'ipid_gv1', 'ipid_gv2', 'ipid_gv3' ];
+var TEST_YX = [ '', 'ipid', 'gv1', 'gv2', 'gv3', 'gv4', 'gv5', 'gv6', 'ipid_gv1', 'ipid_gv2', 'ipid_gv3', 'ipid_gv4', 'ipid_gv5', 'ipid_gv6' ];
 function testKeys(b) { return TEST_YX.map(function(x) { return x ? b + '_' + x : b; }); }
-var TEST_RESULT_MODES = ['current', 'domain', 'v', 'flowseal', 'v_flowseal'].concat(testKeys('youtube'), ['custom'], testKeys('custom_yt'), ['custom_dom']);
+var TEST_RESULT_MODES = ['current', 'domain', 'v', 'flowseal', 'v_flowseal'].concat(testKeys('youtube'), ['gvonly', 'custom'], testKeys('custom_yt'), ['custom_dom']);
 function testBase(k) { return /^custom_yt/.test(k) ? 'custom_yt' : /^youtube/.test(k) ? 'youtube' : k; }
 function testYt(k) { var b = testBase(k); return b === 'youtube' || b === 'custom_yt'; }
 function testYx(k) { return k.slice(testBase(k).length).replace(/^_/, ''); }
 function testYxLabel(x) {
-	var g = /gv([123])/.exec(x || ''), a = [];
+	var g = /gv([1-6])/.exec(x || ''), a = [];
 	if (/ipid/.test(x || '')) a.push('Маскировка');
 	if (g) a.push('gVideo' + g[1]);
 	return a.length ? a.join(' + ') : 'Как есть';
@@ -47773,19 +47857,20 @@ return view.extend({
 				{ id: 'domain', title: 'По домену', sub: 'Все стратегии v и Flowseal на ваших сайтах. Через пробел, до 30 штук.', domain: true },
 				{ id: 'main', title: 'Стратегии v и Flowseal', sub: 'Выберите, что перебирать, и нажмите «Проверить». Проверка идёт по списку заблокированных сайтов.', choice: [ { id: 'v', label: 'v1–v10' }, { id: 'flowseal', label: 'Flowseal' }, { id: 'v_flowseal', label: 'v + Flowseal' } ] },
 				{ id: 'youtube', title: 'YouTube', sub: 'Перебирает стратегии Yv на адресах YouTube. Выбранные дополнения добавляются к каждой стратегии — так, как они будут работать у вас.', yt: true },
+				{ id: 'gvonly', title: 'Подбор gVideo', sub: 'Видео YouTube идёт с серверов googlevideo.com. Тест берёт одну стратегию YouTube и сравнивает 7 вариантов обхода этих серверов: без gVideo и gVideo1–gVideo6. Около двух минут.', subNone: 'Видео YouTube идёт с серверов googlevideo.com. Без основы каждый вариант gVideo проверяется сам по себе, без стратегии Yv, и только на серверах googlevideo.com: gVideo1–gVideo6. Около минуты.', gvo: true },
 				{ id: 'custom', title: 'Свои стратегии', sub: 'Ваш список стратегий: на заблокированных сайтах, на YouTube или на ваших сайтах. Список хранится в /root/custom_test.txt — так же, как в консольном Zapret Manager.', custom: true }
 			];
 			var customPick = /^custom(_yt|_dom)?$/.test(testData.mode || '') ? testData.mode : 'custom', customOpen = false, customText = testData.custom || '';
 			var ytOpt;
 			if (typeof testData.yt_extra === 'string') {
-				var ytm = /(^| )gv([123]|all)( |$)/.exec(testData.yt_extra);
+				var ytm = /(^| )gv([1-6]|all)( |$)/.exec(testData.yt_extra);
 				ytOpt = { ipid: /(^| )ipid( |$)/.test(testData.yt_extra), gv: ytm ? ytm[2] : '' };
 			} else {
 				var ytw = String(statusData.gv_want || statusData.gv || '');
-				ytOpt = { ipid: statusData.ipid_want === 'on' || (!statusData.ipid_want && !!statusData.ipid), gv: /^[123]$/.test(ytw) ? ytw : '' };
+				ytOpt = { ipid: statusData.ipid_want === 'on' || (!statusData.ipid_want && !!statusData.ipid), gv: /^[1-6]$/.test(ytw) ? ytw : '' };
 			}
 			function ytExtra() { return [ ytOpt.ipid ? 'ipid' : '', ytOpt.gv ? 'gv' + ytOpt.gv : '' ].filter(Boolean).join(','); }
-			var YT_GV = [ { id: '', label: 'Нет', title: 'Без отдельного блока googlevideo.com' }, { id: '1', label: 'gVideo1', title: 'gVideo1' }, { id: '2', label: 'gVideo2', title: 'gVideo2 · лёгкий' }, { id: '3', label: 'gVideo3', title: 'gVideo3 · wssize' }, { id: 'all', label: 'Все', title: '4 теста подряд: без gVideo, затем gVideo1, gVideo2, gVideo3' } ];
+			var YT_GV = [ { id: '', label: 'Нет', title: 'Без отдельного блока googlevideo.com' }, { id: '1', label: 'gVideo1', title: 'gVideo1' }, { id: '2', label: 'gVideo2', title: 'gVideo2' }, { id: '3', label: 'gVideo3', title: 'gVideo3' }, { id: '4', label: 'gVideo4', title: 'gVideo4' }, { id: '5', label: 'gVideo5', title: 'gVideo5' }, { id: '6', label: 'gVideo6', title: 'gVideo6' }, { id: 'all', label: 'Все', title: '7 тестов подряд: без gVideo, затем gVideo1–gVideo6' } ];
 			function ytGv(own) {
 				var out = [ E('div', { 'class': 'zm-tt-gv' }, [
 					E('span', { 'class': 'zm-tt-gv-l', 'title': 'Отдельный блок googlevideo.com ставится в начало каждой ' + (own ? 'вашей стратегии' : 'стратегии') + '. Варианты те же, что на вкладке YouTube' }, 'Обход googlevideo.com'),
@@ -47794,10 +47879,83 @@ return view.extend({
 					}))
 				]) ];
 				if (ytOpt.gv === 'all') out.push(E('p', { 'class': 'zm-tt-all' }, [
-					E('b', {}, '4 теста по очереди: '),
-					'без gVideo, затем gVideo1, gVideo2 и gVideo3' + (ytOpt.ipid ? ' — в каждом с маскировкой' : '') + '. Займёт примерно в 4 раза больше времени. Результат каждого теста — отдельной кнопкой в «Результатах».'
+					E('b', {}, '7 тестов по очереди: '),
+					'без gVideo, затем gVideo1–gVideo6' + (ytOpt.ipid ? ' — в каждом с маскировкой' : '') + '. Займёт примерно в 7 раз больше времени. Результат каждого теста — отдельной кнопкой в «Результатах».'
 				]));
 				return out;
+			}
+			var gvoList = ytInitialData && ytInitialData.items && ytInitialData.items.length ? ytInitialData.items : null, gvoLoading = false, gvoTries = 0;
+			var gvoNow = null;
+			var runNow = null, runNowEl = E('div', { 'class': 'zm-tt-nowbox' });
+			function parseRun(txt) {
+				var r = { phase: 'prep', cur: 0, tot: 0, name: '', tags: null, outer: '', sub: '' };
+				String(txt || '').split('\n').forEach(function(l) {
+					var m;
+					if ((m = /^==> \[(\d+)\/(\d+)\] (.*)$/.exec(l))) { r.phase = 'str'; r.cur = +m[1]; r.tot = +m[2]; r.name = m[3]; r.tags = null; }
+					else if ((m = /^\s+в стратегии: (.*)$/.exec(l))) r.tags = m[1].split(' · ').filter(Boolean);
+					else if ((m = /^==> Стратегий: (\d+)/.exec(l))) { r.tot = +m[1]; r.cur = 0; }
+					else if (/^==> Контрольный тест/.test(l)) { r.phase = 'ctrl'; r.name = ''; r.tags = null; }
+					else if (/^==> YouTube: подбираем стратегию/.test(l)) { r.outer = 'Подбор для YouTube (Yv)'; r.phase = 'prep'; r.cur = r.tot = 0; r.tags = null; }
+					else if ((m = /^==> Тест (\d+) из (\d+): (.*)$/.exec(l))) { r.outer = 'Тест ' + m[1] + ' из ' + m[2] + ' · ' + m[3]; r.phase = 'prep'; r.cur = r.tot = 0; r.tags = null; }
+					else if (/^==> Проверяем текущую стратегию/.test(l)) { r.phase = 'cur'; r.tags = null; r.sub = ''; }
+					else if ((m = /^==> (Заблокированные сайты|YouTube): \d+/.exec(l)) && r.phase === 'cur') r.sub = m[1];
+					else if (/^==> Тест (завершён|остановлен)/.test(l)) { r.phase = 'restore'; r.tags = null; }
+				});
+				return r;
+			}
+			function renderNow() {
+				var r = runNow || { phase: 'prep' }, out = [];
+				runNowEl.innerHTML = '';
+				if (r.outer) out.push(E('div', { 'class': 'zm-tt-now-o' }, r.outer));
+				var head = r.phase === 'str' ? [ E('span', { 'class': 'zm-tt-now-n' }, 'Стратегия ' + r.cur + ' из ' + r.tot), E('b', {}, r.name) ]
+					: r.phase === 'ctrl' ? [ E('span', { 'class': 'zm-tt-now-n' }, 'Контрольный тест'), E('b', {}, 'Zapret выключен') ]
+					: r.phase === 'cur' ? [ E('span', { 'class': 'zm-tt-now-n' }, 'Текущая стратегия'), E('b', {}, r.sub || 'запускаем') ]
+					: r.phase === 'restore' ? [ E('b', {}, 'Возвращаем настройки Zapret') ]
+					: [ E('b', {}, 'Готовим тест…') ];
+				out.push(E('div', { 'class': 'zm-tt-now-l' }, head));
+				if (r.tot > 0 && r.phase !== 'cur') {
+					var pct = r.phase === 'restore' ? 100 : r.phase === 'str' ? Math.round((r.cur - 0.5) * 100 / r.tot) : 0;
+					out.push(E('div', { 'class': 'zm-tt-now-bar' }, [ E('span', { 'class': 'zm-tt-now-fill', 'style': 'width:' + Math.max(2, pct) + '%' }) ]));
+				}
+				if (r.tags && r.tags.length && (r.phase === 'str' || r.phase === 'cur')) out.push(E('div', { 'class': 'zm-tt-now-tags' }, r.tags.map(function(t) { return E('span', { 'class': 'zm-tt-now-tag' }, t); })));
+				out.forEach(function(e) { runNowEl.appendChild(e); });
+			}
+			function gvoCur() {
+				if (gvoNow) return gvoNow.base;
+				var w = String(statusData.strategy || '').split(' ');
+				for (var i = 0; i < w.length; i++) if (/^Yv[0-9]+z?$/.test(w[i])) return w[i].replace(/z$/, '');
+				return '';
+			}
+			function gvoCurGv() { return gvoNow ? gvoNow.gv : (/^[1-6]$/.test(String(statusData.gv || '')) ? String(statusData.gv) : ''); }
+			var gvoOpt = { base: '', ipid: statusData.ipid_want === 'on' || (!statusData.ipid_want && !!statusData.ipid) };
+			function gvoLoad() {
+				if (gvoLoading || gvoList) return;
+				gvoLoading = true;
+				zm.strategyListYoutube().then(function(r) {
+					gvoLoading = false;
+					if (r && r.items && r.items.length) { gvoList = r.items; renderLaunch(); }
+					else if (++gvoTries < 10) setTimeout(gvoLoad, 3000);
+				}, function() { gvoLoading = false; if (++gvoTries < 10) setTimeout(gvoLoad, 3000); });
+			}
+			function gvoCtl() {
+				var ids = (gvoList || []).map(function(it) { return it.id; }), cur = gvoCur();
+				if (gvoOpt.base !== 'none' && (!gvoOpt.base || ids.indexOf(gvoOpt.base) < 0)) gvoOpt.base = cur && ids.indexOf(cur) >= 0 ? cur : (ids[0] || '');
+				if (!ids.length) gvoLoad();
+				var none = gvoOpt.base === 'none';
+				var sel = ids.length ? E('select', { 'class': 'cbi-input-select zm-gvo-sel', 'disabled': busy ? '' : null, 'title': 'Стратегия YouTube, с которой сравниваются варианты gVideo', 'change': function() { var was = gvoOpt.base === 'none'; gvoOpt.base = this.value; if (was !== (this.value === 'none')) renderLaunch(); } }, [ E('option', { 'value': 'none', 'selected': none ? '' : null }, 'Без основы') ].concat(ids.map(function(id) {
+					return E('option', { 'value': id, 'selected': id === gvoOpt.base ? '' : null }, id + (id === cur ? ' — текущая' : ''));
+				}))) : E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'Загружаем список стратегий YouTube…');
+				var cb = E('input', { 'type': 'checkbox', 'checked': gvoOpt.ipid && !none ? '' : null, 'disabled': busy || none ? '' : null, 'change': function() { gvoOpt.ipid = this.checked; renderLaunch(); } });
+				return E('div', { 'class': 'zm-tt-ctl' }, [
+					E('div', { 'class': 'zm-gvo-base' }, [
+						E('span', { 'class': 'zm-tt-gv-l' }, 'Основа'), sel,
+						E('label', { 'class': 'zm-tt-opt' + (gvoOpt.ipid && !none ? ' zm-on' : '') + (busy || none ? ' zm-tt-opt-dis' : ''), 'title': none ? 'Маскировка добавляется в стратегию Yv — без основы её некуда добавить' : 'Добавляет --ip-id=zero в стратегию-основу во всех 7 проверках' }, [ cb, E('span', {}, 'Маскировка') ])
+					]),
+					E('button', { 'class': 'cbi-button cbi-button-positive', 'disabled': busy || !gvoOpt.base ? '' : null, 'click': function() {
+						if (!gvoOpt.base) return;
+						doStart('gvonly:' + (gvoOpt.ipid && gvoOpt.base !== 'none' ? 'ipid,' : '') + gvoOpt.base);
+					} }, 'Подобрать gVideo')
+				]);
 			}
 			function ytToggle(key, label, title) {
 				var on = !!ytOpt[key];
@@ -47844,8 +48002,9 @@ return view.extend({
 				launchCard.appendChild(E('h3', {}, 'Тест стратегий'));
 				launchCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:-6px' }, 'Тест идёт в фоне — можно уйти со страницы. После теста настройки Zapret возвращаются как были.'));
 				if (busy) {
+					renderNow();
 					launchCard.appendChild(E('div', { 'class': 'zm-refresh-banner zm-show zm-tt-run' }, [
-						E('span', {}, [ 'Идёт тест: ' + (TEST_MODE_LABELS[curMode] || curMode || '…') + '…' ]),
+						E('span', { 'class': 'zm-tt-runtxt' }, [ E('span', { 'class': 'zm-tt-run-t' }, 'Идёт тест: ' + (TEST_MODE_LABELS[curMode] || curMode || '…')), runNowEl ]),
 						E('button', { 'class': 'cbi-button cbi-button-remove', 'click': doStop }, 'Остановить')
 					]));
 				}
@@ -47874,6 +48033,8 @@ return view.extend({
 							statusData.quic_yt ? E('p', { 'class': 'zm-hint', 'style': 'flex:1 1 100%; margin:0' }, 'QUIC для YouTube тест не проверяет: адреса открываются по HTTPS через TCP. QUIC работает как настроен.') : E([]),
 							E('button', { 'class': 'cbi-button cbi-button-positive', 'disabled': busy ? '' : null, 'click': function() { var x = ytExtra(); doStart(x ? 'youtube:' + x : 'youtube'); } }, 'Проверить')
 						]);
+					} else if (t.gvo) {
+						ctl = gvoCtl();
 					} else if (t.domain) {
 						ctl = E('div', { 'class': 'zm-tt-ctl' }, [ domInput, E('button', { 'class': 'cbi-button cbi-button-positive', 'disabled': busy ? '' : null, 'click': startDomain }, 'Проверить') ]);
 						domInput.disabled = busy;
@@ -47893,7 +48054,7 @@ return view.extend({
 					var had = t.id === 'main' ? (status.has_results_v || status.has_results_flowseal || status.has_results_v_flowseal) : t.id === 'custom' ? (status.has_results_custom || hasAny('custom_yt') || status.has_results_custom_dom) : t.id === 'youtube' ? hasAny('youtube') : status['has_results_' + t.id];
 					return E('div', { 'class': 'zm-tt-tile' + (run ? ' zm-tt-active' : '') + (t.custom ? ' zm-tt-wide' : '') }, [
 						E('div', { 'class': 'zm-tt-head' }, [ E('b', {}, t.title), run ? zm.badge(true, 'идёт', '') : (had ? E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'есть результат') : E([])) ]),
-						E('p', { 'class': 'zm-hint' }, t.sub),
+						E('p', { 'class': 'zm-hint' }, t.gvo && gvoOpt.base === 'none' ? t.subNone : t.sub),
 						ctl
 					]);
 				})));
@@ -48047,7 +48208,8 @@ return view.extend({
 			function doStart(mode) {
 				if (busy) { zm.toast('Дождитесь окончания текущего теста', 'warning'); return; }
 				busy = true;
-				curMode = /^(domain|custom_dom|youtube|custom_yt):/.test(mode) ? mode.replace(/:.*$/, '') : mode;
+				runNow = null;
+				curMode = /^(domain|custom_dom|youtube|custom_yt|gvonly):/.test(mode) ? mode.replace(/:.*$/, '') : mode;
 				renderLaunch();
 				zm.toast('Запускаем тест…', 'warning');
 				zm.testAction('start', mode).then(function(res) {
@@ -48067,6 +48229,7 @@ return view.extend({
 				logEl.classList.add('zm-show');
 				zm.pollJob('strategy_test', logEl, function(ok) {
 					var done = curMode;
+					runNow = null;
 					busy = false;
 					curMode = '';
 					zm.toast(ok ? 'Тест завершён' : 'Тест завершился с ошибкой — смотрите журнал', ok ? 'info' : 'error');
@@ -48081,12 +48244,16 @@ return view.extend({
 						delete resData[done];
 						loadResults(status['has_results_' + done] ? done : resMode);
 					});
+				}, function(txt) {
+					var r = parseRun(txt), was = JSON.stringify(runNow);
+					runNow = r;
+					if (JSON.stringify(r) !== was) renderNow();
 				});
 			}
 
 			function hasAny(b) { return TEST_RESULT_MODES.some(function(m) { return testBase(m) === b && status['has_results_' + m]; }); }
 			function extraText(s) {
-				var g = /gv([123])/.exec(s), a = [];
+				var g = /gv([1-6])/.exec(s), a = [];
 				if (/(^| )ipid( |$)/.test(s)) a.push('маскировка подменных пакетов');
 				if (g) a.push('gVideo' + g[1]);
 				return a.length ? 'с дополнениями: ' + a.join(', ') : 'без дополнений';
@@ -48101,6 +48268,7 @@ return view.extend({
 					else if (p[0] === 'D') doms = (p[1] || '').split(' ').filter(Boolean);
 					else if (p[0] === 'X') out.ipblock = (p[1] || '').split(' ').filter(Boolean).map(function(d) { return d.replace(/_/g, ' '); });
 					else if (p[0] === 'O') out.extra = extraText(p[1] || '');
+					else if (p[0] === 'G') { out.gvBase = p[1] || ''; out.gvIpid = /(^| )ipid( |$)/.test(p[2] || ''); out.extra = out.gvBase === 'none' ? 'без основы, только googlevideo.com' : 'основа ' + out.gvBase + (out.gvIpid ? ' с маскировкой' : ''); }
 					else if (p[0] === 'S') {
 						var fails = (p[4] || '').split(' ').filter(Boolean), fm = {}, wm = {};
 						fails.forEach(function(f) { fm[f] = true; });
@@ -48173,7 +48341,40 @@ return view.extend({
 				return tsGate('youtube:' + name, go);
 			}
 
+			function applyGvo(name) {
+				var d = resData.gvonly;
+				if (!d || !d.gvBase) { zm.toast('Не удалось понять, с какой стратегией шёл тест — запустите его ещё раз', 'warning'); return; }
+				var g = /^gVideo([1-6])$/.exec(name), base = d.gvBase, ipid = d.gvIpid;
+				if (base === 'none') {
+					if (!g) return;
+					if (busy) { zm.toast('Дождитесь окончания теста', 'warning'); return; }
+					zm.toast('Включаем gVideo' + g[1] + ' и перезапускаем Zapret', 'warning');
+					return zm.zapretOptSet('gv:' + g[1]).then(function(r) {
+						if (!r || r.error) { zm.toast((r && r.error) || 'Роутер не ответил', 'error'); return; }
+						gvoNow = { base: gvoCur(), gv: String(r.gv || g[1]) };
+						zm.toast('Обход googlevideo.com включён — gVideo' + g[1] + '. Стратегия YouTube не менялась', 'info');
+						refreshAll();
+						renderLaunch();
+						renderResults();
+					}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
+				}
+				var key = 'youtube' + (ipid ? '_ipid' : '') + (g ? '_gv' + g[1] : '');
+				var what = base + (g ? ' + gVideo' + g[1] : ' без gVideo') + (ipid ? ', с маскировкой' : '');
+				return tsGate('youtube:' + base, function() {
+					zm.toast('Применяем ' + what + '…', 'warning');
+					zm.testAction('apply', key + '|' + base).then(function(r) {
+						if (!r || r.error) { zm.toast((r && r.error) || 'Роутер не ответил', 'error'); return; }
+						gvoNow = { base: base, gv: g ? g[1] : '' };
+						zm.toast('Применено: ' + what, 'info');
+						refreshAll();
+						renderLaunch();
+						renderResults();
+					}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
+				});
+			}
+
 			function applyStrategy(mode, name) {
+				if (mode === 'gvonly') return applyGvo(name);
 				if (testYt(mode)) return applyAsTested(mode, name);
 				var call;
 				if (mode === 'custom' || mode === 'custom_yt' || mode === 'custom_dom') {
@@ -48225,13 +48426,15 @@ return view.extend({
 				var key = mode + ':' + r.name, open = !!openRows[key], pct = r.tot ? Math.round(r.ok * 100 / r.tot) : 0;
 				var cls = isCtrl ? 'zm-tt-ctrl' : scoreCls(r, ctrl);
 				var canApply = !isCtrl && mode !== 'current';
+				var gm = mode === 'gvonly' && !isCtrl && resData.gvonly ? /^(?:gVideo([1-6])|без gVideo)$/.exec(r.name) : null;
+				var isNow = !!gm && (resData.gvonly.gvBase === 'none' || resData.gvonly.gvBase === gvoCur()) && (gm[1] || '') === gvoCurGv();
 				var head = E('div', { 'class': 'zm-tt-row-head', 'click': function() {
 					if (!r.doms.length) return;
 					openRows[key] = !openRows[key];
 					renderResults();
 				} }, [
 					E('span', { 'class': 'zm-tt-rank' }, [ isCtrl ? '—' : String(rank) ]),
-					E('span', { 'class': 'zm-tt-name', 'title': r.name }, [ isCtrl ? 'Без Zapret' : r.name ]),
+					E('span', { 'class': 'zm-tt-name', 'title': r.name }, [ isCtrl ? 'Без Zapret' : r.name, isNow ? E('span', { 'class': 'zm-tt-now' }, 'сейчас') : E([]) ]),
 					E('span', { 'class': 'zm-tt-bar' }, [ E('span', { 'class': 'zm-tt-fill ' + cls, 'style': 'width:' + pct + '%' }) ]),
 					E('span', { 'class': 'zm-tt-score ' + cls }, [ r.ok + ' / ' + r.tot ]),
 					canApply ? E('button', { 'class': 'cbi-button zm-tt-apply', 'click': function(ev) { ev.stopPropagation(); applyStrategy(mode, r.name); } }, 'Применить') : E('span', { 'class': 'zm-tt-apply-ph' }),
@@ -48290,7 +48493,7 @@ return view.extend({
 					var m = /(\d{1,2})\.(\d{1,2})\.(\d{4})\D+(\d{1,2}):(\d{2})/.exec(String(d.ts || '')), p2 = function(n) { return ('0' + n).slice(-2); };
 					var stamp = m ? m[3] + '-' + p2(m[2]) + '-' + p2(m[1]) + '_' + p2(m[4]) + '-' + m[5] : now.getFullYear() + '-' + p2(now.getMonth() + 1) + '-' + p2(now.getDate()) + '_' + p2(now.getHours()) + '-' + p2(now.getMinutes());
 					var who = String(si.model || si.hostname || 'router').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'router';
-					var what = { v_flowseal: 'v+flowseal', custom_dom: 'custom-sites' }[mode] || String(mode).replace(/^custom_yt/, 'custom-youtube').replace(/[^A-Za-z0-9+.-]+/g, '-');
+					var what = { v_flowseal: 'v+flowseal', custom_dom: 'custom-sites', gvonly: 'gvideo' }[mode] || String(mode).replace(/^custom_yt/, 'custom-youtube').replace(/[^A-Za-z0-9+.-]+/g, '-');
 					var a = E('a', { 'href': URL.createObjectURL(new Blob([ '\ufeff' + L.join('\r\n') + '\r\n' ], { type: 'text/plain;charset=utf-8' })), 'download': who + '_' + stamp + '_zapret-test-' + what + '.txt', 'style': 'display:none' });
 					document.body.appendChild(a);
 					a.click();
@@ -48344,7 +48547,8 @@ return view.extend({
 				var total = rows.length ? rows[0].tot : (d.control ? d.control.tot : 0);
 				var meta = [];
 				if (d.ts) meta.push('Проверено ' + d.ts);
-				if (resMode !== 'current') meta.push(rows.length + ' ' + (rows.length % 10 === 1 && rows.length % 100 !== 11 ? 'стратегия' : rows.length % 10 >= 2 && rows.length % 10 <= 4 && (rows.length % 100 < 12 || rows.length % 100 > 14) ? 'стратегии' : 'стратегий'));
+				if (resMode === 'gvonly') meta.push(rows.length + ' ' + (rows.length === 1 ? 'вариант' : rows.length < 5 ? 'варианта' : 'вариантов'));
+				else if (resMode !== 'current') meta.push(rows.length + ' ' + (rows.length % 10 === 1 && rows.length % 100 !== 11 ? 'стратегия' : rows.length % 10 >= 2 && rows.length % 10 <= 4 && (rows.length % 100 < 12 || rows.length % 100 > 14) ? 'стратегии' : 'стратегий'));
 				if (total) meta.push(total + ' адр.');
 				if (d.extra) meta.push(d.extra);
 				if (resMode === 'domain' && status.domains) meta.push(status.domains);
@@ -48491,9 +48695,12 @@ return view.extend({
 			var gv = { cur: status.gv || '', want: status.gv_want || '' };
 			var GV_OPTS = [
 				[ '', 'Выключен', '' ],
-				[ '1', 'gVideo1', 'Полный: fake с поддельным ClientHello google.com (badsum, ack −66000) и multidisorder по 9 точкам — 1, 2, 3, 5, 105, host+5, sld−1, endsld−5, endsld.' ],
-				[ '2', 'gVideo2 · лёгкий', 'Тот же fake, но multidisorder по 5 точкам — 1, sniext+2, host−1, midsld, endsld. Кэш-серверы YouTube не отбрасывают пакеты, а ТСПУ не видит аномалии. Пробуйте, если на первом варианте видео подвисает.' ],
-				[ '3', 'gVideo3 · wssize', 'Без fake: multidisorder по 2 точкам — 1 и midsld, плюс маленькое окно TCP на первые 8 пакетов (--wssize 1:1): устройство само отправляет начало соединения мелкими кусками. Старт видео может быть чуть медленнее. Пробуйте, если первые два варианта не помогли.' ]
+				[ '1', 'gVideo1', '' ],
+				[ '2', 'gVideo2', '' ],
+				[ '3', 'gVideo3', '' ],
+				[ '4', 'gVideo4', '' ],
+				[ '5', 'gVideo5', '' ],
+				[ '6', 'gVideo6', '' ]
 			];
 			function renderGv() {
 				gvCard.innerHTML = '';
@@ -48581,9 +48788,9 @@ return view.extend({
 
 			panels.youtube.appendChild(card);
 			panels.youtube.appendChild(logEl);
+			panels.youtube.appendChild(gvCard);
 			panels.youtube.appendChild(ipidCard);
 			panels.youtube.appendChild(quicCard);
-			panels.youtube.appendChild(gvCard);
 			refreshState();
 
 			if (!initial.started) {
@@ -50563,11 +50770,11 @@ html.zm-theme-dark .zm-sub-note { background: rgba(88,166,255,.1); border-color:
 .zm-quota { width: 100%; max-width: 160px; height: 5px; border-radius: 99px; background: rgba(0,0,0,.1); overflow: hidden; }
 .zm-quota > i { display: block; height: 100%; border-radius: 99px; background: #1a7f37; }
 .zm-quota.zm-quota-high > i { background: #cf222e; }
-.zm-seg { display: inline-flex; flex-wrap: wrap; max-width: 100%; box-sizing: border-box; padding: 3px; gap: 3px; border-radius: 9px; border: 1px solid rgba(0,0,0,.1); background: var(--background-color-low, #fafafa); }
-html.zm-theme-dark .zm-seg { background: #22272e; border-color: rgba(255,255,255,.12); }
-.zm-seg-item { padding: 5px 14px; border-radius: 7px; cursor: pointer; font-size: 13px; font-weight: 600; opacity: .7; transition: background .15s, opacity .15s; }
-.zm-seg-item:hover { opacity: 1; }
-.zm-seg-item.zm-active { opacity: 1; background: #1a7f37; color: #fff; cursor: default; }
+.zm-seg { display: inline-flex; flex-wrap: wrap; max-width: 100%; box-sizing: border-box; padding: 0; gap: 6px; border: 0; border-radius: 0; background: transparent; }
+.zm-seg-item { padding: 6px 14px; border-radius: 9px; border: 1px solid rgba(0,0,0,.16); background: rgba(0,0,0,.035); cursor: pointer; font-size: 13px; font-weight: 600; line-height: 1.35; box-sizing: border-box; transition: background .15s, border-color .15s, color .15s, box-shadow .15s; }
+.zm-seg-item:not(.zm-active):hover { border-color: rgba(26,127,55,.65); }
+.zm-seg-item.zm-active { border-color: #1a7f37; background: #1a7f37; color: #fff; cursor: default; }
+html.zm-theme-dark .zm-seg-item:not(.zm-active) { border-color: rgba(255,255,255,.16); background: rgba(255,255,255,.045); }
 .zm-sub-input { min-height: 72px !important; }
 .zm-svc { min-height: 58px; box-sizing: border-box; }
 .zm-svc-text { overflow: hidden; }
@@ -50799,17 +51006,35 @@ html.zm-theme-dark .zm-tt-tile { border-color: rgba(255,255,255,.12); background
 @media (max-width: 600px) { .zm-tz-time { font-size: 30px; } }
 .zm-tt-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .zm-tt-ctl { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 4px; }
-.zm-tt-opts { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 1 100%; }
+.zm-tt-opts { display: flex; flex-wrap: wrap; gap: 8px; flex: 1 1 100%; min-width: 0; }
 .zm-tt-opt { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; border: 1px solid rgba(127,127,127,.3); font-size: 13px; line-height: 1.3; cursor: pointer; user-select: none; -webkit-user-select: none; transition: background .15s, border-color .15s; }
 .zm-tt-opt input { margin: 0; accent-color: #2d5bff; cursor: inherit; }
 .zm-tt-opt:hover { border-color: rgba(45,91,255,.55); }
 .zm-tt-opt.zm-on { border-color: #2d5bff; background: rgba(45,91,255,.08); }
 .zm-tt-opt.zm-tt-opt-dis { opacity: .55; cursor: default; }
-.zm-tt-gv { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; flex: 1 1 100%; }
+.zm-tt-gv { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; flex: 1 1 100%; min-width: 0; }
 .zm-tt-gv-l { font-size: 13px; font-weight: 600; }
+.zm-gvo-base { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: 1 1 100%; min-width: 0; }
+.zm-gvo-base .zm-gvo-sel { width: auto; min-width: 150px; max-width: 100%; }
+.zm-tt-runtxt { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.zm-tt-run-t { display: inline-flex; align-items: center; gap: 9px; font-weight: 700; }
+.zm-tt-run-t::before { content: ""; width: 9px; height: 9px; border-radius: 50%; background: #2d5bff; background: var(--a1, #2d5bff); flex: 0 0 auto; animation: zm-tt-pulse 1.4s ease-in-out infinite; }
+@keyframes zm-tt-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.7); } }
+.zm-tt-nowbox { display: flex; flex-direction: column; gap: 7px; font-size: 13px; font-weight: 400; min-width: 0; }
+.zm-tt-now-o { font-size: 12px; font-weight: 600; opacity: .7; }
+.zm-tt-now-l { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.zm-tt-now-l b { font-size: 15px; font-weight: 700; overflow-wrap: anywhere; }
+.zm-tt-now-n { font-size: 12px; opacity: .7; white-space: nowrap; }
+.zm-tt-now-bar { height: 6px; max-width: 560px; border-radius: 999px; background: rgba(127,127,127,.22); overflow: hidden; }
+.zm-tt-now-fill { display: block; height: 100%; border-radius: inherit; background: #2d5bff; background: var(--a1, #2d5bff); transition: width .6s ease; }
+.zm-tt-now-tags { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.zm-tt-now-tag { padding: 3px 9px; border-radius: 999px; border: 1px solid rgba(127,127,127,.38); background: rgba(127,127,127,.1); font: 600 12px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; animation: zm-tt-tagin .3s ease both; }
+@keyframes zm-tt-tagin { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.zm-tt-now { display: inline-block; margin-left: 8px; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; vertical-align: 1px; color: #1a7f37; background: rgba(46,160,67,.14); }
+@media (max-width: 600px) { .zm-gvo-base .zm-gvo-sel { flex: 1 1 170px; min-width: 0; } }
 .zm-tt-gv .zm-seg.zm-tt-opt-dis { opacity: .55; pointer-events: none; }
 .zm-tt-gv .zm-seg-item { min-width: 34px; text-align: center; }
-@media (max-width: 600px) { .zm-tt-gv .zm-seg { flex: 1 1 100%; flex-wrap: nowrap; } .zm-tt-gv .zm-seg-item { flex: 1 1 0; min-width: 0; } }
+@media (max-width: 600px) { .zm-tt-gv .zm-seg { flex: 1 1 100%; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); min-width: 0; } .zm-tt-gv .zm-seg-item { min-width: 0; padding: 6px 2px; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } }
 .zm-tt-all { flex: 1 1 100%; margin: 0; padding: 8px 12px; border-radius: 10px; font-size: 12.5px; line-height: 1.45; background: rgba(45,91,255,.08); border: 1px solid rgba(45,91,255,.25); }
 .zm-tt-all b { color: #2d5bff; }
 html.zm-theme-dark .zm-tt-all b { color: #8fb0ff; }
@@ -61099,7 +61324,7 @@ function toast(message, kind, duration) {
 
 var RADIO = [
 	[ 'record', 'Record', 'rr_main96', 'hits' ], [ 'russian_hits', 'Russian Hits', 'russianhits96', 'hits' ], [ 'russian_mix', 'Russian Mix', 'rus96', 'hits' ],
-	[ 'all_timers', 'Вечные хиты', 'alltimers96', 'hits' ], [ 'remix', 'Remix', 'rmx96', 'hits' ], [ 'mashup', 'Mashup', 'mashup96', 'hits' ],
+	[ 'all_timers', 'Вечные Хиты', 'alltimers96', 'hits' ], [ 'remix', 'Remix', 'rmx96', 'hits' ], [ 'mashup', 'Mashup', 'mashup96', 'hits' ],
 	[ 'radio_80', 'Радио 80-х', '198096', 'retro' ], [ 'superdiskoteka_90', 'Радио 90-х', 'sd9096', 'retro' ], [ 'radio_00', 'Радио 00-х', '200096', 'retro' ], [ 'radio_10', 'Радио 10-х', '201096', 'retro' ],
 	[ 'edm', 'EDM', 'club96', 'house' ], [ 'house_hits', 'House Hits', 'househits96', 'house' ], [ 'future_house', 'Future House', 'fut96', 'house' ],
 	[ 'tech_house', 'Tech House', 'techouse96', 'house' ], [ 'deep', 'Deep', 'deep96', 'house' ],
@@ -61129,23 +61354,23 @@ var RADIO = [
 	[ 'o_maxhls', 'Maximum', 'https://hls-01-maximum.hostingradio.ru/maximum/playlist.m3u8', 'rock' ],
 	[ 'o_rockarsenal', 'Rock Arsenal', 'https://online.rockarsenal.ru/rockarsenal_aacplus', 'rock' ],
 	[ 'o_jazz24', 'Jazz24', 'https://knkx-live-a.edge.audiocdn.com/6285_256k', 'jazz' ],
-	[ 'z_pop', 'Pop', 'https://abs.zaycev.fm/pop256k', 'zaycev' ],
-	[ 'z_club', 'Club', 'https://abs.zaycev.fm/club256k', 'zaycev' ],
-	[ 'z_rock', 'NewRock', 'https://abs.zaycev.fm/rock256k', 'zaycev' ],
-	[ 'z_disco', 'Disco', 'https://abs.zaycev.fm/disco256k', 'zaycev' ],
-	[ 'z_shanson', 'Shanson', 'https://abs.zaycev.fm/shanson256k', 'zaycev' ],
-	[ 'z_rus', 'Rus', 'https://abs.zaycev.fm/rus256k', 'zaycev' ],
-	[ 'z_rnb', 'RnB', 'https://abs.zaycev.fm/rnb256k', 'zaycev' ],
-	[ 'z_relax', 'Relax', 'https://abs.zaycev.fm/relax256k', 'zaycev' ],
-	[ 'z_zaychata', 'Zaychata', 'https://abs.zaycev.fm/zaychata256k', 'zaycev' ],
+	[ 'z_pop', 'Популярная Музыка', 'https://abs.zaycev.fm/pop256k', 'zaycev' ],
+	[ 'z_rus', 'Русская Музыка', 'https://abs.zaycev.fm/rus256k', 'zaycev' ],
 	[ 'z_kpop', 'K-Pop', 'https://abs.zaycev.fm/kpop256k', 'zaycev' ],
+	[ 'z_disco', 'Диско', 'https://abs.zaycev.fm/disco256k', 'zaycev' ],
+	[ 'z_love', 'Романтика', 'https://abs.zaycev.fm/love256k', 'zaycev' ],
+	[ 'z_shanson', 'Шансон', 'https://abs.zaycev.fm/shanson256k', 'zaycev' ],
+	[ 'z_club', 'Клубная Музыка', 'https://abs.zaycev.fm/club256k', 'zaycev' ],
+	[ 'z_bass', 'Dubstep & Trap', 'https://abs.zaycev.fm/bass256k', 'zaycev' ],
+	[ 'z_rnb', 'R’n’B', 'https://abs.zaycev.fm/rnb256k', 'zaycev' ],
 	[ 'z_rap', 'Rap', 'https://abs.zaycev.fm/rap256k', 'zaycev' ],
-	[ 'z_metal', 'Metal', 'https://abs.zaycev.fm/metal256k', 'zaycev' ],
-	[ 'z_bass', 'Bass', 'https://abs.zaycev.fm/bass256k', 'zaycev' ],
-	[ 'z_love', 'Love', 'https://abs.zaycev.fm/love256k', 'zaycev' ],
-	[ 'z_rurock', 'RuRock', 'https://abs.zaycev.fm/rurock256k', 'zaycev' ],
-	[ 'z_folk', 'Folk', 'https://abs.zaycev.fm/folk256k', 'zaycev' ],
-	[ 'z_classic', 'Classic', 'https://abs.zaycev.fm/classic256k', 'zaycev' ],
+	[ 'z_relax', 'Релакс Музыка', 'https://abs.zaycev.fm/relax256k', 'zaycev' ],
+	[ 'z_classic', 'Классическая Музыка', 'https://abs.zaycev.fm/classic256k', 'zaycev' ],
+	[ 'z_rock', 'New Rock', 'https://abs.zaycev.fm/rock256k', 'zaycev' ],
+	[ 'z_rurock', 'Русский Рок', 'https://abs.zaycev.fm/rurock256k', 'zaycev' ],
+	[ 'z_folk', 'Фолк Рок', 'https://abs.zaycev.fm/folk256k', 'zaycev' ],
+	[ 'z_metal', 'Heavy Metal', 'https://abs.zaycev.fm/metal256k', 'zaycev' ],
+	[ 'z_zaychata', 'Зайчата', 'https://abs.zaycev.fm/zaychata256k', 'zaycev' ],
 ];
 var RADIO_SETS = [ { id: 'r', name: 'Радио Record' }, { id: 'z', name: 'Zaycev FM' }, { id: 'o', name: 'Разные станции' } ];
 var HLS_SRC = [ 'https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.light.min.js', 'https://unpkg.com/hls.js@1/dist/hls.light.min.js' ];
@@ -63709,7 +63934,7 @@ html[data-theme="matrix"] .zmw-side .zmw-mem-val.zmw-mem-fit { font-size: 10px; 
 .zmw-radio-vol { display: flex; align-items: center; gap: 10px; margin-top: 4px; padding: 6px 7px 1px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--muted); }
 .zmw-radio-vol input { flex: 1; min-width: 0; margin: 0; accent-color: var(--a1); }
 .zmw-radio-voltxt { width: 36px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-2); }
-@media (max-width: 520px) { .zmw-radio-list { grid-auto-columns: minmax(0, 1fr); } .zmw-radio-menu { width: auto; } }
+@media (max-width: 520px) { .zmw-radio-list { grid-auto-columns: minmax(0, 1fr); } .zmw-radio-menu { width: auto; } .zmw-radio-st span:last-child { white-space: normal; overflow: visible; overflow-wrap: anywhere; } }
 @media (prefers-reduced-motion: reduce) {
 	html .zmw-radio-play .zmw-radio-eq i, html .zmw-radio-wait .zmw-radio-eq i, html .zmw-radio-st.zmw-radio-live .zmw-radio-eq i { animation-duration: 1s !important; animation-iteration-count: infinite !important; }
 	html .zmw-radio-play .zmw-radio-eq i:nth-child(2), html .zmw-radio-st.zmw-radio-live .zmw-radio-eq i:nth-child(2) { animation-duration: .8s !important; }
@@ -65571,7 +65796,7 @@ html.zm-dust-on:not(.zm-theme-dark) { --zm-glass-in: 44%; --zm-glass-in3: 52%; -
 html.zm-dust-on[data-theme="ink"] { --zm-pan: #ffffff; }
 html.zm-dust-on[data-theme="bento"] { --zm-glass-in: 62%; --zm-glass-in3: 66%; }
 html.zm-dust-on[data-theme="retro"] { --zm-glass-in: 62%; --zm-glass-in3: 66%; }
-html.zm-dust-on:not(.zm-theme-dark)[data-theme] #zmw-view .zm-card :is(.zm-st-stat, .zm-awg-if, .zm-svc:not(.zm-svc-on), .zm-node:not(.zm-active), .zm-ab-tile, .zm-rm-tile, .zm-th-rows, .zm-fo-card, .zm-seg, .zm-tt-tile, .zm-tt-row, .zm-si-box, .zm-dom-panel, .zm-sb-left, .zm-lists-now, .zm-dns-item, .zm-link-row, .zm-ab-desc, .zm-hide-quick, .zm-current-banner.zm-current-empty) {
+html.zm-dust-on:not(.zm-theme-dark)[data-theme] #zmw-view .zm-card :is(.zm-st-stat, .zm-awg-if, .zm-svc:not(.zm-svc-on), .zm-node:not(.zm-active), .zm-ab-tile, .zm-rm-tile, .zm-th-rows, .zm-fo-card, .zm-seg-item:not(.zm-active), .zm-tt-tile, .zm-tt-row, .zm-si-box, .zm-dom-panel, .zm-sb-left, .zm-lists-now, .zm-dns-item, .zm-link-row, .zm-ab-desc, .zm-hide-quick, .zm-current-banner.zm-current-empty) {
 	background-color: color-mix(in srgb, var(--zm-pan) var(--zm-glass-in), transparent);
 	backdrop-filter: none; -webkit-backdrop-filter: none;
 	transition: background-color .35s ease;
@@ -65736,6 +65961,14 @@ html[data-theme="metro"] .zmw-nav-item.zmw-active .zmw-nav-ico { color: #ffffff;
 html[data-theme="metro"] #zmw-view .zm-card h3::before { width: 12px; height: 12px; border-radius: 50%; background: #ffffff; border: 3px solid #d6083b; box-sizing: border-box; }
 html[data-theme="metro"] #zmw-view .cbi-button-remove, html[data-theme="metro"] #zmw-view .cbi-button-remove:hover, html[data-theme="metro"] .zm-dock .cbi-button-remove, html[data-theme="metro"] .zmw-modal .cbi-button-remove { background: #fde3e6; color: #a4062c; }
 html[data-theme="metro"] .zmw-brand-name b { color: #d6083b; }
+#zmw-view .zm-seg, html[data-theme] #zmw-view .zm-seg { background: transparent; border: 0; padding: 0; gap: 6px; border-radius: 0; box-shadow: none; outline: none; }
+#zmw-view .zm-seg-item { border: 1px solid var(--border-2); border-color: color-mix(in srgb, var(--text) 15%, transparent); background: var(--surface-2); color: var(--text); }
+#zmw-view .zm-seg-item:not(.zm-active):hover { border-color: var(--a1); color: var(--text); }
+#zmw-view .zm-seg-item.zm-active { border-color: transparent; }
+html[data-theme="ink"] #zmw-view .zm-seg-item { border: 2px solid #0a0a0a; background: #ffffff; }
+html[data-theme="ink"] #zmw-view .zm-seg-item.zm-active { border-color: #0a0a0a; outline: none; box-shadow: 2px 2px 0 #0a0a0a; }
+html[data-theme="retro"] #zmw-view .zm-seg-item { border: 2px solid; border-color: #ffffff #808080 #808080 #ffffff; background: #c0c0c0; color: #000000; }
+html[data-theme="retro"] #zmw-view .zm-seg-item.zm-active { border-color: #808080 #ffffff #ffffff #808080; background: #000080; color: #ffffff; }
 ZM_INSTALLER_EOF
 cat > '/www/zm-webui.html' << 'ZM_INSTALLER_EOF'
 <!doctype html>
