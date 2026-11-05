@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.004
+# Version: 5.026
 ZM_VERSION_EOF
 set -e
 
@@ -142,6 +142,8 @@ ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/h
 ZM_STATS_URL="http://89.191.225.101:8787"
 ZM_STATS_OFF="/etc/zapret-manager.nostats"
 ZM_STATS_IDF="/etc/zapret-manager.id"
+ZM_TERMS_FILE="/etc/zapret-manager.terms"
+ZM_TERMS_VER=1
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
 MT_URL_ITDOG="${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/MagiTrickle/configAD.yaml"
@@ -2022,6 +2024,19 @@ ui_nav_set() {
 	printf '{"ok":true,"hidden":"%s"}\n' "$(ui_nav_get)"
 }
 
+terms_get() {
+	local v=""
+	[ -s "$ZM_TERMS_FILE" ] && read -r v _ < "$ZM_TERMS_FILE"
+	printf '{"accepted":%s,"ver":%s}\n' "$([ "$v" = "$ZM_TERMS_VER" ] && echo true || echo false)" "$ZM_TERMS_VER"
+}
+terms_accept() {
+	printf '%s %s\n' "$ZM_TERMS_VER" "$(date +%s)" > "$ZM_TERMS_FILE.zm-new" 2>/dev/null && mv -f "$ZM_TERMS_FILE.zm-new" "$ZM_TERMS_FILE" 2>/dev/null || {
+		rm -f "$ZM_TERMS_FILE.zm-new"
+		echo '{"error":"не удалось сохранить отметку — проверьте свободное место на роутере"}'
+		return 1
+	}
+	printf '{"ok":true}\n'
+}
 ui_flags_get() {
 	local f="$ZM_STATE_DIR/ui.flags" out="" sep="" k
 	if [ -s "$f" ]; then
@@ -2043,26 +2058,37 @@ ui_flag_set() {
 }
 
 UI_RADIO_FILE="$ZM_STATE_DIR/ui.radio"
+_ui_radio_id() { printf '%s' "$1" | grep -qxE '[a-z0-9_]{1,32}'; }
+_ui_radio_fav() { [ "${#1}" -le 2000 ] && printf '%s' "$1" | grep -qxE '[a-z0-9_]{1,32}(,[a-z0-9_]{1,32})*'; }
 ui_radio_get() {
-	local st="" vol="" show=""
-	[ -s "$UI_RADIO_FILE" ] && read -r st vol show < "$UI_RADIO_FILE"
-	printf '%s' "$st" | grep -qE '^[a-z0-9_]{1,32}$' || st=""
+	local st="" vol="" show="" prev="" fav=""
+	[ -s "$UI_RADIO_FILE" ] && read -r st vol show prev fav < "$UI_RADIO_FILE"
+	_ui_radio_id "$st" || st=""
 	case "$vol" in ''|*[!0-9]*) vol=70 ;; esac
 	[ "$vol" -le 100 ] 2>/dev/null || vol=100
 	[ "$show" = 0 ] || show=1
-	printf '{"station":"%s","volume":%s,"show":%s}\n' "$st" "$vol" "$([ "$show" = 1 ] && echo true || echo false)"
+	_ui_radio_id "$prev" || prev=""
+	_ui_radio_fav "$fav" && fav="\"$(printf '%s' "$fav" | sed 's/,/","/g')\"" || fav=""
+	printf '{"station":"%s","volume":%s,"show":%s,"prev":"%s","fav":[%s]}\n' "$st" "$vol" "$([ "$show" = 1 ] && echo true || echo false)" "$prev" "$fav"
 }
 ui_radio_set() {
-	local st vol show x
-	read -r st vol show x <<EOF_ZMR
+	local st vol show prev fav x ost ovol oshow oprev ofav
+	read -r st vol show prev fav x <<EOF_ZMR
 $1
 EOF_ZMR
-	printf '%s' "$st" | grep -qE '^[a-z0-9_]{1,32}$' || { echo '{"error":"неверная станция"}'; return 1; }
+	_ui_radio_id "$st" || { echo '{"error":"неверная станция"}'; return 1; }
 	case "$vol" in ''|*[!0-9]*) echo '{"error":"неверная громкость"}'; return 1 ;; esac
 	[ "$vol" -le 100 ] || { echo '{"error":"неверная громкость"}'; return 1; }
 	case "$show" in 0|1) ;; *) echo '{"error":"неверный параметр"}'; return 1 ;; esac
+	if [ -z "$prev" ]; then
+		[ -s "$UI_RADIO_FILE" ] && read -r ost ovol oshow oprev ofav < "$UI_RADIO_FILE"
+		prev="${oprev:--}"; fav="${ofav:--}"
+	fi
+	[ "$prev" = - ] || _ui_radio_id "$prev" || prev=-
+	[ -n "$fav" ] || fav=-
+	[ "$fav" = - ] || _ui_radio_fav "$fav" || { echo '{"error":"неверный список избранного"}'; return 1; }
 	mkdir -p "$ZM_STATE_DIR"
-	printf '%s %s %s\n' "$st" "$vol" "$show" > "$UI_RADIO_FILE.zm" && mv -f "$UI_RADIO_FILE.zm" "$UI_RADIO_FILE"
+	printf '%s %s %s %s %s\n' "$st" "$vol" "$show" "$prev" "$fav" > "$UI_RADIO_FILE.zm" && mv -f "$UI_RADIO_FILE.zm" "$UI_RADIO_FILE"
 	ui_radio_get
 }
 
@@ -3924,7 +3950,7 @@ hosts_auto_tick() {
 		rm -f "$tmp"
 	elif cat "$tmp" > "$HOSTS_FILE" 2>/dev/null; then
 		rm -f "$tmp"
-		/etc/init.d/dnsmasq restart >/dev/null 2>&1
+		_hosts_dns_reload
 		logger -t zapret-manager "Hosts: список $(_hosts_src_name "$src") обновлён$([ -s "$ex" ] && echo ", ваши записи поверх него сохранены")"
 	else
 		rm -f "$tmp" "$ex"; rmdir "$lk"
@@ -3949,6 +3975,15 @@ hosts_status() {
 	printf '],"extra":%s}\n' "$(_hosts_extra)"
 }
 
+_hosts_dns_reload() {
+	local p
+	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	sleep 1
+	pidof dnsmasq >/dev/null 2>&1 || { /etc/init.d/dnsmasq start >/dev/null 2>&1; sleep 1; }
+	p="$(cat "$AB_FREE_PID" 2>/dev/null)"
+	[ -n "$p" ] && kill -HUP "$p" 2>/dev/null
+	return 0
+}
 hosts_toggle() {
 	local block="$1" content enabled
 	content="$(_hosts_block "$block")" || { echo '{"error":"неизвестный блок"}'; return 1; }
@@ -3958,7 +3993,7 @@ hosts_toggle() {
 	else
 		printf '%s\n' "$content" | _hosts_add_lines
 	fi
-	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	_hosts_dns_reload
 	printf '{"ok":true,"block":"%s","enabled":%s}\n' "$(esc "$block")" "$([ "$enabled" = "true" ] && echo false || echo true)"
 }
 
@@ -3992,7 +4027,7 @@ hosts_replace_geohide() {
 		echo '{"error":"не удалось записать /etc/hosts — проверьте свободное место на роутере"}'
 		return 1
 	fi
-	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	_hosts_dns_reload
 	if [ -s "$HOSTS_AUTO" ]; then
 		_hosts_base_put "$HOSTS_FILE"
 		_hosts_auto_put "$region" "$(date +%s)" ""
@@ -4003,7 +4038,7 @@ hosts_replace_geohide() {
 hosts_reset() {
 	[ -f "$HOSTS_AUTO" ] && { rm -f "$HOSTS_AUTO" "$HOSTS_BASE"; _hosts_auto_cron off; }
 	printf '%s\n' "127.0.0.1	localhost" "" "::1	localhost ip6-localhost ip6-loopback" "ff02::1 ip6-allnodes" "ff02::2 ip6-allrouters" > "$HOSTS_FILE"
-	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	_hosts_dns_reload
 	printf '{"ok":true}\n'
 }
 
@@ -4028,7 +4063,7 @@ hosts_file_set() {
 	cp "$HOSTS_FILE" "$HOSTS_FILE.zm-bak" 2>/dev/null
 	printf '%s' "$content" > "$HOSTS_FILE"
 	[ -n "$(tail -c 1 "$HOSTS_FILE" 2>/dev/null)" ] && echo >> "$HOSTS_FILE"
-	/etc/init.d/dnsmasq restart >/dev/null 2>&1
+	_hosts_dns_reload
 	printf '{"ok":true}\n'
 }
 
@@ -5154,22 +5189,21 @@ _zpg_menu_filter() {
 	return 0
 }
 _zpg_rebuild() {
-	local b=/www/luci-static/resources/zapret-manager/build.txt old new f
-	old="$(head -n1 "$b" 2>/dev/null)"
-	case "$old" in ''|*[!0-9]*) old="" ;; esac
+	local b=/www/luci-static/resources/zapret-manager/build.txt new f
 	new="$(date +%s)"
-	for f in /www/luci-static/resources/zapret-manager/common.js /www/luci-static/resources/bytetube/common.js; do
-		[ -f "$f" ] || continue
-		sed -i "s/__ZM_BUILD__/$new/g" "$f"
-		[ -n "$old" ] && sed -i "s/$old/$new/g" "$f"
-	done
 	{
 		echo "$new"
 		for f in /www/luci-static/resources/zapret-manager/*.js /www/luci-static/resources/bytetube/*.js "$ZPG_V"/*.js "$ZPG_V"/*.css /www/luci-static/resources/view/bytetube/*.css; do
 			[ -f "$f" ] && echo "${f#/www/luci-static/resources/}"
 		done
-	} > "$b.zm" 2>/dev/null && mv -f "$b.zm" "$b" && chmod 0644 "$b"
-	rm -f /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null
+		:
+	} > "$b.zm" 2>/dev/null || { rm -f "$b.zm"; return 0; }
+	for f in /www/luci-static/resources/zapret-manager/common.js /www/luci-static/resources/bytetube/common.js; do
+		[ -f "$f" ] || continue
+		sed -i -e "s/__ZM_BUILD__/$new/g" -e "s/var ZM_BUILD = '[0-9]*'/var ZM_BUILD = '$new'/" -e "s/test('[0-9]*') ? '?v=[0-9]*'/test('$new') ? '?v=$new'/" "$f"
+	done
+	mv -f "$b.zm" "$b" && chmod 0644 "$b"
+	rm -f "$b.zm" /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null
 	return 0
 }
 _zpg_enforce() {
@@ -9309,30 +9343,6 @@ _test_detail_add() {
 	printf 'S|%s|%s|%s|%s|%s\n' "$(printf '%s' "$name" | tr '|' '/')" "${ok:-0}" "${tot:-0}" "$fails" "$whys" >> "$f"
 }
 
-_test_ipblock() {
-	awk -F '|' '
-		function flush(   i, h) {
-			if (ns >= 4) for (i = 1; i <= nd; i++) { h = d[i]; if (ip[h] == ns && !seen[h]++) out = out (out == "" ? "" : " ") h }
-			ns = 0; split("", ip)
-		}
-		$1 == "D" { flush(); nd = split($2, d, " ") }
-		$1 == "S" {
-			ns++
-			n = split($6, a, " ")
-			for (i = 1; i <= n; i++) { k = a[i]; r = a[i]; sub(/:[^:]*$/, "", k); sub(/^.*:/, "", r); if (r == "ip") ip[k]++ }
-		}
-		END { flush(); print out }' "$1" 2>/dev/null
-}
-
-_test_ipblock_note() {
-	local d="$1" x
-	x="$(_test_ipblock "$d")"
-	[ -n "$x" ] || return 0
-	printf 'X|%s\n' "$x" >> "$d"
-	echo "!! До этих адресов соединение не устанавливается вообще, ни с одной стратегией: $(printf '%s' "$x" | sed 's/_/ /g; s/ \([^ ]\)/, \1/g')"
-	echo "   Их блокируют по IP-адресу — Zapret тут не поможет, для них нужен VPN (Forkozz, Steer, Mixomo)"
-}
-
 _test_tags() {
 	awk '{ sub(/^[ \t]+/, ""); sub(/[ \t\r]+$/, "") } /^#/ && !s[$0]++ { printf "%s%s", (n++ ? " · " : ""), $0 } END { if (n) print "" }'
 }
@@ -9611,7 +9621,6 @@ _do_test_run_core() {
 		_test_run_set "$urls" "$name" "$results" "$detail"
 	done
 
-	[ -f "$TEST_STOP_FLAG" ] || _test_ipblock_note "$detail"
 
 	ZT_STOPPED=""
 	if [ -f "$TEST_STOP_FLAG" ]; then
@@ -12427,7 +12436,7 @@ do_versions_refresh() {
 		add "$(_ver_item hev-socks5-tunnel "$(_awg_pkg_ver hev-socks5-tunnel)" "$(_vl _ver_feed_latest hev-socks5-tunnel)")"
 	fi
 	if _awg_installed; then
-		add "$(_ver_item AmneziaWG "$(_awg_pkg_ver amneziawg-tools)" '')"
+		v="$(_awg_pkg_ver amneziawg-tools)"; add "$(_ver_item AmneziaWG "$v" "$v")"
 	fi
 	if _pkg_is_installed https-dns-proxy; then
 		add "$(_ver_item 'DNS over HTTPS (https-dns-proxy)' "$(_awg_pkg_ver https-dns-proxy)" "$(_vl _ver_feed_latest https-dns-proxy)")"
@@ -14627,16 +14636,23 @@ do_doh_install() {
 	echo "==> Устанавливаем https-dns-proxy и luci-app-https-dns-proxy"
 	$INSTALL https-dns-proxy luci-app-https-dns-proxy >&2 || { echo "ОШИБКА установки"; return 1; }
 	_doh_force_apply
-	local p r
+	local p r ok=""
 	for p in quad9 cloudflare google; do
 		echo "==> Включаем DNS через $(_doh_name "$p")"
 		if r="$(_doh_apply "$p")"; then
 			_doh_fo_put pref "$p"; _doh_fo_put active "$p"; rm -f "$DOH_FO_STATE"
 			echo "   ✓ DNS роутера идёт через $(_doh_name "$p")"
+			ok=1
 			break
 		fi
 		echo "   ! $(printf '%s' "$r" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')"
 	done
+	if [ -z "$ok" ]; then
+		doh_power off >/dev/null 2>&1 || { /etc/init.d/https-dns-proxy stop >/dev/null 2>&1; /etc/init.d/dnsmasq restart >/dev/null 2>&1; }
+		echo "!! Ни один из серверов DoH не заработал — похоже, провайдер их блокирует. Чтобы интернет не остался без DNS, DoH выключен: DNS идёт через обычные серверы"
+		echo "==> DNS over HTTPS установлен, но выключен — выберите ниже другой сервер и нажмите «Запустить»"
+		return 0
+	fi
 	_zo_doh_follow
 	echo "==> Готово, DNS over HTTPS установлен — сервер можно сменить ниже"
 }
@@ -21840,21 +21856,35 @@ _st_hp_build() {
 	mv -f "$hp.$$" "$hp" 2>/dev/null
 }
 
+_st_over_dev() {
+	local n t d
+	case "$ST_SEC" in s[2-9]) ;; *) return 1 ;; esac
+	[ -s "$STL_SPEC" ] && stl_running || return 1
+	n="${ST_SEC#s}"
+	t="$(sed -n "s/.*\"zm_vpn$n\":{\"kind\":\"tunnel\",\"over\":\"\([^\"]*\)\".*/\1/p" "$STL_SPEC" | head -n 1)"
+	[ -n "$t" ] || t="$(sed -n "s/.*\"zmv${n}_[A-Za-z0-9]*\":{\"kind\":\"tunnel\",\"over\":\"\([^\"]*\)\".*/\1/p" "$STL_SPEC" | head -n 1)"
+	printf '%s' "$t" | grep -qE '^[A-Za-z0-9_.-]{1,32}$' || return 1
+	d="$(sed -n "s/.*\"$t\":{[^}]*\"device\":\"\([^\"]*\)\".*/\1/p" "$STL_SPEC" | head -n 1)"
+	printf '%s' "$d" | grep -qE '^[A-Za-z0-9_.-]{1,15}$' && [ -d "/sys/class/net/$d" ] || return 1
+	[ -w "/proc/sys/net/ipv4/conf/$d/rp_filter" ] && echo 2 > "/proc/sys/net/ipv4/conf/$d/rp_filter" 2>/dev/null
+	printf '%s' "$d"
+}
 _st_tcp_one() {
-	local h="$1" p="$2" to="$3" out="$4"
-	case "$h" in *:*) h="[$h]" ;; esac
-	( curl -s -o /dev/null --noproxy '*' --connect-timeout "$to" --max-time "$to" -w '%{time_connect} %{time_namelookup}\n' "http://$h:$p/" 2>/dev/null > "$out.a" ) &
-	( curl -s -o /dev/null --noproxy '*' --connect-timeout "$to" --max-time "$to" -w '%{time_connect} %{time_namelookup}\n' "http://$h:$p/" 2>/dev/null > "$out.b" ) &
+	local h="$1" p="$2" to="$3" out="$4" via=""
+	case "$h" in *:*) h="[$h]" ;; *) [ -n "$5" ] && via="--interface $5" ;; esac
+	( curl -s -o /dev/null --noproxy '*' $via --connect-timeout "$to" --max-time "$to" -w '%{time_connect} %{time_namelookup}\n' "http://$h:$p/" 2>/dev/null > "$out.a" ) &
+	( curl -s -o /dev/null --noproxy '*' $via --connect-timeout "$to" --max-time "$to" -w '%{time_connect} %{time_namelookup}\n' "http://$h:$p/" 2>/dev/null > "$out.b" ) &
 	wait
 	cat "$out.a" "$out.b" 2>/dev/null | awk '{ c = $1 + 0; n = $2 + 0; if (c > 0) { if (n > 0 && n < c) c -= n; m = int(c * 1000 + 0.5); if (m < 1) m = 1; if (!b || m < b) b = m } } END { if (b) print b }' > "$out"
 	rm -f "$out.a" "$out.b"
 }
 
 steer_sub_tcp() {
-	local t dir list="" i p f hp retry="" out="" sep="" ms
+	local t dir list="" i p f hp retry="" out="" sep="" ms ov
 	_zm_has curl || { echo '{"error":"на роутере нет curl"}'; return 1; }
 	[ -s "$ST_SUB" ] && _st_vpn_ok && t="$(_st_nodes)" || { echo '{"error":"подписки нет"}'; return 1; }
 	_st_hp_build
+	ov="$(_st_over_dev)"
 	dir="$ST_RUN/tcp.$$"; mkdir -p "$dir"
 	for i in $(printf '%s' "$1" | tr ',' ' '); do
 		case "$i" in ''|*[!0-9]*) continue ;; esac
@@ -21864,14 +21894,14 @@ steer_sub_tcp() {
 		[ -n "$1" ] && [ "$p" != hysteria2 ] && hp="$(awk -F'\t' -v m="$p" -v n="$f" '$1 == m && $2 == n { print $3, $4; exit }' "$ST_SUB_NODES.hp" 2>/dev/null)"
 		if [ -z "$hp" ]; then echo udp > "$dir/$i.k"; list="$list $i"; continue; fi
 		echo "$hp" > "$dir/$i.k"
-		_st_tcp_one "${hp% *}" "${hp#* }" 3 "$dir/$i" &
+		_st_tcp_one "${hp% *}" "${hp#* }" 3 "$dir/$i" "$ov" &
 		list="$list $i"
 	done
 	wait
 	for i in $list; do
 		[ "$(cat "$dir/$i.k")" != udp ] && [ ! -s "$dir/$i" ] || continue
 		hp="$(cat "$dir/$i.k")"
-		_st_tcp_one "${hp% *}" "${hp#* }" 6 "$dir/$i" &
+		_st_tcp_one "${hp% *}" "${hp#* }" 6 "$dir/$i" "$ov" &
 		retry=1
 	done
 	[ -n "$retry" ] && wait
@@ -22162,11 +22192,12 @@ _st_ping_cron() {
 }
 
 _st_ping_measure() {
-	local t dir hid i proto pidx fidx name rest p hp k n=0 hy=0 f ms j tab kd
+	local t dir hid i proto pidx fidx name rest p hp k n=0 hy=0 f ms j tab kd ov
 	[ -s "$ST_SUB" ] && _st_vpn_ok && t="$(_st_nodes)" || return 1
 	_zm_has curl || return 1
 	tab="$(printf '\t')"
 	_st_hp_build
+	ov="$(_st_over_dev)"
 	hid=" $(cut -f1,5 "$t" | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | tr '\n' ' ') "
 	dir="$ST_RUN/ping.$$"; rm -rf "$dir"; mkdir -p "$dir"
 	while IFS="$tab" read -r i proto pidx fidx name rest; do
@@ -22179,7 +22210,7 @@ _st_ping_measure() {
 		[ -n "$hp" ] || { echo none > "$dir/$i.k"; continue; }
 		echo "$hp" > "$dir/$i.k"
 		echo "$p $fidx" > "$dir/$i.m"
-		_st_tcp_one "${hp% *}" "${hp#* }" 3 "$dir/$i" &
+		_st_tcp_one "${hp% *}" "${hp#* }" 3 "$dir/$i" "$ov" &
 		n=$((n + 1)); [ $((n % 16)) = 0 ] && wait
 	done < "$t"
 	wait
@@ -22189,11 +22220,11 @@ _st_ping_measure() {
 		i="${f##*/}"; i="${i%.k}"; read -r k < "$f"
 		case "$k" in hy*|none) continue ;; esac
 		[ -s "$dir/$i" ] && continue
-		_st_tcp_one "${k% *}" "${k#* }" 6 "$dir/$i" &
+		_st_tcp_one "${k% *}" "${k#* }" 6 "$dir/$i" "$ov" &
 		n=$((n + 1)); [ $((n % 16)) = 0 ] && wait
 	done
 	wait
-	if stl_has hy2; then
+	if stl_has hy2 && [ -z "$ov" ]; then
 		for f in "$dir"/*.k; do
 			[ -f "$f" ] || continue
 			read -r k < "$f"
@@ -22212,7 +22243,7 @@ _st_ping_measure() {
 		done
 		wait
 	fi
-	if [ "$(_st_lat_mode)" = real ]; then
+	if [ "$(_st_lat_mode)" = real ] && [ -z "$ov" ]; then
 		for f in "$dir"/*.m; do
 			[ -f "$f" ] || continue
 			i="${f##*/}"; i="${i%.m}"
@@ -22353,6 +22384,7 @@ steer_sub_probe() {
 	[ -n "$1" ] || { echo '{"ok":false,"error":"узла нет в подписке"}'; return 1; }
 	p="$(_stl_mod_of "$1")"; f="$2"
 	stl_has "$p" || { echo '{"ok":false,"error":"модуль ядра steer для этого протокола не установлен"}'; return 1; }
+	[ -n "$(_st_over_dev)" ] && { echo '{"ok":false,"over":true,"error":"секция выходит через подложку — проверяется только соединение с сервером"}'; return 0; }
 	out="$(stl_probe "$ST_SUB" "$p" "$f")"
 	case "$out" in '{'*) printf '%s\n' "$out" ;; *) echo '{"ok":false,"error":"проверка не удалась"}' ;; esac
 }
@@ -28186,6 +28218,26 @@ _fk_rl_report() {
 	return 0
 }
 
+_fk_engine_state() {
+	local j p x n q k=0
+	j="$(ubus call service list '{"name":"netshift"}' 2>/dev/null)"
+	p="$(printf '%s' "$j" | jsonfilter -e '@.netshift.instances[*].pid' 2>/dev/null | head -n 1)"
+	if printf '%s' "$j" | grep -q '"running": *true' && [ -n "$p" ] && [ -d "/proc/$p" ]; then
+		q="$p"; n=""
+		while [ -n "$q" ] && [ "$k" -lt 4 ]; do
+			x=""
+			for p in $q; do x="$x $(cat "/proc/$p/task/$p/children" 2>/dev/null)"; done
+			q="$(echo $x)"; k=$((k + 1))
+			for p in $q; do n="$n $(sed -n 's/^Name:[[:space:]]*//p' "/proc/$p/status" 2>/dev/null)"; done
+		done
+		n="$(printf '%s\n' $n | grep -vxE 'sh|ash|sleep|logger' | awk '!s[$0]++' | head -n 4 | tr '\n' ' ' | sed 's/ $//; s/ /, /g')"
+		echo "движок NetShift ещё не закончил запуск${n:+ (сейчас работает: $n)}"
+	else
+		x="$(printf '%s' "$j" | jsonfilter -e '@.netshift.instances[*].exit_code' 2>/dev/null | head -n 1)"
+		case "$x" in ''|0) ;; *) echo "движок NetShift завершился с ошибкой (код $x)" ;; esac
+	fi
+}
+
 do_fk_service() {
 	local a="$1" b
 	_fk_installed || { echo "ОШИБКА: Forkozz не установлен"; return 1; }
@@ -28324,6 +28376,8 @@ do_fk_service() {
 	b="$(_fk_why)"
 	echo "ОШИБКА: Forkozz не запустился${b:+: $b}. Если ошибка повторяется, перезагрузите роутер — это сбросит всё, что осталось от прошлых запусков."
 	_zm_reboot_hint "Forkozz не запустился. Перезагрузите роутер — это сбросит всё, что осталось от прошлых запусков, — и включите Forkozz снова."
+	b="$(_fk_engine_state)"
+	[ -n "$b" ] && echo "Состояние: $b"
 	echo "Последние записи журнала:"
 	logread 2>/dev/null | { if [ -n "$FK_LOGMARK" ]; then awk -v m="$FK_LOGMARK" 'f { print } index($0, m) { f = 1 }'; else cat; fi; } |
 		grep -E 'netshift|sing-box' | grep -v 'DEBUG\|\[debug\]\|udhcpc\|is deprecated\|deprecated in sing-box' |
@@ -29209,7 +29263,7 @@ steer_explain() {
 		"$(esc "$node")" "$(esc "$probe")" "$where" "$(esc "$src")" "$smode" "$(esc "$skey")" "$(esc "$sname")" "$ssec" "$(esc "$([ -n "$ssec" ] && _st_sec_name "$ssec")")" "$xs" "$(esc "$([ -n "$xs" ] && _st_sec_name "$xs")")" "$(esc "$([ -n "$xs" ] && _st_sec_with "$xs" _st_sub_label)")" "$(esc_ml "$STL_X_TEXT")"
 }
 
-fk_route_check() {
+_fk_route_run() {
 	local q addr="" how="" verdict=direct tr rule="" ob="" ac="" sec="" s isip=0 caught=0 arg="$1" source="" err wh=
 	case "$arg" in *'|'*) source="${arg#*|}"; arg="${arg%%|*}" ;; esac
 	q="$(_zm_route_target "$arg")" || { echo '{"error":"введите домен (например, youtube.com) или IP-адрес"}'; return 1; }
@@ -29261,6 +29315,20 @@ fk_route_check() {
 	printf '{"target":"%s","verdict":"%s","how":"%s","addr":"%s","ip":%s,"rule":"%s","outbound":"%s","action":"%s","section":"%s","source":"%s","probe":"%s","where":%s}\n' \
 		"$(esc "$q")" "$verdict" "$how" "$(esc "$addr")" "$([ "$isip" = 1 ] && echo true || echo false)" "$(esc "$rule")" "$(esc "$ob")" "$(esc "$ac")" "$(esc "$sec")" \
 		"$(esc "$source")" "$(esc "$probe")" "$wh"
+}
+
+fk_route_check() {
+	local d="$JOBS_DIR/fkroute" f i=0
+	mkdir -p "$d"
+	f="$d/$(printf '%s' "$1" | md5sum | cut -c1-12)"
+	if [ -s "$f.out" ] && [ ! -e "$f.run" ]; then cat "$f.out"; rm -f "$f.out"; return 0; fi
+	if [ ! -e "$f.run" ] || [ -z "$(find "$f.run" -mmin -3 2>/dev/null)" ]; then
+		rm -f "$f.out" "$f.tmp"; : > "$f.run"
+		( _fk_route_run "$1" > "$f.tmp" 2>/dev/null; mv -f "$f.tmp" "$f.out"; rm -f "$f.run" ) </dev/null >/dev/null 2>&1 &
+	fi
+	while [ -e "$f.run" ] && [ "$i" -lt 12 ]; do sleep 1; i=$((i + 1)); done
+	if [ ! -e "$f.run" ] && [ -s "$f.out" ]; then cat "$f.out"; rm -f "$f.out"; return 0; fi
+	echo '{"pending":true}'
 }
 
 forkop_action() {
@@ -30964,7 +31032,6 @@ _ab_free_conf() {
 	echo "# Zapret Manager: DNS без блокировки рекламы для выбранных устройств (копия пересылки основного dnsmasq)"
 	echo "port=$AB_FREE_PORT"
 	echo "bind-dynamic"
-	echo "no-hosts"
 	echo "pid-file=$AB_FREE_PID"
 	grep -E '^(server=|no-resolv$|resolv-file=|strict-order$|all-servers$|cache-size=|domain-needed$|bogus-priv$|stop-dns-rebind$|rebind-localhost-ok$|rebind-domain-ok=)' "$f"
 	grep -qE '^(no-resolv$|resolv-file=)' "$f" || { [ -s /tmp/resolv.conf.d/resolv.conf.auto ] && echo "resolv-file=/tmp/resolv.conf.d/resolv.conf.auto"; }
@@ -32238,6 +32305,8 @@ case "$cmd" in
 	ui_nav_set)                           ui_nav_set "$1" ;;
 	zm_pages)                             zm_pages "$1" "$2" ;;
 	ui_flags_get)                         ui_flags_get ;;
+	terms_get)                            terms_get ;;
+	terms_accept)                         terms_accept ;;
 	ui_flag_set)                          ui_flag_set "$1" ;;
 	ui_radio_get)                         ui_radio_get ;;
 	ui_radio_set)                         ui_radio_set "$1" ;;
@@ -36206,6 +36275,8 @@ list_methods() {
 	json_add_object "ui_nav_set";             json_add_string "ids" "string"; json_close_object
 	json_add_object "zm_pages";               json_add_string "action" "string"; json_add_string "value" "string"; json_close_object
 	json_add_object "ui_flags_get";           json_close_object
+	json_add_object "terms_get";              json_close_object
+	json_add_object "terms_accept";           json_close_object
 	json_add_object "ui_flag_set";            json_add_string "name" "string"; json_close_object
 	json_add_object "ui_radio_get";           json_close_object
 	json_add_object "ui_radio_set";           json_add_string "mode" "string"; json_close_object
@@ -36408,6 +36479,8 @@ call_method() {
 		ui_nav_set)              json_get_var ids ids;         "$BACKEND" ui_nav_set "$ids" ;;
 		zm_pages)                json_get_var action action; json_get_var value value; "$BACKEND" zm_pages "$action" "$value" ;;
 		ui_flags_get)            "$BACKEND" ui_flags_get ;;
+		terms_get)               "$BACKEND" terms_get ;;
+		terms_accept)            "$BACKEND" terms_accept ;;
 		ui_flag_set)             json_get_var name name;       "$BACKEND" ui_flag_set "$name" ;;
 		ui_radio_get)            "$BACKEND" ui_radio_get ;;
 		ui_radio_set)            json_get_var mode mode;       "$BACKEND" ui_radio_set "$mode" ;;
@@ -36496,6 +36569,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"forkop_config_get",
 					"sysinfo_get",
 					"ui_flags_get",
+					"terms_get",
 					"ui_radio_get",
 					"ui_radio_now",
 					"events",
@@ -36604,6 +36678,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"ui_look_set",
 					"ui_nav_set",
 					"ui_flag_set",
+					"terms_accept",
 					"ui_radio_set",
 					"versions_mode",
 					"system_reboot",
@@ -36825,6 +36900,8 @@ var callZramAction = zmDeclare({ object: 'zapret-manager', method: 'zram_action'
 var callOwrtStatus = zmDeclare({ object: 'zapret-manager', method: 'owrt_status', expect: {} });
 var callOwrtSet = zmDeclare({ object: 'zapret-manager', method: 'owrt_set', params: ['action', 'mode'], expect: {} });
 var callUiFlagsGet = zmDeclare({ object: 'zapret-manager', method: 'ui_flags_get', expect: {} });
+var callTermsGet = zmDeclare({ object: 'zapret-manager', method: 'terms_get', expect: {} });
+var callTermsAccept = zmDeclare({ object: 'zapret-manager', method: 'terms_accept', expect: {} });
 var callUiFlagSet = zmDeclare({ object: 'zapret-manager', method: 'ui_flag_set', params: ['name'], expect: {} });
 var callAdblockStatus = zmDeclare({ object: 'zapret-manager', method: 'adblock_status', expect: {} });
 var callAdblockAction = zmDeclare({ object: 'zapret-manager', method: 'adblock_action', params: ['action', 'mode'], expect: {} });
@@ -37245,11 +37322,94 @@ function changelogShow(mode, o) {
 			version: r.version, date: r.date, text: match ? r.text : '' }).then(function() { callZmChangelogSeen().catch(function() {}); });
 	}).catch(function() { return false; });
 }
+var TM_LOGO = '<svg width="40" height="40" viewBox="0 0 1250 1250" aria-hidden="true"><defs><linearGradient id="zm-tm-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#00b6ff"/><stop offset="1" stop-color="#0090ff"/></linearGradient></defs><g fill="url(#zm-tm-g)" stroke="#0a0a0a" stroke-width="22"><polygon points="455,170 1072,118 1215,25 688,615 25,1235 735,338 262,383"/><polygon points="1025,462 722,860 1215,800 1005,1022 315,1095"/></g></svg>';
+var TM_ICO = [
+	'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8l-9-5-9 5v8l9 5 9-5z"/><path d="M3 8l9 5 9-5"/><path d="M12 13v8"/></svg>',
+	'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>',
+	'<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg>'
+];
+function termsScreen() {
+	return new Promise(function(resolve) {
+		var wrap, cb, go, out;
+		function html(cls, h) { var d = E('div', { 'class': cls }); d.innerHTML = h; return d; }
+		function point(i, t, p) { return E('div', { 'class': 'zm-tm-pt' }, [ html('zm-tm-ico', TM_ICO[i]), E('div', {}, [ E('b', {}, t), E('span', {}, p) ]) ]); }
+		function sec(t, p) { return E('div', { 'class': 'zm-tm-sec' }, [ E('h3', {}, t), E('p', {}, p) ]); }
+		function idle() { go.disabled = !cb.checked; go.textContent = 'Принимаю и продолжаю'; }
+		function onKey(ev) {
+			if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); return; }
+			if (ev.key !== 'Tab') return;
+			var f = Array.prototype.filter.call(wrap.querySelectorAll('button, input, a[href], [tabindex="0"]'), function(x) { return !x.disabled; });
+			if (!f.length) return;
+			if (ev.shiftKey && document.activeElement === f[0]) { ev.preventDefault(); f[f.length - 1].focus(); }
+			else if (!ev.shiftKey && document.activeElement === f[f.length - 1]) { ev.preventDefault(); f[0].focus(); }
+		}
+		go = E('button', { 'type': 'button', 'class': 'zm-tm-go', 'disabled': '', 'click': function() {
+			if (!cb.checked) return;
+			go.disabled = true; go.textContent = 'Сохраняем…';
+			callTermsAccept().then(function(r) {
+				if (!r || r.error) { toast((r && r.error) || 'Не удалось сохранить — попробуйте ещё раз', 'error'); idle(); return; }
+				document.removeEventListener('keydown', onKey, true);
+				if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+				document.documentElement.classList.remove('zm-wn-lock');
+				resolve(true);
+			}).catch(function() { toast('Роутер не ответил — попробуйте ещё раз', 'error'); idle(); });
+		} }, 'Принимаю и продолжаю');
+		out = E('button', { 'type': 'button', 'class': 'zm-tm-out', 'click': function() { location.href = L.url('admin/logout'); } }, 'Выйти');
+		cb = E('input', { 'type': 'checkbox', 'id': 'zm-tm-cb', 'change': idle });
+		var logo = html('zm-tm-logo', TM_LOGO);
+		logo.appendChild(E('div', { 'class': 'zm-tm-brand' }, [ 'Zapret ', E('span', {}, 'Manager') ]));
+		wrap = E('div', { 'class': 'zm-tm', 'role': 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'zm-tm-h' }, [
+			E('div', { 'class': 'zm-tm-side' }, [
+				logo,
+				E('div', { 'class': 'zm-tm-intro' }, [
+					E('h2', { 'id': 'zm-tm-h' }, 'Прежде чем начать'),
+					E('p', {}, 'Панель меняет настройки вашего роутера. Коротко о главном — полный текст рядом.')
+				]),
+				E('div', { 'class': 'zm-tm-pts' }, [
+					point(0, '«Как есть»', 'Бесплатно и без гарантий, что всё заработает именно у вас.'),
+					point(1, 'Решаете вы — отвечаете вы', 'За то, что вы настраиваете и как используете, отвечаете вы сами.'),
+					point(2, 'Без претензий к автору', 'Автор не отвечает за сбои, потерю данных и последствия.')
+				]),
+				E('div', { 'class': 'zm-tm-ed' }, 'Редакция 1.0 от 05.11.2026 · © StressOzz')
+			]),
+			E('div', { 'class': 'zm-tm-main' }, [
+				E('div', { 'class': 'zm-tm-doc', 'tabindex': '0' }, [
+					E('h2', {}, 'Условия использования Zapret Manager'),
+					sec('1. Программа «как есть»', 'Zapret Manager распространяется бесплатно. Автор не даёт гарантий — ни явных, ни подразумеваемых: что программа будет работать без ошибок, подойдёт для ваших целей и роутера или что через неё откроются какие-либо сайты и сервисы.'),
+					sec('2. Ваша ответственность', 'Вы сами решаете, что устанавливать и запускать, и сами отвечаете за последствия. Используйте программу только на оборудовании и в сети, которыми вправе управлять, и соблюдайте законы своей страны.'),
+					sec('3. Ограничение ответственности', 'Автор и участники проекта не отвечают за прямой или косвенный ущерб: неработоспособность роутера, потерю настроек и данных, перерывы в работе интернета, блокировку сервисов, требования третьих лиц, штрафы и упущенную выгоду.'),
+					sec('4. Отказ от претензий', 'Принимая условия, вы отказываетесь от претензий к автору и участникам проекта, связанных с программой, в той мере, в какой это допускает закон.'),
+					sec('5. Программы других авторов', 'Zapret, sing-box, Mihomo, WARP и другие компоненты принадлежат своим авторам и распространяются по своим лицензиям. Панель только скачивает их из официальных источников и настраивает.'),
+					E('div', { 'class': 'zm-tm-sec' }, [ E('h3', {}, '6. Данные'), E('p', {}, [ 'Личные данные не собираются. Для счётчика установок панель отправляет автору случайный номер роутера и версию. Отключить: файл ', E('code', {}, '/etc/zapret-manager.nostats'), '.' ]) ]),
+					sec('7. Изменение условий', 'Новая редакция условий покажется при следующем входе в панель.')
+				]),
+				E('div', { 'class': 'zm-tm-foot' }, [
+					E('label', { 'class': 'zm-tm-agree', 'for': 'zm-tm-cb' }, [ cb, E('span', {}, 'Я прочитал(а) условия и принимаю их') ]),
+					E('div', { 'class': 'zm-tm-btns' }, [ go, out ])
+				])
+			])
+		]);
+		document.documentElement.classList.add('zm-wn-lock');
+		document.body.appendChild(wrap);
+		document.addEventListener('keydown', onKey, true);
+		try { cb.focus({ preventScroll: true }); } catch (e) {}
+	});
+}
 var _clAuto = false;
 function changelogAuto() {
 	if (_clAuto) return;
 	_clAuto = true;
-	setTimeout(function() { changelogShow('local'); }, 700);
+	setTimeout(function() {
+		callTermsGet().then(function(t) {
+			if (!t || t.error || t.accepted !== false) { changelogShow('local'); return; }
+			termsScreen().then(function() {
+				if (document.body.classList.contains('zmw-body')) {
+					if (location.hash !== '#/thanks') location.hash = '#/thanks';
+					setTimeout(function() { changelogShow('local'); }, 900);
+				} else location.href = L.url('admin/services/zapret-manager/thanks');
+			});
+		}).catch(function() { changelogShow('local'); });
+	}, 700);
 }
 
 function injectCss() {
@@ -38804,14 +38964,18 @@ function routeCheck(o) {
 		inp.value = v;
 		if (off()) { toast(o.offText || 'Сейчас проверить нельзя', 'warning'); return; }
 		busy = true; err = ''; last = v; paint();
-		Promise.resolve(o.call(v)).then(function(r) {
-			busy = false;
-			if (!r || r.error) { res = null; err = (r && r.error) || 'Не удалось проверить'; }
-			else res = r;
-			paint();
-		}, function(e) {
-			busy = false; res = null; err = 'Не удалось проверить: ' + ((e && e.message) || e); paint();
-		});
+		var tries = 0;
+		(function ask() {
+			Promise.resolve(o.call(v)).then(function(r) {
+				if (r && r.pending && !r.error && ++tries < 8) { setTimeout(ask, 1500); return; }
+				busy = false;
+				if (!r || r.error || r.pending) { res = null; err = (r && r.error) || (r && r.pending ? 'Роутер считает слишком долго — попробуйте ещё раз через минуту' : 'Не удалось проверить'); }
+				else res = r;
+				paint();
+			}, function(e) {
+				busy = false; res = null; err = 'Не удалось проверить: ' + ((e && e.message) || e); paint();
+			});
+		})();
 	}
 	function paint() {
 		btn.disabled = busy;
@@ -44500,6 +44664,7 @@ return view.extend({
 				picking = false; bt.close();
 				if (g !== secGen) return;
 				var t = rr[0] && rr[0].results && rr[0].results[n.index], r = rr[1] && rr[1].results && rr[1].results[0];
+				if (!r && rr[1] && rr[1].over && t && t.ok === false) { lat[n.index] = { ok: false, why: 'нет соединения с сервером через подложку' }; renderSub(); askDead(n, lat[n.index]); return; }
 				if (!r) { go(); return; }
 				if (r.ok) { lat[n.index] = { ok: true, ms: r.ttfb_ms > 0 ? r.ttfb_ms : r.handshake_ms, why: r.why, tcp: t && t.ok ? t.ms : 0 }; renderSub(); go(); return; }
 				lat[n.index] = t && t.ok ? { ok: false, blocked: true, tcp: t.ms, why: r.why || '' } : { ok: false, why: r.why || '' };
@@ -44530,6 +44695,7 @@ return view.extend({
 				return stA('sub_probe', String(i)).then(function(res) {
 					if (g !== secGen) return;
 					var r = res && res.results && res.results[0];
+					if (!r && res && res.over && !(tcp > 0)) { delete lat[i]; return; }
 					if (r && r.ok) lat[i] = { ok: true, ms: r.ttfb_ms > 0 ? r.ttfb_ms : r.handshake_ms, why: r.why, tcp: tcp };
 					else if (tcp > 0 && r) lat[i] = { ok: false, blocked: true, tcp: tcp, why: r.why || '' };
 					else if (tcp > 0) lat[i] = { ok: true, ms: tcp, tcpOnly: true, why: 'только TCP' + (res && res.error ? ': ' + res.error : '') };
@@ -45117,7 +45283,7 @@ return view.extend({
 			var down = cur === 'warp' ? !data.warp_on : cur === 'main' ? data.exit !== 'vpn' : to ? (!to.live || to.off) : false;
 			if (!cur) connCard.appendChild(E('p', { 'class': 'zm-hint' }, 'VPN этой секции подключается к своему серверу напрямую. Можно пустить его через ' + warpName() + ' или через VPN другой секции: сайты всё равно видят IP сервера VPN, а сервер VPN видит адрес ' + warpName() + ' или другого VPN.'));
 			else if (down) connCard.appendChild(E('div', { 'class': 'zm-refresh-banner zm-show' }, tname + ' сейчас не работает — пока он не поднимется, VPN этой секции подключается напрямую.'));
-			else connCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сервисы идут в VPN, а сам VPN — через ' + tname + '. Если ' + tname + ' упадёт, VPN этой секции тоже отключится и сработает правило «Если туннель недоступен».'));
+			else connCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сервисы идут в VPN, а сам VPN — через ' + tname + '. Если ' + tname + ' упадёт, VPN этой секции тоже отключится и сработает правило «Если туннель недоступен». Пинг и доступность узлов этой секции тоже проверяются через ' + tname + '.'));
 		}
 
 		function renderConn() {
@@ -48779,21 +48945,19 @@ return view.extend({
 				return a.length ? 'с дополнениями: ' + a.join(', ') : 'без дополнений';
 			}
 			function parse(res) {
-				var out = { ts: '', rows: [], control: null, ipblock: [] };
+				var out = { ts: '', rows: [], control: null };
 				var doms = [];
 				(res.detail || '').split('\n').forEach(function(l) {
 					if (!l) return;
 					var p = l.split('|');
 					if (p[0] === 'T') out.ts = p[1];
 					else if (p[0] === 'D') doms = (p[1] || '').split(' ').filter(Boolean);
-					else if (p[0] === 'X') out.ipblock = (p[1] || '').split(' ').filter(Boolean).map(function(d) { return d.replace(/_/g, ' '); });
 					else if (p[0] === 'O') out.extra = extraText(p[1] || '');
 					else if (p[0] === 'G') { out.gvBase = p[1] || ''; out.gvIpid = /(^| )ipid( |$)/.test(p[2] || ''); out.extra = out.gvBase === 'none' ? 'без основы, только googlevideo.com' : 'основа ' + out.gvBase + (out.gvIpid ? ' с маскировкой' : ''); }
 					else if (p[0] === 'S') {
-						var fails = (p[4] || '').split(' ').filter(Boolean), fm = {}, wm = {};
+						var fails = (p[4] || '').split(' ').filter(Boolean), fm = {};
 						fails.forEach(function(f) { fm[f] = true; });
-						(p[5] || '').split(' ').filter(Boolean).forEach(function(w) { var i = w.lastIndexOf(':'); if (i > 0) wm[w.slice(0, i)] = w.slice(i + 1); });
-						var row = { name: p[1], ok: +p[2], tot: +p[3], doms: doms.map(function(d) { return { name: d.replace(/_/g, ' '), ok: !fm[d], why: fm[d] ? (wm[d] || 'dpi') : '' }; }) };
+						var row = { name: p[1], ok: +p[2], tot: +p[3], doms: doms.map(function(d) { return { name: d.replace(/_/g, ' '), ok: !fm[d] }; }) };
 						if (/^Контрольный тест/.test(row.name)) out.control = row; else out.rows.push(row);
 					}
 				});
@@ -48926,14 +49090,12 @@ return view.extend({
 				});
 			}
 
-			var WHY_TXT = { ip: 'по IP', dns: 'DNS' };
-			var WHY_HINT = { ip: 'Соединение до сайта не установилось — его блокируют по IP-адресу, стратегия Zapret тут не поможет', dns: 'Роутер не нашёл адрес сайта — проблема DNS, а не стратегии', dpi: 'Соединение установилось, но его оборвали или заморозили — это работа DPI, стратегия может помочь' };
 			function chips(list) {
 				var bad = list.filter(function(d) { return !d.ok; }), good = list.filter(function(d) { return d.ok; });
 				var box = E('div', { 'class': 'zm-tt-doms' });
 				if (bad.length) box.appendChild(E('div', { 'class': 'zm-tt-domgrp' }, [
 					E('div', { 'class': 'zm-tt-domhead zm-tt-bad' }, [ 'Не открылись · ' + bad.length ]),
-					E('div', { 'class': 'zm-chips' }, bad.map(function(d) { return E('span', { 'class': 'zm-chip zm-chip-bad' + (d.why === 'ip' || d.why === 'dns' ? ' zm-chip-why' : ''), 'title': WHY_HINT[d.why] || '' }, [ E('span', { 'class': 'zm-dot' }), d.name, WHY_TXT[d.why] ? E('span', { 'class': 'zm-chip-tag' }, WHY_TXT[d.why]) : E([]) ]); }))
+					E('div', { 'class': 'zm-chips' }, bad.map(function(d) { return E('span', { 'class': 'zm-chip zm-chip-bad' }, [ E('span', { 'class': 'zm-dot' }), d.name ]); }))
 				]));
 				if (good.length) box.appendChild(E('div', { 'class': 'zm-tt-domgrp' }, [
 					E('div', { 'class': 'zm-tt-domhead zm-tt-good' }, [ 'Открылись · ' + good.length ]),
@@ -48995,14 +49157,13 @@ return view.extend({
 					L.push(resPad('№', 4) + resPad('Стратегия', w) + 'Открылось');
 					L.push(new Array(4 + w + 18).join('-'));
 					rows.forEach(function(r, i) { L.push(resPad(i + 1, 4) + resPad(r.name, w) + resPad(r.ok + ' / ' + r.tot, 10) + resPad(pct(r), 6)); });
-					if (d.ipblock && d.ipblock.length) { L.push(''); L.push('Блокируются по IP (Zapret не поможет, нужен VPN): ' + d.ipblock.join(', ')); }
 					var det = rows.filter(function(r) { return r.doms && r.doms.length; });
 					if (d.control && d.control.doms && d.control.doms.length) det.unshift(d.control);
 					if (det.length) {
 						L.push('');
 						L.push('Подробно — какие адреса не открылись');
 						det.forEach(function(r) {
-							var bad = r.doms.filter(function(x) { return !x.ok; }).map(function(x) { return x.name + (WHY_TXT[x.why] ? ' (' + WHY_TXT[x.why] + ')' : ''); });
+							var bad = r.doms.filter(function(x) { return !x.ok; }).map(function(x) { return x.name; });
 							L.push('');
 							L.push((r === d.control ? 'Без Zapret' : r.name) + ' — ' + r.ok + ' из ' + r.tot + ':');
 							L.push(bad.length ? '   не открылись: ' + bad.join(', ') : '   открылось всё');
@@ -49076,10 +49237,6 @@ return view.extend({
 				resCard.appendChild(E('p', { 'class': 'zm-hint zm-tt-meta' }, [ meta.join(' · ') ]));
 				if (resMode !== 'current' && d.control && d.control.tot > 0 && d.control.ok * 100 >= d.control.tot * 80)
 					resCard.appendChild(E('div', { 'class': 'zm-au-pause', 'style': 'margin:0 0 10px' }, 'Без Zapret открылось ' + d.control.ok + ' из ' + d.control.tot + ' — сайты доступны и так. Похоже, трафик самого роутера идёт через VPN (Forkozz или Steer) или эти сайты у провайдера не блокируются, поэтому сравнение стратегий почти ничего не показывает. Автоподбор в таком случае стратегию не меняет.'));
-				if (resMode !== 'current' && d.ipblock && d.ipblock.length) resCard.appendChild(E('div', { 'class': 'zm-au-pause zm-tt-ipblock', 'style': 'margin:0 0 10px' }, [
-					E('b', {}, 'Не помогла ни одна стратегия: '), d.ipblock.join(', '),
-					E('div', { 'style': 'margin-top:4px' }, 'До этих адресов не устанавливается даже соединение — их блокируют по IP-адресу. Zapret меняет только сами пакеты и тут бессилен: такие сайты нужно пускать через VPN (Forkozz, Steer или Mixomo).')
-				]));
 				var list = E('div', { 'class': 'zm-tt-list' });
 				if (d.control) list.appendChild(rowEl(resMode, d.control, 0, null, true));
 				rows.forEach(function(r, i) { list.appendChild(rowEl(resMode, r, i + 1, d.control, false)); });
@@ -50690,25 +50847,43 @@ html.zm-theme-dark body:not(.zmw-body) .zm-meter-bar { background: rgba(255,255,
 .zm-sp-text { margin: 6px 0 0; font-size: 14.5px; line-height: 1.55; }
 .zm-sp-btns { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .zm-sp-btns .cbi-button { margin: 0 !important; display: inline-flex; align-items: center; text-decoration: none; }
-.zm-sp-pays { display: flex; flex-wrap: wrap; gap: 12px; }
-.zm-sp-pay { flex: 0 1 340px; min-width: 0; box-sizing: border-box; display: flex; align-items: center; gap: 14px; padding: 12px 18px 12px 12px; border-radius: 18px; text-decoration: none !important; transition: transform .15s, box-shadow .15s; }
+.zm-sp-pays { display: flex; flex-wrap: wrap; gap: 16px; }
+.zm-sp-pay { flex: 0 1 420px; min-width: 0; box-sizing: border-box; display: flex; align-items: center; gap: 18px; padding: 16px 24px 16px 16px; border-radius: 22px; text-decoration: none !important; transition: transform .15s, box-shadow .15s; }
 .zm-sp-pay:hover { transform: translateY(-1px); box-shadow: 0 8px 22px -12px rgba(0,0,0,.45); }
 .zm-sp-tb, .zm-sp-tb:hover { background: #ffdd2d; color: #1a1a1a !important; }
 .zm-sp-oz, .zm-sp-oz:hover { background: #005bff; color: #ffffff !important; }
-.zm-sp-qr { flex: none; display: block; padding: 6px; background: #ffffff; border-radius: 12px; line-height: 0; }
-.zm-sp-qr svg { display: block; width: 104px; height: 104px; }
+.zm-sp-qr { flex: none; display: block; padding: 8px; background: #ffffff; border-radius: 14px; line-height: 0; }
+.zm-sp-qr svg { display: block; width: 132px; height: 132px; }
 .zm-sp-pay-t { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.zm-sp-pay-t b { font-size: 17px; }
-.zm-sp-pay-t span { font-size: 13px; opacity: .85; }
-.zm-sp-pay-t .zm-sp-go { margin-top: 2px; font-weight: 700; opacity: 1; }
-.zm-sp-kvn { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; }
-.zm-sp-kvn-t { flex: 1 1 420px; min-width: 0; }
-.zm-sp-kvn-t h3 { margin-bottom: 0; }
-.zm-sp-kvn .zm-sp-btns { margin-top: 0; }
+.zm-sp-pay-t b { font-size: 21px; }
+.zm-sp-pay-t span { font-size: 14.5px; opacity: .85; }
+.zm-sp-pay-t .zm-sp-go { margin-top: 6px; font-size: 15.5px; font-weight: 700; opacity: 1; }
+.zm-kv { display: flex; flex-direction: column; gap: 18px; }
+.zm-kv-head { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px 24px; }
+.zm-kv-t { flex: 1 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.zm-kv-name { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; }
+.zm-kv-h { font-size: 26px; font-weight: 800; letter-spacing: -.02em; line-height: 1.15; color: #1e1b4b; }
+.zm-kv-free { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: #e9f8ef; color: #166534; font-size: 13.5px; font-weight: 700; white-space: nowrap; }
+.zm-kv-free-i, .zm-kv-i { line-height: 0; }
+.zm-kv-lead { margin: 0; font-size: 15px; line-height: 1.6; opacity: .9; max-width: 720px; }
+.zm-kv .zm-kv-btns { margin-top: 0; }
+.zm-kv-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.zm-kv-it { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 14px; background: #f7f6ff; border: 1px solid #e6e3fb; color: #1e1b4b; font-size: 14px; line-height: 1.4; min-width: 0; }
+.zm-kv-i { flex: none; width: 34px; height: 34px; border-radius: 10px; background: #e8e5ff; color: #3C3489; display: flex; align-items: center; justify-content: center; }
+.zm-kv-thx { background: #fff1f3; border-color: #fecdd6; color: #9f1239; font-weight: 600; }
+.zm-kv-thx .zm-kv-i { background: #ffe0e6; color: #e11d48; }
+html.zm-theme-dark .zm-kv-h { color: #ffffff; }
+html.zm-theme-dark .zm-kv-free { background: rgba(63,185,80,.16); color: #4ade80; }
+html.zm-theme-dark .zm-kv-it { background: rgba(255,255,255,.05); border-color: rgba(255,255,255,.09); color: #e7e5ff; }
+html.zm-theme-dark .zm-kv-i { background: rgba(155,140,255,.18); color: #b7abff; }
+html.zm-theme-dark .zm-kv-thx { background: rgba(225,29,72,.14); border-color: rgba(225,29,72,.28); color: #ffd6df; }
+html.zm-theme-dark .zm-kv-thx .zm-kv-i { background: rgba(225,29,72,.22); color: #fb7185; }
+@media (max-width: 1100px) { .zm-kv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 640px) { .zm-kv-grid { grid-template-columns: minmax(0, 1fr); } .zm-kv-h { font-size: 22px; } .zm-kv-btns .cbi-button { flex: 1 1 auto; justify-content: center; } }
 .zm-sp-count p { margin: 0; font-size: 14.5px; opacity: .8; }
 .zm-sp-count b { font-variant-numeric: tabular-nums; }
 .zm-sp-count[hidden] { display: none; }
-@media (max-width: 640px) { .zm-sp-pay { flex: 1 1 100%; } .zm-sp-qr svg { width: 88px; height: 88px; } }
+@media (max-width: 640px) { .zm-sp-pay { flex: 1 1 100%; padding: 12px 16px 12px 12px; gap: 14px; } .zm-sp-qr svg { width: 104px; height: 104px; } .zm-sp-pay-t b { font-size: 18px; } }
 .zm-th-group { margin-top: 16px; }
 .zm-th-ghead { margin: 0 0 6px; font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; opacity: .65; }
 .zm-th-ghead span { opacity: .75; }
@@ -51279,8 +51454,6 @@ html.zm-theme-dark .zm-lat-blk { color: #f0b54a; }
 .zm-sub-fact { display: flex; flex-direction: column; gap: 3px; font-size: 12px; min-width: 0; }
 .zm-sub-fact > span { opacity: .6; }
 .zm-sub-fact > b { font-size: 13px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.zm-chip-tag { margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10.5px; font-weight: 700; background: rgba(127,127,127,.18); }
-.zm-chip-why { box-shadow: inset 0 0 0 1px rgba(207,34,46,.45); background: transparent; }
 .zm-sub-note { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 8px; background: rgba(9,105,218,.07); border: 1px solid rgba(9,105,218,.2); font-size: 12.5px; line-height: 1.45; white-space: pre-line; overflow-wrap: anywhere; }
 .zm-sub-note-k { font-size: 11px; font-weight: 700; opacity: .65; text-transform: uppercase; letter-spacing: .03em; }
 .zm-sub-links { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; }
@@ -51930,6 +52103,66 @@ html.zm-theme-dark .zm-rl-key { color: #3fb950; }
 
 .zm-wn-wrap { background: rgba(10,12,18,.45); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); animation: zmFindFade .15s ease-out; }
 html.zm-wn-lock, html.zm-wn-lock body { overflow: hidden; }
+.zm-tm { position: fixed; inset: 0; z-index: 2147483000; display: flex; background: #ffffff; color: #0f172a; font-family: inherit; text-align: left; -webkit-font-smoothing: antialiased; }
+.zm-tm *, .zm-tm *::before, .zm-tm *::after { box-sizing: border-box; }
+.zm-tm-side { flex: 0 0 min(470px, 38%); background: #0f172a; color: #e2e8f0; padding: 48px 44px; display: flex; flex-direction: column; gap: 28px; overflow-y: auto; }
+.zm-tm-logo { display: flex; align-items: center; gap: 12px; }
+.zm-tm-logo svg { flex: 0 0 auto; display: block; }
+.zm-tm-brand { font-size: 20px; font-weight: 700; color: #ffffff; }
+.zm-tm-brand span { color: #5b8cff; }
+.zm-tm-intro { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+.zm-tm-intro h2 { margin: 0; font-size: 34px; line-height: 1.15; font-weight: 800; letter-spacing: -.02em; color: #ffffff; border: 0; padding: 0; background: none; }
+.zm-tm-intro p { margin: 0; font-size: 16px; line-height: 1.55; color: #cbd5e1; }
+.zm-tm-pts { display: flex; flex-direction: column; gap: 18px; }
+.zm-tm-pt { display: flex; gap: 14px; align-items: flex-start; }
+.zm-tm-ico { flex: 0 0 40px; height: 40px; border-radius: 12px; background: #1e293b; color: #7aa2ff; display: flex; align-items: center; justify-content: center; }
+.zm-tm-ico svg { display: block; }
+.zm-tm-pt b { display: block; font-size: 16px; font-weight: 700; color: #ffffff; }
+.zm-tm-pt span { display: block; font-size: 14px; line-height: 1.5; color: #cbd5e1; }
+.zm-tm-ed { margin-top: auto; font-size: 13px; line-height: 1.5; color: #94a3b8; }
+.zm-tm-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: #ffffff; }
+.zm-tm-doc { flex: 1; min-height: 0; overflow-y: auto; padding: 44px 56px 16px; display: flex; flex-direction: column; gap: 18px; font-size: 15px; line-height: 1.6; color: #1e293b; outline: none; }
+.zm-tm-doc h2 { margin: 0; font-size: 22px; font-weight: 800; color: #0f172a; border: 0; padding: 0; background: none; }
+.zm-tm-sec h3 { margin: 0 0 2px; font-size: 16px; font-weight: 700; color: #0f172a; border: 0; padding: 0; background: none; }
+.zm-tm-sec p { margin: 0; color: #1e293b; }
+.zm-tm-sec code { font-size: 14px; padding: 1px 6px; border-radius: 6px; background: #f1f4f9; color: #0f172a; }
+.zm-tm-foot { padding: 20px 56px 28px; border-top: 1px solid #eef1f6; display: flex; flex-direction: column; gap: 16px; background: #ffffff; }
+.zm-tm-agree { display: flex; align-items: flex-start; gap: 12px; font-size: 15px; line-height: 1.45; color: #0f172a; cursor: pointer; margin: 0; }
+.zm-tm-agree input { width: 20px; height: 20px; margin: 1px 0 0; flex: 0 0 auto; accent-color: #2d5bff; cursor: pointer; }
+.zm-tm-btns { display: flex; gap: 12px; }
+.zm-tm-go, .zm-tm-out { height: 50px; border-radius: 14px; font: inherit; font-size: 16px; font-weight: 700; cursor: pointer; margin: 0; line-height: 1; text-transform: none; letter-spacing: 0; }
+.zm-tm-go { flex: 1; border: 0; background: #2d5bff; color: #ffffff; box-shadow: 0 10px 24px -14px rgba(45,91,255,.9); }
+.zm-tm-go:hover:not(:disabled) { background: #2149e6; }
+.zm-tm-go:disabled { background: #c7d3ff; color: #1e3a8a; box-shadow: none; cursor: not-allowed; }
+.zm-tm-out { padding: 0 22px; border: 1px solid #d7dde8; background: #ffffff; color: #0f172a; font-weight: 600; font-size: 15px; }
+.zm-tm-out:hover { background: #f4f6fa; }
+.zm-tm-go:focus-visible, .zm-tm-out:focus-visible, .zm-tm-agree input:focus-visible, .zm-tm-doc:focus-visible { outline: 3px solid #93b0ff; outline-offset: 2px; }
+@media (max-width: 900px) {
+	.zm-tm { flex-direction: column; }
+	.zm-tm-main { min-height: 0; }
+	.zm-tm-side { flex: 0 0 auto; padding: 22px 24px; gap: 14px; overflow: visible; }
+	.zm-tm-intro { margin-top: 0; gap: 6px; }
+	.zm-tm-intro h2 { font-size: 24px; }
+	.zm-tm-intro p { font-size: 14.5px; }
+	.zm-tm-pts { flex-direction: row; flex-wrap: wrap; gap: 10px 18px; }
+	.zm-tm-pt { flex: 1 1 200px; }
+	.zm-tm-ed { display: none; }
+	.zm-tm-doc { padding: 22px 24px 10px; }
+	.zm-tm-foot { padding: 14px 24px 20px; gap: 12px; }
+}
+@media (max-width: 560px) {
+	.zm-tm-pts, .zm-tm-intro p { display: none; }
+	.zm-tm-side { padding: 16px 20px; flex-direction: row; align-items: center; gap: 12px; }
+	.zm-tm-brand { display: none; }
+	.zm-tm-logo svg { width: 34px; height: 34px; }
+	.zm-tm-intro h2 { font-size: 21px; }
+	.zm-tm-doc { padding: 18px 20px 8px; font-size: 14.5px; }
+	.zm-tm-doc h2 { font-size: 19px; }
+	.zm-tm-foot { padding: 12px 20px 18px; }
+	.zm-tm-btns { flex-direction: column; }
+	.zm-tm-go { flex: 0 0 auto; }
+	.zm-tm-out { height: 46px; }
+}
 .zm-wn-head { display: flex; align-items: center; gap: 12px; margin: 0 0 10px; }
 .zm-wn-head h3 { margin: 0 !important; line-height: 1.3; }
 .zm-wn { max-width: 560px; max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); display: flex; flex-direction: column; overflow: hidden; padding: 22px 24px 18px; border-radius: 18px; }
@@ -54126,6 +54359,38 @@ var SP_PAY = [
 ];
 var SP_KVN_BOT = 'https://t.me/StressKVN_bot';
 var SP_KVN_SITE = 'http://stresskvn.lol/';
+var SP_KVN_ICO = {
+	shield: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+	list: '<path d="M9 6h12"/><path d="M9 12h12"/><path d="M9 18h12"/><path d="M4 6l1 1 2-2"/><path d="M4 12l1 1 2-2"/><path d="M4 18l1 1 2-2"/>',
+	bolt: '<path d="M13 2L4 14h8l-1 8 9-12h-8z"/>',
+	inf: '<path d="M12 12c-2-2.7-4-4-6-4a4 4 0 0 0 0 8c2 0 4-1.3 6-4z"/><path d="M12 12c2 2.7 4 4 6 4a4 4 0 0 0 0-8c-2 0-4 1.3-6 4z"/>',
+	lock: '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+	play: '<rect x="2" y="5" width="20" height="14" rx="4"/><path d="M10 9l5 3-5 3z"/>',
+	clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+	globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/>',
+	route: '<circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 18h7a4 4 0 0 0 0-8h-4a4 4 0 0 1 0-8h7"/>',
+	gift: '<rect x="3" y="9" width="18" height="12" rx="2"/><path d="M12 9v12"/><path d="M3 13h18"/><path d="M12 9c-1.5-3-4-4.5-5.5-3.2S7.5 9 12 9z"/><path d="M12 9c1.5-3 4-4.5 5.5-3.2S16.5 9 12 9z"/>',
+	router: '<rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 16.5h.01"/><path d="M11 16.5h.01"/><path d="M17 13V8"/><path d="M14 6.5a4 4 0 0 1 6 0"/>',
+	heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>'
+};
+var SP_KVN_F = [
+	[ 'shield', 'Работает даже при жёсткой фильтрации' ],
+	[ 'list', 'Работает в условиях белых списков' ],
+	[ 'bolt', 'Высокая скорость без ограничений' ],
+	[ 'inf', 'Полностью безлимитный трафик' ],
+	[ 'lock', 'Защита соединения и приватности' ],
+	[ 'play', 'YouTube без рекламы' ],
+	[ 'clock', 'Работа 24/7 без отключений' ],
+	[ 'globe', 'Более 40 локаций' ],
+	[ 'route', 'Умная маршрутизация: иностранные ресурсы через VPN, российский трафик напрямую' ],
+	[ 'gift', 'Бесплатный тест — 3 дня без оплаты' ],
+	[ 'router', 'Подходит для роутеров на OpenWrt: настраивается один раз и работает для всех устройств в сети' ]
+];
+function spIco(n, cls, size) {
+	var s = E('span', { 'class': cls });
+	s.innerHTML = '<svg width="' + (size || 18) + '" height="' + (size || 18) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + SP_KVN_ICO[n] + '</svg>';
+	return s;
+}
 
 function spPl(n, one, few, many) {
 	var a = n % 10, b = n % 100;
@@ -54155,7 +54420,7 @@ return view.extend({
 			E('h3', {}, 'Поддержать проект'),
 			E('div', { 'class': 'zm-sp-pays' }, SP_PAY.map(function(p) {
 				var pic = E('span', { 'class': 'zm-sp-qr' });
-				pic.innerHTML = zm.qrSvg(p.url, 104);
+				pic.innerHTML = zm.qrSvg(p.url, 132);
 				var svg = pic.firstChild;
 				if (svg && svg.setAttribute) svg.setAttribute('aria-label', 'QR-код: ' + p.title);
 				return E('a', { 'class': 'zm-sp-pay zm-sp-' + p.id, 'href': p.url, 'target': '_blank', 'rel': 'noreferrer' }, [
@@ -54169,12 +54434,20 @@ return view.extend({
 			}))
 		]));
 
-		wrap.appendChild(E('div', { 'class': 'zm-card zm-sp-kvn' }, [
-			E('div', { 'class': 'zm-sp-kvn-t' }, [
-				E('h3', {}, 'Подключайтесь к StressKVN'),
-				E('p', { 'class': 'zm-sp-text' }, 'StressKVN — на случай, когда одного Zapret мало. Это VPN, который работает и при белых списках операторов, без лимитов трафика и скорости, а российские сайты открываются напрямую. На всех устройствах и без рекламы на YouTube. Подключается к роутеру прямо из Zapret Manager.')
+		wrap.appendChild(E('div', { 'class': 'zm-card zm-kv' }, [
+			E('div', { 'class': 'zm-kv-head' }, [
+				E('div', { 'class': 'zm-kv-t' }, [
+					E('div', { 'class': 'zm-kv-name' }, [
+						E('div', { 'class': 'zm-kv-h', 'role': 'heading', 'aria-level': '3' }, 'StressKVN'),
+						E('span', { 'class': 'zm-kv-free' }, [ spIco('gift', 'zm-kv-free-i', 15), '3 дня бесплатно' ])
+					]),
+					E('p', { 'class': 'zm-kv-lead' }, 'VPN на случай, когда одного Zapret мало. Работает даже при белых списках операторов и подключается к роутеру прямо из Zapret Manager.')
+				]),
+				E('div', { 'class': 'zm-sp-btns zm-kv-btns' }, [ spLink(SP_KVN_BOT, 'Открыть бота', 'cbi-button-action'), spLink(SP_KVN_SITE, 'Открыть сайт') ])
 			]),
-			E('div', { 'class': 'zm-sp-btns' }, [ spLink(SP_KVN_BOT, 'Открыть бота', 'cbi-button-action'), spLink(SP_KVN_SITE, 'Открыть сайт') ])
+			E('div', { 'class': 'zm-kv-grid' }, SP_KVN_F.map(function(f) {
+				return E('div', { 'class': 'zm-kv-it' }, [ spIco(f[0], 'zm-kv-i'), E('span', {}, f[1]) ]);
+			}).concat([ E('div', { 'class': 'zm-kv-it zm-kv-thx' }, [ spIco('heart', 'zm-kv-i'), E('span', {}, 'Спасибо всем, кто пользуется StressKVN и советует его друзьям!') ]) ]))
 		]));
 
 		var count = E('div', { 'class': 'zm-card zm-sp-count', 'hidden': '' });
@@ -61231,7 +61504,11 @@ ZM_BUILD_ID="$(date +%s)"
 		[ -f "$_zm_f" ] && echo "${_zm_f#/www/luci-static/resources/}"
 	done
 } > /www/luci-static/resources/zapret-manager/build.txt.zm-new 2>/dev/null || true
-sed -i "s/__ZM_BUILD__/$ZM_BUILD_ID/g" /www/luci-static/resources/zapret-manager/common.js /www/luci-static/resources/bytetube/common.js 2>/dev/null || true
+for _zm_f in /www/luci-static/resources/zapret-manager/common.js /www/luci-static/resources/bytetube/common.js; do
+	if [ -f "$_zm_f" ]; then
+		sed -i -e "s/__ZM_BUILD__/$ZM_BUILD_ID/g" -e "s/var ZM_BUILD = '[0-9]*'/var ZM_BUILD = '$ZM_BUILD_ID'/" -e "s/test('[0-9]*') ? '?v=[0-9]*'/test('$ZM_BUILD_ID') ? '?v=$ZM_BUILD_ID'/" "$_zm_f" 2>/dev/null || true
+	fi
+done
 mv -f /www/luci-static/resources/zapret-manager/build.txt.zm-new /www/luci-static/resources/zapret-manager/build.txt 2>/dev/null || true
 chmod 0644 /www/luci-static/resources/zapret-manager/build.txt 2>/dev/null || true
 
@@ -61808,6 +62085,8 @@ var ICONS = {
 	rnext: '<path d="M5.5 6.3v11.4L13.8 12z" fill="currentColor" stroke="none"/><path d="M17.5 6.2v11.6"/>',
 	rplay: '<path d="M8.2 5.6v12.8L18.6 12z" fill="currentColor" stroke="none"/>',
 	rstop: '<rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none"/>',
+	rswap: '<path d="M4.5 8.5h14"/><path d="M15 5l3.5 3.5L15 12"/><path d="M19.5 15.5h-14"/><path d="M9 12l-3.5 3.5L9 19"/>',
+	rstar: '<path d="M12 3.6l2.55 5.17 5.7.83-4.13 4.02.98 5.68L12 16.62l-5.1 2.68.98-5.68-4.13-4.02 5.7-.83z"/>',
 	radio: '<rect x="3" y="8.5" width="18" height="11.5" rx="3"/><path d="M7.5 8.5l9-4.5"/><circle cx="15.5" cy="14.2" r="2.5"/><path d="M6.8 12.7h3M6.8 15.7h3"/>',
 	telegram: '<path d="M21 4.5L2.8 11.4c-.8.3-.8 1.4 0 1.7l4.4 1.5 1.7 5.3c.2.7 1.1.9 1.6.4l2.5-2.4 4.6 3.4c.6.4 1.4.1 1.6-.6L22.3 5.8c.2-.9-.6-1.6-1.3-1.3z"/><path d="M7.3 14.6l10-6.6-7.4 8"/>'
 };
@@ -61911,15 +62190,28 @@ var RADIO = [
 	[ 'z_metal', 'Heavy Metal', 'https://abs.zaycev.fm/metal256k', 'zaycev' ],
 	[ 'z_zaychata', 'Зайчата', 'https://abs.zaycev.fm/zaychata256k', 'zaycev' ],
 ];
-var RADIO_SETS = [ { id: 'r', name: 'Радио Record' }, { id: 'z', name: 'Zaycev FM' }, { id: 'o', name: 'Разные станции' } ];
+var RADIO_SETS = [ { id: 'f', name: 'Избранное' }, { id: 'r', name: 'Радио Record' }, { id: 'z', name: 'Zaycev FM' }, { id: 'o', name: 'Разные станции' } ];
 var HLS_SRC = [ 'https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.light.min.js', 'https://unpkg.com/hls.js@1/dist/hls.light.min.js' ];
 function radioSetOf(i) { return /^z_/.test(RADIO[i][0]) ? 'z' : /^https?:\/\//.test(RADIO[i][2]) ? 'o' : 'r'; }
 function radioSetName(i) { var k = radioSetOf(i); return k === 'z' ? 'Zaycev FM' : k === 'o' ? '' : 'Радио Record'; }
 function radioUrl(i) { var p = RADIO[i][2]; return /^https?:\/\//.test(p) ? p : 'https://radiorecord.hostingradio.ru/' + p + '.aacp'; }
 function radioIsHls(i) { return /\.m3u8(\?|$)/.test(radioUrl(i)); }
-function radioIdx(set) { var r = []; for (var i = 0; i < RADIO.length; i++) if (radioSetOf(i) === set) r.push(i); return r; }
+function radioIdx(set) {
+	if (set === 'f') return radio.fav.map(radioFind).filter(function (i) { return i >= 0; });
+	var r = [];
+	for (var i = 0; i < RADIO.length; i++) if (radioSetOf(i) === set) r.push(i);
+	return r;
+}
+function radioIsFav(i) { return radio.fav.indexOf(RADIO[i][0]) >= 0; }
+function radioFavToggle(i) {
+	var id = RADIO[i][0], k = radio.fav.indexOf(id);
+	if (k >= 0) radio.fav.splice(k, 1); else radio.fav.push(id);
+	radioSave();
+	radioPaint();
+}
+function radioInFav() { return radio.ctx === 'f' && radioIsFav(radio.idx); }
 var K_RADIO = 'zmw.radio';
-var radio = { idx: 0, vol: 70, show: true, state: 'off', audio: null, el: null, menu: null, saveT: 0, waitT: 0, synced: false, track: null, nowT: 0, nowSeq: 0, nowOff: false, subTxt: null, hls: null, hlsP: null, startSeq: 0, tab: 'r' };
+var radio = { idx: 0, vol: 70, show: true, state: 'off', audio: null, el: null, menu: null, saveT: 0, waitT: 0, synced: false, track: null, nowT: 0, nowSeq: 0, nowOff: false, subTxt: null, hls: null, hlsP: null, startSeq: 0, tab: 'r', fav: [], prev: -1, ctx: '' };
 (function () {
 	try {
 		var c = JSON.parse(sget(K_RADIO) || 'null');
@@ -61932,14 +62224,17 @@ function radioApplyCfg(c) {
 	if (i >= 0) radio.idx = i;
 	if (typeof c.volume === 'number' && c.volume >= 0 && c.volume <= 100) radio.vol = c.volume;
 	if (typeof c.show === 'boolean') radio.show = c.show;
+	if (Array.isArray(c.fav)) radio.fav = c.fav.filter(function (id, k, a) { return typeof id === 'string' && radioFind(id) >= 0 && a.indexOf(id) === k; });
+	if (typeof c.prev === 'string') { i = radioFind(c.prev); radio.prev = i === radio.idx ? -1 : i; }
+	if (c.ctx === 'f' || c.ctx === '') radio.ctx = c.ctx;
 }
-function radioCache() { sset(K_RADIO, JSON.stringify({ station: RADIO[radio.idx][0], volume: radio.vol, show: radio.show }), true); }
+function radioCache() { sset(K_RADIO, JSON.stringify({ station: RADIO[radio.idx][0], volume: radio.vol, show: radio.show, prev: radio.prev >= 0 ? RADIO[radio.prev][0] : '', fav: radio.fav, ctx: radio.ctx }), true); }
 function radioSave() {
 	radioCache();
 	clearTimeout(radio.saveT);
 	radio.saveT = setTimeout(function () {
 		if (!sid) return;
-		ubus('zapret-manager', 'ui_radio_set', { mode: RADIO[radio.idx][0] + ' ' + radio.vol + ' ' + (radio.show ? 1 : 0) }).catch(function () {});
+		ubus('zapret-manager', 'ui_radio_set', { mode: RADIO[radio.idx][0] + ' ' + radio.vol + ' ' + (radio.show ? 1 : 0) + ' ' + (radio.prev >= 0 ? RADIO[radio.prev][0] : '-') + ' ' + (radio.fav.length ? radio.fav.join(',') : '-') }).catch(function () {});
 	}, 700);
 }
 function radioSync() {
@@ -61949,8 +62244,9 @@ function radioSync() {
 		if (!c) return;
 		radio.synced = true;
 		if (!c.station) { radioSave(); return; }
-		var was = radio.idx;
+		var was = radio.idx, loc = radio.fav.slice();
 		radioApplyCfg(c);
+		if (!Array.isArray(c.fav) && loc.length) { radio.fav = loc; radioSave(); }
 		if (radio.idx !== was && radio.state !== 'off' && radio.state !== 'err') radioStart();
 		if (!radio.show && radio.state !== 'off') radioStop();
 		if (radio.audio) radio.audio.volume = radio.vol / 100;
@@ -62122,17 +62418,32 @@ function radioFail() {
 function radioToggle() {
 	if (radio.state === 'wait' || radio.state === 'play') radioStop(); else radioStart();
 }
-function radioPick(i) {
-	radio.idx = (i + RADIO.length) % RADIO.length;
+function radioGo(i) {
+	i = (i + RADIO.length) % RADIO.length;
+	if (i !== radio.idx) radio.prev = radio.idx;
+	radio.idx = i;
+}
+function radioPick(i, ctx) {
+	radioGo(i);
+	radio.ctx = ctx === 'f' ? 'f' : '';
 	radioSave();
 	radioStart();
 }
-function radioStep(d) {
-	var on = radio.state === 'wait' || radio.state === 'play', g = radioIdx(radioSetOf(radio.idx)), k = g.indexOf(radio.idx);
-	radio.idx = g[((k < 0 ? 0 : k) + d + g.length) % g.length];
+function radioJump(i) {
+	var on = radio.state === 'wait' || radio.state === 'play';
+	radioGo(i);
 	radioSave();
 	if (on) radioStart();
 	else { radio.state = 'off'; radioNowStop(); radioPaint(); radioMedia(); }
+}
+function radioStep(d) {
+	var g = radioIdx(radioInFav() && radio.fav.length > 1 ? 'f' : radioSetOf(radio.idx)), k = g.indexOf(radio.idx);
+	radioJump(g[((k < 0 ? 0 : k) + d + g.length) % g.length]);
+}
+function radioSwap() {
+	if (radio.prev < 0 || radio.prev === radio.idx) return;
+	if (radio.ctx === 'f' && !radioIsFav(radio.prev)) radio.ctx = '';
+	radioJump(radio.prev);
 }
 function radioNowStop() {
 	clearTimeout(radio.nowT);
@@ -62212,6 +62523,7 @@ function radioBuild() {
 	r.playBtn = E('button', { 'class': 'zmw-radio-btn zmw-radio-main', 'type': 'button', 'click': radioToggle });
 	r.el = E('div', { 'class': 'zmw-radio', 'role': 'group', 'aria-label': 'Радио Record' }, [
 		r.pick,
+		r.swapBtn = E('button', { 'class': 'zmw-radio-btn zmw-radio-swap', 'type': 'button', 'hidden': '', 'click': radioSwap }, [ icon('rswap') ]),
 		E('button', { 'class': 'zmw-radio-btn', 'type': 'button', 'aria-label': 'Предыдущая станция', 'title': 'Предыдущая станция', 'click': function () { radioStep(-1); } }, [ icon('rprev') ]),
 		r.playBtn,
 		E('button', { 'class': 'zmw-radio-btn', 'type': 'button', 'aria-label': 'Следующая станция', 'title': 'Следующая станция', 'click': function () { radioStep(1); } }, [ icon('rnext') ]),
@@ -62241,6 +62553,11 @@ function radioPaint() {
 	r.playBtn.appendChild(icon(on ? 'rstop' : 'rplay'));
 	r.playBtn.setAttribute('aria-label', on ? 'Остановить' : 'Играть');
 	r.playBtn.title = on ? 'Остановить' : 'Играть «' + RADIO[r.idx][1] + '»';
+	var pv = r.prev >= 0 && r.prev !== r.idx ? RADIO[r.prev][1] : '';
+	r.swapBtn.hidden = !pv;
+	r.el.classList.toggle('zmw-radio-x4', !!pv);
+	r.swapBtn.title = pv ? 'Вернуться к «' + pv + '»' : '';
+	r.swapBtn.setAttribute('aria-label', pv ? 'Вернуться к станции «' + pv + '»' : 'Предыдущая выбранная станция');
 	try { if ('mediaSession' in navigator) navigator.mediaSession.playbackState = on ? 'playing' : 'paused'; } catch (e) {}
 	if (r.menu) radioMenuPaint();
 }
@@ -62292,6 +62609,15 @@ function radioMenuPaint() {
 		b.classList.toggle('zmw-radio-live', cur && radio.state === 'play');
 		b.setAttribute('aria-checked', cur ? 'true' : 'false');
 	});
+	Array.prototype.forEach.call(m.querySelectorAll('.zmw-radio-fav'), function (b) {
+		var on = radioIsFav(+b.getAttribute('data-i'));
+		b.classList.toggle('zmw-on', on);
+		b.setAttribute('aria-pressed', on ? 'true' : 'false');
+		b.title = on ? 'Убрать из избранного' : 'Добавить в избранное';
+		b.setAttribute('aria-label', (on ? 'Убрать из избранного: ' : 'Добавить в избранное: ') + RADIO[+b.getAttribute('data-i')][1]);
+	});
+	var ft = m.querySelector('.zmw-radio-tab[data-set="f"] .zmw-radio-cnt');
+	if (ft) { ft.textContent = radio.fav.length ? String(radio.fav.length) : ''; ft.hidden = !radio.fav.length; }
 }
 function radioMenuToggle() {
 	if (radio.menu) { radioMenuClose(); return; }
@@ -62303,14 +62629,14 @@ function radioMenuToggle() {
 		if (radio.audio) radio.audio.volume = radio.vol / 100;
 		radioSave();
 	});
-	radio.tab = radioSetOf(radio.idx);
+	radio.tab = radioIsFav(radio.idx) ? 'f' : radioSetOf(radio.idx);
 	var list = E('div', { 'class': 'zmw-radio-list' });
 	var tabs = E('div', { 'class': 'zmw-radio-tabs', 'role': 'tablist' }, RADIO_SETS.map(function (t) {
-		return E('button', { 'class': 'zmw-radio-tab', 'type': 'button', 'role': 'tab', 'data-set': t.id, 'click': function () {
+		return E('button', { 'class': 'zmw-radio-tab' + (t.id === 'f' ? ' zmw-radio-tab-fav' : ''), 'type': 'button', 'role': 'tab', 'data-set': t.id, 'click': function () {
 			if (radio.tab === t.id) return;
 			radio.tab = t.id;
 			fill();
-		} }, [ t.name ]);
+		} }, t.id === 'f' ? [ icon('rstar', 'zmw-radio-tstar'), t.name, E('span', { 'class': 'zmw-radio-cnt', 'hidden': '' }) ] : [ t.name ]);
 	}));
 	var m = E('div', { 'class': 'zmw-radio-menu', 'role': 'menu', 'aria-label': 'Радиостанции' }, [
 		E('div', { 'class': 'zmw-radio-menu-head' }, [ tabs ]),
@@ -62333,13 +62659,33 @@ function radioMenuToggle() {
 			b.setAttribute('aria-selected', on ? 'true' : 'false');
 		});
 		list.innerHTML = '';
+		list.classList.toggle('zmw-radio-list-empty', !ids.length);
+		if (!ids.length) {
+			list.appendChild(E('div', { 'class': 'zmw-radio-empty' }, [
+				E('span', { 'class': 'zmw-radio-empty-ico' }, [ icon('rstar') ]),
+				E('div', {}, [ E('b', {}, [ 'Здесь будут ваши станции' ]), E('span', {}, [ 'Отметьте звёздочкой любимые станции на других вкладках — они соберутся здесь, а кнопки «назад» и «вперёд» в плеере будут листать только их' ]) ])
+			]));
+			list.style.gridTemplateRows = '';
+		}
 		ids.forEach(function (i) {
-			list.appendChild(E('button', { 'class': 'zmw-radio-st', 'type': 'button', 'role': 'menuitemradio', 'data-i': String(i), 'click': function () { radioPick(i); radioMenuClose(); } }, [
-				E('span', { 'class': 'zmw-radio-eq', 'aria-hidden': 'true' }, [ E('i'), E('i'), E('i') ]), E('span', {}, [ RADIO[i][1] ])
+			var sn = radio.tab === 'f' ? radioSetName(i) || 'Разные станции' : '';
+			list.appendChild(E('div', { 'class': 'zmw-radio-row' }, [
+				E('button', { 'class': 'zmw-radio-st', 'type': 'button', 'role': 'menuitemradio', 'data-i': String(i), 'title': sn ? RADIO[i][1] + ' · ' + sn : '', 'click': function () { radioPick(i, radio.tab); radioMenuClose(); } }, [
+					E('span', { 'class': 'zmw-radio-eq', 'aria-hidden': 'true' }, [ E('i'), E('i'), E('i') ]), E('span', {}, [ RADIO[i][1] ])
+				]),
+				E('button', { 'class': 'zmw-radio-fav', 'type': 'button', 'data-i': String(i), 'click': function () { favClick(i); } }, [ icon('rstar') ])
 			]));
 		});
-		list.style.gridTemplateRows = 'repeat(' + Math.ceil(ids.length / cols) + ', auto)';
+		if (ids.length) list.style.gridTemplateRows = 'repeat(' + Math.ceil(ids.length / cols) + ', auto)';
 		if (radio.menu) { radioMenuPaint(); place(); }
+	}
+	function favClick(i) {
+		var inFav = radio.tab === 'f', pos = inFav ? radioIdx('f').indexOf(i) : -1, nx;
+		radioFavToggle(i);
+		if (!inFav) return;
+		fill();
+		nx = list.querySelectorAll('.zmw-radio-fav');
+		try { (nx[Math.min(pos, nx.length - 1)] || tabs.querySelector('.zmw-radio-tab-fav')).focus({ preventScroll: true }); } catch (e) {}
 	}
 	document.body.appendChild(m);
 	radio.menu = m;
@@ -64775,7 +65121,38 @@ html[data-theme="matrix"] .zmw-side .zmw-mem-val.zmw-mem-fit { font-size: 10px; 
 .zmw-radio-vol { display: flex; align-items: center; gap: 10px; margin-top: 4px; padding: 6px 7px 1px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--muted); }
 .zmw-radio-vol input { flex: 1; min-width: 0; margin: 0; accent-color: var(--a1); }
 .zmw-radio-voltxt { width: 36px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-2); }
-@media (max-width: 520px) { .zmw-radio-list { grid-auto-columns: minmax(0, 1fr); } .zmw-radio-menu { width: auto; } .zmw-radio-st span:last-child { white-space: normal; overflow: visible; overflow-wrap: anywhere; } }
+.zmw-radio-swap[hidden] { display: none; }
+.zmw-radio-x4 .zmw-radio-btn { width: 28px; }
+.zmw-radio-x4 .zmw-radio-pick { gap: 6px; padding-right: 2px; }
+.zmw-radio-x4:not(.zmw-radio-play):not(.zmw-radio-wait) .zmw-radio-pick .zmw-radio-ico { display: none; }
+.zmw-radio-swap .zmw-i { width: 19px; height: 19px; }
+.zmw-radio-swap:hover { color: var(--a1); }
+.zmw-radio-tab-fav { display: inline-flex; align-items: center; gap: 5px; }
+.zmw-radio-tstar { width: 15px; height: 15px; flex: none; margin-top: -1px; color: #f5a524; fill: currentColor; stroke-width: 1.4; }
+.zmw-radio-cnt { min-width: 18px; height: 18px; box-sizing: border-box; padding: 0 5px; border-radius: 9px; background: var(--surface-3); color: var(--text-2); font: 650 11px/18px var(--font); text-align: center; font-variant-numeric: tabular-nums; }
+.zmw-radio-cnt[hidden] { display: none; }
+.zmw-radio-tab-fav.zmw-on .zmw-radio-cnt { background: var(--grad-soft); color: var(--text); }
+.zmw-radio-row { display: flex; align-items: center; min-width: 0; border-radius: 6px; }
+.zmw-radio-row .zmw-radio-st { flex: 1 1 auto; }
+.zmw-radio-list .zmw-radio-row .zmw-radio-st { padding-right: 4px; }
+.zmw-radio-fav { width: 26px; height: 26px; flex: none; display: grid; place-items: center; padding: 0; margin: 0 4px 0 -2px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; opacity: .55; transition: opacity .15s, color .15s, background .15s, transform .12s; }
+.zmw-radio-fav .zmw-i { width: 16px; height: 16px; stroke-width: 1.7; }
+.zmw-radio-fav:hover { opacity: 1; color: #f5a524; background: var(--surface-2); }
+.zmw-radio-fav:active { transform: scale(.86); }
+.zmw-radio-fav:focus-visible { outline: none; opacity: 1; box-shadow: var(--ring); }
+.zmw-radio-fav.zmw-on { opacity: 1; color: #f5a524; }
+.zmw-radio-fav.zmw-on .zmw-i { fill: currentColor; }
+@media (hover: hover) and (pointer: fine) {
+	.zmw-radio-fav:not(.zmw-on) { opacity: 0; }
+	.zmw-radio-row:hover .zmw-radio-fav:not(.zmw-on), .zmw-radio-fav:not(.zmw-on):focus-visible { opacity: .6; }
+	.zmw-radio-row:hover .zmw-radio-fav:not(.zmw-on):hover { opacity: 1; }
+}
+.zmw-radio-list-empty { display: block; }
+.zmw-radio-empty { display: flex; align-items: flex-start; gap: 12px; width: 380px; max-width: 100%; box-sizing: border-box; margin: 4px 0 6px; padding: 12px 14px; border-radius: 10px; border: 1px dashed var(--border-2); color: var(--muted); font-size: 12.5px; line-height: 1.45; }
+.zmw-radio-empty b { display: block; margin-bottom: 2px; color: var(--text); font-size: 13.5px; font-weight: 650; }
+.zmw-radio-empty-ico { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 10px; background: rgba(245,165,36,.14); color: #f5a524; }
+.zmw-radio-empty-ico .zmw-i { width: 19px; height: 19px; fill: currentColor; stroke-width: 1.4; }
+@media (max-width: 520px) { .zmw-radio-list { grid-auto-columns: minmax(0, 1fr); } .zmw-radio-menu { width: auto; } .zmw-radio-st span:last-child { white-space: normal; overflow: visible; overflow-wrap: anywhere; } .zmw-radio-tabs { flex-wrap: wrap; column-gap: 14px; row-gap: 8px; } .zmw-radio-empty { width: auto; } }
 @media (prefers-reduced-motion: reduce) {
 	html .zmw-radio-play .zmw-radio-eq i, html .zmw-radio-wait .zmw-radio-eq i, html .zmw-radio-st.zmw-radio-live .zmw-radio-eq i { animation-duration: 1s !important; animation-iteration-count: infinite !important; }
 	html .zmw-radio-play .zmw-radio-eq i:nth-child(2), html .zmw-radio-st.zmw-radio-live .zmw-radio-eq i:nth-child(2) { animation-duration: .8s !important; }
