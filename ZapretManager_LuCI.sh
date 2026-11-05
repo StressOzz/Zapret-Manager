@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.031
+# Version: 5.032
 ZM_VERSION_EOF
 set -e
 
@@ -1319,6 +1319,9 @@ adblock_status() { _zmL adblock && adblock_status "$@"; }
 adblock_action() { _zmL adblock && adblock_action "$@"; }
 adblock_cron() { _zmL adblock && adblock_cron "$@"; }
 _ab_watch() { _zmL adblock && _ab_watch "$@"; }
+_ab_ids() { _zmL adblock && _ab_ids "$@"; }
+_ab_src() { _zmL adblock && _ab_src "$@"; }
+do_ab_apply() { _zmL adblock && do_ab_apply "$@"; }
 owrt_reboot_run() { _zmL openwrt && owrt_reboot_run "$@"; }
 owrt_status() { _zmL openwrt && owrt_status "$@"; }
 owrt_set() { _zmL openwrt && owrt_set "$@"; }
@@ -6596,11 +6599,53 @@ _st_sec_with() {
 	_st_bind "$_sw_was"
 	return $_sw_rc
 }
-_st_secs() { [ -s "$ST_SEC_LIST" ] || return 0; grep -E '^s[2-9]$' "$ST_SEC_LIST" | while read -r _s; do [ -d "$ST_SEC_DIR/$_s" ] && echo "$_s"; done; }
+_st_secs() { local s; for s in $(_st_list); do [ "$s" = main ] || echo "$s"; done; }
 _st_sec_kind() { local k=""; [ -f "$ST_SEC_DIR/$1/kind" ] && read -r k < "$ST_SEC_DIR/$1/kind"; case "$k" in vpn|iface) echo "$k" ;; *) echo warp ;; esac; }
 _st_sec_iface() { local k=""; [ -f "$ST_SEC_DIR/$1/iface" ] && read -r k < "$ST_SEC_DIR/$1/iface"; printf '%s' "$k"; }
-_st_sec_over() { local k=""; [ -f "$ST_SEC_DIR/$1/over" ] && read -r k < "$ST_SEC_DIR/$1/over"; case "$k" in warp|main|s[2-9]) printf '%s' "$k" ;; esac; }
-_st_secs_overwarp() { local s; for s in $(_st_secs); do [ "$(_st_sec_kind "$s")" = vpn ] && _st_sec_live "$s" && _st_sec_work "$s" && [ "$(_st_sec_over "$s")" = warp ] && return 0; done; return 1; }
+_st_sec_over() { local k="" f="$ST_SEC_DIR/$1/over"; [ "$1" = main ] && f="$ST_DIR/over"; [ -f "$f" ] && read -r k < "$f"; case "$k" in warp|main) printf '%s' "$k" ;; s[2-9]) [ -d "$ST_SEC_DIR/$k" ] && printf '%s' "$k" ;; esac; }
+_st_over_drop() {
+	local i n=0
+	for i in $(_st_secs); do [ "$(_st_sec_over "$i")" = "$1" ] && { rm -f "$ST_SEC_DIR/$i/over"; n=1; }; done
+	[ "$(_st_sec_over main)" = "$1" ] && { rm -f "$ST_DIR/over"; n=1; }
+	return $((1 - n))
+}
+_st_secs_overmain() { local s; for s in $(_st_secs); do [ "$(_st_sec_over "$s")" = main ] && _st_sec_live "$s" && _st_sec_work "$s" && return 0; done; return 1; }
+_st_warp_used() { _st_warp_on && { _st_secs_warp || _st_secs_overwarp; }; }
+_st_list() {
+	local l s
+	l="$([ -s "$ST_SEC_LIST" ] && grep -E '^(main|s[2-9])$' "$ST_SEC_LIST" | awk '!x[$0]++')"
+	for s in $l; do
+		[ "$s" = main ] || [ -d "$ST_SEC_DIR/$s" ] || continue
+		printf '%s\n' "$s"
+	done
+}
+_st_heal_list() {
+	local l s
+	l="$(_st_list)"
+	for s in s2 s3 s4 s5 s6 s7 s8 s9; do
+		[ -f "$ST_SEC_DIR/$s/kind" ] || continue
+		printf '%s\n' "$l" | grep -qx "$s" || l="${l:+$l
+}$s"
+	done
+	if ! printf '%s\n' "$l" | grep -qE '^s[2-9]$'; then
+		rm -f "$ST_SEC_LIST" "$ST_SEC_DIR/main.off"
+		return 0
+	fi
+	[ "$l" = "$(cat "$ST_SEC_LIST" 2>/dev/null)" ] && return 0
+	printf '%s\n' "$l" > "$ST_SEC_LIST.heal.$$" && mv -f "$ST_SEC_LIST.heal.$$" "$ST_SEC_LIST" || rm -f "$ST_SEC_LIST.heal.$$"
+}
+_st_order_all() {
+	local l
+	l="$(_st_list)"
+	if [ -z "$l" ] || ! printf '%s\n' "$l" | grep -qx main; then
+		printf 'main\n'
+		[ -n "$l" ] && printf '%s\n' "$l"
+		return 0
+	fi
+	printf '%s\n' "$l"
+}
+_st_order_json() { _st_order_all | awk 'BEGIN { o = "" } { printf "%s\"%s\"", o, $0; o = "," }'; }
+_st_secs_overwarp() { local s; _st_sec_with main _st_use_vpn && { _st_sec_with main _st_work_main || _st_secs_overmain; } && [ "$(_st_sec_over main)" = warp ] && return 0; for s in $(_st_secs); do [ "$(_st_sec_kind "$s")" = vpn ] && _st_sec_live "$s" && _st_sec_work "$s" && [ "$(_st_sec_over "$s")" = warp ] && return 0; done; return 1; }
 _st_sec_name() {
 	local f="$ST_SEC_DIR/$1/name" v=""
 	case "$1" in ''|main) f="$ST_SEC_DIR/main.name" ;; esac
@@ -6669,7 +6714,7 @@ _st_feats_all() { local s; { _st_sec_with main _st_use_vpn && _st_sec_with main 
 
 steer_action() {
 	local action="$1" mode="$2" w d
-	case "$action" in sec_add|sec_name|sec_kind|sec_del|sec_off|sec_over) steer_sec_action "$action" "$mode"; return ;; esac
+	case "$action" in sec_add|sec_name|sec_kind|sec_del|sec_off|sec_over|sec_order) steer_sec_action "$action" "$mode"; return ;; esac
 	case "$mode" in
 		"~s"[2-9]"~"*)
 			w="${mode#?}"; w="${w%%\~*}"; mode="${mode#?$w?}"
@@ -24610,7 +24655,7 @@ _stl_overs() {
 	tab="$(printf '\t')"
 	while IFS="$tab" read -r k a b c; do
 		[ "$k" = over ] || continue
-		case "$a" in s[2-9]) ;; *) continue ;; esac
+		case "$a" in main|s[2-9]) ;; *) continue ;; esac
 		case "$b" in
 			warp) t="$STL_WARP_OUT" ;;
 			main) t="$STL_VPN_OUT" ;;
@@ -24622,8 +24667,14 @@ _stl_overs() {
 			*) t="" ;;
 		esac
 		[ -n "$t" ] && t="$(_stl_over_name "$o" "$t")"
+		printf '%s' "$t" | grep -qE '^[A-Za-z0-9_.-]{1,32}$' || t=""
+		[ "$a" = main ] && [ "$t" = "$STL_VPN_OUT" ] && t=""
 		if [ -z "$t" ]; then
 			echo "   ! Секция «$(_st_sec_name "$a")»: то, через что она выходит, сейчас не работает — её VPN подключается напрямую" >&2
+			continue
+		fi
+		if [ "$a" = main ]; then
+			o="$(printf '%s' "$o" | sed -e "s/\"zm_vpn\":{\"kind\":\"tunnel\",/&\"over\":\"$t\",/" -e "s/\"zmv_[A-Za-z0-9]*\":{\"kind\":\"tunnel\",/&\"over\":\"$t\",/g")"
 			continue
 		fi
 		n="${a#s}"
@@ -24683,7 +24734,9 @@ _stl_spec() {
 			sec)
 				_stl_rule; lid=""; srs=""; dom=""; pfx=""; cu=""
 				sec="$a"; out=""; dnt="${a#s}"; sfm=""; sfa=""
-				for t in $so; do [ "${t%%:*}" = "$a" ] && out="${t#*:}"; done
+				if [ "$a" = main ]; then out="$mout"; sec=""; else
+					for t in $so; do [ "${t%%:*}" = "$a" ] && out="${t#*:}"; done
+				fi
 				[ -n "$out" ] || continue
 				if [ "$out" = "$mout" ]; then dnt=""; elif [ "$out" = "$STL_WARP_OUT" ]; then dnt=w; fi
 				while IFS="$tab" read -r u d m x; do
@@ -24846,7 +24899,7 @@ stl_diag_lines() {
 _st_diag_map() {
 	local s many="" st
 	[ -n "$(_st_secs)" ] && many=1
-	for s in main $(_st_secs); do
+	for s in $(_st_order_all); do
 		if [ "$s" = main ]; then
 			if _st_sec_off main; then st=off; elif _st_sec_with main _st_work_main; then st=work; else st=idle; fi
 			printf '%s\t%s\t%s\t%s\n' main "${many:+Секция «$(_st_sec_name main)»}" "$st" "$(_st_main_iface)"
@@ -25099,7 +25152,17 @@ do_steer_excl() {
 
 _st_dev_model() {
 	[ -s "$ST_DEVS" ] || return 0
-	awk -F'\t' '($1 == "all" || $1 == "byp") && $2 != "" && !s[$2]++ { printf "dev\t%s\t%s\t%s\n", $1, $2, $3 }' "$ST_DEVS"
+	awk -F'\t' -v m="$1" '$1 == m && $2 != "" && !s[$2]++ { printf "dev\t%s\t%s\t%s\n", $1, $2, $3 }' "$ST_DEVS"
+}
+_st_dev_sec() {
+	[ -s "$ST_SEC_DIR/$1/devices" ] || return 0
+	awk -F'\t' -v s="$1" '($1 == "all" || $1 == "only") && $2 != "" && !x[$2]++ { printf "sdev\t%s\t%s\t%s\n", s, $1, $2 }' "$ST_SEC_DIR/$1/devices"
+}
+_st_devs_fit() {
+	local have want s
+	have="$(awk -F'\t' '$1 == "dev" || $1 == "sdev"' "$ST_DIR/model.svc" 2>/dev/null | sort)"
+	want="$( { _st_dev_model all; for s in $(_st_secs); do _st_sec_live "$s" && _st_dev_sec "$s"; done; } | sort)"
+	[ "$have" = "$want" ]
 }
 
 steer_devices() {
@@ -26435,32 +26498,38 @@ _st_pkg_lists() {
 _st_model_head() {
 	local id s k m=none
 	printf 'lan'; for id in $(_st_lan_devs); do printf '\t%s' "$id"; done; echo
-	if _st_sec_off main || { ! _st_work_main && _st_secs_work; }; then m=none
+	if _st_sec_off main || { ! _st_work_main && ! _st_secs_overmain && _st_secs_work; }; then m=none
 	elif _st_use_vpn; then m=vpn; elif [ "$(_st_exit)" = iface ]; then m=iface; elif _st_warp_on || ! _st_secs_work; then m=warp; fi
 	printf 'main\t%s\n' "$m"
 	[ "$m" = iface ] && printf 'mif\t%s\n' "$(_zm_tun_dev "$(_st_main_iface)")"
 	if [ "$m" = vpn ]; then
 		printf 'vpn\t%s\n' "$ST_SUB"
+		if [ -n "$(_st_sec_over main)" ] && { [ "$(_st_sec_over main)" != warp ] || _st_warp_on; }; then
+			printf 'over\tmain\t%s\n' "$(_st_sec_over main)"
+		fi
 		_st_sub_filter
 	fi
-	if [ "$m" = warp ] || { _st_warp_on && _st_secs_warp; } || { _st_warp_on && _st_secs_overwarp; }; then
+	if [ "$m" = warp ] || _st_warp_used; then
 		printf 'wpick\t%s\n' "$(_st_warp_pick)"
 		printf 'warp'
 		if [ -s "$ST_WARP_UP" ]; then for id in $(_st_warp_use); do printf '\t%s' "$id"; done; else printf '\t%s' "$ST_WARP_IF"; fi
 		echo
 	fi
-	_st_dev_model
+	_st_dev_model byp
 	for s in $(_st_secs); do
 		_st_sec_live "$s" || continue
 		k="$(_st_sec_kind "$s")"
 		case "$k" in
 			vpn)
 				printf 'so\t%s\tvpn\t%s\n' "$s" "$ST_SEC_DIR/$s/sub.txt"; _st_sec_with "$s" _st_sub_filter | sed "s/^tun	/stun	$s	/"
-				[ -n "$(_st_sec_over "$s")" ] && printf 'over\t%s\t%s\n' "$s" "$(_st_sec_over "$s")" ;;
+				id="$(_st_sec_over "$s")"
+				if [ -n "$id" ]; then
+					if [ "$id" = main ]; then [ "$m" = vpn ] || id=""; else _st_sec_live "$id" || id=""; fi
+				fi
+				[ -n "$id" ] && printf 'over\t%s\t%s\n' "$s" "$id" ;;
 			iface) printf 'so\t%s\tiface\t%s\n' "$s" "$(_zm_tun_dev "$(_st_sec_iface "$s")")" ;;
 			*) printf 'so\t%s\twarp\n' "$s" ;;
 		esac
-		[ -s "$ST_SEC_DIR/$s/devices" ] && awk -F'\t' -v s="$s" '($1 == "all" || $1 == "only") && $2 != "" && !x[$2]++ { printf "sdev\t%s\t%s\t%s\n", s, $1, $2 }' "$ST_SEC_DIR/$s/devices"
 	done
 	_st_excl_model
 }
@@ -26471,16 +26540,21 @@ _st_model() {
 	mkdir -p "$ST_RUN"
 	_st_cust_split
 	_st_model_head
-	for id; do
-		_st_svc_lists "$id"
-	done
-	for s in $(_st_secs); do
+	for s in $(_st_order_all); do
+		if [ "$s" = main ]; then
+			printf 'sec\tmain\n'
+			rm -f "$ST_RUN"/used.*
+			for id; do _st_svc_lists "$id"; done
+			_st_dev_model all
+			continue
+		fi
 		_st_sec_live "$s" || continue
 		rm -f "$ST_RUN"/used.*
 		printf 'sec\t%s\n' "$s"
 		for id in $(_st_sec_with "$s" _st_sel); do
 			_st_sec_with "$s" _st_svc_lists "$id"
 		done
+		_st_dev_sec "$s"
 	done
 }
 
@@ -26540,7 +26614,7 @@ _st_spec_apply() {
 		if [ $# -gt 0 ] || ! grep -qE '^(dev	all|sdev	[^	]*	all)	' "$m"; then rm -f "$m"; echo "ОШИБКА: для выбранных сервисов нет ни одного списка"; return 1; fi
 	fi
 	stl_apply "$m" || { rm -f "$m"; return 1; }
-	grep -v '^\(lan\|main\|warp\|wpick\|vpn\|tun\|so\|stun\|sdev\|dev\|xdom\|xpfx\|over\)	' "$m" > "$ST_DIR/model.svc" 2>/dev/null
+	grep -v '^\(lan\|main\|mif\|warp\|wpick\|vpn\|tun\|so\|stun\|xdom\|xpfx\|over\)	' "$m" | grep -v '^dev	byp	' > "$ST_DIR/model.svc" 2>/dev/null
 	rm -f "$m"
 	_st_own "steer-spec"
 	if [ -z "$ZM_ST_LISTS_BG" ]; then
@@ -26671,19 +26745,26 @@ _st_warp_resume() {
 	return 0
 }
 
-_st_apply() { _st_sec_with main _st_apply0 "$@"; }
+_st_apply() { _st_heal_list; _st_sec_with main _st_apply0 "$@"; }
 
 _st_secs_fit() {
 	local have want s
 	have="$(awk -F'\t' '$1 == "sec" { printf "%s ", $2 }' "$ST_DIR/model.svc" 2>/dev/null)"
-	want="$(for s in $(_st_secs); do _st_sec_live "$s" && printf '%s ' "$s"; done)"
-	[ "$have" = "$want" ]
+	want=""
+	for s in $(_st_order_all); do
+		[ "$s" = main ] || _st_sec_live "$s" || continue
+		want="${want:+$want }$s"
+	done
+	[ "${have% }" = "$want" ]
 }
 
 _st_secs_say() {
 	local s k n w
-	_st_sec_off main && echo "   · Секция «$(_st_sec_name main)» выключена — её сервисы идут напрямую"
-	for s in $(_st_secs); do
+	for s in $(_st_order_all); do
+		if [ "$s" = main ]; then
+			_st_sec_off main && echo "   · Секция «$(_st_sec_name main)» выключена — её сервисы идут напрямую"
+			continue
+		fi
 		_st_sec_off "$s" && { echo "   · Секция «$(_st_sec_name "$s")» выключена — её сервисы идут напрямую"; continue; }
 		w="$(_st_sec_with "$s" _st_sel | tr '\n' ' ')"
 		n="$(_st_sec_with "$s" _st_devs_n all)"
@@ -26752,7 +26833,7 @@ _st_apply0() {
 			fi
 			[ -n "$mw" ] && _rb_warn "У основной секции нет туннеля — подключите WARP или подписку VPN, её сервисы пока идут напрямую" ;;
 	esac
-	if { [ "$ex" = vpn ] || [ "$ex" = iface ]; } && _st_warp_on && _st_secs_warp && [ "$1" != tunnel_ready ]; then _st_warp_resume || _st_warp_up || return 1; fi
+	if { [ "$ex" = vpn ] || [ "$ex" = iface ]; } && _st_warp_used && [ "$1" != tunnel_ready ]; then _st_warp_resume || _st_warp_up || return 1; fi
 	[ -n "$(_st_secs_vpn)" ] && _st_vpn_zone on
 	_st_secs_fw
 	local what dn
@@ -27413,7 +27494,8 @@ _st_spec_quick0() {
 	[ -f "$ST_DIR/model.svc" ] && _st_owns "steer-spec" && stl_running || return 2
 	for f in $(awk -F'\t' '$1 == "srs" || $1 == "dom" || $1 == "pfx" { print $2 }' "$ST_DIR/model.svc"); do [ -s "$f" ] || return 2; done
 	_st_secs_fit || return 2
-	if { ! _st_use_vpn && _st_warp_on; } || { _st_warp_on && _st_secs_warp; }; then [ -s "$ST_WARP_UP" ] || return 2; fi
+	_st_devs_fit || return 2
+	if { ! _st_use_vpn && _st_warp_on; } || _st_warp_used; then [ -s "$ST_WARP_UP" ] || return 2; fi
 	_st_engine_ready || return 1
 	_st_vpn_any && _st_vpn_zone on
 	_st_secs_fw
@@ -27795,6 +27877,7 @@ _do_steer_remove_core() {
 
 steer_status() {
 	_st_cust_split
+	_st_heal_list
 	ZM_STL_CACHE=1; STL_ST_J=""
 	stl_present && STL_ST_J="$(_stl_t 10 steer status 2>/dev/null)"
 	local running=false phase="" blk colo="" warp_up=false installed=false ver="" run=false chans=0 dns=false
@@ -27890,10 +27973,10 @@ steer_status() {
 	if [ "$vup" = true ] && [ "$vexit" = vpn ] && [ "$off" = false ]; then
 		_st_vpn_live; case $? in 0) vlive=true ;; 1) vlive=false ;; esac
 	fi
-	printf '{"running":%s,"phase":"%s","blocker":"%s","installed":%s,"stopped":%s,"version":"%s","steer_running":%s,"channels":%s,"warp_up":%s,"warp_colo":"%s","warp_host":"%s","warp_port":"%s","warp_hs_age":"%s","warp_rx":%s,"warp_tx":%s,"autorestart":"%s","dns_conflict":%s,"doh":"%s","doh_mode":"%s","exit":"%s","vpn_up":%s,"vpn_live":%s,"has_sub":%s,"sub_label":"%s","latest":"%s","ext":%s,"warp_on":%s,"warp_mode":"%s","warp_iface":"%s","warp_pick":"%s","onfail":"%s","warp_own_saved":%s,"tunnels":%s,"warp_active":"%s","catalog":%s,"wfix":%s,"lists_via":%s,"sub_via":%s,"lists":%s,"failopen":%s,"warp_failed":%s,"hosts_extra":%s,"dnsmode":"%s","realip":"%s","cttl":%s,"devices":[%s],"services":[%s],"main_name":"%s","main_off":%s,"exit_want":"%s","main_tun":%s,"sec_max":%s,"sec_vpn_max":%s,"sections":[%s],"awg_by_steer":%s,"awg_other":%s}\n' \
+	printf '{"running":%s,"phase":"%s","blocker":"%s","installed":%s,"stopped":%s,"version":"%s","steer_running":%s,"channels":%s,"warp_up":%s,"warp_colo":"%s","warp_host":"%s","warp_port":"%s","warp_hs_age":"%s","warp_rx":%s,"warp_tx":%s,"autorestart":"%s","dns_conflict":%s,"doh":"%s","doh_mode":"%s","exit":"%s","vpn_up":%s,"vpn_live":%s,"has_sub":%s,"sub_label":"%s","latest":"%s","ext":%s,"warp_on":%s,"warp_mode":"%s","warp_iface":"%s","warp_pick":"%s","onfail":"%s","warp_own_saved":%s,"tunnels":%s,"warp_active":"%s","catalog":%s,"wfix":%s,"lists_via":%s,"sub_via":%s,"lists":%s,"failopen":%s,"warp_failed":%s,"hosts_extra":%s,"dnsmode":"%s","realip":"%s","cttl":%s,"devices":[%s],"services":[%s],"main_name":"%s","main_off":%s,"exit_want":"%s","main_tun":%s,"main_over":"%s","order":[%s],"sec_max":%s,"sec_vpn_max":%s,"sections":[%s],"awg_by_steer":%s,"awg_other":%s}\n' \
 		"$running" "$(esc "$phase")" "$(esc "$blk")" "$installed" "$off" "$(esc "$ver")" "$run" "${chans:-0}" "$warp_up" "$(esc "$colo")" \
 		"$(esc "$host")" "$(esc "$port")" "$age" "${rx:-0}" "${tx:-0}" "$(_st_cron_get)" "$dns" "$doh" "$(_doh_force_mode)" \
-		"$vexit" "$vup" "$vlive" "$vsub" "$(esc "$(_st_sub_label)")" "$(esc "$latest")" "$ext" "$won" "$(_st_warp_modename)" "$(esc "$(_st_ext_if)")" "$(_st_warp_pick)" "$(_st_onfail)" "$(_st_own_saved && echo true || echo false)" "$(_st_tunnels_json)" "$active" "$(_st_cat_json)" "$(_st_wfix_json)" "$([ -f "$ST_DIR/lists.via" ] && echo true || echo false)" "$([ -f "$ST_SUB_VIA" ] && echo true || echo false)" "$(_st_lists_json)" "$failed" "$wfail" "$(_hosts_extra)" "$(_st_dnsmode)" "$(_st_realip)" "$(_st_cttl)" "$(_st_devs_json)" "$svc" "$(esc "$(_st_sec_name main)")" "$(_st_sec_off main && echo true || echo false)" "$(esc "$(cat "$ST_DIR/exit" 2>/dev/null)")" "$mtun" "$ST_SEC_MAX" "$ST_SEC_VPN_MAX" "$(_st_secs_json)" \
+		"$vexit" "$vup" "$vlive" "$vsub" "$(esc "$(_st_sub_label)")" "$(esc "$latest")" "$ext" "$won" "$(_st_warp_modename)" "$(esc "$(_st_ext_if)")" "$(_st_warp_pick)" "$(_st_onfail)" "$(_st_own_saved && echo true || echo false)" "$(_st_tunnels_json)" "$active" "$(_st_cat_json)" "$(_st_wfix_json)" "$([ -f "$ST_DIR/lists.via" ] && echo true || echo false)" "$([ -f "$ST_SUB_VIA" ] && echo true || echo false)" "$(_st_lists_json)" "$failed" "$wfail" "$(_hosts_extra)" "$(_st_dnsmode)" "$(_st_realip)" "$(_st_cttl)" "$(_st_devs_json)" "$svc" "$(esc "$(_st_sec_name main)")" "$(_st_sec_off main && echo true || echo false)" "$(esc "$(cat "$ST_DIR/exit" 2>/dev/null)")" "$mtun" "$(_st_sec_over main)" "$(_st_order_json)" "$ST_SEC_MAX" "$ST_SEC_VPN_MAX" "$(_st_secs_json)" \
 		"$(_st_owns "pkg kmod-amneziawg" || _st_owns "pkg amneziawg-tools" && echo true || echo false)" \
 		"$(uci -q -X show network 2>/dev/null | sed -n "s/^network\.\([^.=]*\)\.proto='amneziawg'\$/\1/p" | grep -cvE '^zmwarp[0-9]*$')"
 }
@@ -29059,9 +29142,8 @@ _st_hp_build() {
 
 _st_over_dev() {
 	local n t d
-	case "$ST_SEC" in s[2-9]) ;; *) return 1 ;; esac
+	case "$ST_SEC" in '') n="" ;; s[2-9]) n="${ST_SEC#s}" ;; *) return 1 ;; esac
 	[ -s "$STL_SPEC" ] && stl_running || return 1
-	n="${ST_SEC#s}"
 	t="$(sed -n "s/.*\"zm_vpn$n\":{\"kind\":\"tunnel\",\"over\":\"\([^\"]*\)\".*/\1/p" "$STL_SPEC" | head -n 1)"
 	[ -n "$t" ] || t="$(sed -n "s/.*\"zmv${n}_[A-Za-z0-9]*\":{\"kind\":\"tunnel\",\"over\":\"\([^\"]*\)\".*/\1/p" "$STL_SPEC" | head -n 1)"
 	printf '%s' "$t" | grep -qE '^[A-Za-z0-9_.-]{1,32}$' || return 1
@@ -29147,15 +29229,16 @@ _st_bind() {
 _st_sec_ok() { case "$1" in s[2-9]) [ -d "$ST_SEC_DIR/$1" ] ;; *) return 1 ;; esac; }
 
 _st_over_loop() {
-	local id="$1" cur="$2" i=0
-	while [ "$i" -lt 3 ]; do
+	local id="$1" cur="$2" i=0 seen=""
+	while [ -n "$cur" ]; do
 		[ "$cur" = "$id" ] && return 0
-		case "$cur" in s[2-9]) ;; *) return 1 ;; esac
-		cur="$(_st_sec_over "$cur")"
-		[ -n "$cur" ] || return 1
+		case " $seen " in *" $cur "*) return 0 ;; esac
+		seen="$seen $cur"
 		i=$((i + 1))
+		[ "$i" -gt 3 ] && return 0
+		cur="$(_st_sec_over "$cur")"
 	done
-	return 0
+	return 1
 }
 
 _st_sec_out() {
@@ -29301,7 +29384,17 @@ _st_secs_vpn_watch() { local s; for s in $(_st_secs_vpn); do _st_sec_with "$s" _
 
 _st_sec_new_id() { local n=2; while [ "$n" -le 9 ]; do [ -d "$ST_SEC_DIR/s$n" ] || { echo "s$n"; return 0; }; n=$((n + 1)); done; return 1; }
 
-_st_sec_count() { _st_secs | grep -c .; }
+_st_sec_count() { local n=0 s; for s in s2 s3 s4 s5 s6 s7 s8 s9; do [ -d "$ST_SEC_DIR/$s" ] && n=$((n + 1)); done; echo "$n"; }
+
+_st_order_ids() { printf '%s' "$1" | tr ',' '\n' | grep -E '^(main|s[2-9])$'; }
+_st_sec_order_ok() {
+	local a b ids
+	ids="$(_st_order_ids "$1")"
+	a="$(printf '%s\n' "$ids" | sort -u)"
+	b="$(_st_order_all | sort -u)"
+	[ -n "$a" ] && [ "$a" = "$b" ] || return 1
+	[ "$(printf '%s\n' "$ids" | grep -c .)" = "$(printf '%s\n' "$b" | grep -c .)" ]
+}
 
 _st_sec_vpn_count() { local n=0 s; _st_sec_with main _st_use_vpn && n=1; for s in $(_st_secs); do [ "$(_st_sec_kind "$s")" = vpn ] && n=$((n + 1)); done; echo "$n"; }
 
@@ -29534,6 +29627,7 @@ steer_sec_action() {
 	local action="$1" mode="$2" id k i n d
 	case "$action" in
 		sec_add)
+			_st_running && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
 			[ -z "$(_st_blocker)" ] || { echo '{"error":"ядро steer сейчас настраивает не Zapret Manager"}'; return 1; }
 			k="${mode%%|*}"; mode="${mode#*|}"; i="${mode%%|*}"; n="${mode#*|}"
 			[ "$(_st_sec_count)" -lt $((ST_SEC_MAX - 1)) ] || { printf '{"error":"%s"}\n' "$(esc "секций может быть не больше $ST_SEC_MAX")"; return 1; }
@@ -29544,7 +29638,7 @@ steer_sec_action() {
 			echo "$k" > "$d/kind"
 			[ "$k" = iface ] && echo "$i" > "$d/iface"
 			n="$(_st_sec_label_ok "$n")"; [ -n "$n" ] && printf '%s\n' "$n" > "$d/name"
-			{ _st_secs; echo "$id"; } | awk '!x[$0]++' > "$ST_SEC_LIST.tmp" && mv -f "$ST_SEC_LIST.tmp" "$ST_SEC_LIST"
+			{ _st_list; echo "$id"; } | awk '!x[$0]++' > "$ST_SEC_LIST.tmp.$$" && mv -f "$ST_SEC_LIST.tmp.$$" "$ST_SEC_LIST" || { rm -f "$ST_SEC_LIST.tmp.$$"; rm -rf "$d"; echo '{"error":"не удалось сохранить список секций"}'; return 1; }
 			printf '{"ok":true,"id":"%s"}\n' "$id" ;;
 		sec_name)
 			id="${mode%%|*}"; n="$(_st_sec_label_ok "${mode#*|}")"
@@ -29562,8 +29656,9 @@ steer_sec_action() {
 			echo "$k" > "$d/kind"
 			if [ "$k" = iface ]; then echo "$i" > "$d/iface"; else rm -f "$d/iface"; fi
 			[ "$k" = vpn ] || rm -f "$d/over"
+			n=0; case "$k" in vpn|iface) ;; *) _st_over_drop "$id" && n=1 ;; esac
 			_st_ping_cron
-			if _st_installed && [ ! -f "$ST_OFF" ] && _st_owns "steer-spec" && _st_sec_work "$id"; then job_start steer do_steer_apply
+			if _st_installed && [ ! -f "$ST_OFF" ] && _st_owns "steer-spec" && { _st_sec_work "$id" || [ "$n" = 1 ]; }; then job_start steer do_steer_apply
 			else printf '{"ok":true,"saved":true}\n'; fi ;;
 		sec_off)
 			_st_running && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
@@ -29595,10 +29690,11 @@ steer_sec_action() {
 			id="$mode"
 			_st_sec_ok "$id" || { echo '{"error":"нет такой секции — обновите страницу"}'; return 1; }
 			k=""; _st_sec_work "$id" && k=1
-			_st_secs | grep -vx "$id" > "$ST_SEC_LIST.tmp"; mv -f "$ST_SEC_LIST.tmp" "$ST_SEC_LIST"
-			[ -s "$ST_SEC_LIST" ] || { rm -f "$ST_SEC_LIST"; [ -f "$ST_SEC_DIR/main.off" ] && { rm -f "$ST_SEC_DIR/main.off"; k=1; }; }
+			_st_over_drop "$id" && k=1
 			rm -rf "${ST_SEC_DIR:?}/$id"
-			for i in $(_st_secs); do [ "$(_st_sec_over "$i")" = "$id" ] && rm -f "$ST_SEC_DIR/$i/over"; done
+			_st_list | grep -vx "$id" > "$ST_SEC_LIST.tmp.$$"
+			mv -f "$ST_SEC_LIST.tmp.$$" "$ST_SEC_LIST" || { rm -f "$ST_SEC_LIST.tmp.$$"; echo '{"error":"не удалось сохранить список секций"}'; return 1; }
+			[ -n "$(_st_secs)" ] || { rm -f "$ST_SEC_LIST"; [ -f "$ST_SEC_DIR/main.off" ] && { rm -f "$ST_SEC_DIR/main.off"; k=1; }; }
 			rm -f "$JOBS_DIR/steer.vpnprobe.$id" "$JOBS_DIR/steer.vpnwatch.$id" "$JOBS_DIR/steer.hometick.$id" "$JOBS_DIR/steer.holdlog.$id"
 			_st_ping_cron
 			if [ -n "$k" ] && _st_installed && [ ! -f "$ST_OFF" ] && _st_owns "steer-spec"; then job_start steer do_steer_apply
@@ -29610,13 +29706,18 @@ steer_sec_action() {
 			_st_running && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
 			[ -z "$(_st_blocker)" ] || { echo '{"error":"ядро steer сейчас настраивает не Zapret Manager"}'; return 1; }
 			id="${mode%%|*}"; k="${mode#*|}"
-			_st_sec_ok "$id" || { echo '{"error":"нет такой секции — обновите страницу"}'; return 1; }
-			[ "$(_st_sec_kind "$id")" = vpn ] || { echo '{"error":"выбрать, через что выходить, можно только у VPN-секции"}'; return 1; }
-			d="$ST_SEC_DIR/$id/over"
+			case "$id" in
+				main) _st_sec_with main _st_use_vpn || { echo '{"error":"основная секция сейчас идёт не через VPN"}'; return 1; }; d="$ST_DIR/over" ;;
+				*) _st_sec_ok "$id" || { echo '{"error":"нет такой секции — обновите страницу"}'; return 1; }
+					[ "$(_st_sec_kind "$id")" = vpn ] || { echo '{"error":"выбрать, через что выходить, можно только у VPN-секции"}'; return 1; }
+					d="$ST_SEC_DIR/$id/over" ;;
+			esac
 			case "$k" in
 				""|-|direct) k="" ;;
 				warp) _st_warp_on || { echo '{"error":"WARP ещё не настроен — сначала подключите его в любой секции"}'; return 1; } ;;
-				main) _st_sec_with main _st_use_vpn || { echo '{"error":"основная секция сейчас идёт не через VPN"}'; return 1; } ;;
+				main) [ "$id" = main ] && { echo '{"error":"секция не может выходить через саму себя"}'; return 1; }
+					_st_sec_with main _st_use_vpn || { echo '{"error":"основная секция сейчас идёт не через VPN"}'; return 1; }
+					_st_over_loop "$id" main && { printf '{"error":"%s"}\n' "$(esc "получится круг: основная секция выходит через эту секцию или цепочка длиннее трёх звеньев")"; return 1; } ;;
 				s[2-9])
 					[ "$k" != "$id" ] || { echo '{"error":"секция не может выходить через саму себя"}'; return 1; }
 					_st_sec_ok "$k" || { echo '{"error":"нет такой секции — обновите страницу"}'; return 1; }
@@ -29625,9 +29726,22 @@ steer_sec_action() {
 				*) echo '{"error":"неизвестное значение"}'; return 1 ;;
 			esac
 			[ "$k" = "$(_st_sec_over "$id")" ] && { printf '{"ok":true,"saved":true}\n'; return 0; }
-			if [ -n "$k" ]; then echo "$k" > "$d"; else rm -f "$d"; fi
+			if [ -n "$k" ]; then printf '%s\n' "$k" > "$d.$$" && mv -f "$d.$$" "$d" || { rm -f "$d.$$"; echo '{"error":"не удалось сохранить подложку"}'; return 1; }
+			else rm -f "$d"; fi
 			logger -t zapret-manager "Steer: секция «$(_st_sec_name "$id")» выходит $([ -n "$k" ] && echo "через $k" || echo напрямую)"
-			if _st_installed && [ ! -f "$ST_OFF" ] && _st_owns "steer-spec" && _st_sec_work "$id" && _st_sec_live "$id"; then job_start steer do_steer_apply
+			if _st_installed && [ ! -f "$ST_OFF" ] && _st_owns "steer-spec"; then
+				if [ "$id" = main ]; then _st_sec_with main _st_use_vpn && { _st_sec_with main _st_work_main || _st_secs_overmain; }
+				else _st_sec_work "$id" && _st_sec_live "$id"; fi && { job_start steer do_steer_apply; return 0; }
+			fi
+			printf '{"ok":true,"saved":true}\n' ;;
+		sec_order)
+			_st_running && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
+			[ -z "$(_st_blocker)" ] || { echo '{"error":"ядро steer сейчас настраивает не Zapret Manager"}'; return 1; }
+			_st_sec_order_ok "$mode" || { echo '{"error":"список секций изменился — обновите страницу"}'; return 1; }
+			_st_order_ids "$mode" | awk '!x[$0]++' > "$ST_SEC_LIST.tmp.$$" && mv -f "$ST_SEC_LIST.tmp.$$" "$ST_SEC_LIST" || { rm -f "$ST_SEC_LIST.tmp.$$"; echo '{"error":"не удалось сохранить порядок"}'; return 1; }
+			[ -n "$(_st_secs)" ] || rm -f "$ST_SEC_LIST"
+			logger -t zapret-manager "Steer: порядок — $(_st_order_ids "$mode" | tr '\n' ' ')"
+			if _st_installed && [ ! -f "$ST_OFF" ] && _st_owns "steer-spec"; then job_start steer do_steer_apply
 			else printf '{"ok":true,"saved":true}\n'; fi ;;
 		*) echo '{"error":"неизвестное действие"}'; return 1 ;;
 	esac
@@ -29994,10 +30108,14 @@ _st_src_dev() {
 	[ -n "$mac" ] || mac="$(uci -q -X show dhcp 2>/dev/null | awk -F= -v ip="$ip" '
 		/^dhcp\.[^.]*\.(mac|ip)=/ { split($1, a, "."); v = $2; gsub(/\x27/, "", v); x[a[2], a[3]] = v }
 		END { for (k in x) { split(k, z, SUBSEP); if (z[2] == "ip" && x[k] == ip && x[z[1], "mac"] != "") { split(x[z[1], "mac"], m, " "); print tolower(m[1]); exit } } }')"
-	for s in main $(_st_secs); do
+	if [ -s "$ST_DIR/devices" ]; then
+		line="$(awk -F'\t' -v k="$ip" -v m="$mac" -v d="$(_zm_dname "$mac")" '$1 == "byp" && ($2 == k || (m != "" && $2 == m)) { print $1 "\t" $2 "\t" (d != "" ? d : $3); exit }' "$ST_DIR/devices")"
+		[ -n "$line" ] && { printf '%s\t%s\n' "$line" main; return 0; }
+	fi
+	for s in $(_st_order_all); do
 		if [ "$s" = main ]; then f="$ST_DIR/devices"; else f="$ST_SEC_DIR/$s/devices"; fi
 		[ -s "$f" ] || continue
-		line="$(awk -F'\t' -v k="$ip" -v m="$mac" -v d="$(_zm_dname "$mac")" '($1 == "all" || $1 == "byp" || $1 == "only") && ($2 == k || (m != "" && $2 == m)) { print $1 "\t" $2 "\t" (d != "" ? d : $3); exit }' "$f")"
+		line="$(awk -F'\t' -v k="$ip" -v m="$mac" -v d="$(_zm_dname "$mac")" '($1 == "all" || $1 == "only") && ($2 == k || (m != "" && $2 == m)) { print $1 "\t" $2 "\t" (d != "" ? d : $3); exit }' "$f")"
 		[ -n "$line" ] && { printf '%s\t%s\n' "$line" "$s"; return 0; }
 	done
 	return 1
@@ -43740,7 +43858,12 @@ return view.extend({
 			var s = secObj(id);
 			return s ? s.name : 'Секция';
 		}
-		function secIds() { return [ 'main' ].concat(secList().map(function(s) { return s.id; })); }
+		function secIds() {
+			var ids = secList().map(function(s) { return s.id; }), o = (data.order || []).filter(function(id, i, a) { return a.indexOf(id) === i && (id === 'main' || ids.indexOf(id) >= 0); });
+			if (o.indexOf('main') < 0) o.unshift('main');
+			ids.forEach(function(id) { if (o.indexOf(id) < 0) o.push(id); });
+			return o;
+		}
 		function secSvc(id) {
 			if (!id || id === 'main') return (data.services || []).filter(function(s) { return s.on; }).map(function(s) { return s.id; });
 			var s = secObj(id);
@@ -46320,10 +46443,10 @@ return view.extend({
 			zm.ask('Выбор в секции «' + secName(secCur) + '» не сохранён.\n\nПерейти в «' + secName(id) + '» без сохранения?').then(function(ok) { if (ok) go(); });
 		}
 
-		function secAct(action, arg, okText, after) {
-			if (busy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
+		function secAct(action, arg, okText, after, onFail) {
+			if (busy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); if (onFail) onFail(); return; }
 			zm.steerAction(action, arg).then(function(res) {
-				if (!res || res.error) { zm.toast((res && res.error) || 'Роутер не ответил', 'error'); return; }
+				if (!res || res.error) { zm.toast((res && res.error) || 'Роутер не ответил', 'error'); if (onFail) onFail(); return; }
 				if (after) after(res);
 				if (res.started) {
 					lastAction = action;
@@ -46334,7 +46457,7 @@ return view.extend({
 				}
 				if (okText) zm.toast(okText, 'info');
 				refresh().then(function() { if (subShow()) loadSub(); });
-			}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
+			}).catch(function() { zm.toast('Роутер не ответил', 'error'); if (onFail) onFail(); });
 		}
 
 		function ifDesc(f) {
@@ -46385,7 +46508,87 @@ return view.extend({
 			});
 		}
 
+		function secOrderPush(ids, id) {
+			var o0 = (data.order || []).slice(), s0 = data.sections ? data.sections.slice() : null, key = ids.join(',');
+			if (data.sections) data.sections.sort(function(a, b) { return ids.indexOf(a.id) - ids.indexOf(b.id); });
+			data.order = ids.slice();
+			secAct('sec_order', key, 'Порядок сохранён: «' + secName(id) + '» ' + (ids.indexOf(id) + 1) + '-я', null, function() {
+				if ((data.order || []).join(',') !== key) return;
+				if (s0) data.sections = s0;
+				data.order = o0;
+				renderSecs();
+				refresh().catch(function() { renderAll(); });
+			});
+		}
+
+		var dragged = null, dragActive = false, secDirty = false;
+
+		function bindSecDrag(el, id) {
+			var grip = el.querySelector('.zm-sec-grip');
+			if (!grip) return;
+			grip.addEventListener('pointerdown', function(ev) {
+				if (busy || dragActive || ev.button > 0) return;
+				ev.preventDefault(); ev.stopPropagation();
+				dragActive = true;
+				dragged = null;
+				var sx = ev.clientX, sy = ev.clientY, moved = false, home = el.nextSibling, wd = null;
+				try { document.body.setPointerCapture(ev.pointerId); } catch (e) {}
+				function onMove(e) {
+					if (!moved && Math.abs(e.clientX - sx) + Math.abs(e.clientY - sy) < 6) return;
+					if (!moved) { moved = true; el.classList.add('zm-dragging'); }
+					var n = document.elementFromPoint(e.clientX, e.clientY);
+					var t = n && n.closest ? n.closest('.zm-node.zm-sec[data-id]') : null;
+					if (!t || t === el) return;
+					var r = t.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+					var dx = e.clientX - cx, dy = e.clientY - cy;
+					var after = Math.abs(dx) > Math.abs(dy) ? dx > 0 : dy > 0;
+					var ref = after ? t.nextSibling : t;
+					if (ref === el || (ref && ref.previousSibling === el)) return;
+					el.parentNode.insertBefore(el, ref);
+				}
+				function stop() {
+					if (wd) clearTimeout(wd);
+					window.removeEventListener('pointermove', onMove, true);
+					window.removeEventListener('pointerup', finish, true);
+					window.removeEventListener('pointercancel', cancel, true);
+					window.removeEventListener('keydown', onKey, true);
+					document.removeEventListener('visibilitychange', onVis);
+					try { document.body.releasePointerCapture(ev.pointerId); } catch (e) {}
+					el.classList.remove('zm-dragging');
+					dragActive = false;
+					if (secDirty) { secDirty = false; renderAll(); }
+				}
+				function order() {
+					return Array.prototype.map.call(el.parentNode.querySelectorAll('.zm-sec[data-id]'), function(n) { return n.getAttribute('data-id'); });
+				}
+				var start = order().join(',');
+				function finish() {
+					var ids = moved ? order() : null;
+					if (moved) {
+						dragged = id;
+						if (ids.join(',') !== start) secOrderPush(ids, id);
+					}
+					stop();
+				}
+				function cancel() {
+					stop();
+					if (!moved) return;
+					dragged = id;
+					if (el.parentNode) el.parentNode.insertBefore(el, home);
+				}
+				function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); cancel(); } }
+				function onVis() { if (document.hidden) cancel(); }
+				wd = setTimeout(cancel, 20000);
+				window.addEventListener('pointermove', onMove, true);
+				window.addEventListener('pointerup', finish, true);
+				window.addEventListener('pointercancel', cancel, true);
+				window.addEventListener('keydown', onKey, true);
+				document.addEventListener('visibilitychange', onVis);
+			});
+		}
+
 		function renderSecs() {
+			if (dragActive) { secDirty = true; return; }
 			secCard.innerHTML = '';
 			var show = !!data.installed && !data.blocker;
 			secCard.style.display = show ? '' : 'none';
@@ -46404,15 +46607,23 @@ return view.extend({
 					: s.kind === 'iface' ? (s.iface || 'туннель') + (s.live ? '' : ' · нет') : 'WARP';
 				var right = c ? c + ' ' + plural(c, 'сервис', 'сервиса', 'сервисов') : w ? 'устройства' : 'пусто', so = secOff(id);
 				if (so) right = 'выключена';
-				return E('div', { 'class': 'zm-node zm-sec' + (id === secCur ? ' zm-active' : '') + (so ? ' zm-sec-off' : ''), 'title': 'Секция «' + secName(id) + '»' + (so ? ' — выключена' : ''), 'click': function() { secTo(id, common); } }, [
-					E('div', { 'class': 'zm-node-name' }, [ secName(id) ]),
+				var kids = [
+					E('div', { 'class': 'zm-node-name' }, [ id === 'main' && n > 1 ? '★ ' : '', secName(id) ]),
 					E('div', { 'class': 'zm-node-foot' }, [ E('span', {}, [ foot ]), E('span', { 'class': 'zm-lat ' + (so ? 'zm-lat-none' : ex === 'none' && w ? 'zm-lat-mid' : w ? 'zm-lat-good' : 'zm-lat-none'), 'style': 'flex:0 1 auto' }, right) ])
-				]);
+				];
+				if (n > 1) kids.push(E('span', { 'class': 'zm-sec-grip', 'click': function(ev) { ev.stopPropagation(); } }, '⠿'));
+				var el = E('div', { 'class': 'zm-node zm-sec' + (id === secCur ? ' zm-active' : '') + (so ? ' zm-sec-off' : ''), 'data-id': id, 'title': 'Секция «' + secName(id) + '»' + (so ? ' — выключена' : '') + (n > 1 ? '. Порядок меняется перетаскиванием за ⠿' : ''), 'pointerdown': function() { dragged = null; }, 'click': function() { if (dragged === id) { dragged = null; return; } secTo(id, common); } }, kids);
+				if (n > 1) bindSecDrag(el, id);
+				return el;
 			});
 			if (n < (data.sec_max || 6)) tiles.push(E('div', { 'class': 'zm-node zm-sec zm-sec-add', 'role': 'button', 'tabindex': '0', 'title': 'Свои сервисы через другое подключение', 'click': secAddDialog,
 				'keydown': function(ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); secAddDialog(); } } }, [ E('span', { 'class': 'zm-sec-add-text' }, 'Создать новую секцию') ]));
 			secCard.appendChild(E('div', { 'class': 'zm-nodes' }, tiles));
-			if (n > 1 && !common) secCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Порядок важен: сервис или устройство, выбранные в нескольких секциях, пойдут через первую из них — ' + ids.map(secName).join(' → ') + '. «Мимо Steer» и исключения главнее всех секций.'));
+			if (n > 1 && !common) secCard.appendChild(E('p', { 'class': 'zm-hint' }, [
+				'Порядок задаёт, чьи правила главнее: сервис или устройство, выбранные в нескольких секциях, пойдут через первую из них — ' + ids.map(secName).join(' → ') + '.',
+				E('br'),
+				'Маршрут по умолчанию задаёт основная (★).'
+			]));
 		}
 
 		function ifPicker(box, cur, onPick, onCancel) {
@@ -46459,16 +46670,17 @@ return view.extend({
 		function overRow(s) {
 			var cur = s.over || '', opts = [ { v: '', t: 'Напрямую' } ];
 			if (data.warp_on || cur === 'warp') opts.push({ v: 'warp', t: warpName() });
-			if (data.exit === 'vpn' || cur === 'main') opts.push({ v: 'main', t: 'VPN секции «' + secName('main') + '»' });
+			if (s.id !== 'main' && (data.exit === 'vpn' || cur === 'main')) opts.push({ v: 'main', t: 'VPN секции «' + secName('main') + '»' });
 			secList().forEach(function(o) {
-				if (o.id === s.id) return;
+				if (o.id === s.id || o.over === s.id) return;
 				if (o.kind === 'vpn') opts.push({ v: o.id, t: 'VPN секции «' + o.name + '»' });
 				else if (o.kind === 'iface') opts.push({ v: o.id, t: 'Туннель ' + (o.iface || '') + ' · «' + o.name + '»' });
 			});
+			if (cur && !opts.some(function(o) { return o.v === cur; })) cur = '';
 			if (opts.length < 2 && !cur) return;
 			var sel = E('select', { 'class': 'cbi-input-select zm-st-over', 'disabled': busy ? '' : null, 'aria-label': 'Через что выходить', 'change': function() {
 				var v = this.value, lab = opts.filter(function(o) { return o.v === v; })[0];
-				secAct('sec_over', s.id + '|' + (v || '-'), v ? 'Секция «' + secName(s.id) + '»: VPN подключается через ' + (lab ? lab.t : v) : 'Секция «' + secName(s.id) + '»: VPN подключается напрямую');
+				secAct('sec_over', s.id + '|' + (v || '-'), v ? 'Секция «' + secName(s.id) + '»: VPN подключается через ' + (lab ? lab.t : v) : 'Секция «' + secName(s.id) + '»: VPN подключается напрямую', null, function() { sel.value = cur; });
 			} }, opts.map(function(o) { return E('option', { 'value': o.v, 'selected': o.v === cur ? '' : null }, o.t); }));
 			connCard.appendChild(E('div', { 'class': 'zm-row zm-st-over-row' }, [ E('span', { 'class': 'zm-label' }, 'Через что выходить'), sel ]));
 			var tl = opts.filter(function(o) { return o.v === cur; })[0], tname = tl ? tl.t : cur, to = /^s[2-9]$/.test(cur) ? secObj(cur) : null;
@@ -46485,7 +46697,7 @@ return view.extend({
 			if (!show) return;
 			var main = isMain(), s = secObj(secCur), multi = hasSecs();
 			var kind = main ? mainKind() : s.kind;
-			connCard.appendChild(E('h3', {}, multi ? 'Подключение · «' + secName(secCur) + '»' : 'Подключение'));
+			connCard.appendChild(E('h3', {}, multi ? 'Подключение · ' + (main ? 'основная секция «' : '«') + secName(secCur) + '»' : 'Подключение'));
 			if (multi) {
 				var nameIn = E('input', { 'type': 'text', 'class': 'cbi-input-text', 'maxlength': '40', 'placeholder': main ? 'Основная' : 'Секция', 'style': 'flex:1 1 180px; min-width:0; max-width:340px', 'aria-label': 'Название секции' });
 				nameIn.value = nameDraft !== null ? nameDraft : secName(secCur);
@@ -46540,7 +46752,17 @@ return view.extend({
 					if (secVpnCount(secCur) >= (data.sec_vpn_max || 3)) { zm.toast('VPN уже в ' + secVpnCount(secCur) + ' секциях — больше нельзя: каждая держит свой туннель и память роутера', 'warning'); return; }
 					secAct('sec_kind', secCur + '|vpn', 'Секция «' + secName(secCur) + '» теперь идёт через VPN — добавьте подписку');
 				}),
-				opt('warp', 'WARP', function() { secAct('sec_kind', secCur + '|warp', data.warp_on ? 'Секция «' + secName(secCur) + '» теперь идёт через WARP' : 'Сохранено — выберите ниже, как подключить WARP'); }),
+				opt('warp', 'WARP', function() {
+					var target = secCur, cs = secObj(target);
+					var msg = 'Секция «' + secName(target) + '» теперь идёт через WARP';
+					if (cs && cs.kind === 'vpn' && cs.vpn && cs.vpn.has) {
+						zm.ask('Секция «' + secName(target) + '» сейчас идёт через VPN. Переключить её на WARP? Подписка и выбор сервера сохранятся — вернуться можно этой же кнопкой.').then(function(ok) {
+							if (ok) secAct('sec_kind', target + '|warp', msg);
+						});
+						return;
+					}
+					secAct('sec_kind', target + '|warp', data.warp_on ? msg : 'Сохранено — выберите ниже, как подключить WARP');
+				}),
 				opt('iface', 'Туннель', function() { ifChoose = true; ifSel = null; tunLoad(true); renderConn(); })
 			];
 			if (ifChoose) opts.forEach(function(o, k) { o.classList.toggle('zm-active', k === 2); });
@@ -46577,7 +46799,7 @@ return view.extend({
 				var vp = main ? null : s.vpn || {};
 				if (main ? !data.has_sub : !vp.has) connCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Подписки ещё нет — добавьте её ниже. ' + (main ? 'После этого сервисы пойдут через VPN.' : 'У каждой VPN-секции своя подписка и свой выбор сервера.')));
 				else connCard.appendChild(E('p', { 'class': 'zm-hint' }, (main ? 'Подписка, выбор сервера и проверка задержки — ниже.' : 'У этой секции своя подписка и свой выбор сервера — они ниже и не влияют на другие секции.')));
-				if (!main && vp.has) overRow(s);
+				if (main ? data.has_sub : vp.has) overRow(main ? { id: 'main', over: data.main_over || '' } : s);
 			}
 			if (!main) connCard.appendChild(E('div', { 'class': 'zm-actions zm-st-secdel' }, [ E('button', { 'class': 'cbi-button cbi-button-remove', 'disabled': busy ? '' : null, 'click': function() {
 				var items = [ 'Её выбор сервисов и устройств удалится', 'Эти сервисы пойдут так, как велят остальные секции, или напрямую', 'Остальные секции не изменятся' ];
@@ -52612,6 +52834,12 @@ html.zm-theme-dark .zm-node:not(.zm-active) { background: #22272e; border-color:
 .zm-node-name { font-weight: 600; font-size: 13px; line-height: 1.35; overflow-wrap: anywhere; }
 .zm-node.zm-active .zm-node-name::before { content: none; }
 .zm-node.zm-sec .zm-node-name::before { content: none; }
+.zm-sec .zm-node-name { padding-right: 16px; }
+.zm-sec-grip { position: absolute; top: 7px; right: 8px; width: 14px; height: 16px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; background: transparent; color: inherit; border-radius: 4px; font-size: 13px; line-height: 1; opacity: .3; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.zm-sec-grip::after { content: ''; position: absolute; top: -10px; right: -10px; bottom: -10px; left: -10px; }
+.zm-sec-grip:hover { opacity: .9; background: rgba(127,127,127,.18); }
+.zm-node.zm-dragging { opacity: .45; }
+@media (hover: none) { .zm-sec-grip { opacity: .7; } }
 .zm-tabsplit { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 40px; margin: 4px 0 0; }
 .zm-tabsplit > .zm-tabgrp { margin: 0; }
 .zm-tabsplit.zm-tabs-one > .zm-tabgrp { flex: 1 1 100%; width: 100%; max-width: 100%; display: flex; }
@@ -63503,6 +63731,7 @@ function radioSync() {
 		if (!Array.isArray(c.fav) && loc.length) { radio.fav = loc; radioSave(); }
 		if (radio.idx !== was && radio.state !== 'off' && radio.state !== 'err') radioStart();
 		if (!radio.show && radio.state !== 'off') radioStop();
+		if (typeof lookPageRender === 'function') lookPageRender();
 		if (radio.audio) radio.audio.volume = radio.vol / 100;
 		radioCache();
 		radioPaint();
@@ -63957,19 +64186,21 @@ function radioMenuToggle() {
 }
 function navRadioBtn() {
 	var b = E('button', { 'class': 'zmw-nav-btn zmw-nav-btn-wide zmw-nav-btn-radio', 'type': 'button' });
-	function txt() { b.textContent = radio.show ? 'Скрыть радио' : 'Показать радио'; }
-	b.addEventListener('click', function () { window.zmwRadio.set(!radio.show); txt(); });
+	function txt() { b.textContent = window.zmwRadio.shown() ? 'Скрыть радио' : 'Показать радио'; }
+	b.addEventListener('click', function () { window.zmwRadio.set(!window.zmwRadio.shown()); txt(); });
 	txt();
 	radio.navBtn = txt;
 	return b;
 }
 window.zmwRadio = {
-	shown: function () { return radio.show; },
+	shown: function () { return radio.show && (typeof LOOK === 'undefined' || !!LOOK.radio); },
 	set: function (on) {
-		radio.show = !!on;
-		if (!radio.show) { radioMenuClose(); if (radio.state !== 'off') radioStop(); }
+		on = !!on;
+		radio.show = on;
+		if (!on) { radioMenuClose(); if (radio.state !== 'off') radioStop(); }
 		radioPaint();
 		radioSave();
+		if (typeof LOOK !== 'undefined' && !!LOOK.radio !== on) lookSet('radio', on ? 1 : 0);
 	}
 };
 
@@ -64995,7 +65226,7 @@ function lookPage() {
 				lookRow('Углы', lookSeg([ [ 'sharp', 'Острые' ], [ 'md', 'Как в теме' ], [ 'round', 'Круглые' ] ], L.rad, function (v) { lookSet('rad', v); paint(); })),
 				lookSw(!!L.motion, 'Анимации интерфейса', 'Плавное появление, мигающие точки статуса, переходы. Выключите — панель станет полностью статичной. Индикаторы загрузки крутятся всегда.', function () { lookSet('motion', L.motion ? 0 : 1); paint(); }),
 				lookSw(!!L.glass, 'Прозрачные карточки при живом фоне', 'Фон просвечивает сквозь карточки. Выключите — карточки станут сплошными, а фон будет виден только между ними.', function () { lookSet('glass', L.glass ? 0 : 1); paint(); }),
-				lookSw(!!L.radio, 'Радио в боковом меню', 'Мини-плеер под меню. Выключите — плеер скроется, а играющее радио остановится.', function () { lookSet('radio', L.radio ? 0 : 1); paint(); })
+				lookSw(window.zmwRadio.shown(), 'Радио в боковом меню', 'Мини-плеер под меню. Выключите — плеер скроется, а играющее радио остановится.', function () { window.zmwRadio.set(!window.zmwRadio.shown()); paint(); })
 			]));
 		}
 		var pasteBox = null;
@@ -65004,6 +65235,7 @@ function lookPage() {
 				if (!lookResetAsk) { lookResetAsk = true; paint(); setTimeout(function () { if (lookResetAsk) { lookResetAsk = false; if (lookPageRender) lookPageRender(); } }, 4000); return; }
 				lookResetAsk = false;
 				LOOK = lookClean(null); sset(K_LOOK, lookJson(), true); lookPush(); lookApply(); applyTheme(); dustSync();
+				if (!radio.show) window.zmwRadio.set(true);
 				toast('Оформление сброшено — тема осталась прежней', 'info');
 				paint();
 			} }, [ lookResetAsk ? 'Нажмите ещё раз, чтобы сбросить' : 'Сбросить оформление' ]),
@@ -65022,6 +65254,7 @@ function lookPage() {
 			try { o = JSON.parse(ta.value); } catch (e) { toast('Это не похоже на настройки оформления', 'error'); return; }
 			if (!o || typeof o !== 'object' || !o.look) { toast('Это не похоже на настройки оформления', 'error'); return; }
 			LOOK = lookClean(o.look); sset(K_LOOK, lookJson(), true); lookPush(); lookApply();
+			if (radio.show !== !!LOOK.radio) window.zmwRadio.set(!!LOOK.radio);
 			if (o.theme && (o.theme === 'auto' || themeById(o.theme)) && o.theme !== themePref()) { if (o.theme === 'auto') { sset(K_THEME, null, true); themeSave('auto'); } else setTheme(o.theme); }
 			if (/^(0|stars|traffic|music|theme)$/.test(o.anim || '')) animSet(o.anim === '0' ? '' : o.anim);
 			applyTheme(); dustSync();
