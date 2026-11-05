@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.008
+# Version: 5.030
 ZM_VERSION_EOF
 set -e
 
@@ -19388,8 +19388,6 @@ _do_test_run_core() {
 	set -- $ZT_CTRL
 	if [ "${2:-0}" -gt 0 ] && [ $(( ${1:-0} * 100 )) -ge $(( $2 * 80 )) ]; then
 		ZT_CTRL_HIGH=1
-		echo "!! Без Zapret открылось $1 из $2 — сайты доступны и так."
-		echo "   Похоже, трафик самого роутера идёт через VPN (Forkozz или Steer) или эти сайты у провайдера не блокируются — сравнение стратегий почти ничего не покажет"
 	fi
 
 	local lines
@@ -31696,10 +31694,10 @@ SI_ZA_EOF
 	case "$r" in
 		applied) r="применена $b — $bo из $bt (было $co)" ;; kept) r="оставлена ${cn:-текущая} — $co из $bt; лучшая $b — $bo" ;;
 		close) r="оставлена ${cn:-текущая} — разница в пределах погрешности" ;; nochange) r="пропущен — «Не изменять стратегию»" ;;
-		yoff) r="пропущен — YouTube выключен" ;; ctrl) r="пропущен — без Zapret открылось $co из $bt, похоже, трафик идёт через VPN" ;;
+		yoff) r="пропущен — YouTube выключен" ;; ctrl) r="пропущен — без Zapret открылось $co из $bt" ;;
 		none) r="лучшую определить не удалось" ;; *) r="ошибка теста" ;;
 	esac
-	_si_row "Последний автоподбор" "${at:+$at · }$([ "$k" = yt ] && echo 'YouTube · ')$r" "$(case "$r" in применена*) echo ok ;; ошибка*) echo bad ;; *ctrl*|*VPN*) echo warn ;; esac)"
+	_si_row "Последний автоподбор" "${at:+$at · }$([ "$k" = yt ] && echo 'YouTube · ')$r" "$(case "$r" in применена*) echo ok ;; ошибка*) echo bad ;; *"без Zapret"*) echo warn ;; esac)"
 }
 
 _si_run() { if [ "$1" = true ]; then _si_row "${2:-Состояние}" работает ok; else _si_row "${2:-Состояние}" остановлен bad; fi; }
@@ -45891,8 +45889,8 @@ return view.extend({
 		}
 
 		function nodeCard(opts) {
-			var cls = 'zm-node' + (opts.active ? ' zm-active' : '') + (opts.dead ? ' zm-node-dead' : '') + (opts.blk ? ' zm-node-blk' : '');
-			return E('div', { 'class': cls, 'title': opts.title || '', 'click': opts.click }, [
+			var cls = 'zm-node' + (opts.active ? ' zm-active' : '') + (opts.live && !opts.active ? ' zm-node-live' : '') + (opts.dead ? ' zm-node-dead' : '') + (opts.blk ? ' zm-node-blk' : '');
+			return E('div', { 'class': cls, 'title': opts.title || '', 'aria-current': opts.active ? 'true' : null, 'click': opts.click }, [
 				E('div', { 'class': 'zm-node-name' }, [ String(opts.name || '') ]),
 				E('div', { 'class': 'zm-node-foot' }, [
 					E('span', {}, [ String(opts.foot || '') ]),
@@ -46102,9 +46100,10 @@ return view.extend({
 				else if (l && l.ok) { txt = l.ms > 0 ? l.ms + ' мс' : '<1 мс'; cls = latClass(l.ms); if (l.tcp > 0) ttl = 'Запрос через узел: ' + l.ms + ' мс · TCP: ' + l.tcp + ' мс'; }
 				else if (l) { txt = 'нет ответа'; cls = 'zm-lat-bad'; dead = true; }
 				var foot = [ PROTO_NAMES[n.proto] || '', n.type !== 'quic' ? n.type : '', n.security && n.security !== 'none' ? n.security : '', n.vision ? 'vision' : '' ].filter(function(x) { return x; }).join(' · ');
-				if (vpn && !subData.node && subData.vpn && subData.vpn.up && subData.vpn.node === n.name) foot = 'сейчас работает · ' + foot;
+				var live = !!(vpn && !subData.node && subData.vpn && subData.vpn.up && subData.vpn.node === n.name);
+				if (live) ttl = 'Сейчас трафик идёт через этот узел — его выбрал режим «Авто»' + (ttl ? '. ' + ttl : '');
 				grid.appendChild(nodeCard({
-					name: n.name || 'Узел ' + (ni + 1), foot: foot, lat: txt, latCls: cls, dead: dead,
+					name: n.name || 'Узел ' + (ni + 1), foot: foot, lat: txt, latCls: cls, dead: dead, live: live,
 					active: subData.node === n.name, title: ttl, blk: !!(l && l.blocked),
 					click: function() { pickNode(n); }
 				}));
@@ -49988,7 +49987,7 @@ return view.extend({
 						: l.result === 'nochange' ? [ 'пропущен — включено «Не изменять стратегию»' ]
 						: l.result === 'yoff' ? [ 'пропущен — YouTube выключен в стратегии' ]
 						: l.result === 'close' ? [ E('b', {}, 'оставлена ' + cur), ' — ' + l.cur_ok + ' из ' + l.total + unit + '; ' + l.best + ' — ' + l.best_ok + ' из ' + l.total + ', разница в пределах погрешности' ]
-						: l.result === 'ctrl' ? [ E('b', { 'class': 'zm-ab-warn' }, 'пропущен'), ' — без Zapret открылось ' + l.cur_ok + ' из ' + l.total + unit + ': похоже, трафик роутера идёт через VPN' ]
+						: l.result === 'ctrl' ? [ E('b', { 'class': 'zm-ab-warn' }, 'пропущен'), ' — без Zapret открылось ' + l.cur_ok + ' из ' + l.total + unit ]
 						: l.result === 'none' ? [ 'лучшую стратегию определить не удалось, оставлена текущая' ] : [ E('b', { 'class': 'zm-ab-bad' }, 'ошибка'), ' — подробности в журнале теста' ];
 				}
 				var last = autoInfo.last, abLog = autoInfo.log || [];
@@ -50393,8 +50392,6 @@ return view.extend({
 				if (resMode === 'domain' && status.domains) meta.push(status.domains);
 				if (resMode === 'custom_dom' && status.custom_domains) meta.push(status.custom_domains);
 				resCard.appendChild(E('p', { 'class': 'zm-hint zm-tt-meta' }, [ meta.join(' · ') ]));
-				if (resMode !== 'current' && d.control && d.control.tot > 0 && d.control.ok * 100 >= d.control.tot * 80)
-					resCard.appendChild(E('div', { 'class': 'zm-au-pause', 'style': 'margin:0 0 10px' }, 'Без Zapret открылось ' + d.control.ok + ' из ' + d.control.tot + ' — сайты доступны и так. Похоже, трафик самого роутера идёт через VPN (Forkozz или Steer) или эти сайты у провайдера не блокируются, поэтому сравнение стратегий почти ничего не показывает. Автоподбор в таком случае стратегию не меняет.'));
 				var list = E('div', { 'class': 'zm-tt-list' });
 				if (d.control) list.appendChild(rowEl(resMode, d.control, 0, null, true));
 				rows.forEach(function(r, i) { list.appendChild(rowEl(resMode, r, i + 1, d.control, false)); });
@@ -54048,6 +54045,28 @@ html.zm-theme-dark .zm-ev-dot { background: #8b949e; }
 	.zm-ev { grid-template-columns: 10px 1fr; }
 	.zm-ev-time { grid-column: 2; }
 	.zm-ev-msg { grid-column: 2; }
+}
+html { --zm-l-sel: #1a7f37; --zm-l-ink: #ffffff; --zm-l-bg: #ffffff; }
+html.zm-theme-dark { --zm-l-sel: #2ea043; --zm-l-bg: #1e1e1e; }
+body:not(.zmw-body) :is(.zm-node.zm-active, .zm-tile.zm-active, .zm-node.zm-node-live) { position: relative; }
+body:not(.zmw-body) :is(.zm-node.zm-active:not(.zm-sec-add), .zm-tile.zm-active)::after {
+	content: ''; position: absolute; z-index: 2; top: -8px; right: -8px; width: 20px; height: 20px; border-radius: 50%; box-sizing: border-box;
+	background: var(--zm-l-sel); box-shadow: 0 0 0 3px var(--zm-l-bg); pointer-events: none;
+}
+body:not(.zmw-body) :is(.zm-node.zm-active:not(.zm-sec-add), .zm-tile.zm-active)::before {
+	content: '' !important; display: block !important; position: absolute; z-index: 3; top: -3px; right: -1px; width: 4px; height: 8px; margin: 0; padding: 0; background: none;
+	border: solid var(--zm-l-ink); border-width: 0 2.2px 2.2px 0; transform: rotate(45deg); pointer-events: none;
+}
+html.zm-theme-dark body:not(.zmw-body) :is(.zm-node.zm-active, .zm-tile.zm-active, .zm-tt-tile.zm-tt-active) {
+	border-color: var(--zm-l-sel) !important;
+	background: rgba(46,160,67,.18) !important;
+	box-shadow: inset 0 0 0 1px var(--zm-l-sel), 0 0 0 4px rgba(46,160,67,.22) !important;
+}
+html.zm-theme-dark body:not(.zmw-body) .zm-svc.zm-svc-on { border-color: rgba(26,163,255,.75); background: rgba(26,163,255,.13); }
+body:not(.zmw-body) .zm-node.zm-node-live:not(.zm-active) { border: 1px dashed var(--zm-l-sel); background: rgba(46,160,67,.07); }
+body:not(.zmw-body) .zm-node.zm-node-live:not(.zm-active)::after {
+	content: 'сейчас'; position: absolute; z-index: 2; top: -9px; right: 10px; padding: 0 8px; border-radius: 999px; pointer-events: none;
+	font-size: 10.5px; font-weight: 700; line-height: 17px; background: var(--zm-l-sel); color: var(--zm-l-ink); box-shadow: 0 0 0 3px var(--zm-l-bg);
 }
 ZM_INSTALLER_EOF
 chmod 0644 '/www/luci-static/resources/view/zapret-manager/style.css'
@@ -68475,7 +68494,39 @@ html #zmw-view .zm-lk-own input[type="color"] { -webkit-appearance: none; appear
 #zmw-view .zm-lk-prev p:not(.zm-hint) { margin: 0; font-size: 13px; }
 #zmw-view .zm-lk-prev .zm-swrow { margin-top: 12px; }
 #zmw-view .zm-lk-log { margin: 14px 0 0; display: block; white-space: pre-wrap; font-size: 12px; min-height: 0; max-height: none; height: auto; }
-
+html[data-theme] { --zm-sel: var(--a1, #2d5bff); --zm-sel-ink: #ffffff; --zm-sel-ring: var(--bg, #ffffff); }
+html[data-theme="retro"] { --zm-sel-ring: #d4d0c8; }
+html[data-theme="oled"], html[data-theme="matrix"], html[data-theme="neon"], html[data-theme="noir"], html[data-theme="graphite"], html[data-theme="depth"], html[data-theme="blocks"], html[data-theme="ink"] { --zm-sel-ink: #06080d; }
+html[data-theme] #zmw-view :is(.zm-node.zm-active, .zm-tile.zm-active, .zm-node.zm-node-live) { position: relative; }
+html[data-theme] #zmw-view :is(.zm-node.zm-active:not(.zm-sec-add), .zm-tile.zm-active)::after {
+	content: ''; position: absolute; z-index: 2; top: -8px; right: -8px; width: 20px; height: 20px; border-radius: 50%; box-sizing: border-box;
+	background: var(--zm-sel); box-shadow: 0 0 0 3px var(--zm-sel-ring), 0 3px 8px -2px color-mix(in srgb, var(--zm-sel) 70%, transparent); pointer-events: none;
+}
+html[data-theme] #zmw-view :is(.zm-node.zm-active:not(.zm-sec-add), .zm-tile.zm-active)::before {
+	content: '' !important; display: block !important; position: absolute; z-index: 3; top: -3px; right: -1px; width: 4px; height: 8px; margin: 0; padding: 0; background: none;
+	border: solid var(--zm-sel-ink); border-width: 0 2.2px 2.2px 0; transform: rotate(45deg); pointer-events: none;
+}
+html.zm-theme-dark[data-theme] #zmw-view :is(.zm-node.zm-active, .zm-tile.zm-active, .zm-tt-tile.zm-tt-active) {
+	border-color: var(--zm-sel) !important;
+	background: color-mix(in srgb, var(--zm-sel) 17%, transparent) !important;
+	color: var(--text) !important;
+	box-shadow: inset 0 0 0 1px var(--zm-sel), 0 0 0 4px color-mix(in srgb, var(--zm-sel) 20%, transparent), 0 12px 26px -16px color-mix(in srgb, var(--zm-sel) 75%, transparent) !important;
+}
+html.zm-theme-dark[data-theme] #zmw-view :is(.zm-node.zm-active, .zm-tile.zm-active) :is(.zm-node-name, b, strong) { color: var(--text) !important; }
+html.zm-theme-dark[data-theme] #zmw-view .zm-svc.zm-svc-on { border-color: color-mix(in srgb, var(--zm-sel) 70%, transparent) !important; background: color-mix(in srgb, var(--zm-sel) 11%, transparent) !important; }
+html.zm-theme-dark[data-theme] #zmw-view .zm-route-chip.zm-route-chip-on { background: var(--zm-sel) !important; border-color: var(--zm-sel) !important; color: var(--zm-sel-ink) !important; }
+html.zm-theme-dark[data-theme] #zmw-view .zm-node.zm-node-live:not(.zm-active) {
+	border: 1px dashed var(--zm-sel) !important;
+	background: color-mix(in srgb, var(--zm-sel) 8%, transparent) !important;
+}
+html[data-theme] #zmw-view .zm-node.zm-node-live:not(.zm-active) { border-style: dashed; border-color: var(--zm-sel); }
+html[data-theme] #zmw-view .zm-node.zm-node-live:not(.zm-active)::after {
+	content: 'сейчас'; position: absolute; z-index: 2; top: -9px; right: 10px; padding: 0 8px; border-radius: 999px; pointer-events: none;
+	font-size: 10.5px; font-weight: 700; line-height: 17px; letter-spacing: .02em; text-transform: none;
+	background: var(--zm-sel); color: var(--zm-sel-ink); box-shadow: 0 0 0 3px var(--zm-sel-ring);
+}
+html[data-theme] #zmw-view .zm-tt-tile.zm-tt-active { border-color: var(--zm-sel); box-shadow: inset 0 0 0 1px var(--zm-sel); }
+html[data-zm-motion="0"] #zmw-view .zm-node.zm-active, html[data-zm-motion="0"] #zmw-view .zm-tile.zm-active { transition: none; }
 ZM_INSTALLER_EOF
 cat > '/www/zm-webui.html' << 'ZM_INSTALLER_EOF'
 <!doctype html>
