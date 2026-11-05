@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.030
+# Version: 5.031
 ZM_VERSION_EOF
 set -e
 
@@ -10307,6 +10307,7 @@ _bk_skip() {
 	case "$1" in
 		/tmp/*|/var/*|/usr/*|/lib/*|/www/*|/proc/*|/sys/*|/dev/*|/etc/init.d/*|/etc/rc.d/*|/etc/hotplug.d/*|/etc/uci-defaults/*|/etc/modules.d/*|/etc/modules-boot.d/*) return 0 ;;
 		"$BK_DIR"|"$BK_DIR"/*) return 0 ;;
+		"$AB_DIR"/src|"$AB_DIR"/src/*) return 0 ;;
 		/opt/zapret-manager-luci/backend.sh*|/opt/zapret-manager-luci/*.uc|/opt/zapret-manager-luci/*.zm-new|/opt/zapret-manager-luci/CHANGELOG*|/opt/zapret-manager-luci/rpcd-plugin*) return 0 ;;
 		/opt/zapret/ipset/*|/opt/zapret2/ipset/*|/opt/zapret/init.d/openwrt/custom.d/*|/opt/zapret2/init.d/openwrt/custom.d/*|/opt/zapret/files/fake/*|/opt/zapret2/files/fake/*) ;;
 		/opt/zapret/*|/opt/zapret2/*) return 0 ;;
@@ -10919,6 +10920,20 @@ do_backup_restore() {
 	fi
 	case "$bc" in *" forkozz "*) _fk_ours && forkop_device_setup apply >/dev/null 2>&1 ;; esac
 	case "$bc" in *" bytetube "*) bytetube_sync >/dev/null 2>&1 ;; esac
+	if case "$bc" in *" adblock "*) true ;; *) false ;; esac && _ab_on; then
+		f=""
+		for c in $(_ab_ids); do _ab_src "$c" >/dev/null || f=1; done
+		if [ -n "$f" ]; then
+			echo "   · Списки рекламы в копию не входят — скачиваем свежие и включаем блокировку"
+			if ( do_ab_apply ) > "$BK_W/adblock.log" 2>&1; then
+				grep -E '^   ✓ (К блокировке|dnsmasq)' "$BK_W/adblock.log" | head -n 2
+			else
+				grep -E '^ОШИБКА' "$BK_W/adblock.log" | head -n 1 | sed 's/^ОШИБКА: /   ! /'
+				echo "   ! Блокировка рекламы включится, когда списки скачаются: панель попробует ещё раз сама или нажмите «Обновить сейчас» на вкладке «Блокировка рекламы»"
+			fi
+			rm -f "$BK_W/adblock.log"
+		fi
+	fi
 	rm -f "$JOBS_DIR/adblock.watch"
 	/etc/init.d/cron restart >/dev/null 2>&1
 	zm_watch >/dev/null 2>&1
@@ -14544,6 +14559,7 @@ forkop_action() {
 			_job_running forkop && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
 			b="$(printf '%s' "$arg" | _fk_ucj hide)"
 			case "$b" in *'"ok": true'*|*'"ok":true'*) ;; *) printf '%s\n' "$b"; return 1 ;; esac
+			case "$b" in *'"same": true'*|*'"same":true'*) printf '{"ok":true,"same":true}\n'; return 0 ;; esac
 			if _fk_enabled && _fk_up; then job_start forkop do_fk_service apply
 			else printf '{"ok":true,"saved":true}\n'; fi
 			;;
@@ -36621,6 +36637,8 @@ function cmd_hide(sec) {
 	if (c.get(CFG, sec) != "section") fail("Forkozz ещё не настроен");
 	let m = c.get_all(CFG, sec) || {}, mode = sec_mode(m);
 	if (mode == "iface") fail("у туннеля нет серверов");
+	let eff = (f) => mode == "links" ? join("\n", visible_links(m, f)) : mode == "sub" ? join("\n", filter(sub_raw_names(sec, m), (n) => excl_sub_hit(n, f))) : null;
+	let eff0 = eff(excl_vars(m));
 	let names = [];
 	if (d.reset) {
 		c.delete(CFG, sec, "zm_hide");
@@ -36664,10 +36682,11 @@ function cmd_hide(sec) {
 			if (xstr != "") c.set(CFG, sec, "zm_exclude", xstr); else c.delete(CFG, sec, "zm_exclude");
 		}
 	}
+	let eff1 = eff(excl_vars(c.get_all(CFG, sec) || {}));
 	apply_servers(c, sec);
 	c.save(CFG);
 	c.commit(CFG);
-	out({ ok: true, hidden: length(names) });
+	out({ ok: true, hidden: length(names), same: eff0 != null && eff0 == eff1 && (mode != "sub" || length(sub_raw_names(sec, m)) > 0) });
 }
 
 function nn_ru(n, one, few, many) {
@@ -39823,7 +39842,19 @@ function hidePicker(o) {
 	var items = [], info = {}, selecting = false, pick = {}, phr = [], phr0 = '', phrI = [], saving = false, lastSig = '';
 	var bar = saveBar({ saveLabel: 'Сохранить', busyText: 'Сохраняем…', onCancel: function() { stop(); }, onSave: save });
 	function real() { return items.filter(function(it) { return !it.gone; }); }
-	function hiddenCount() { return items.filter(function(it) { return it.hidden || it.locked || it.withName; }).length; }
+	function hiddenCount() { return items.filter(function(it) { return !it.gone && (it.hidden || it.locked || it.withName); }).length; }
+	function goneNames() { return items.filter(function(it) { return it.gone && it.hidden; }).map(function(it) { return it.name; }); }
+	function clean() {
+		var g = goneNames();
+		if (!g.length || saving) return;
+		var keep = (info.hideNames || []).filter(function(n) { return g.indexOf(n) < 0; });
+		saving = true; render();
+		Promise.resolve(o.onSave(keep, info.markers || '')).then(function(ok) {
+			saving = false;
+			if (ok !== false) { info.hideNames = keep; items = items.filter(function(it) { return !(it.gone && g.indexOf(it.name) >= 0); }); }
+			render();
+		}, function() { saving = false; render(); });
+	}
 	function byPhrase(it) { return !!((phr.length && hit(it.name, phr)) || (it.locked && phrKey(phr) === phr0)); }
 	function nameSub() { return typeof o.nameSub === 'function' ? !!o.nameSub() : !!o.nameSub; }
 	function coverBy(name, list) {
@@ -39918,22 +39949,26 @@ function hidePicker(o) {
 	function render() {
 		el.innerHTML = '';
 		if (info.error && !items.length && !hiddenCount()) { el.appendChild(E('p', { 'class': 'zm-hint' }, [ info.error ])); return; }
-		var hc = hiddenCount();
+		var hc = hiddenCount(), gn = goneNames();
 		if (!selecting) {
 			var acts = [];
 			if (!o.inline && !info.noEdit && (items.length > 1 || hc)) acts.push(E('button', { 'class': 'cbi-button', 'disabled': o.busy && o.busy() ? '' : null, 'click': start }, hc || info.markers ? (W.edit || 'Изменить список скрытых') : wHide + ' ' + noun + '…'));
 			if (hc || info.markers) acts.push(E('button', { 'class': 'cbi-button cbi-button-remove', 'disabled': o.busy && o.busy() ? '' : null, 'click': reset }, W.reset || ('Вернуть все ' + noun)));
 			if (!acts.length) return;
-			if (hc || info.markers) {
-				var hidden = items.filter(function(it) { return it.hidden || it.locked || it.withName; }).map(function(it) { return it.name || '(без названия)'; });
+			if (hc || info.markers || gn.length) {
+				var hidden = items.filter(function(it) { return !it.gone && (it.hidden || it.locked || it.withName); }).map(function(it) { return it.name || '(без названия)'; });
 				var chips = hidden.slice(0, 12).map(function(n) { return E('span', { 'class': 'zm-hide-chip' }, [ String(n) ]); });
 				if (hidden.length > 12) chips.push(E('span', { 'class': 'zm-hide-chip zm-hide-more' }, [ '+ ещё ' + (hidden.length - 12) ]));
 				var box = E('div', { 'class': 'zm-hide-box' }, [
 					E('div', { 'class': 'zm-hide-head' }, [
-						E('span', { 'class': 'zm-badge zm-warn' }, [ E('span', { 'class': 'zm-dot' }), hc ? wHidden + ': ' + hc : wHidden + ' по фразам' ]),
+						E('span', { 'class': 'zm-badge zm-warn' }, [ E('span', { 'class': 'zm-dot' }), hc ? wHidden + ': ' + hc : info.markers ? wHidden + ' по фразам' : wHidden + ': 0' ]),
 						E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, [ wDesc ])
 					]),
 					chips.length ? E('div', { 'class': 'zm-hide-chips' }, chips) : E([]),
+					gn.length ? E('div', { 'class': 'zm-hide-gone' }, [
+						E('span', { 'class': 'zm-hint', 'style': 'margin:0', 'title': gn.join('\n') }, [ 'Устаревших названий: ' + gn.length + ' — таких в подписке уже нет, и они ничего не скрывают.' ]),
+						E('button', { 'type': 'button', 'class': 'cbi-button', 'disabled': saving || (o.busy && o.busy()) ? '' : null, 'click': clean }, saving ? 'Убираем…' : 'Убрать их из списка')
+					]) : E([]),
 					info.markers ? E('p', { 'class': 'zm-hint', 'style': 'margin:0' }, [ 'Также убираются названия с «' + exclParse(info.markers, o.exact).join('», «') + '».' ]) : E([]),
 					E('div', { 'class': 'zm-actions', 'style': 'margin:0' }, acts)
 				]);
@@ -53117,6 +53152,7 @@ html.zm-theme-dark .zm-ow-link { color: #79c0ff; }
 .zm-hide-box { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; padding: 12px 14px; border-radius: 12px; border: 1px dashed rgba(154,103,0,.55); background: rgba(154,103,0,.06); }
 .zm-hide-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .zm-hide-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.zm-hide-gone { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .zm-hide-chip { padding: 3px 10px; border-radius: 999px; font-size: 12px; background: rgba(127,127,127,.14); text-decoration: line-through; opacity: .85; overflow-wrap: anywhere; }
 .zm-hide-chip.zm-hide-more { text-decoration: none; }
 .zm-reboot-ov { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(10,12,18,.55); backdrop-filter: blur(3px); }
@@ -58740,7 +58776,10 @@ return view.extend({
 			if (busy || saving) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return Promise.resolve(false); }
 			return zm.forkopAction('hide', arg).then(function(res) {
 				if (res.error) { zm.toast(res.error, 'error'); return false; }
-				if (res.started) {
+				if (res.same) {
+					zm.toast('Список скрытых обновлён — серверы те же, перезапуск не нужен', 'info');
+					loadServers();
+				} else if (res.started) {
 					lastAct = 'apply';
 					zm.toast('Применяем список серверов — ход работы виден в окне вывода', 'warning');
 					follow();
@@ -59846,7 +59885,7 @@ return view.extend({
 				title: subName(sub.title) || 'Подписка',
 				used: sub.used, total: sub.total, unlimited: sub.unlimited, expire: sub.expire, updated: sub.updated,
 				refill: sub.refill, announce: sub.announce, announce_url: sub.announce_url, support: sub.support, web: sub.web,
-				count: { label: 'Серверов', n: manual.length, all: S.list.filter(function(t) { return t !== autoTag; }).length },
+				count: { label: 'Серверов', n: manual.length, all: Math.max(S.list.filter(function(t) { return t !== autoTag; }).length, manual.length + (Array.isArray(servers.sub_hidden) ? servers.sub_hidden.length : 0)) },
 				fmt: sub.fmt
 			}));
 			if (!direct && servers.home) srvCard.appendChild(E('div', { 'class': 'zm-refresh-banner zm-show zm-home-banner', 'role': 'note' }, [
@@ -59883,7 +59922,13 @@ return view.extend({
 				shown[nm] = true;
 				return { name: nm, foot: String(n.type || '').toLowerCase(), hidden: byName, locked: !!n.hidden && !byName };
 			});
-			hn.forEach(function(nm) { if (!shown[nm]) { shown[nm] = true; hpItems.push({ name: nm, foot: 'скрыт', hidden: true, locked: false }); } });
+			var subHid = Array.isArray(servers.sub_hidden) ? servers.sub_hidden : null;
+			hn.forEach(function(nm) {
+				if (shown[nm]) return;
+				shown[nm] = true;
+				var gone = !!subHid && subHid.indexOf(nm) < 0;
+				hpItems.push({ name: nm, foot: gone ? 'нет в подписке' : 'скрыт', hidden: true, locked: false, gone: gone });
+			});
 			var hpPh = zm.exclParse(servers.exclude || '');
 			(servers.sub_hidden || []).forEach(function(nm) {
 				if (shown[nm]) return;
