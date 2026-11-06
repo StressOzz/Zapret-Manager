@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.032
+# Version: 5.034
 ZM_VERSION_EOF
 set -e
 
@@ -2157,7 +2157,7 @@ status() {
 		fi
 	fi
 
-	printf '{"pkg":"%s","zapret":"%s","zapret_running":%s,"zapret_version":"%s","zapret2":"%s","zapret2_running":%s,"strategy":"%s","flowseal":"%s","yv_off":%s,"quic_yt":%s,"expert":%s,"rkn":%s,"rkn_on":%s,"rkn_fits":%s,"rkn_count":%s,"wssize":%s,"ulist":%s,"ulist_on":%s,"ulist_count":%s,"testing":%s,"test_now":"%s","ipid":%s,"ipid_want":"%s","gv":"%s","gv_want":"%s","gv_list":"%s","yt_tcp":%s,"z2_luci":"%s","zdoh":%s,"zdoh_on":%s,"zdoh_doms":"%s","zdoh_own":%s,"s2":%s,"pending":%s,"pending_was":"%s"}\n' \
+	printf '{"pkg":"%s","zapret":"%s","zapret_running":%s,"zapret_version":"%s","zapret2":"%s","zapret2_running":%s,"strategy":"%s","flowseal":"%s","yv_off":%s,"quic_yt":%s,"expert":%s,"rkn":%s,"rkn_on":%s,"rkn_fits":%s,"rkn_count":%s,"wssize":%s,"ulist":%s,"ulist_on":%s,"ulist_count":%s,"testing":%s,"test_now":"%s","ipid":%s,"ipid_want":"%s","gv":"%s","gv_want":"%s","gv_list":"%s","yt_tcp":%s,"z2_luci":"%s","zdoh":%s,"zdoh_on":%s,"zdoh_doms":"%s","zdoh_own":%s,"s2":%s,"pending":%s,"pending_was":"%s","hdrezka":%s,"hdrezka_used":%s}\n' \
 		"$PKG" "$zr" "$zr_running" "$(esc "$zr_ver")" "$zr2" "$zr2_running" "$(esc "$strat")" "$(esc "$fs_marker")" \
 		"$([ -f /opt/zapret-manager-luci/yv_off ] && echo true || echo false)" \
 		"$([ -f "$CONF" ] && _udp443_on && echo true || echo false)" \
@@ -2175,7 +2175,8 @@ status() {
 		"$([ -f "$CONF" ] && [ "${ZM_YS%% *}" -gt 0 ] 2>/dev/null && echo true || echo false)" "$(esc "$zr2_luci")" \
 		"$([ -f "$ZO_DOH_FLAG" ] && echo true || echo false)" "$([ -f "$CONF" ] && _zo_doh_on && echo true || echo false)" \
 		"$(esc "$zdd")" "$zdo" "$(_zs2_on && echo true || echo false)" \
-		"$(_pend_on && echo true || echo false)" "$(_pend_on && esc "$(_pend_was)")"
+		"$(_pend_on && echo true || echo false)" "$(_pend_on && esc "$(_pend_was)")" \
+		"$(_zx_hdr_on && echo true || echo false)" "$([ -f "$CONF" ] && _zl_used exclude && echo true || echo false)"
 }
 _z2_luci_path() {
 	grep -ho '"admin/[A-Za-z0-9_/-]*zapret2[A-Za-z0-9_/-]*"' /usr/share/luci/menu.d/*.json 2>/dev/null | tr -d '"' | grep -v 'zapret-manager' |
@@ -3753,6 +3754,46 @@ _zx_auto_get() {
 }
 
 ZL_EDIT_MAX=262144
+
+ZX_HDR_FLAG="$ZM_STATE_DIR/zapret_hdrezka"
+ZX_HDR_FILE="/opt/zapret/ipset/zapret-hosts-user-exclude.txt"
+ZX_HDR_DOMS="rezka.ag hdrezka.ag hdrezka.ac hdrezka.la hdrezka.me hdrezka.org flypink.org"
+ZX_HDR_B="#zm-hdrezka"
+ZX_HDR_E="#zm-hdrezka-end"
+_zx_hdr_on() { [ -f "$ZX_HDR_FLAG" ]; }
+_zx_hdr_sync() {
+	local f="${1:-$ZX_HDR_FILE}" tmp
+	if [ ! -f "$f" ]; then
+		_zx_hdr_on && [ -d "$(dirname "$f")" ] || return 1
+		: > "$f"
+	fi
+	tmp="$f.zmhdr"
+	awk -v B="$ZX_HDR_B" -v E="$ZX_HDR_E" -v D="$ZX_HDR_DOMS" '
+		BEGIN { n = split(D, a, " "); for (i = 1; i <= n; i++) d[a[i]] = 1 }
+		{ l = $0; sub(/\r$/, "", l); t = tolower(l); gsub(/^[ \t]+|[ \t]+$/, "", t) }
+		t == B { s = 1; next }
+		t == E { s = 0; next }
+		s && (t in d || t == "") { next }
+		{ print }' "$f" > "$tmp" || { rm -f "$tmp"; return 1; }
+	if _zx_hdr_on; then
+		[ -s "$tmp" ] && [ -n "$(tail -c 1 "$tmp")" ] && echo >> "$tmp"
+		{ echo "$ZX_HDR_B"; printf '%s\n' $ZX_HDR_DOMS; echo "$ZX_HDR_E"; } >> "$tmp"
+	fi
+	if cmp -s "$tmp" "$f"; then rm -f "$tmp"; return 1; fi
+	cat "$tmp" > "$f"; rm -f "$tmp"; chmod 644 "$f"
+	return 0
+}
+_zx_hdr_set() {
+	_pend_on && { echo '{"error":"сначала примените или отмените выбранную стратегию"}'; return 1; }
+	case "$1" in
+		on) mkdir -p "$ZM_STATE_DIR"; : > "$ZX_HDR_FLAG" ;;
+		off) rm -f "$ZX_HDR_FLAG" ;;
+		*) echo '{"error":"неизвестное значение"}'; return 1 ;;
+	esac
+	mkdir -p "$(dirname "$ZX_HDR_FILE")"
+	_zx_hdr_sync && zapret_restart
+	status
+}
 
 nfqws_opt_set() {
 	local content="$1"
@@ -7966,6 +8007,9 @@ case "$cmd" in
 	zapret_opt_set)
 		case "$1" in rkn:*|wssize:*|ipid:*) [ -f "$CONF" ] && { _nochange_guard || exit 1; } ;; esac ;;
 esac
+case "$cmd:$1" in
+	zapret_opt_set:hdrezka:*) ;;
+	*)
 case "$cmd" in
 	strategy_set_v|strategy_set_flowseal|strategy_set_youtube|youtube_quic_set|discord_set_dv|discord_set_fake|game_set|game_set_fake|game_toggle_xtreme|zapret_opt_set)
 		if [ -n "$ZM_UI_DEFER" ] && [ -f "$CONF" ] && [ ! -s "$TEST_BACKUP" ] && pgrep -f "/opt/zapre[t]/" >/dev/null 2>&1; then
@@ -7977,6 +8021,7 @@ case "$cmd" in
 	strategy_set_v|strategy_set_flowseal|strategy_set_youtube|youtube_quic_set|discord_set_dv|discord_set_fake|game_set|game_set_fake|game_toggle_xtreme|zapret_opt_set)
 		_nfq_canon
 		_zc_lift ;;
+esac ;;
 esac
 _zm_run_cmd() {
 case "$cmd" in
@@ -17219,6 +17264,8 @@ _nochange_fetch() {
 	mkdir -p "$(dirname "$f")"
 	if _zm_fetch "$url" "$tmp" 60 && _zm_dl_sane "$tmp"; then mv -f "$tmp" "$f"
 	else rm -f "$tmp"; return 1; fi
+	[ "$f" = "$ZX_HDR_FILE" ] && _zx_hdr_sync "$f"
+	return 0
 }
 
 _nochange_save() {
@@ -18271,6 +18318,7 @@ zapret_excl_tick() {
 	rm -f "$tmp"
 	_zm_fetch "$EXCLUDE_URL" "$tmp" 60
 	if [ ! -s "$tmp" ] || grep -qi '<html\|<!doctype' "$tmp" || ! grep -q '^[A-Za-z0-9][A-Za-z0-9.-]*\.[A-Za-z]' "$tmp"; then rm -f "$tmp"; return 0; fi
+	_zx_hdr_sync "$tmp"
 	if cmp -s "$tmp" "$f"; then rm -f "$tmp"; return 0; fi
 	mv -f "$tmp" "$f"; chmod 644 "$f"
 	logger -t zapret-manager "Список исключений Zapret обновлён по расписанию"
@@ -18297,6 +18345,7 @@ zapret_list_op() {
 		[ -f "$f" ] || { printf '{"ok":true,"removed":0,"info":%s}\n' "$(_zl_info "$id")"; return 0; }
 		rmn="$(_zl_count "$f")"
 		grep -E '^[[:space:]]*#' "$f" > "$f.zmclr"; cat "$f.zmclr" > "$f"; rm -f "$f.zmclr"; chmod 644 "$f"
+		[ "$f" = "$ZX_HDR_FILE" ] && _zx_hdr_sync "$f"
 		[ "$rmn" -gt 0 ] && zapret_restart >/dev/null 2>&1
 		printf '{"ok":true,"removed":%s,"info":%s}\n' "$rmn" "$(_zl_info "$id")"
 		return 0
@@ -18363,6 +18412,7 @@ zapret_list_set() {
 	printf '%s\n' "$2" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | awk 'NF { for (i = 0; i < e; i++) print ""; e = 0; print; next } { e++ }' > "$tmp" || { rm -f "$tmp"; echo '{"error":"не удалось записать файл"}'; return 1; }
 	mv -f "$tmp" "$f"
 	chmod 644 "$f"
+	[ "$f" = "$ZX_HDR_FILE" ] && _zx_hdr_sync "$f"
 	zapret_restart
 	printf '{"ok":true,"info":%s}\n' "$(_zl_info "$1")"
 }
@@ -18419,6 +18469,7 @@ zapret_list_restore() {
 	_zm_fetch "$EXCLUDE_URL" "$tmp" 60
 	if ! _zm_dl_sane "$tmp"; then rm -f "$tmp"; echo '{"error":"не удалось скачать список исключений — текущий список не тронут"}'; return 1; fi
 	mv -f "$tmp" "$f"; chmod 644 "$f"
+	_zx_hdr_sync "$f"
 	zapret_restart
 	zapret_list_get exclude
 }
@@ -18555,6 +18606,7 @@ zapret_opt_set() {
 				off) rm -f "$ZO_DOH_FLAG"; _zo_doh_cut ;;
 				*) echo '{"error":"неизвестное значение"}'; return 1 ;;
 			esac ;;
+		hdrezka) _zx_hdr_set "$val"; return ;;
 		wssize)
 			case "$val" in
 				on) _zo_wss_add || { echo '{"error":"не удалось добавить блок --wssize: в стратегии нет ни одного профиля"}'; return 1; } ;;
@@ -29122,7 +29174,7 @@ steer_sub_status() {
 
 _st_hp_build() {
 	local m hp="$ST_SUB_NODES.hp"
-	[ -s "$hp" ] && [ ! "$ST_SUB" -nt "$hp" ] && return 0
+	[ -s "$hp" ] && [ ! "$ST_SUB" -nt "$hp" ] && [ ! "$ST_SUB_NODES" -nt "$hp" ] && return 0
 	mkdir -p "$ST_DIR"
 	{ for m in vless proxy; do
 		[ -x "$STL_SBIN/steer-$m" ] || continue
@@ -29372,10 +29424,8 @@ do_steer_sub_update_all() {
 }
 
 _st_secs_ping_tick() {
-	local s iv
+	local s
 	for s in $(_st_secs_vpn); do
-		iv="$(_st_sec_with "$s" _st_pick_iv)"
-		[ -f "$ST_SEC_DIR/$s/sub.ping" ] && [ -z "$(find "$ST_SEC_DIR/$s/sub.ping" -mmin +$((iv - 1)) 2>/dev/null)" ] && continue
 		_st_sec_with "$s" steer_ping_tick
 	done
 }
@@ -29424,7 +29474,7 @@ _st_ping_cron() {
 }
 
 _st_ping_measure() {
-	local t dir hid i proto pidx fidx name rest p hp k n=0 hy=0 f ms j tab kd ov
+	local t dir hid i proto pidx fidx name rest p hp k n=0 hy=0 f ms j tab kd ov ci
 	[ -s "$ST_SUB" ] && _st_vpn_ok && t="$(_st_nodes)" || return 1
 	_zm_has curl || return 1
 	tab="$(printf '\t')"
@@ -29457,13 +29507,22 @@ _st_ping_measure() {
 	done
 	wait
 	if stl_has hy2 && [ -z "$ov" ]; then
+		ci=""
+		if [ -n "$1" ]; then
+			for f in "$dir"/*.n; do
+				[ -f "$f" ] || continue
+				[ "$(cat "$f")" = "$1" ] && { ci="${f##*/}"; ci="${ci%.n}"; break; }
+			done
+		fi
 		for f in "$dir"/*.k; do
 			[ -f "$f" ] || continue
 			read -r k < "$f"
-			case "$k" in hy*) ;; *) continue ;; esac
-			[ "$hy" -ge 6 ] && break
+			case "$k" in hy*) i="${f##*/}"; echo "${i%.k}" ;; esac
+		done | sort -n | awk -v c="$ci" '$0 == c { print; next } { r[++n] = $0 } END { for (i = 1; i <= n; i++) print r[i] }' > "$dir/hy.list"
+		while read -r i; do
+			[ -n "$i" ] || continue
+			read -r k < "$dir/$i.k"
 			hy=$((hy + 1))
-			i="${f##*/}"; i="${i%.k}"
 			( j="$(stl_probe "$ST_SUB" hysteria2 "${k#hy }")"
 			  if [ "$(printf '%s' "$j" | jsonfilter -e '@.results[0].ok' 2>/dev/null)" = true ]; then
 				ms="$(printf '%s' "$j" | jsonfilter -e '@.results[0].handshake_ms' 2>/dev/null)"
@@ -29472,7 +29531,7 @@ _st_ping_measure() {
 				echo "$ms" > "$dir/$i"
 			  else : > "$dir/$i.dead"; fi ) &
 			[ $((hy % 2)) = 0 ] && wait
-		done
+		done < "$dir/hy.list"
 		wait
 	fi
 	if [ "$(_st_lat_mode)" = real ] && [ -z "$ov" ]; then
@@ -29571,18 +29630,32 @@ _st_ping_ready() {
 		[ ! -f "$ST_OFF" ] && [ -z "$(_st_blocker)" ] && _st_owns "steer-spec" && _st_work_main
 }
 
+_st_ping_due() {
+	local at
+	[ -f "$ST_SUB_PING" ] || return 0
+	at="$(date -r "$ST_SUB_PING" +%s 2>/dev/null)"
+	case "$at" in ''|*[!0-9]*) return 0 ;; esac
+	[ $(($(date +%s) - at)) -ge $(($(_st_pick_iv) * 60 - 240)) ]
+}
+
 steer_ping_tick() {
-	local lk="$ST_RUN/ping.lock" cur="" best
+	local lk="$ST_RUN/ping.lock" cur="" best prev="$ST_SUB_ORDER.prev"
 	_st_ping_ready || return 0
+	_st_ping_due || return 0
 	_st_running && return 0
 	mkdir -p "$ST_RUN"
 	mkdir "$lk" 2>/dev/null || { [ -n "$(find "$lk" -maxdepth 0 -mmin +20 2>/dev/null)" ] && rmdir "$lk" 2>/dev/null; return 0; }
 	stl_running && stl_state vpn >/dev/null 2>&1 && [ "$STL_UP" = true ] && cur="$(_st_active_key)"
+	rm -f "$prev"; [ -s "$ST_SUB_ORDER" ] && cp -f "$ST_SUB_ORDER" "$prev"
 	if _st_ping_measure "$cur" && _st_ping_order "$cur" && ! _st_running && _st_ping_ready; then
 		best="$(head -n1 "$ST_SUB_ORDER")"
 		if _st_spec_quick >/dev/null 2>&1; then logger -t zapret-manager "Steer: по пингу первым стал узел «$best» ($(_st_ping_line "$best") мс)"
-		else logger -t zapret-manager "Steer: узел по пингу «$best» применить не удалось"; fi
+		else
+			if [ -s "$prev" ]; then mv -f "$prev" "$ST_SUB_ORDER"; else rm -f "$ST_SUB_ORDER"; fi
+			logger -t zapret-manager "Steer: узел по пингу «$best» применить не удалось — повторим при следующем замере"
+		fi
 	fi
+	rm -f "$prev"
 	rmdir "$lk" 2>/dev/null
 	return 0
 }
@@ -49470,11 +49543,13 @@ return view.extend({
 				extraCard.appendChild(zm.swRow(!!status.ulist, extraBusy === 'userlist' ? 'Обход по пользовательским спискам — применяем…' : 'Обход по пользовательским спискам', ulHint, function() { toggleExtra('userlist', !status.ulist); }, !!extraBusy));
 				if (status.ulist_on && !ulN) extraCard.appendChild(E('p', { 'class': 'zm-hint zm-ab-warn', 'style': 'margin:-4px 0 10px 52px' }, 'Список пуст — основная стратегия сейчас не применяется ни к одному сайту. Добавьте домены на вкладке «Редактор списков».'));
 				extraCard.appendChild(zm.swRow(!!status.wssize, extraBusy === 'wssize' ? 'Блок --wssize 1:6 — применяем…' : 'Блок --wssize 1:6', 'Отдельный блок в конце стратегии: для HTTPS уменьшает окно TCP в начале соединения. Помогает с некоторыми блокировками, но может снизить скорость и стабильность. Сохраняется при смене стратегии.', function() { toggleExtra('wssize', !status.wssize); }, !!extraBusy));
+				extraCard.appendChild(zm.swRow(!!status.hdrezka, extraBusy === 'hdrezka' ? 'Исключить домены HDRezka — применяем…' : 'Исключить домены HDRezka', 'Приложение HDRezka может не работать, пока его трафик обрабатывает Zapret. Сайты HDRezka в браузере после этого могут не открываться. Домены сохраняются при обновлении списка исключений.', function() { toggleExtra('hdrezka', !status.hdrezka); }, !!extraBusy));
+				if (status.hdrezka && status.hdrezka_used === false) extraCard.appendChild(E('p', { 'class': 'zm-hint zm-ab-warn', 'style': 'margin:-4px 0 10px 52px' }, 'Текущая стратегия не использует список исключений — домены HDRezka в нём есть, но Zapret их пока обрабатывает. Выберите стратегию из списка панели или добавьте в свою --hostlist-exclude=/opt/zapret/ipset/zapret-hosts-user-exclude.txt.'));
 			}
 			function toggleExtra(what, on) {
 				if (busy || extraBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
 				extraBusy = what; renderExtra();
-				zm.toast(what === 'doh' ? (on ? 'Добавляем блок обхода DoH и перезапускаем Zapret' : 'Убираем блок обхода DoH') : what === 'rkn' ? (on ? 'Скачиваем список РКН и перезапускаем Zapret' : 'Выключаем списки РКН') : what === 'userlist' ? (on ? 'Переводим стратегию на ваш список и перезапускаем Zapret' : 'Возвращаем обход для всех сайтов, кроме исключений') : (on ? 'Добавляем блок --wssize' : 'Убираем блок --wssize'), 'warning');
+				zm.toast(what === 'hdrezka' ? (on ? 'Добавляем домены HDRezka в исключения и перезапускаем Zapret' : 'Убираем домены HDRezka из исключений и перезапускаем Zapret') : what === 'doh' ? (on ? 'Добавляем блок обхода DoH и перезапускаем Zapret' : 'Убираем блок обхода DoH') : what === 'rkn' ? (on ? 'Скачиваем список РКН и перезапускаем Zapret' : 'Выключаем списки РКН') : what === 'userlist' ? (on ? 'Переводим стратегию на ваш список и перезапускаем Zapret' : 'Возвращаем обход для всех сайтов, кроме исключений') : (on ? 'Добавляем блок --wssize' : 'Убираем блок --wssize'), 'warning');
 				zm.zapretOptSet(what + ':' + (on ? 'on' : 'off')).then(function(res) {
 					extraBusy = '';
 					if (!res || res.error) { zm.toast((res && res.error) || 'Роутер не ответил', 'error'); renderExtra(); return; }
@@ -49482,7 +49557,7 @@ return view.extend({
 					if (!zBusy) renderZCard(res);
 					renderExtra(); renderBanner(); renderV();
 					if (lastFlowseal) renderFlowseal(lastFlowseal);
-					zm.toast(what === 'doh' ? (on ? 'Обход блокировки DoH включён' : 'Обход блокировки DoH выключен') : what === 'rkn' ? (on ? (res.rkn_on ? 'Списки РКН включены' : 'Списки РКН включатся с подходящей стратегией') : 'Списки РКН выключены')
+					zm.toast(what === 'hdrezka' ? (on ? 'Домены HDRezka добавлены в исключения' : 'Домены HDRezka убраны из исключений') : what === 'doh' ? (on ? 'Обход блокировки DoH включён' : 'Обход блокировки DoH выключен') : what === 'rkn' ? (on ? (res.rkn_on ? 'Списки РКН включены' : 'Списки РКН включатся с подходящей стратегией') : 'Списки РКН выключены')
 						: what === 'userlist' ? (on ? 'Стратегия работает только по вашему списку' : 'Стратегия снова работает для всех сайтов, кроме исключений')
 						: (on ? 'Блок --wssize добавлен' : 'Блок --wssize убран'), 'info');
 					refreshAll();
@@ -56686,7 +56761,8 @@ var COMPS = [
 	{ id: 'steer', name: 'Steer', color: '#0ea5e9', rx: /(^|\/)steer/ },
 	{ id: 'mixomo', name: 'Mixomo', color: '#14b8a6', rx: /mihomo|magitrickle|hev-socks5-tunnel/ },
 	{ id: 'bytetube', name: 'ByeTube', color: '#ef4444', rx: /ciadpi|byedpi|bytetube/ },
-	{ id: 'tg', name: 'TG WS Proxy', color: '#38bdf8', rx: /tg-ws-proxy|(^|\/)s?tgws/ },
+	{ id: 'tg', name: 'TG WS Proxy', color: '#fb923c', rx: /tg-ws-proxy|(^|\/)s?tgws/ },
+	{ id: 'ts', name: 'Tailscale', color: '#84cc16', rx: /(^|\/)tailscaled?( |$)/ },
 	{ id: 'doh', name: 'DNS over HTTPS', color: '#22d3ee', rx: /https-dns-proxy/ },
 	{ id: 'dns', name: 'DNS (dnsmasq)', color: '#06b6d4', rx: /(^|\/)dnsmasq/ },
 	{ id: 'term', name: 'Терминал', color: '#f59e0b', rx: /(^|\/)ttyd|(^|\/)htop/ },
@@ -57155,10 +57231,10 @@ return view.extend({
 			procs.forEach(function(p) { if (!p.rss) return; by[p.comp.id] = (by[p.comp.id] || 0) + p.rss; sum += p.rss; });
 			var used = memUsed(m), rest = Math.max(0, used - sum);
 			var parts = Object.keys(by).map(function(id) { return { c: COMP_BY_ID[id], kb: by[id] }; }).sort(function(a, b) { return b.kb - a.kb; });
-			var top = parts.slice(0, 6), other = parts.slice(6).reduce(function(s, x) { return s + x.kb; }, 0);
+			var tiny = m.total * .003, top = parts.filter(function(x) { return x.kb >= tiny; }), other = parts.filter(function(x) { return x.kb < tiny; }).reduce(function(s, x) { return s + x.kb; }, 0);
 			memBar.innerHTML = ''; memLeg.innerHTML = '';
 			function seg(kb, color, text, cls) {
-				var w = 100 * kb / m.total; if (w < .3) return;
+				var w = 100 * kb / m.total; if (w < .3 && cls !== 'zm-mon-seg-free') return;
 				memBar.appendChild(E('div', { 'class': 'zm-mon-stackseg' + (cls ? ' ' + cls : ''), 'style': 'width:' + w.toFixed(2) + '%;' + (color ? 'background:' + color : ''), 'title': text + ' · ' + mb(kb) }));
 				memLeg.appendChild(E('span', { 'class': 'zm-mon-leg' }, [ E('i', { 'class': cls || '', 'style': color ? 'background:' + color : '' }), text + ' · ' + mb(kb) ]));
 			}
@@ -63544,6 +63620,7 @@ var ICONS = {
 	external: '<path d="M14 4h6v6"/><path d="M20 4l-9 9"/><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
 	eye: '<path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>',
 	gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+	navChev: '<path d="M6 9.5l6 6 6-6"/>',
 	eyeOff: '<path d="M3 3l18 18"/><path d="M10.6 5.6A10 10 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-3.1 3.9M6.2 6.9C3.9 8.6 2.5 12 2.5 12S6 18.5 12 18.5c1.7 0 3.2-.5 4.5-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
 	user: '<circle cx="12" cy="8" r="4"/><path d="M4 20.5c1.3-3.8 4.3-5.5 8-5.5s6.7 1.7 8 5.5"/>',
 	lock: '<rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>',
@@ -63700,6 +63777,7 @@ var radio = { idx: 0, vol: 70, show: true, state: 'off', audio: null, el: null, 
 		if (c) radioApplyCfg(c);
 	} catch (e) {}
 })();
+function radioGain(v) { v = Math.max(0, Math.min(100, +v || 0)) / 100; return v * v * v; }
 function radioFind(id) { for (var i = 0; i < RADIO.length; i++) if (RADIO[i][0] === id) return i; return -1; }
 function radioApplyCfg(c) {
 	var i = radioFind(c.station);
@@ -63732,7 +63810,7 @@ function radioSync() {
 		if (radio.idx !== was && radio.state !== 'off' && radio.state !== 'err') radioStart();
 		if (!radio.show && radio.state !== 'off') radioStop();
 		if (typeof lookPageRender === 'function') lookPageRender();
-		if (radio.audio) radio.audio.volume = radio.vol / 100;
+		if (radio.audio) radio.audio.volume = radioGain(radio.vol);
 		radioCache();
 		radioPaint();
 	}).catch(function () {});
@@ -63843,7 +63921,7 @@ function radioStart(plain) {
 	radio.corsTry = cors && !radioIsHls(i);
 	if (plain !== true) radio.ncPend = '';
 	if (cors && !radAud.ac) { try { radAud.ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
-	a.volume = radio.vol / 100;
+	a.volume = radioGain(radio.vol);
 	radio.state = 'wait';
 	radioHlsDrop();
 	radioPaint();
@@ -64074,12 +64152,18 @@ function radioMenuClose() {
 	if (!radio.menu) return;
 	radio.menu.remove();
 	radio.menu = null;
+	radio.menuPlace = null;
 	radio.pick.setAttribute('aria-expanded', 'false');
 	document.removeEventListener('mousedown', radioMenuOutside, true);
 	document.removeEventListener('touchstart', radioMenuOutside, true);
 	document.removeEventListener('keydown', radioMenuKey, true);
-	window.removeEventListener('resize', radioMenuClose);
+	window.removeEventListener('resize', radioMenuResize);
 	window.removeEventListener('hashchange', radioMenuClose);
+}
+function radioMenuResize() {
+	if (!radio.menu) return;
+	if (window.innerWidth !== radio.menuW) radioMenuClose();
+	else if (radio.menuPlace) radio.menuPlace();
 }
 function radioMenuPaint() {
 	var m = radio.menu, tr = radio.state === 'play' && radio.track && radio.track.idx === radio.idx ? radio.track : null, nowEl = m.querySelector('.zmw-radio-now');
@@ -64109,7 +64193,7 @@ function radioMenuToggle() {
 	vol.addEventListener('input', function () {
 		radio.vol = +vol.value;
 		volTxt.textContent = radio.vol + '%';
-		if (radio.audio) radio.audio.volume = radio.vol / 100;
+		if (radio.audio) radio.audio.volume = radioGain(radio.vol);
 		radioSave();
 	});
 	radio.tab = radioIsFav(radio.idx) ? 'f' : radioSetOf(radio.idx);
@@ -64128,11 +64212,27 @@ function radioMenuToggle() {
 		E('label', { 'class': 'zmw-radio-vol' }, [ E('span', {}, [ 'Громкость' ]), vol, volTxt ])
 	]);
 	function place() {
-		var rc = radio.el.getBoundingClientRect(), vw = window.innerWidth, w;
+		var rc = radio.el.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight, bt = Math.max(8, Math.ceil(vh - rc.top + 8)), up = Math.floor(vh - bt - 8), w, h;
 		m.style.maxWidth = (vw - 16) + 'px';
+		m.style.maxHeight = 'none';
 		w = m.offsetWidth;
+		h = m.offsetHeight;
 		m.style.left = Math.max(8, Math.min(rc.left, vw - w - 8)) + 'px';
-		m.style.bottom = Math.max(8, window.innerHeight - rc.top + 8) + 'px';
+		if (up >= Math.min(h, 280)) {
+			m.style.top = '';
+			m.style.bottom = bt + 'px';
+			m.style.maxHeight = up + 'px';
+		} else {
+			m.style.bottom = '';
+			m.style.top = '8px';
+			m.style.maxHeight = (vh - 16) + 'px';
+		}
+	}
+	function curShow() {
+		var c = list.querySelector('.zmw-radio-st[data-i="' + radio.idx + '"]'), lr, cr;
+		if (!c || list.scrollHeight <= list.clientHeight) return;
+		lr = list.getBoundingClientRect(); cr = c.getBoundingClientRect();
+		if (cr.top < lr.top || cr.bottom > lr.bottom) list.scrollTop += cr.top - lr.top - Math.max(0, (lr.height - cr.height) / 2);
 	}
 	function fill() {
 		var ids = radioIdx(radio.tab), cols = window.innerWidth <= 520 ? 2 : 3;
@@ -64160,7 +64260,8 @@ function radioMenuToggle() {
 			]));
 		});
 		if (ids.length) list.style.gridTemplateRows = 'repeat(' + Math.ceil(ids.length / cols) + ', auto)';
-		if (radio.menu) { radioMenuPaint(); place(); }
+		list.scrollTop = 0;
+		if (radio.menu) { radioMenuPaint(); place(); curShow(); }
 	}
 	function favClick(i) {
 		var inFav = radio.tab === 'f', pos = inFav ? radioIdx('f').indexOf(i) : -1, nx;
@@ -64172,14 +64273,17 @@ function radioMenuToggle() {
 	}
 	document.body.appendChild(m);
 	radio.menu = m;
+	radio.menuW = window.innerWidth;
+	radio.menuPlace = place;
 	radio.pick.setAttribute('aria-expanded', 'true');
 	fill();
 	radioMenuPaint();
 	place();
+	curShow();
 	document.addEventListener('mousedown', radioMenuOutside, true);
 	document.addEventListener('touchstart', radioMenuOutside, true);
 	document.addEventListener('keydown', radioMenuKey, true);
-	window.addEventListener('resize', radioMenuClose);
+	window.addEventListener('resize', radioMenuResize);
 	window.addEventListener('hashchange', radioMenuClose);
 	var cur = m.querySelector('.zmw-radio-st[data-i="' + radio.idx + '"]');
 	if (cur) try { cur.focus({ preventScroll: true }); } catch (e) {}
@@ -64575,7 +64679,7 @@ function dustStart(kind) {
 				if (live) {
 					if (!fdB || fdB.length !== radAud.an.frequencyBinCount) fdB = new Float32Array(radAud.an.frequencyBinCount);
 					radAud.an.getFloatFrequencyData(fdB);
-					var adj = -20 * Math.log(Math.max(radio.vol / 100, 0.02)) / Math.LN10;
+					var adj = -20 * Math.log(Math.max(radioGain(radio.vol), 0.001)) / Math.LN10;
 					top = -200;
 					for (i = 0; i < M; i++) {
 						p = i / (M - 1); dd = Math.abs(p - 0.5) * 2;
@@ -65299,6 +65403,54 @@ var root, shell = null, viewEl, titleEl, subEl, navLinks = {}, navDots = {}, dev
 
 var NAV_LOCK = { dashboard: 1, pages: 1, thanks: 1 }, NAV_BUILTIN = { dashboard: 1, look: 1, system: 1, openwrt: 1, watch: 1, monitor: 1, cleanup: 1, sysinfo: 1, backup: 1, pages: 1, thanks: 1 };
 var PAGES_OFF = navParse(sget('zmw.pgoff')), navHidden = navParse(sget(K_NAV)), navEdit = null, navSaving = false, navGroups = [], navGear = null, navNav = null, navHealth = null;
+var K_NAVFOLD = 'zmw.navfold', navFold = (function () { var o = {}; try { (JSON.parse(sget(K_NAVFOLD) || '[]') || []).forEach(function (k) { if (typeof k === 'string') o[k] = 1; }); } catch (e) {} return o; })();
+function navFoldSet(g, shut) {
+	if (shut) navFold[g.key] = 1; else delete navFold[g.key];
+	var keys = Object.keys(navFold);
+	sset(K_NAVFOLD, keys.length ? JSON.stringify(keys) : null, true);
+	navFoldPaint();
+}
+function navFoldPaint() {
+	var edit = !!navEdit, cur = currentRoute(), RANK = { 'zmw-stop': 4, 'zmw-part': 3, 'zmw-on': 2, 'zmw-idle': 1 };
+	navGroups.forEach(function (g) {
+		if (!g.fold) return;
+		var shut = !edit && !!navFold[g.key], n = 0, best = '', inside = false;
+		g.ids.forEach(function (id) {
+			var a = navLinks[id]; if (!a) return;
+			var keep = id === cur || id === 'thanks', hide = shut && !keep && !a.hidden;
+			if (shut && keep && !a.hidden) inside = true;
+			a.classList.toggle('zmw-nav-folded', hide);
+			if (hide) a.setAttribute('aria-hidden', 'true'); else a.removeAttribute('aria-hidden');
+			if (!hide) return;
+			n++;
+			var c = a._dot ? a._dot.className.replace('zmw-nav-dot', '').trim() : '';
+			if (c && (!best || (RANK[c] || 0) > (RANK[best] || 0))) best = c;
+		});
+		g.el.classList.toggle('zmw-nav-shut', shut);
+		g.el.setAttribute('aria-expanded', shut ? 'false' : 'true');
+		g.el.title = edit ? '' : (shut ? 'Развернуть' : 'Свернуть') + ' «' + g.name + '»' + (shut && n ? ' · скрыто разделов: ' + n : '');
+		g.sum.hidden = !shut || !n;
+		g.cnt.textContent = String(n);
+		g.cnt.hidden = inside && n === 0;
+		g.dot.className = 'zmw-nav-dot' + (best ? ' ' + best : '');
+		g.dot.title = best ? 'В свёрнутой группе есть раздел: ' + DOT_TEXT[{ 'zmw-on': 1, 'zmw-stop': 2, 'zmw-part': 3, 'zmw-idle': 4 }[best]] : '';
+	});
+}
+function navFoldInit(g) {
+	g.fold = true;
+	g.dot = E('span', { 'class': 'zmw-nav-dot' });
+	g.cnt = E('span', { 'class': 'zmw-nav-gcnt' });
+	g.sum = E('span', { 'class': 'zmw-nav-gsum', 'hidden': '' }, [ g.dot, g.cnt ]);
+	var chev = E('span', { 'class': 'zmw-nav-chev', 'aria-hidden': 'true' }, [ icon('navChev') ]);
+	g.el.classList.add('zmw-nav-foldable');
+	g.el.setAttribute('role', 'button');
+	g.el.setAttribute('tabindex', '0');
+	g.el.insertBefore(chev, g.el.firstChild.nextSibling);
+	g.el.insertBefore(g.sum, chev);
+	function go(ev) { if (navEdit) return; if (ev) ev.preventDefault(); navFoldSet(g, !navFold[g.key]); }
+	g.el.addEventListener('click', function (ev) { if (ev.target.closest && ev.target.closest('.zmw-nav-gear')) return; go(ev); });
+	g.el.addEventListener('keydown', function (ev) { if (ev.target !== g.el) return; if (ev.key === 'Enter' || ev.key === ' ') go(ev); else if (ev.key === 'ArrowLeft' && !navFold[g.key]) go(ev); else if (ev.key === 'ArrowRight' && navFold[g.key]) go(ev); });
+}
 function navParse(v) { var o = {}; String(v || '').split(/[\s,]+/).forEach(function (k) { if (/^[a-z0-9_]{1,32}$/.test(k) && !NAV_LOCK[k]) o[k] = 1; }); return o; }
 function navList(o) { return ROUTES.map(function (r) { return r.id; }).filter(function (k) { return o[k]; }); }
 function navCount() { return navList(navHidden).length; }
@@ -65313,6 +65465,7 @@ function navApply() {
 		if (a._eye) { a._eye.innerHTML = ''; a._eye.appendChild(icon(off ? 'eyeOff' : 'eye')); a._eye.setAttribute('aria-pressed', off ? 'false' : 'true'); a._eye.title = off ? 'Показать в меню' : 'Скрыть из меню'; }
 	});
 	navGroups.forEach(function (g) { g.el.hidden = g.ids.every(function (k) { return PAGES_OFF[k] || (!edit && navHidden[k]); }); });
+	navFoldPaint();
 	if (navGear) {
 		var n = navCount();
 		navGear.classList.toggle('zmw-on', edit);
@@ -65562,12 +65715,12 @@ function buildShell() {
 	navNav = nav; navGroups = [];
 	ROUTES.forEach(function (r) {
 		if (r.group !== lastGroup) {
-			var gEl = E('div', { 'class': 'zmw-nav-group' }, [ E('span', {}, [ r.group ]) ]);
+			var gEl = E('div', { 'class': 'zmw-nav-group' }, [ E('span', { 'class': 'zmw-nav-gname' }, [ r.group ]) ]);
 			if (!navGroups.length) {
 				navGear = E('button', { 'class': 'zmw-nav-gear', 'type': 'button', 'aria-label': 'Настроить меню', 'aria-expanded': 'false', 'click': function (ev) { ev.preventDefault(); navOpen(); } }, [ icon('gear'), E('span', { 'class': 'zmw-nav-gear-done' }, [ 'Готово' ]), E('i', {}) ]);
 				gEl.appendChild(navGear);
 			}
-			navGroups.push({ el: gEl, ids: [] });
+			navGroups.push({ el: gEl, ids: [], key: r.group, name: r.group });
 			nav.appendChild(gEl); lastGroup = r.group;
 		}
 		navGroups[navGroups.length - 1].ids.push(r.id);
@@ -65580,6 +65733,7 @@ function buildShell() {
 			tail
 		]);
 		if (!NAV_LOCK[r.id]) a._eye = tail;
+		a._dot = dot;
 		a.addEventListener('click', function (ev) {
 			if (navEdit) { ev.preventDefault(); navToggle(r.id); return; }
 			closeDrawer();
@@ -65594,6 +65748,7 @@ function buildShell() {
 		E('button', { 'class': 'zmw-nav-btn', 'type': 'button', 'click': function () { navAll(); } }, [ 'Показать все' ]),
 		E('button', { 'class': 'zmw-nav-btn zmw-nav-btn-done', 'type': 'button', 'click': function () { navDone(); } }, [ 'Готово' ])
 	]));
+	navGroups.forEach(function (g) { if (g.ids.length > 1) navFoldInit(g); });
 	navApply();
 
 	deviceEl = E('div', { 'class': 'zmw-device' }, [
@@ -65811,6 +65966,7 @@ function applyHealth(h) {
 		if (h.dots && h.dots[k] === 4) title = null;
 		setDot(navDots[k], h.dots && typeof h.dots[k] === 'number' ? h.dots[k] : h[k], title);
 	});
+	navFoldPaint();
 }
 window.addEventListener('zm:health', function (ev) {
 	var h = ev && ev.detail;
@@ -65922,6 +66078,7 @@ function route(force) {
 	var token = ++routeToken;
 
 	Object.keys(navLinks).forEach(function (k) { navLinks[k].classList.toggle('zmw-active', k === id); });
+	navFoldPaint();
 	navReveal(); setTimeout(navReveal, 400);
 	titleEl.textContent = r.title;
 	subEl.textContent = r.sub || '';
@@ -66441,6 +66598,26 @@ html[data-theme="dark"] .zmw-brand-name b, html[data-theme="depth"] .zmw-brand-n
 .zmw-nav-group { display: flex; align-items: center; justify-content: space-between; gap: 8px; opacity: 1; }
 .zmw-nav-group > span { opacity: .8; }
 .zmw-nav-group[hidden], .zmw-nav-item[hidden] { display: none; }
+.zmw-nav { interpolate-size: allow-keywords; }
+.zmw-nav-gname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zmw-nav-group.zmw-nav-foldable { cursor: pointer; user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; border-radius: 8px; outline: none; transition: color .15s; }
+.zmw-nav-group.zmw-nav-foldable:hover { color: var(--text); }
+.zmw-nav-group.zmw-nav-foldable:focus-visible { box-shadow: inset 0 0 0 2px var(--a1); }
+.zmw-nav-chev { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; margin: -5px -5px -5px 0; border-radius: 7px; color: var(--muted); opacity: .75; transition: transform .24s cubic-bezier(.3,.7,.3,1), background .15s, color .15s, opacity .15s; }
+.zmw-nav-chev .zmw-i { width: 14px; height: 14px; display: block; stroke-width: 2.2; }
+.zmw-nav-foldable:hover .zmw-nav-chev, .zmw-nav-foldable:focus-visible .zmw-nav-chev { background: var(--surface-2); color: var(--text); opacity: 1; }
+.zmw-nav-shut .zmw-nav-chev { transform: rotate(-90deg); }
+.zmw-nav-gsum { flex: none; display: inline-flex; align-items: center; gap: 8px; letter-spacing: 0; animation: zmw-gsum-in .22s ease; }
+.zmw-nav-gsum[hidden], .zmw-nav-gcnt[hidden] { display: none; }
+.zmw-nav-gsum .zmw-nav-dot { width: 7px; height: 7px; }
+.zmw-nav-gcnt { min-width: 20px; height: 18px; padding: 0 6px; box-sizing: border-box; border-radius: 9px; background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); font-size: 10.5px; font-weight: 700; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums; }
+@keyframes zmw-gsum-in { from { opacity: 0; transform: translateX(4px); } to { opacity: 1; transform: none; } }
+.zmw-nav-editing .zmw-nav-group.zmw-nav-foldable { cursor: default; }
+.zmw-nav-editing .zmw-nav-chev, .zmw-nav-editing .zmw-nav-gsum { display: none; }
+.zmw-nav-item.zmw-nav-folded { height: 0; min-height: 0; padding-top: 0; padding-bottom: 0; margin-top: -2px; border-top-width: 0; border-bottom-width: 0; opacity: 0; visibility: hidden; pointer-events: none; clip-path: inset(0 -40px 0 -40px); }
+html:not([data-zm-motion="0"]) .zmw-nav-item { clip-path: inset(-40px -40px -40px -40px); transition: background .15s, color .15s, height .26s cubic-bezier(.3,.7,.3,1), padding .26s cubic-bezier(.3,.7,.3,1), margin .26s cubic-bezier(.3,.7,.3,1), opacity .2s ease, clip-path .26s cubic-bezier(.3,.7,.3,1), visibility 0s; }
+html:not([data-zm-motion="0"]) .zmw-nav-item.zmw-nav-folded { clip-path: inset(0 -40px 0 -40px); transition: background .15s, color .15s, height .26s cubic-bezier(.3,.7,.3,1), padding .26s cubic-bezier(.3,.7,.3,1), margin .26s cubic-bezier(.3,.7,.3,1), opacity .16s ease, clip-path .26s cubic-bezier(.3,.7,.3,1), visibility 0s .26s; }
+@media (prefers-reduced-motion: reduce) { .zmw-nav-item, .zmw-nav-item.zmw-nav-folded, .zmw-nav-chev { transition: none !important; } .zmw-nav-gsum { animation: none; } }
 .zmw-nav-gear {
 	position: relative; height: 24px; min-width: 24px; margin: -4px -6px -4px 0; padding: 0; flex: none;
 	display: inline-flex; align-items: center; justify-content: center; gap: 0;
@@ -66560,7 +66737,7 @@ html[data-theme="matrix"] .zmw-side .zmw-mem-val.zmw-mem-fit { font-size: 10px; 
 .zmw-radio-scroll { text-overflow: clip; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 10px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 10px), transparent); }
 .zmw-radio-scroll .zmw-radio-mq { display: inline-block; padding-right: 2px; animation: zmw-mq var(--zmw-mqt, 8s) ease-in-out infinite alternate; }
 @keyframes zmw-mq { 0%, 18% { transform: translateX(0); } 82%, 100% { transform: translateX(var(--zmw-mq, 0)); } }
-.zmw-radio-now { width: 0; min-width: 100%; box-sizing: border-box; padding: 0 7px 5px; font-size: 12.5px; line-height: 1.3; color: var(--text-2); overflow-wrap: anywhere; }
+.zmw-radio-now { flex: none; width: 0; min-width: 100%; box-sizing: border-box; padding: 0 7px 5px; font-size: 12.5px; line-height: 1.3; color: var(--text-2); overflow-wrap: anywhere; }
 .zmw-radio-now[hidden] { display: none; }
 .zmw-radio-now::before { content: 'Играет: '; color: var(--muted); }
 .zmw-radio-name { font-size: 12.5px; font-weight: 650; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -66584,8 +66761,8 @@ html[data-theme="matrix"] .zmw-side .zmw-mem-val.zmw-mem-fit { font-size: 10px; 
 .zmw-radio-btn .zmw-i { width: 21px; height: 21px; }
 .zmw-radio-main .zmw-i { width: 23px; height: 23px; }
 .zmw-radio-play .zmw-radio-main, .zmw-radio-wait .zmw-radio-main { color: var(--a1); }
-.zmw-radio-menu { position: fixed; z-index: 120; box-sizing: border-box; max-height: calc(100vh - 16px); overflow: auto; padding: 7px 6px 5px; border-radius: 12px; background: var(--surface-solid); border: 1px solid var(--border-2); box-shadow: var(--shadow-lg); color: var(--text); font: 13px/1.3 var(--font); }
-.zmw-radio-menu-head { display: flex; align-items: baseline; gap: 10px; padding: 0 7px 4px; }
+.zmw-radio-menu { position: fixed; z-index: 120; box-sizing: border-box; display: flex; flex-direction: column; max-height: calc(100vh - 16px); overflow: hidden; overscroll-behavior: contain; padding: 7px 6px 5px; border-radius: 12px; background: var(--surface-solid); border: 1px solid var(--border-2); box-shadow: var(--shadow-lg); color: var(--text); font: 13px/1.3 var(--font); }
+.zmw-radio-menu-head { display: flex; flex: none; align-items: baseline; gap: 10px; padding: 0 7px 4px; }
 .zmw-radio-menu-head b { font-size: 14px; }
 .zmw-radio-tabs { display: flex; align-items: flex-end; gap: 18px; }
 .zmw-radio-tab { -webkit-appearance: none; appearance: none; margin: 0; padding: 0 0 5px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: none; color: var(--muted); font: 600 14px/1.3 var(--font); cursor: pointer; white-space: nowrap; transition: color .15s, border-color .15s; }
@@ -66593,7 +66770,7 @@ html[data-theme="matrix"] .zmw-side .zmw-mem-val.zmw-mem-fit { font-size: 10px; 
 .zmw-radio-tab.zmw-on { color: var(--text); font-weight: 700; border-bottom-color: var(--a1); }
 .zmw-radio-tab:focus-visible { outline: none; box-shadow: var(--ring); border-radius: 4px; }
 .zmw-radio-menu { width: max-content; }
-.zmw-radio-list { display: grid; grid-auto-flow: column; grid-auto-columns: max-content; column-gap: 2px; padding-top: 2px; }
+.zmw-radio-list { display: grid; grid-auto-flow: column; grid-auto-columns: max-content; column-gap: 2px; padding-top: 2px; flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .zmw-radio-list .zmw-radio-st { width: 100%; padding-right: 10px; }
 .zmw-radio-st { display: flex; align-items: center; gap: 7px; min-width: 0; box-sizing: border-box; padding: 3px 8px; margin: 0; border: 0; border-radius: 6px; background: transparent; color: var(--text-2); font: 500 13.5px/1.25 var(--font); text-align: left; cursor: pointer; }
 .zmw-radio-st span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -66604,7 +66781,7 @@ html[data-theme="matrix"] .zmw-side .zmw-mem-val.zmw-mem-fit { font-size: 10px; 
 .zmw-radio-st.zmw-radio-live .zmw-radio-eq i { animation: zmw-eq 1s ease-in-out infinite; }
 .zmw-radio-st.zmw-radio-live .zmw-radio-eq i:nth-child(2) { animation-duration: .8s; animation-delay: -.3s; }
 .zmw-radio-st.zmw-radio-live .zmw-radio-eq i:nth-child(3) { animation-duration: 1.15s; animation-delay: -.6s; }
-.zmw-radio-vol { display: flex; align-items: center; gap: 10px; margin-top: 4px; padding: 6px 7px 1px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--muted); }
+.zmw-radio-vol { display: flex; flex: none; align-items: center; gap: 10px; margin-top: 4px; padding: 6px 7px 1px; border-top: 1px solid var(--border); font-size: 12.5px; color: var(--muted); }
 .zmw-radio-vol input { flex: 1; min-width: 0; margin: 0; accent-color: var(--a1); }
 .zmw-radio-voltxt { width: 36px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-2); }
 .zmw-radio-swap[hidden] { display: none; }
