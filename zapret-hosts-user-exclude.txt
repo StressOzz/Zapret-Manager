@@ -534,6 +534,10 @@ origin.com
 tnt-ea.com
 easports.com
 eamobile.com
+battlefront.com
+gosredirector.ea.com
+gosgvaprod-qos.ea.com
+eaassets-a.akamaihd.net
 #################################### IP Camera
 av380.net
 hiseese.com
