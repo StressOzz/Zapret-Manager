@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.045
+# Version: 5.046
 ZM_VERSION_EOF
 set -e
 
@@ -5268,6 +5268,7 @@ _doh_provider_of() {
 		https://dns.zapret.moe/*) echo zapretmoe ;;
 		https://d.webshiftvpn.ru/*) echo webshift ;;
 		https://dns.dagami.ru/*) echo dagami ;;
+		https://api.magicdns.ru/*) echo magicdns ;;
 		https://freedns.controld.com/p0) echo controld ;;
 		https://freedns.controld.com/p1) echo controld_sec ;;
 		https://freedns.controld.com/family) echo controld_fam ;;
@@ -5386,6 +5387,7 @@ _doh_url_of() {
 		zapretmoe)     echo "https://dns.zapret.moe/dns-query" ;;
 		webshift)      echo "https://d.webshiftvpn.ru/dns-query" ;;
 		dagami)        echo "https://dns.dagami.ru/dns-query" ;;
+		magicdns)      echo "https://api.magicdns.ru/sync" ;;
 		controld)      echo "https://freedns.controld.com/p0" ;;
 		controld_sec)  echo "https://freedns.controld.com/p1" ;;
 		controld_fam)  echo "https://freedns.controld.com/family" ;;
@@ -5416,7 +5418,7 @@ _doh_name() {
 		cloudflare_sec) echo "Cloudflare · Защита от угроз" ;; cloudflare_fam) echo "Cloudflare · Семейный фильтр" ;; quad9_open) echo "Quad9 · Без фильтрации" ;;
 		controld_sec) echo "Control D · Защита от угроз" ;; controld_fam) echo "Control D · Семейный фильтр" ;; dns4eu_sec) echo "DNS4EU · Защита от угроз" ;; dns4eu_fam) echo "DNS4EU · Семейный фильтр" ;;
 		yandex) echo "Яндекс" ;; yandex_family) echo "Яндекс · Семейный фильтр" ;; yandex_safe) echo "Яндекс · Защита от угроз" ;; geohide_eu) echo "GeoHide EU" ;;
-		geohide_us) echo "GeoHide US" ;; malw) echo MALW ;; zapretmoe) echo zapret.moe ;; webshift) echo WebShift ;; dagami) echo Dagami ;;
+		geohide_us) echo "GeoHide US" ;; malw) echo MALW ;; zapretmoe) echo zapret.moe ;; webshift) echo WebShift ;; dagami) echo Dagami ;; magicdns) echo MagicDNS ;;
 		controld) echo "Control D" ;; dns4eu) echo DNS4EU ;;
 		https://*) _doh_own_title "$1" | grep . || printf '%s' "$1" | sed 's#^https://\([^/]*\).*#\1#' ;; *) echo "$1" ;;
 	esac
@@ -33092,6 +33094,7 @@ dns.malw.link
 dns.zapret.moe
 d.webshiftvpn.ru
 dns.dagami.ru
+api.magicdns.ru
 freedns.controld.com
 unfiltered.joindns4.eu
 protective.joindns4.eu
@@ -42029,7 +42032,8 @@ var PROVIDERS = [
 	{ id: 'malw', label: 'MALW', url: 'https://dns.malw.link/dns-query', k: 'geo' },
 	{ id: 'zapretmoe', label: 'zapret.moe', url: 'https://dns.zapret.moe/dns-query', k: 'geo' },
 	{ id: 'webshift', label: 'WebShift', url: 'https://d.webshiftvpn.ru/dns-query', k: 'geo' },
-	{ id: 'dagami', label: 'Dagami', url: 'https://dns.dagami.ru/dns-query', k: 'geo' }
+	{ id: 'dagami', label: 'Dagami', url: 'https://dns.dagami.ru/dns-query', k: 'geo' },
+	{ id: 'magicdns', label: 'MagicDNS', url: 'https://api.magicdns.ru/sync', k: 'geo' }
 ];
 function bootLuci(url) {
 	var out = '';
@@ -42067,7 +42071,7 @@ var VAR_TEXT = { plain: 'только шифрование', safe: 'блокир
 
 var GROUPS = [
 	{ title: 'Без подмены', hint: 'только шифрование; у Cloudflare, Quad9, Control D, DNS4EU и Яндекса есть варианты «Защита от угроз» и «Семейный фильтр»', ids: [ 'google', 'cloudflare', 'quad9', 'controld', 'dns4eu', 'yandex' ] },
-	{ title: 'С обходом геоблокировок', hint: 'открывают сервисы, закрытые для России', ids: [ 'xbox', 'comss', 'dnsai', 'bezmezhau', 'geohide', 'malw', 'zapretmoe', 'webshift', 'dagami' ] }
+	{ title: 'С обходом геоблокировок', hint: 'открывают сервисы, закрытые для России', ids: [ 'xbox', 'comss', 'dnsai', 'bezmezhau', 'geohide', 'malw', 'zapretmoe', 'webshift', 'dagami', 'magicdns' ] }
 ];
 function famIds(key) { return FAMS[key] ? FAMS[key].ids : [ key ]; }
 function groupIds(g) { var out = []; g.ids.forEach(function(t) { out = out.concat(famIds(t)); }); return out; }
@@ -44458,7 +44462,7 @@ function plural(n, one, few, many) {
 	return many;
 }
 
-var DOHN = { cloudflare: 'Cloudflare', google: 'Google', quad9: 'Quad9 · Защита от угроз', xbox: 'XBOX', comss: 'Comss', dnsai: 'DNS-AI', bezmezhau: 'Bezmezhau', yandex: 'Яндекс', yandex_family: 'Яндекс · Семейный фильтр', yandex_safe: 'Яндекс · Защита от угроз', cloudflare_sec: 'Cloudflare · Защита от угроз', cloudflare_fam: 'Cloudflare · Семейный фильтр', quad9_open: 'Quad9 · Без фильтрации', controld_sec: 'Control D · Защита от угроз', controld_fam: 'Control D · Семейный фильтр', dns4eu_sec: 'DNS4EU · Защита от угроз', dns4eu_fam: 'DNS4EU · Семейный фильтр', geohide_eu: 'GeoHide EU', geohide_us: 'GeoHide US', malw: 'MALW', zapretmoe: 'zapret.moe', webshift: 'WebShift', dagami: 'Dagami', controld: 'Control D', dns4eu: 'DNS4EU', multi: 'несколько серверов', other: 'свой сервер' };
+var DOHN = { cloudflare: 'Cloudflare', google: 'Google', quad9: 'Quad9 · Защита от угроз', xbox: 'XBOX', comss: 'Comss', dnsai: 'DNS-AI', bezmezhau: 'Bezmezhau', yandex: 'Яндекс', yandex_family: 'Яндекс · Семейный фильтр', yandex_safe: 'Яндекс · Защита от угроз', cloudflare_sec: 'Cloudflare · Защита от угроз', cloudflare_fam: 'Cloudflare · Семейный фильтр', quad9_open: 'Quad9 · Без фильтрации', controld_sec: 'Control D · Защита от угроз', controld_fam: 'Control D · Семейный фильтр', dns4eu_sec: 'DNS4EU · Защита от угроз', dns4eu_fam: 'DNS4EU · Семейный фильтр', geohide_eu: 'GeoHide EU', geohide_us: 'GeoHide US', malw: 'MALW', zapretmoe: 'zapret.moe', webshift: 'WebShift', dagami: 'Dagami', magicdns: 'MagicDNS', controld: 'Control D', dns4eu: 'DNS4EU', multi: 'несколько серверов', other: 'свой сервер' };
 
 function verLt(a, b) {
 	var x = String(a).split('.'), y = String(b).split('.');
@@ -56630,6 +56634,7 @@ var CREDITS = [
 	{ g: 'dns', product: 'zapret.moe (DoH)', author: 'zapret.moe', url: 'https://zapret.moe' },
 	{ g: 'dns', product: 'WebShift DNS (DoH)', author: 'WebShift', url: 'https://dns.webshiftvpn.ru' },
 	{ g: 'dns', product: 'Dagami DNS (DoH)', author: 'Dagami', url: 'https://dns.dagami.ru' },
+	{ g: 'dns', product: 'MagicDNS (DoH, DoT)', author: 'MagicDNS', url: 'https://magicdns.ru' },
 	{ g: 'dns', product: 'AstraCat DNS (DoH)', author: 'AstraCat', url: 'https://dns.astrakat.ru' },
 	{ g: 'dns', product: 'Mafioznik DNS (DoH)', author: 'Mafioznik', url: 'https://dns.mafioznik.com' },
 	{ g: 'dns', product: 'dns-blocklists (блокировка рекламы, TIF)', author: 'hagezi', url: 'https://github.com/hagezi/dns-blocklists' },
@@ -59260,6 +59265,7 @@ var DNS_CAT = {
 		{ id: 'zapretmoe', name: 'zapret.moe', value: 'https://dns.zapret.moe/dns-query', boot: '77.88.8.8', alias: [ 'dns.zapret.moe' ] },
 		{ id: 'webshift', name: 'WebShift', value: 'https://d.webshiftvpn.ru/dns-query', boot: '77.88.8.8', alias: [ 'd.webshiftvpn.ru' ] },
 		{ id: 'dagami', name: 'Dagami', value: 'https://dns.dagami.ru/dns-query', boot: '77.88.8.8', alias: [ 'dns.dagami.ru' ] },
+		{ id: 'magicdns', name: 'MagicDNS', value: 'https://api.magicdns.ru/sync', boot: '77.88.8.8', alias: [ 'api.magicdns.ru' ] },
 		{ id: 'controld', name: 'Control D', value: 'https://freedns.controld.com/p0', boot: '76.76.2.0', alias: [ 'freedns.controld.com' ] },
 		{ id: 'dns4eu', name: 'DNS4EU', value: 'https://unfiltered.joindns4.eu/dns-query', boot: '86.54.11.100', alias: [ 'unfiltered.joindns4.eu' ] }
 	],
@@ -59271,7 +59277,8 @@ var DNS_CAT = {
 		{ id: 'yandex_safe', name: 'Яндекс · Защита от угроз', value: 'safe.dot.dns.yandex.net', boot: '77.88.8.88' },
 		{ id: 'yandex_family', name: 'Яндекс · Семейный фильтр', value: 'family.dot.dns.yandex.net', boot: '77.88.8.7' },
 		{ id: 'comss', name: 'Comss', value: 'dns.comss.one', boot: '77.88.8.8' },
-		{ id: 'bezmezhau', name: 'Bezmezhau', value: 'sync.bezmezhau.com', boot: '77.88.8.8' }
+		{ id: 'bezmezhau', name: 'Bezmezhau', value: 'sync.bezmezhau.com', boot: '77.88.8.8' },
+		{ id: 'magicdns', name: 'MagicDNS', value: 'api.magicdns.ru', boot: '77.88.8.8' }
 	],
 	udp: [
 		{ id: 'quad9', name: 'Quad9', value: '9.9.9.9', boot: '9.9.9.9' },
