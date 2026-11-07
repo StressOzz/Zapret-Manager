@@ -387,6 +387,8 @@ sh <(wget -qO - https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/
 <details>
 <summary><b>💡 Мало места на роутере? Установка с выбором страниц</b></summary>
 
+<img width="1280" height="1098" alt="image" src="https://github.com/user-attachments/assets/7b6a2a34-a24b-46c9-8515-45fdd297d123" />
+
 Есть второй установщик — **`ZapretManager_Select.sh`**. Он ставит ту же панель, но сначала показывает меню: все страницы по разделам, размер каждой и итог — сколько займёт ядро, сколько страницы, сколько сэкономите и сколько свободно на флеше.
 
 ```sh
