@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.048
+# Version: 5.049
 ZM_VERSION_EOF
 set -e
 
@@ -1419,6 +1419,17 @@ _zm_zone_of_net() {
 	local z
 	for z in $(uci -q -X show firewall | sed -n "s/^firewall\.\([^.=]*\)=zone\$/\1/p"); do
 		case " $(uci -q get "firewall.$z.network") " in *" $1 "*) uci -q get "firewall.$z.name"; return 0 ;; esac
+	done
+	return 1
+}
+_zm_zone_of_tun() {
+	local n z
+	_zm_zone_of_net "$1" && return 0
+	case "$(uci -q get "network.$1.proto")" in gre|grev6) ;; *) return 1 ;; esac
+	z="$(uci -q get "network.$1.zone")"
+	[ -n "$z" ] && { echo "$z"; return 0; }
+	for n in $(uci -q -X show network | sed -n "s/^network\.\([^.=]*\)\.device='@$1'\$/\1/p"); do
+		_zm_zone_of_net "$n" && return 0
 	done
 	return 1
 }
@@ -6138,13 +6149,13 @@ _st_warp_zone() {
 }
 
 ST_EXT_FWD="zmwarp_ext"
-_st_secs_zoneless() { local i z; for i in $(_st_tun_ifaces); do z="$(_zm_zone_of_net "$i")"; { [ -z "$z" ] || [ "$z" = "$ST_WARP_ZONE" ]; } && echo "$i"; done; }
+_st_secs_zoneless() { local i z; for i in $(_st_tun_ifaces); do z="$(_zm_zone_of_tun "$i")"; { [ -z "$z" ] || [ "$z" = "$ST_WARP_ZONE" ]; } && echo "$i"; done; }
 _st_secs_fw() {
 	local i z lz s r keep="" ch=0 zl=""
 	lz="$(_zm_lan_zone)"
 	_st_tun_hook
 	for i in $(_st_tun_ifaces); do
-		z="$(_zm_zone_of_net "$i")"
+		z="$(_zm_zone_of_tun "$i")"
 		if [ -z "$z" ] || [ "$z" = "$ST_WARP_ZONE" ]; then zl=1; continue; fi
 		s="$(_st_zone_sec "$z")"
 		if [ "$z" = "$lz" ]; then
@@ -6744,6 +6755,8 @@ _zm_tun_kind() {
 		l2tp) echo l2tp ;;
 		sstp) echo sstp ;;
 		openvpn) echo ovpn ;;
+		gre) echo gre ;;
+		grev6) echo gre6 ;;
 		none)
 			d="$(uci -q get "network.$1.device")"
 			case "$d" in ''|@*|br-*|lo|tailscale*|zm*|eth*|lan*|wan*|wlan*|phy*|bond*|veth*) return 1 ;; esac
@@ -6752,7 +6765,7 @@ _zm_tun_kind() {
 		*) return 1 ;;
 	esac
 }
-_zm_tun_label() { case "$1" in awg) echo AmneziaWG ;; wg) echo WireGuard ;; pptp) echo PPTP ;; l2tp) echo L2TP ;; sstp) echo SSTP ;; ovpn) echo OpenVPN ;; *) echo "туннель" ;; esac; }
+_zm_tun_label() { case "$1" in awg) echo AmneziaWG ;; wg) echo WireGuard ;; pptp) echo PPTP ;; l2tp) echo L2TP ;; sstp) echo SSTP ;; ovpn) echo OpenVPN ;; gre) echo GRE ;; gre6) echo "GRE (IPv6)" ;; *) echo "туннель" ;; esac; }
 _zm_tun_dev() {
 	local d p
 	d="$(ifstatus "$1" 2>/dev/null | jsonfilter -e '@.l3_device' 2>/dev/null)"
@@ -6761,6 +6774,8 @@ _zm_tun_dev() {
 		case "$p" in
 			pptp|l2tp|sstp) d="$p-$1" ;;
 			amneziawg|wireguard) d="$1" ;;
+			gre) d="gre4-$1" ;;
+			grev6) d="gre6-$1" ;;
 			*) d="$(uci -q get "network.$1.device")"; case "$d" in @*) d="" ;; esac ;;
 		esac
 	fi
@@ -29959,6 +29974,9 @@ _zm_tun_json() {
 			ep="$(uci -q get "network.$p.endpoint_host")"; port="$(uci -q get "network.$p.endpoint_port")"; ep="$ep${ep:+${port:+:$port}}"
 			[ -n "$p" ] && [ "$(uci -q get "network.$p.public_key")" = "$AWG_WARP_PEER" ] && warp=true
 			[ -n "$p" ] && [ "$(uci -q get "network.$p.route_allowed_ips")" = 1 ] && route=true ;;
+		gre|gre6)
+			alive="$up"
+			if [ "$k" = gre ]; then ep="$(uci -q get "network.$i.peeraddr")"; else ep="$(uci -q get "network.$i.peer6addr")"; fi ;;
 		pptp|l2tp|sstp)
 			alive="$up"
 			ep="$(uci -q get "network.$i.server")"
@@ -29967,7 +29985,7 @@ _zm_tun_json() {
 	esac
 	printf '{"name":"%s","kind":"%s","label":"%s","dev":"%s","up":%s,"alive":%s,"hs_age":"%s","endpoint":"%s","warp":%s,"route_all":%s,"enabled":%s,"zone":"%s","forkozz":%s,"failed":%s}' \
 		"$(esc "$i")" "$k" "$(esc "$(_zm_tun_label "$k")")" "$(esc "$d")" "$up" "$alive" "$age" "$(esc "$ep")" "$warp" "$route" \
-		"$([ "$(uci -q get "network.$i.auto")" = 0 ] && echo false || echo true)" "$(esc "$(_zm_zone_of_net "$i")")" \
+		"$([ "$(uci -q get "network.$i.auto")" = 0 ] && echo false || echo true)" "$(esc "$(_zm_zone_of_tun "$i")")" \
 		"$([ -n "$d" ] && _awg_fk_live "$d" && echo true || echo false)" "${2:-false}"
 }
 
@@ -30476,7 +30494,7 @@ _st_sec_kind_check() {
 		iface)
 			printf '%s' "$i" | grep -qE '^[A-Za-z0-9_]{1,15}$' || { echo '{"error":"выберите туннель"}'; return 1; }
 			_awg_is_steer "$i" && { echo '{"error":"это туннель самого Steer — выберите свой туннель"}'; return 1; }
-			_zm_tun_kind "$i" >/dev/null || { echo '{"error":"такого туннеля нет — подойдут AmneziaWG, WireGuard, PPTP, L2TP, SSTP и OpenVPN"}'; return 1; }
+			_zm_tun_kind "$i" >/dev/null || { echo '{"error":"такого туннеля нет — подойдут AmneziaWG, WireGuard, PPTP, L2TP, SSTP, OpenVPN и GRE"}'; return 1; }
 			_zm_tun_dev "$i" >/dev/null || { echo '{"error":"у туннеля ещё нет устройства — подключите его в Сеть → Интерфейсы и выберите снова"}'; return 1; } ;;
 		*) echo '{"error":"неизвестный способ подключения"}'; return 1 ;;
 	esac
@@ -30515,7 +30533,7 @@ _st_dev_zone() {
 	for n in $(uci -q -X show network | sed -n 's/^network\.\([^.=]*\)=interface$/\1/p'); do
 		[ "$(_st_net_dev "$n")" = "$1" ] && _zm_zone_of_net "$n" && return 0
 	done
-	n="$(_st_tun_srcdev "$1")" && _zm_zone_of_net "$n" && return 0
+	n="$(_st_tun_srcdev "$1")" && _zm_zone_of_tun "$n" && return 0
 	return 1
 }
 
@@ -30526,7 +30544,7 @@ _st_out_zones() {
 	[ "$(uci -q get "firewall.$ST_VPN_ZONE")" = zone ] && echo "$ST_VPN_ZONE"
 	{ _st_tun_ifaces; _st_warp_ext && echo "$ST_WIF1"; } 2>/dev/null | while read -r i; do
 		[ -n "$i" ] || continue
-		z="$(_zm_zone_of_net "$i")"
+		z="$(_zm_zone_of_tun "$i")"
 		[ -n "$z" ] && [ "$z" != "$lz" ] && [ "$z" != "$wz" ] && echo "$z"
 	done
 }
@@ -30607,7 +30625,7 @@ steer_lan_list() {
 		d="$(_zm_tun_dev "$n")" || continue
 		case " $seen " in *" $d "*) continue ;; esac
 		seen="$seen $d"
-		z="$(_zm_zone_of_net "$n")"
+		z="$(_zm_zone_of_tun "$n")"
 		up=false; [ -d "/sys/class/net/$d" ] && up=true
 		printf '%s{"dev":"%s","net":"%s","zone":"%s","auto":false,"on":%s,"kind":"tun","label":"%s","up":%s,"out":%s,"wan":%s}' "$sep" "$(esc "$d")" "$(esc "$n")" "$(esc "$z")" \
 			"$(case "$extra" in *" $d "*) echo true ;; *) echo false ;; esac)" "$(esc "$(_zm_tun_label "$k")")" "$up" \
@@ -34853,7 +34871,7 @@ function devices() {
 	});
 }
 
-const TUN_LABEL = { amneziawg: "AmneziaWG", wireguard: "WireGuard", pptp: "PPTP", l2tp: "L2TP", sstp: "SSTP", openvpn: "OpenVPN" };
+const TUN_LABEL = { amneziawg: "AmneziaWG", wireguard: "WireGuard", pptp: "PPTP", l2tp: "L2TP", sstp: "SSTP", openvpn: "OpenVPN", gre: "GRE", grev6: "GRE (IPv6)" };
 function tunnels() {
 	let r = [], seen = {}, byDev = {}, want = [];
 	try {
@@ -34863,6 +34881,8 @@ function tunnels() {
 			let n = x[".name"], p = s(x.proto), d = "";
 			if (p == "pptp" || p == "l2tp" || p == "sstp") d = p + "-" + n;
 			else if (p == "amneziawg" || p == "wireguard") d = n;
+			else if (p == "gre") d = "gre4-" + n;
+			else if (p == "grev6") d = "gre6-" + n;
 			else if (p == "openvpn" || p == "none") { d = s(x.device || x.ifname); if (match(d, /^@/)) d = ""; }
 			if (d == "" || n == "tailscale" || match(n, /^zmwarp[0-9]*$/)) return;
 			byDev[d] = { net: n, proto: p };
@@ -34870,9 +34890,9 @@ function tunnels() {
 		});
 	} catch (e) {}
 	for (let n in (fs.lsdir(NETDIR) || [])) {
-		if (n == "lo" || match(n, /^(sit|ip6tnl|gre|erspan|teql|ifb|dummy|bond)/)) continue;
-		let t = trim(s(fs.readfile(NETDIR + "/" + n + "/type"))), b = byDev[n];
-		if (t == "512" ? !(b && (b.proto == "pptp" || b.proto == "l2tp" || b.proto == "sstp")) : t != "65534") continue;
+		let t = trim(s(fs.readfile(NETDIR + "/" + n + "/type"))), b = byDev[n], gr = b && (b.proto == "gre" || b.proto == "grev6");
+		if (n == "lo" || !gr && match(n, /^(sit|ip6tnl|gre|erspan|teql|ifb|dummy|bond)/)) continue;
+		if (gr ? t != "778" && t != "823" : t == "512" ? !(b && (b.proto == "pptp" || b.proto == "l2tp" || b.proto == "sstp")) : t != "65534") continue;
 		let st = trim(s(fs.readfile(NETDIR + "/" + n + "/operstate"))), steer = !!match(n, /^zmwarp[0-9]*$/);
 		seen[n] = true;
 		push(r, { name: n, up: st != "down", steer, net: b ? b.net : "",
@@ -47478,7 +47498,7 @@ return view.extend({
 						{ type: 'choice', id: 'kind', title: 'Куда пойдут её сервисы', value: vFull ? 'warp' : 'vpn', options: [
 							{ id: 'vpn', label: 'VPN', disabled: vFull, hint: vFull ? 'Уже ' + vmax + ' ' + plural(vmax, 'секция', 'секции', 'секций') + ' с VPN — больше нельзя: каждая держит свой туннель и память роутера.' : 'Своя подписка или свои серверы — отдельный туннель только для этой секции.' },
 							{ id: 'warp', label: 'WARP', hint: data.warp_on ? 'Общие туннели WARP Steer — через них уже идут другие секции с WARP.' : 'Общие туннели WARP Steer. Их ещё нет — подключите после создания секции, с подтверждением.' },
-							{ id: 'iface', label: 'Туннель', disabled: !ifs.length, hint: ifs.length ? 'Готовый туннель роутера: AmneziaWG, WireGuard, PPTP, L2TP, SSTP или OpenVPN.' : 'Туннелей пока нет — создайте AmneziaWG на вкладке AmneziaWG или VPN-подключение в Сеть → Интерфейсы.' }
+							{ id: 'iface', label: 'Туннель', disabled: !ifs.length, hint: ifs.length ? 'Готовый туннель роутера: AmneziaWG, WireGuard, PPTP, L2TP, SSTP, OpenVPN или GRE.' : 'Туннелей пока нет — создайте AmneziaWG на вкладке AmneziaWG или VPN-подключение в Сеть → Интерфейсы.' }
 						] },
 						{ type: 'choice', id: 'iface', title: 'Туннель', value: best, show: function(v) { return v.kind === 'iface'; },
 							options: ifs.map(function(f) { return { id: f.name, label: f.name, hint: ifDesc(f) }; }) }
@@ -47625,7 +47645,7 @@ return view.extend({
 			if (!list.length) {
 				box.appendChild(E('div', { 'class': 'zm-st-ext-empty' }, [
 					E('div', { 'class': 'zm-st-ext-empty-t' }, 'Туннелей на роутере пока нет'),
-					E('div', { 'class': 'zm-hint' }, 'Подойдёт AmneziaWG с одноимённой вкладки — из WARP.conf или своего .conf. Или VPN-подключение PPTP, L2TP, SSTP, WireGuard, OpenVPN — его создают в LuCI, в разделе Сеть → Интерфейсы. Потом возвращайтесь сюда.'),
+					E('div', { 'class': 'zm-hint' }, 'Подойдёт AmneziaWG с одноимённой вкладки — из WARP.conf или своего .conf. Или VPN-подключение PPTP, L2TP, SSTP, WireGuard, OpenVPN, GRE — его создают в LuCI, в разделе Сеть → Интерфейсы. Потом возвращайтесь сюда.'),
 					E('div', { 'class': 'zm-actions' }, [ awgLink ].concat(onCancel ? [ E('button', { 'class': 'cbi-button', 'click': onCancel }, 'Отмена') ] : []))
 				]));
 				return;
@@ -47647,6 +47667,7 @@ return view.extend({
 				]);
 			})));
 			var pf = list.filter(function(f) { return f.name === ifSel; })[0] || {}, same = pf.name === cur;
+			if (pf.kind === 'gre' || pf.kind === 'gre6') box.appendChild(E('p', { 'class': 'zm-hint zm-st-gre-note' }, 'GRE не шифрует трафик: провайдер видит только ваш сервер, а сайты по HTTPS и так зашифрованы — но то, что идёт без HTTPS, внутри туннеля открыто. И у GRE нет рукопожатия: если ваш сервер выключится, туннель на роутере останется «поднятым».'));
 			if (pf.route_all) box.appendChild(E('p', { 'class': 'zm-hint' }, pf.kind === 'awg' || pf.kind === 'wg'
 				? '⚠ У ' + pf.name + ' включён маршрут «весь трафик»: через него уже идёт весь интернет роутера, а не только сервисы Steer.'
 				: '⚠ У ' + pf.name + ' включён «Использовать шлюз по умолчанию»: через туннель идёт весь интернет роутера, а не только сервисы Steer. Если нужен только Steer — снимите эту галочку в Сеть → Интерфейсы → ' + pf.name + ' → Дополнительные настройки.'));
@@ -47762,7 +47783,7 @@ return view.extend({
 			connCard.appendChild(E('div', { 'class': 'zm-row zm-st-mode' }, [ E('span', { 'class': 'zm-label' }, 'Куда идут сервисы'), E('div', { 'class': 'zm-seg' + (opts.length === 3 ? ' zm-seg-3' : '') }, opts) ]));
 
 			if (ifChoose) {
-				connCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сервисы ' + (main && !multi ? '' : 'секции ') + 'пойдут в готовый туннель роутера: AmneziaWG, WireGuard, PPTP, L2TP, SSTP или OpenVPN. Сам туннель Steer не меняет — он настраивается там, где создан.'));
+				connCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Сервисы ' + (main && !multi ? '' : 'секции ') + 'пойдут в готовый туннель роутера: AmneziaWG, WireGuard, PPTP, L2TP, SSTP, OpenVPN или GRE. Сам туннель Steer не меняет — он настраивается там, где создан.'));
 				var to0 = tunOf(secCur);
 				ifPicker(connCard, to0 ? to0.iface : '', function(name) {
 					if (main) act('sub_exit', 'iface:' + name, 'Пускаем сервисы через ' + name);
@@ -61044,7 +61065,8 @@ return view.extend({
 						E('span', { 'class': 'zm-lat ' + (up ? 'zm-lat-good' : 'zm-lat-bad') }, up ? 'поднят' : t.down ? 'не подключён' : 'выключен'));
 				})));
 				else connCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Туннелей на роутере пока нет.'));
-				connCard.appendChild(E('p', { 'class': 'zm-hint' }, [ 'Подойдут WireGuard, AmneziaWG, OpenVPN, PPTP, L2TP и SSTP. Туннель WARP или свой создаётся на вкладке ', E('a', { 'href': pageLink('awg') }, 'AmneziaWG'), ', VPN-подключение PPTP, L2TP или SSTP — в LuCI, в разделе Сеть → Интерфейсы.' ]));
+				connCard.appendChild(E('p', { 'class': 'zm-hint' }, [ 'Подойдут WireGuard, AmneziaWG, OpenVPN, PPTP, L2TP, SSTP и GRE. Туннель WARP или свой создаётся на вкладке ', E('a', { 'href': pageLink('awg') }, 'AmneziaWG'), ', VPN-подключение PPTP, L2TP, SSTP или GRE — в LuCI, в разделе Сеть → Интерфейсы.' ]));
+				if (draft.iface && /^gre[46]-/.test(draft.iface)) connCard.appendChild(E('p', { 'class': 'zm-hint' }, 'GRE не шифрует трафик: провайдер видит только ваш сервер, а сайты по HTTPS и так зашифрованы — но то, что идёт без HTTPS, внутри туннеля открыто. И у GRE нет рукопожатия: если ваш сервер выключится, туннель на роутере останется «поднятым».'));
 				if (draft.iface && /^(pptp|l2tp|sstp)-/.test(draft.iface)) connCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Если у этого подключения включено «Использовать шлюз по умолчанию», через него идёт весь интернет роутера, а не только сервисы Forkozz. Нужен только Forkozz — снимите эту галочку в Сеть → Интерфейсы.'));
 			}
 			connCard.appendChild(fold('conn', 'Дополнительно', connExtSummary(), renderConnExt));
