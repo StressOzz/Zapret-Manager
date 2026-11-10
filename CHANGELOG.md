@@ -1,6 +1,6 @@
 ## 5.058 — 11.11.2026
 
-- 📚 Tachyon Lists
+📚 Tachyon Lists
 - ⚡️ YouTube, TikTok, Telegram, Discord, X, Roblox, Google AI, Google Play, Геоблок, 18+ и регионы теперь берут и более полные списки Tachyon
 - ➕ Новые сервисы: «Meta целиком» (Instagram, Facebook, Threads, Messenger) и «Россия внутри (сводный)»
 - ⚡️ Если список Tachyon для встроенного сервиса не скачался, сервис работает по своему основному списку, а не по резервному
