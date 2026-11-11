@@ -1459,9 +1459,11 @@ _zm_arch_alts() {
 	return 0
 }
 _zm_arch_accept() {
-	local a="$1" c="${ZM_OPKG_CONF:-/etc/opkg.conf}" f="${ZM_APK_ARCH:-/etc/apk/arch}" n
+	local a="$1" c="${ZM_OPKG_CONF:-/etc/opkg.conf}" f="${ZM_APK_ARCH:-/etc/apk/arch}" n cur
 	case " $ZM_A73_ALTS " in *" $a "*) ;; *) return 0 ;; esac
-	[ "$(_zm_arch)" = "$ZM_A73" ] || return 0
+	cur="$(_zm_arch)"
+	[ "$cur" = "$a" ] && return 0
+	case "$cur" in aarch64_*) ;; *) return 0 ;; esac
 	if [ "$PKG" = apk ]; then
 		[ -d "${f%/*}" ] || return 0
 		if [ ! -s "$f" ]; then
@@ -1475,14 +1477,14 @@ _zm_arch_accept() {
 		[ -f "$c" ] || return 0
 		if ! grep -q '^[[:space:]]*arch[[:space:]]' "$c"; then
 			n="$(opkg print-architecture 2>/dev/null | awk '$1 == "arch" && NF >= 3 { print "arch " $2 " " $3 }')"
-			case "$n" in *"$ZM_A73"*) ;; *) return 0 ;; esac
+			case "$n" in *aarch64*) ;; *) return 0 ;; esac
 			{ [ -z "$(tail -c 1 "$c")" ] || echo; printf '%s\n' "$n"; } >> "$c" || return 1
 		fi
 		grep -qE "^[[:space:]]*arch[[:space:]]+$a([[:space:]]|\$)" "$c" && return 0
 		{ [ -z "$(tail -c 1 "$c")" ] || echo; echo "arch $a 5"; } >> "$c" || return 1
 	fi
-	echo "   · Разрешили ставить пакеты $a — на $ZM_A73 они работают (тот же набор команд ARMv8.0)" >&2
-	logger -t zapret-manager "Разрешены пакеты $a (совместимы с $ZM_A73)"
+	echo "   · Разрешили ставить пакеты $a — на $cur они работают (совместимый 64-битный ARM)" >&2
+	logger -t zapret-manager "Разрешены пакеты $a (совместимы с $cur)"
 	return 0
 }
 
@@ -18598,10 +18600,10 @@ zapret_action() {
 _do_install_zapret2_core() {
 	local arch
 	arch="$(_z2_arch)"
-	if [ "$arch" != "aarch64_cortex-a53" ]; then
-		echo "ОШИБКА: Zapret2 поддерживает только архитектуру aarch64_cortex-a53 (у вас: $arch)"
-		return 1
-	fi
+	case "$arch" in
+		aarch64*) ;;
+		*) echo "ОШИБКА: Zapret2 поддерживает только aarch64-роутеры (у вас: $arch)"; return 1 ;;
+	esac
 	if [ -f /etc/init.d/zapret ] && [ ! -f "$EXPERT_MODE_FILE" ]; then
 		echo "ОШИБКА: установлен основной Zapret, он несовместим с Zapret2 — сначала удалите Zapret"
 		return 1
@@ -18643,6 +18645,9 @@ _do_install_zapret2_core() {
 	$UPDATE
 
 	echo "==> Устанавливаем"
+	# пакеты Zapret2 собраны под aarch64_cortex-a53; на других aarch64 (a72, a73, a76, generic)
+	# бинарники совместимы — регистрируем arch в конфиге пакетного менеджера (apk/opkg)
+	_zm_arch_accept aarch64_cortex-a53
 	$INSTALL ./*."$raz" || { echo "ОШИБКА установки"; return 1; }
 	_nochange_restore zapret2
 
@@ -18696,8 +18701,11 @@ zapret2_action() {
 			if [ ! -f /etc/init.d/zapret2 ] && [ -f /etc/init.d/zapret ] && [ ! -f "$EXPERT_MODE_FILE" ]; then
 				echo '{"error":"Стоит Zapret — он несовместим с Zapret2. Чтобы поставить Zapret2, удалите Zapret."}'; return 1
 			fi
-			if [ "$action" = install ] && [ "$(_z2_arch)" != "aarch64_cortex-a53" ]; then
-				printf '{"error":"%s"}\n' "$(esc "Zapret2 работает только на роутерах с архитектурой aarch64_cortex-a53, у этого роутера — $(_z2_arch)")"; return 1
+			if [ "$action" = install ]; then
+				case "$(_z2_arch)" in
+					aarch64*) ;;
+					*) printf '{"error":"%s"}\n' "$(esc "Zapret2 работает только на aarch64-роутерах, у этого роутера — $(_z2_arch)")"; return 1 ;;
+				esac
 			fi
 			job_start install_zapret2 do_install_zapret2 ;;
 		remove)         job_start remove_zapret2  do_remove_zapret2 ;;
@@ -55653,7 +55661,7 @@ return view.extend({
 			var z2Block = d.zapret2 !== 'installed' && d.zapret === 'installed' && !d.expert;
 
 			if (z2Block) {
-				cards.appendChild(zm.blockCard(E('div', { 'class': 'zm-card' }), 'Zapret2', 'Только для архитектуры aarch64_cortex-a53. Несовместим с основным Zapret.', 'Стоит Zapret — он несовместим с Zapret2. Чтобы поставить Zapret2, удалите Zapret.'));
+				cards.appendChild(zm.blockCard(E('div', { 'class': 'zm-card' }), 'Zapret2', 'Только для aarch64-роутеров. Несовместим с основным Zapret.', 'Стоит Zapret — он несовместим с Zapret2. Чтобы поставить Zapret2, удалите Zapret.'));
 				return;
 			}
 			var z2Card = E('div', { 'class': 'zm-card' }, [
@@ -55664,7 +55672,7 @@ return view.extend({
 						? zm.badge(d.zapret2_running === true, 'запущен', 'остановлен')
 						: zm.badge(false, '', 'не установлен')
 				]),
-				E('p', { 'class': 'zm-hint' }, 'Только для архитектуры aarch64_cortex-a53. Несовместим с основным Zapret.'),
+				E('p', { 'class': 'zm-hint' }, 'Только для aarch64-роутеров. Несовместим с основным Zapret.'),
 				E('div', { 'class': 'zm-actions' }, z2Actions)
 			]);
 
