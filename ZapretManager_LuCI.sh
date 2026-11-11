@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.063
+# Version: 5.064
 ZM_VERSION_EOF
 set -e
 
@@ -446,7 +446,7 @@ wget() { _zm_ghp_run wget "$@"; }
 _zm_fetch_ok() {
 	[ -s "$1" ] || return 1
 	[ -n "$ZM_FETCH_ANY" ] || ! head -c 1024 "$1" | grep -qiE '<(!doctype|html|head|body)' || return 1
-	ZM_FETCH_SIZE="$(wc -c < "$1" 2>/dev/null | tr -d ' ')"
+	ZM_FETCH_SIZE="$(wc -c 2>/dev/null < "$1" | tr -d ' ')"
 	return 0
 }
 _zm_fetch() {
@@ -570,6 +570,7 @@ _job_running() {
 
 job_status() {
 	local name="$1"
+	case "$name" in ''|*[!A-Za-z0-9_.-]*) echo '{"running":false,"done":false,"rc":""}'; return ;; esac
 	local pid="$JOBS_DIR/$name.pid"
 	local log="$JOBS_DIR/$name.log"
 	local running="false" done="false" rc=""
@@ -583,6 +584,7 @@ job_status() {
 
 log_tail() {
 	local name="$1"
+	case "$name" in ''|*[!A-Za-z0-9_.-]*) echo '{"lines":""}'; return ;; esac
 	local log="$JOBS_DIR/$name.log"
 	[ -f "$log" ] || { echo '{"lines":""}'; return; }
 	printf '{"lines":"%s"}\n' "$(esc_ml "$(tail -n 300 "$log" | grep -v '^__DONE__')")"
@@ -1629,8 +1631,8 @@ _zm_px_foreign() {
 }
 _apk_ver() {
 	local v=""
-	[ -f /lib/apk/db/installed ] && v="$(awk -v p="$1" '/^P:/ { x = (substr($0, 3) == p) } x && /^V:/ { print substr($0, 3); exit }' /lib/apk/db/installed)"
-	[ -n "$v" ] || v="$(apk info -v 2>/dev/null | sed -n "s/^$1-\([0-9][^ ]*\)\$/\1/p" | head -n1)"
+	if [ -s /lib/apk/db/installed ]; then v="$(awk -v p="$1" '/^P:/ { x = (substr($0, 3) == p) } x && /^V:/ { print substr($0, 3); exit }' /lib/apk/db/installed)"
+	else v="$(apk info -v 2>/dev/null | sed -n "s/^$1-\([0-9][^ ]*\)\$/\1/p" | head -n1)"; fi
 	[ -n "$v" ] && printf '%s\n' "$v"
 }
 _kv_last() {
@@ -2153,7 +2155,7 @@ _ui_icy_dl() {
 		command curl -sSL --max-redirs 3 --connect-timeout 5 --max-time 8 -A 'Mozilla/5.0' -H 'Icy-MetaData: 1' -D "$b.h" \
 			"$u" 2>/dev/null | head -c 40000 > "$b.bin"
 		n="$(grep -i '^icy-metaint:' "$b.h" 2>/dev/null | head -n 1 | tr -dc '0-9' | head -c 6)"
-		sz="$(wc -c < "$b.bin" 2>/dev/null | tr -d ' ')"
+		sz="$(wc -c 2>/dev/null < "$b.bin" | tr -d ' ')"
 		if [ -n "$n" ] && [ "$n" -gt 0 ] 2>/dev/null; then
 			off=0
 			for k in 1 2; do
@@ -2685,7 +2687,7 @@ _fake_get_many() {
 		[ $((n % 4)) = 0 ] || [ "$n" = "$tot" ] || continue
 		wait $pids 2>/dev/null
 		for f in $batch; do
-			IFS='|' read -r st src sz < "$r/$f" 2>/dev/null
+			IFS='|' read -r st src sz 2>/dev/null < "$r/$f"
 			if [ "$st" = ok ]; then
 				ZM_FAKE_OK=$((ZM_FAKE_OK + 1))
 				echo "   ✓ $f — $(_zm_size_txt "$sz")$([ "$src" != Flowseal ] && echo " · из $src")"
@@ -3510,7 +3512,7 @@ _zpg_bytes() {
 	for f in $(_zpg_files "$1"); do
 		[ -s "$f" ] || continue
 		grep -q 'zmPageOff' "$f" 2>/dev/null && continue
-		s="$(wc -c < "$f" 2>/dev/null)"; n=$((n + ${s:-0}))
+		s="$(wc -c 2>/dev/null < "$f")"; n=$((n + ${s:-0}))
 	done
 	echo "$n"
 }
@@ -3526,9 +3528,9 @@ _zpg_core_bytes() {
 		/usr/share/rpcd/acl.d/luci-app-zapret-manager.json "$ZPG_MENU" /www/luci-static/resources/zapret-manager/common.js \
 		"$ZPG_V/style.css" "$ZPG_V/dashboard.js" "$ZPG_V/system.js" "$ZPG_V/thanks.js" /www/zm/app.js /www/zm/app.css /www/zm-webui.html; do
 		[ -f "$f" ] || continue
-		s="$(wc -c < "$f" 2>/dev/null)"; n=$((n + ${s:-0}))
+		s="$(wc -c 2>/dev/null < "$f")"; n=$((n + ${s:-0}))
 	done
-	for f in $(find /usr/share/zm-redbtn -type f 2>/dev/null); do s="$(wc -c < "$f" 2>/dev/null)"; n=$((n + ${s:-0})); done
+	for f in $(find /usr/share/zm-redbtn -type f 2>/dev/null); do s="$(wc -c 2>/dev/null < "$f")"; n=$((n + ${s:-0})); done
 	echo "$n"
 }
 _zpg_prune() {
@@ -3917,9 +3919,6 @@ _zs2_refresh() {
 	rm -rf "$t"
 	return 0
 }
-# Несколько изменений секции за один раз: шаги стратегии, устройства, включение/выключение — и один перезапуск Zapret.
-# Строки: "step<TAB>действие<TAB>значение", "devs<TAB>ip|имя<TAB>ip|имя…", "on", "off".
-# preview — только собрать и вернуть, что получится; batch — записать и применить.
 
 _zl_path() {
 	case "$1" in
@@ -4318,7 +4317,6 @@ _zm_port_owner() {
 
 TG_ARGS_DEF_GO="--cf-proxy --cf-proxy-first --cf-balance"
 TG_ARGS_DEF_RS="--default-domains --cf-balance --cf-priority"
-# Параметры строки запуска после самой программы — без тех, что задаёт «Порт и ключ» (--host, --port, --secret, --listen-faketls-domain)
 _tg_args_of() {
 	local init
 	init="$(_tg_auto_init "$1")" || return 0
@@ -4469,8 +4467,6 @@ TEST_PARALLEL=8
 ZO_RKN_URL="${GH_RAW}/IndeecFOX/zapret4rocket/refs/heads/master/extra_strats/TCP/RKN/List.txt"
 ZO_RKN_FILE="/opt/zapret/ipset/zapret-hosts-rkn.txt"
 ZO_RKN_FLAG="$ZM_STATE_DIR/zapret_rkn"
-# Откуда брать список РКН: zapret4rocket (реестр, ~125 тыс. доменов) или Tachyon «Заблокированные в РФ»
-# (очищенный, только действующие домены, ~74 тыс.). Список общий для Zapret и Zapret2
 ZO_RKN_SRC_FILE="$ZM_STATE_DIR/zapret_rkn_src"
 _zo_rkn_src() { [ "$(cat "$ZO_RKN_SRC_FILE" 2>/dev/null)" = tachyon ] && echo tachyon || echo z4r; }
 ZO_USER_HL="--hostlist=/opt/zapret/ipset/zapret-hosts-user.txt"
@@ -5182,7 +5178,6 @@ _fk_dash_info() {
 		*) echo "свои серверы" ;;
 	esac
 }
-# Секции Forkozz для дашборда: «состояние<TAB>имя» по включённым секциям, кэш 20 с.
 _fk_dash_secs() {
 	local f="$JOBS_DIR/fk.dash" now t=""
 	now="$(date +%s)"
@@ -5194,7 +5189,6 @@ _fk_dash_secs() {
 	fi
 	tail -n +2 "$f" 2>/dev/null
 }
-# Итог для дашборда: «код<TAB>подпись». 1 — все секции работают, 3 — часть, 2 — ни одна.
 _fk_dash_sum() {
 	_fk_dash_secs | awk -F'\t' '$2 != "" { n++; nm = nm (n > 1 ? ", " : "") $2; if ($1 == "bad" || $1 == "stopped" || $1 == "direct") { b++; bn = bn (b > 1 ? ", " : "") $2 } }
 		END {
@@ -5763,7 +5757,6 @@ _rb_list_get() {
 	if [ -s "$p" ] && [ -n "$(find "$ZM_LISTS_DIR/.$f.fail" -mmin -60 2>/dev/null)" ]; then return 0; fi
 	mkdir -p "$ZM_LISTS_DIR" 2>/dev/null
 	tmp="$ZM_LISTS_DIR/.$f.$$"
-	# raw.githubusercontent.com бывает недоступен — тот же файл через jsDelivr
 	if _st_fetch "$u" "$tmp" || { _st_cdn_url "$u" >/dev/null 2>&1 && _st_fetch "$(_st_cdn_url "$u")" "$tmp"; }; then
 		_rb_list_norm "$f" "$tmp" > "$tmp.ok"
 		if [ -s "$tmp.ok" ]; then
@@ -5785,8 +5778,6 @@ _rb_list_get() {
 
 _rb_say() { echo "==> $*"; }
 _rb_warn() { echo "!! $*"; }
-# Встроенные сервисы; при включённом Tachyon Lists к их наборам (поле 8) добавлены
-# более полные списки того же сервиса из Tachyon (tachyon.plus: «id|t_набор,…»)
 _rb_conf_plus() {
 	if [ -f "$ST_TCH_OFF" ] || [ ! -s "$ST_TCH_PLUS" ]; then grep -hv '^#' "$RB_SHARE/services.conf" 2>/dev/null; return 0; fi
 	awk -F'|' -v OFS='|' -v pf="$ST_TCH_PLUS" '
@@ -5797,7 +5788,6 @@ _rb_conf_plus() {
 }
 _rb_svc_src() { _rb_conf_plus; cat "$ST_OWN_SVC" "$ST_OWN_CSVC" 2>/dev/null; [ -f "$ST_CAT_OFF" ] || awk -F'|' -v skip="$ST_CAT_SKIP" -v conf="$RB_SHARE/services.conf" 'BEGIN { while ((getline l < conf) > 0) { if (l ~ /^#/) continue; split(l, a, "|"); if (a[1] == "") continue; b[a[1]] = 1; m = split(a[8], c, ","); for (i = 1; i <= m; i++) if (c[i] != "") b[c[i]] = 1 } } $9 != "" && $9 != "Свои списки каталога" { k = $1; sub(/^c_/, "", k); if (index(skip, " " k " ")) next; if (k ~ /^itdoginfo_/ && (substr(k, 11) in b)) next; print }' "$ST_CAT_SVC" 2>/dev/null; [ -f "$ST_TCH_OFF" ] || cat "$ST_TCH_SVC" 2>/dev/null; }
 _rb_svc_field() { _rb_svc_src | awk -F'|' -v k="$1" -v n="$2" '$1 == k { print $n; exit }'; }
-# Строка сервиса целиком: один проход вместо вызова _rb_svc_field на каждое поле
 _rb_svc_row() { _rb_svc_src | awk -F'|' -v k="$1" '$1 == k { print; exit }'; }
 _rb_svc_names() { local id; for id in $1; do printf '%s, ' "$(_rb_svc_field "$id" 2)"; done | sed 's/, $//'; }
 _rb_routable() { _rb_svc_src | awk -F'|' -v k="$1" '$1 == k { r = k == "custom" || $3 $4 $8 != ""; exit } END { exit !r }'; }
@@ -5903,7 +5893,6 @@ _st_dnsmode() { [ "$(cat /etc/zm-steer/dns.mode 2>/dev/null)" = router ] && echo
 _st_realip() { [ "$(cat /etc/zm-steer/realip.mode 2>/dev/null)" = off ] && echo off || echo on; }
 _st_torrent() { case "$(cat /etc/zm-steer/torrent.mode 2>/dev/null)" in direct) echo direct ;; block) echo block ;; *) echo allow ;; esac; }
 _st_quic() { [ "$(cat /etc/zm-steer/quic.mode 2>/dev/null)" = block ] && echo block || echo allow; }
-# Ключи правила ядра steer 2.1: торренты клиентов мимо выхода и запрет QUIC (браузер сразу идёт по TCP)
 _stl_tq() {
 	[ -n "$ZM_STL_NOTQ" ] && return 0
 	[ "$(_st_torrent)" = allow ] || printf ',"torrent":"%s"' "$(_st_torrent)"
@@ -6220,7 +6209,6 @@ stl_sub_mods() {
 		grep -qiE '"(protocol|type)"[[:space:]]*:[[:space:]]*"(hysteria2?|hy2)"' "$1" && m="$m hy2"
 		grep -qiE '"(protocol|type)"[[:space:]]*:[[:space:]]*"(trojan|shadowsocks|socks|http|vmess)"' "$1" && m="$m proxy"
 	elif grep -qE '^proxies:[[:space:]]*(\[|$)' "$1"; then
-		# Clash / Mihomo: «type: hysteria2» блоком и «{…, type: ss, …}» потоком; type групп (select, url-test) не подходит
 		grep -qiE '(^|[{,[:space:]-])type:[[:space:]]*["'"'"']?(hysteria2?|hy2)["'"'"']?([,}[:space:]]|$)' "$1" && m="$m hy2"
 		grep -qiE '(^|[{,[:space:]-])type:[[:space:]]*["'"'"']?(trojan|ss|shadowsocks|socks5?|http|vmess)["'"'"']?([,}[:space:]]|$)' "$1" && m="$m proxy"
 	else
@@ -6230,8 +6218,6 @@ stl_sub_mods() {
 	echo "$m"
 }
 
-# Узлы с allowInsecure ядро берёт, только когда у выхода insecure: true. Перечень и проверка по файлу
-# подписки — с тем же флагом, иначе номера узлов разойдутся с номерами выхода
 _stl_insec() { [ -f "${1%/*}/sub.insecure" ]; }
 _stl_insec_arg() { _stl_insec "$1" && echo --insecure; }
 
@@ -6645,7 +6631,6 @@ _st_tch_bg() {
 	( _st_tch_refresh force >/dev/null 2>&1 & )
 }
 
-# Каталог сейчас качается или собирается (флаг «запущено» живёт не дольше 5 минут — на случай сбоя)
 _st_tch_busy() {
 	[ -d "$ST_RUN/tch.lock" ] && [ -z "$(find "$ST_RUN/tch.lock" -maxdepth 0 -mmin +5 2>/dev/null)" ] && return 0
 	[ -f "$ST_RUN/tch.pending" ] && [ -z "$(find "$ST_RUN/tch.pending" -maxdepth 0 -mmin +5 2>/dev/null)" ]
@@ -6691,9 +6676,6 @@ _st_cat_json() {
 		"$([ -d "$ST_RUN/cat.lock" ] && echo true || echo false)" "$(_st_tch_json)" "$(_st_own_json)" "$ST_OWN_MAX"
 }
 
-# Мои списки: свои списки доменов и подсетей по ссылке. Каталоги (splify2-lists, Tachyon Lists) не трогают:
-# лежат отдельно (own.svc — плитки, own.idx — наборы) и подмешиваются к ним так же, как Tachyon.
-# Общие для Steer и Forkozz: добавили в одном — список есть и в другом
 _st_own_used() {
 	local id="$1" u w=""
 	case "$id" in
@@ -6719,14 +6701,14 @@ _st_own_json() {
 		w="$(_st_own_used "$id")"
 		printf '%s{"id":"%s","kind":"list","name":"%s","url":"%s","fmt":"%s","dom":%s,"pfx":%s,"used":"%s"}' "$sep" "$id" "$(esc "${name:-$id}")" "$(esc "$url")" "$fmt" "${dom:-0}" "${pfx:-0}" "$(esc "$w")"
 		sep=","
-	done < "$ST_OWN_IDX" 2>/dev/null
+	done 2>/dev/null < "$ST_OWN_IDX"
 	local sets svcs ver ts
 	while IFS='|' read -r id name url sets svcs ver ts; do
 		[ -n "$id" ] || continue
 		w="$(_st_own_used "$id")"
 		printf '%s{"id":"%s","kind":"catalog","name":"%s","url":"%s","sets":%s,"svcs":%s,"version":"%s","age":%s,"used":"%s"}' "$sep" "$id" "$(esc "$name")" "$(esc "$url")" "${sets:-0}" "${svcs:-0}" "$(esc "$ver")" "$(( $(date +%s) - ${ts:-0} ))" "$(esc "$w")"
 		sep=","
-	done < "$ST_OWN_CATS" 2>/dev/null
+	done 2>/dev/null < "$ST_OWN_CATS"
 	printf ']'
 }
 
@@ -6738,12 +6720,10 @@ _st_own_desc() {
 	printf '%s' "$o"
 }
 
-# github.com/…/blob/ветка/путь → raw.githubusercontent.com/…/ветка/путь: по ссылке со страницы GitHub отдаётся HTML
 _st_own_url() {
 	printf '%s' "$1" | sed 's#^https://github\.com/\([^/]*\)/\([^/]*\)/\(blob\|raw\)/#https://raw.githubusercontent.com/\1/\2/#'
 }
 
-# Скачать и разобрать список так же, как это делает Steer. Печатает «fmt домены подсети» или «ERR:причина»
 _st_own_probe() {
 	local u="$1" f="$ST_RUN/own.probe.$$" d p h
 	mkdir -p "$ST_RUN"
@@ -6783,7 +6763,6 @@ _st_own_probe() {
 	echo "lst $d $p"
 }
 
-# название уже занято другим списком или каталогом (без учёта регистра, и для кириллицы — awk роутера её не понижает)
 _st_own_taken() {
 	awk -F'|' -v nm="$1" -v k="$2" '
 		function lc(x,    i) { x = tolower(x); for (i = 1; i <= 33; i++) gsub(U[i], L[i], x); return x }
@@ -6791,7 +6770,6 @@ _st_own_taken() {
 		$1 != k && lc($2) == nm { f = 1 } END { exit !f }' $(for f in "$ST_OWN_SVC" "$ST_OWN_CATS"; do [ -f "$f" ] && echo "$f"; done) /dev/null 2>/dev/null
 }
 
-# имя по умолчанию: у GitHub — «владелец/репозиторий», иначе имя файла
 _st_own_dname() {
 	local n
 	n="$(printf '%s' "$1" | sed -n 's#^https://raw\.githubusercontent\.com/\([^/]*\)/\([^/]*\)/.*#\1/\2#p; s#^https://github\.com/\([^/]*\)/\([^/]*\)/.*#\1/\2#p' | head -n1)"
@@ -6800,7 +6778,6 @@ _st_own_dname() {
 	printf '%s' "${n:-Мой список}"
 }
 
-# Свой каталог: собрать заново из $ST_RUN/own.cat.new и заменить его строки в own.cat.svc / own.cat.idx
 _st_owncat_put() {
 	local id="$1" name="$2" url="$3" svcs sets ver
 	_st_owncat_build "$ST_RUN/own.cat.new" "$id" "$name" || return 1
@@ -6816,7 +6793,6 @@ _st_owncat_put() {
 	return 0
 }
 
-# Обновить свой каталог (все — без аргумента). Список на месте, если не скачался
 _st_owncat_refresh() {
 	local id name url rest r rc=0
 	[ -s "$ST_OWN_CATS" ] || return 0
@@ -6831,7 +6807,6 @@ _st_owncat_refresh() {
 	return $rc
 }
 
-# раз в сутки — в фоне, как стандартные каталоги
 _st_owncat_bg() {
 	[ -s "$ST_OWN_CATS" ] || return 0
 	[ -d "$ST_RUN/owncat.lock" ] && [ -z "$(find "$ST_RUN/owncat.lock" -maxdepth 0 -mmin +5 2>/dev/null)" ] && return 0
@@ -6929,7 +6904,6 @@ _st_own_ren() {
 			local old
 			old="$(awk -F'|' -v k="$id" '$1 == k { print $2; exit }' "$ST_OWN_CATS")"
 			awk -F'|' -v OFS='|' -v nm="$name" -v k="$id" '$1 == k { $2 = nm } { print }' "$ST_OWN_CATS" > "$ST_OWN_CATS.t" && mv -f "$ST_OWN_CATS.t" "$ST_OWN_CATS"
-			# группы его списков — «название (источник)»: меняем только название
 			awk -F'|' -v OFS='|' -v nm="$name" -v o="$old (" -v k="${id}_" 'index($1, k) == 1 && index($9, o) == 1 { $9 = nm " (" substr($9, length(o) + 1) } { print }' "$ST_OWN_CSVC" > "$ST_OWN_CSVC.t" && mv -f "$ST_OWN_CSVC.t" "$ST_OWN_CSVC" ;;
 		*) awk -F'|' -v OFS='|' -v nm="$name" -v k="$id" '$1 == k { $2 = nm } { print }' "$ST_OWN_SVC" > "$ST_OWN_SVC.t" && mv -f "$ST_OWN_SVC.t" "$ST_OWN_SVC" ;;
 	esac
@@ -7067,7 +7041,6 @@ ST_SUB_GRP="$ST_DIR/sub.group"
 ST_SUB_GRPS="$ST_DIR/sub.autogrp"
 ST_SUB_EXCL="$ST_DIR/sub.exclude"
 ST_SUB_HIDE="$ST_DIR/sub.hidden"
-# Серверы, на которые «Авто» не переключается (вручную выбрать их можно): названия и фразы-маркеры
 ST_SUB_NOAUTO="$ST_DIR/sub.noauto"; ST_SUB_NOAUTO_MK="$ST_DIR/sub.noauto.mk"
 ST_EXIT="$ST_DIR/exit"
 
@@ -7170,18 +7143,12 @@ _st_vpn_dev() {
 	for d in $STL_VPN_DEVS; do [ -d "/sys/class/net/$d" ] && { echo "$d"; return 0; }; done
 	return 1
 }
-# Ядро steer 2.1+: TCP выходов-туннелей (vless, hysteria2, прокси) принимает TCP-стек Linux — соединение
-# перенаправляется к слушателю туннеля по метке выхода, собственный TCP-стек устройства TUN удалён. Через
-# такое устройство ходит только UDP, и curl --interface не соединится НИКОГДА, даже при живом туннеле.
-# Свой трафик роутера через эти устройства не пускаем, а туннель проверяем пробой его узла
 _stl_redir_dev() {
 	case "$1" in zm_vpn|zm_vpn[2-9]|zmv_*|zmv[2-9]_*) ;; *) return 1 ;; esac
 	[ -n "$STL_VER_C" ] || STL_VER_C="$(stl_version)"
 	_stl_ver_ok "$STL_VER_C" && ! _st_ver_lt "$STL_VER_C" 2.1.0
 }
 
-# Проба узла, через который сейчас идёт выход-туннель: рукопожатие с узлом и запрос через него (её
-# делает плагин протокола). Печатает probe=<мс> — туннель живой, ничего — не ответил
 _st_vpn_node_probe() {
 	local o="$1" p m j idx ok ms
 	p="$(sed -n "s/.*\"$o\":{\([^}]*\)}.*/\1/p" "$STL_SPEC" 2>/dev/null | head -n 1 | sed -n 's/.*"protocol":"\([a-z0-9]*\)".*/\1/p')"
@@ -7211,8 +7178,6 @@ _st_vpn_trace() {
 		t="$(curl -4 -s --interface "$1" --connect-timeout 5 --max-time 10 "$u" 2>/dev/null)"
 		case "$t" in *ip=*) printf '%s\n' "$t"; return 0 ;; esac
 	done
-	# Медленный туннель (Tor, перегруженный сервер) соединяется дольше 5 с — ещё раз, с запасом по времени
-	# и без TLS: живой туннель не должен считаться упавшим только потому, что он медленный
 	t="$(curl -4 -s -o /dev/null -w '%{http_code}' --interface "$1" --connect-timeout 12 --max-time 18 http://cp.cloudflare.com/generate_204 2>/dev/null)"
 	case "$t" in 204|200) echo alive=1; return 0 ;; esac
 	return 1
@@ -7613,8 +7578,6 @@ steer_action() {
 					[ "$mode" = refresh ] && ! _st_tch_on && { echo '{"error":"Tachyon Lists выключен"}'; return 1; }
 					rm -f "$ST_TCH_OFF" "$ST_TCH_ERR"
 					_st_tch_idx_merge
-					# Каталог качается в фоне: через медленный raw.githubusercontent.com это бывает дольше,
-					# чем ждёт браузер. Панель следит за флагом «обновляется» и сама покажет итог
 					mkdir -p "$ST_RUN"; : > "$ST_RUN/tch.pending"
 					if [ "$mode" = on ] && [ -s "$ST_TCH_SVC" ]; then ( _st_tch_refresh; rm -f "$ST_RUN/tch.pending" ) >/dev/null 2>&1 &
 					else ( _st_tch_refresh force; rm -f "$ST_RUN/tch.pending" ) >/dev/null 2>&1 &
@@ -8043,7 +8006,7 @@ _st_out_tun_devs() {
 
 ST_LAN_EXTRA="$ST_DIR/lan.extra"
 ST_LAN_MAX=8
-_st_lan_extra() { [ -s "$ST_LAN_EXTRA" ] || return 0; tr -s ' \t\r' '\n\n\n' < "$ST_LAN_EXTRA" 2>/dev/null | grep -E '^([A-Za-z0-9._-]{1,15}|ppp\+)$' | awk '!x[$0]++'; }
+_st_lan_extra() { [ -s "$ST_LAN_EXTRA" ] || return 0; tr -s ' \t\r' '\n\n\n' 2>/dev/null < "$ST_LAN_EXTRA" | grep -E '^([A-Za-z0-9._-]{1,15}|ppp\+)$' | awk '!x[$0]++'; }
 _st_lan_fw_drop() {
 	local r ch=0
 	for r in $(sed -n 's/^fw \(zmlan_[A-Za-z0-9_]*\)$/\1/p' "$ST_OWNED" 2>/dev/null); do
@@ -8646,7 +8609,6 @@ _ab_applied() {
 
 AB_TG_LIST="$AB_DIR/tg.domains"
 AB_TG_URL="${GH_RAW}/Flowseal/tg-ws-proxy/refs/heads/main/.github/cfproxy-domains.txt"
-# Списки блокировки из Tachyon Lists: домены — в dnsmasq вместе с HaGeZi, опасные IP — в файрвол (отдельная таблица nft)
 AB_TCH_DOM="android_ads_block telemetry_mobile_block win_spy xiaomi_smarttv_ads gambling_block"
 AB_TCH_IP="et_spamhaus_block hagezi_tif_ip_block botnet_attackers_ip_block"
 AB_IP_NFT="zm_adblock_ip"
@@ -9691,7 +9653,7 @@ _tg_tls_live() {
 	local p c
 	p="$(pidof "$(_tg_bin_of "$1")" 2>/dev/null | awk '{ print $1 }')"
 	[ -n "$p" ] || return 1
-	c=" $(tr '\000' ' ' < "/proc/$p/cmdline" 2>/dev/null) "
+	c=" $(tr '\000' ' ' 2>/dev/null < "/proc/$p/cmdline") "
 	if [ -n "$2" ]; then
 		case "$c" in *"-domain $2 "*|*"-domain=$2 "*) return 0 ;; esac
 		return 1
@@ -10089,8 +10051,6 @@ tg_action() {
 	esac
 }
 
-# Файлы с настройками прокси: порт, ключ, параметры запуска. Ключи — отдельно:
-# их возвращаем, даже если переустановка не удалась, чтобы новая установка взяла прежний ключ
 _tg_keep_files() {
 	case "$1" in
 		mtproto) echo "$TG_CONF_MT $TG_SECRET_MT_FILE" ;;
@@ -10100,8 +10060,6 @@ _tg_keep_files() {
 }
 _tg_key_files() { case "$1" in mtproto) echo "$TG_SECRET_MT_FILE" ;; rust) echo "$TG_SECRET_RS_FILE" ;; esac; }
 
-# «Переустановить»: программа ставится заново, а порт, ключ, параметры и доступ
-# из интернета остаются прежними — ссылку для Telegram менять не нужно
 _tg_reinstall_keep() {
 	local v="$1" k="$JOBS_DIR/tg_keep.$1" f b n=0 rc=0 fw host hmode init
 	rm -rf "$k"; mkdir -p "$k" || return 1
@@ -10131,7 +10089,6 @@ _tg_reinstall_keep() {
 	return "$rc"
 }
 
-# Перезапуск одного прокси (кнопка на его карточке); ответ — свежий статус
 _tg_restart_one() {
 	local init i=0
 	init="$(_tg_auto_init "$1")"
@@ -10613,8 +10570,8 @@ zm_refs_heal() {
 
 _zm_bin_put() {
 	local need have old=0 min keep=""
-	need=$(( ($(wc -c < "$1" 2>/dev/null || echo 0) + 1023) / 1024 ))
-	[ -f "$2" ] && old=$(( ($(wc -c < "$2" 2>/dev/null || echo 0) + 1023) / 1024 ))
+	need=$(( ($(wc -c 2>/dev/null < "$1" || echo 0) + 1023) / 1024 ))
+	[ -f "$2" ] && old=$(( ($(wc -c 2>/dev/null < "$2" || echo 0) + 1023) / 1024 ))
 	have="$(_zm_df_kb "${2%/*}")"
 	min=$((need + 128))
 	_zm_fs_packs && min=$((need / 3 + 64))
@@ -12717,14 +12674,14 @@ _fk_dns_watch() {
 	for v in "$@"; do
 		ok=0
 		_fk_dns_probe "$t" "$v" "$tmp"
-		IFS='|' read -r l ok l l < "$tmp" 2>/dev/null
+		IFS='|' read -r l ok l l 2>/dev/null < "$tmp"
 		rm -f "$tmp"
 		[ "$ok" = 1 ] && { best="$v"; break; }
 	done
 	[ -n "$best" ] && [ "$best" != "$cur" ] || { rm -f "$f"; return 0; }
 	ok=0
 	_fk_dns_probe "$t" "$cur" "$tmp"
-	IFS='|' read -r l ok l l < "$tmp" 2>/dev/null
+	IFS='|' read -r l ok l l 2>/dev/null < "$tmp"
 	rm -f "$tmp"
 	[ "$ok" = 1 ] && cur_ok=1
 	{ read -r want cnt < "$f"; } 2>/dev/null
@@ -13966,7 +13923,7 @@ _fk_rs_get() {
 
 _fk_rs_valid() {
 	local f="$1" fmt="$2" sz
-	sz="$(wc -c < "$f" 2>/dev/null | tr -d ' ')"
+	sz="$(wc -c 2>/dev/null < "$f" | tr -d ' ')"
 	[ "${sz:-0}" -gt 0 ] && [ "$sz" -le "$FK_RS_MAXF" ] || return 1
 	if [ "$fmt" = binary ]; then
 		[ "$(head -c 3 "$f")" = SRS ]
@@ -15708,7 +15665,7 @@ _fk_dns_probe() {
 			case "$host" in \[*) ;; *) ip="$(_fk_dns_ip "$host")"; [ -n "$ip" ] && [ "$ip" != "$host" ] && rs="$host:$port:$ip" ;; esac
 			res="$(curl -s -o "$f" -w '%{http_code} %{time_total}' -H 'accept: application/dns-message' --connect-timeout 4 --max-time 5 ${rs:+--resolve "$rs"} "$url" 2>/dev/null)"
 			code="${res%% *}"; tm="${res##* }"
-			if [ "$code" = 200 ] && [ "$(wc -c < "$f" 2>/dev/null || echo 0)" -ge 29 ]; then ok=1; ms="$(_fk_dns_ms "$tm")"; fi
+			if [ "$code" = 200 ] && [ "$(wc -c 2>/dev/null < "$f" || echo 0)" -ge 29 ]; then ok=1; ms="$(_fk_dns_ms "$tm")"; fi
 			rm -f "$f"; how=doh ;;
 	esac
 	if [ "$ok" != 1 ] && _fk_dns_lanip "${ip:-$host}"; then
@@ -16734,8 +16691,6 @@ _ow_v6_up() {
 	[ -n "$a" ]
 }
 
-# Режим IPv6: on — с выходом в интернет; lan — только внутри домашней сети
-# (локальные адреса ULA и link-local, без WAN); off — устройствам IPv6 не раздаётся
 _ow_v6_mode() {
 	local ra dv w6
 	w6=1
@@ -16747,7 +16702,6 @@ _ow_v6_mode() {
 	else echo lan; fi
 }
 
-# Без префикса ULA устройства в режиме «Только дома» получат лишь link-local — задаём его, если нет
 _ow_v6_ula() {
 	local h
 	if [ -z "$(uci -q get network.globals.ula_prefix)" ]; then
@@ -16769,7 +16723,6 @@ _ow_v6_set() {
 	cur="$(_ow_v6_mode)"
 	[ "$cur" = "$want" ] && { printf '{"ok":true,"same":true,"on":%s,"mode":"%s"}\n' "$([ "$want" = off ] && echo false || echo true)" "$want"; return 0; }
 	if [ "$want" != on ]; then
-		# настройки «с интернетом» запоминаем один раз — при уходе из режима on, чтобы потом вернуть как было
 		if [ "$cur" = on ]; then
 			mkdir -p "$ZM_STATE_DIR"
 			: > "$OW_V6_BAK.tmp"
@@ -16784,8 +16737,6 @@ _ow_v6_set() {
 				uci -q set dhcp.lan.dhcpv6=disabled
 				uci -q set dhcp.lan.ndp=disabled
 			else
-				# роутер раздаёт локальный префикс сам; маршрута в интернет по IPv6 у него нет,
-				# поэтому устройства идут в интернет по IPv4 — мимо Zapret и VPN ничего не утечёт
 				uci -q set dhcp.lan.ra=server
 				uci -q set dhcp.lan.dhcpv6=server
 				uci -q delete dhcp.lan.ndp
@@ -16821,7 +16772,6 @@ _ow_v6_set() {
 	uci -q commit network
 	uci -q commit dhcp
 	_ow_v6_reload
-	# отвечаем фактическим режимом: без интерфейса wan6 «Включён» на деле остаётся «Только дома»
 	cur="$(_ow_v6_mode)"
 	printf '{"ok":true,"on":%s,"mode":"%s"}\n' "$([ "$cur" = off ] && echo false || echo true)" "$cur"
 }
@@ -17055,11 +17005,6 @@ owrt_status() {
 		"$(_ow_upnp_json)" "$(_ow_devs_json),$(_pc_json)" "$(_ow_rb_json)" "$(_job_running owrt && echo true || echo false)"
 }
 
-# ---------- Родительский контроль ----------
-# Интернет выбранным устройствам — по расписанию или «Пауза» сразу. Своя таблица nftables (fw4 не трогаем):
-# пакеты устройства из набора отбрасываются ещё на входе в роутер — кроме адресованных самому роутеру и
-# широковещательных, так что DHCP, DNS и страница роутера работают, а локальная сеть идёт мимо (мост).
-# Ошибка таблицы никого не блокирует. Строки PC_FILE: MAC|имя|пауза 0/1|расписание 0/1|с|до|дни (1 — пн … 7 — вс)
 _pc_eval() {
 	[ -s "$PC_FILE" ] || return 0
 	awk -F'|' -v hm="$(date +%H%M)" -v dow="$(date +%u)" '
@@ -17090,7 +17035,6 @@ _pc_table() {
 		"}" | nft -f - 2>&1
 }
 
-# оборвать уже открытые соединения устройства: иначе при включённом ускорении (flow offloading) они доживут
 _pc_cut() {
 	local ip
 	command -v conntrack >/dev/null 2>&1 || return 0
@@ -17104,7 +17048,6 @@ _pc_cron() {
 	local want="" t h m
 	if [ -s "$PC_FILE" ]; then
 		for t in $(awk -F'|' '$4 == 1 { print $5; print $6 }' "$PC_FILE" | sort -u); do
-			# без ведущего нуля: «09» для printf и cron — не восьмеричное
 			h="${t%%:*}"; m="${t#*:}"; h="${h#0}"; m="${m#0}"
 			want="$want${m:-0} ${h:-0} * * * /opt/zapret-manager-luci/backend.sh pc_tick >/dev/null 2>&1 $PC_TAG
 "
@@ -18568,6 +18511,7 @@ do_install_zapret2() {
 }
 
 do_install_zapret_full() {
+	local r bad=""
 	do_install_zapret || return 1
 	[ -f /etc/init.d/zapret ] || return 1
 
@@ -18575,16 +18519,19 @@ do_install_zapret_full() {
 	else
 		_zc_lift
 		echo "==> Применяем базовую стратегию v7"
-		strategy_set_v v7 >/dev/null
+		r="$(strategy_set_v v7 2>/dev/null)"
+		case "$r" in *'"error"'*) bad=1; echo "!! Базовая стратегия v7 не применилась: $(printf '%s' "$r" | jsonfilter -e '@.error' 2>/dev/null)" ;; esac
 	fi
 
 	if ! _nochange_strategy; then
 		echo "==> Настраиваем игровую стратегию Gv1"
-		game_set 1 >/dev/null
+		r="$(game_set 1 2>/dev/null)"
+		case "$r" in *'"error"'*) bad=1; echo "!! Игровая стратегия Gv1 не применилась: $(printf '%s' "$r" | jsonfilter -e '@.error' 2>/dev/null)" ;; esac
 	fi
 	_zc_drop
 
-	echo "==> Готово, Zapret установлен и настроен"
+	if [ -n "$bad" ]; then echo "==> Zapret установлен, но стратегия не настроена — выберите её на вкладке Zapret, когда появится интернет"
+	else echo "==> Готово, Zapret установлен и настроен"; fi
 }
 
 do_remove_zapret() {
@@ -18609,8 +18556,6 @@ do_remove_zapret() {
 	_zm_rm_done "$rc" "Zapret"
 }
 
-# Ждём, пока процессы Zapret появятся (1) или пропадут (0): procd поднимает nfqws
-# не сразу, и без ожидания панель получала «остановлен» сразу после «Запустить»
 _zp_wait_run() {
 	local i=0
 	while [ "$i" -lt "${2:-6}" ]; do
@@ -19638,7 +19583,6 @@ hosts_replace_geohide() {
 	fi
 	_hosts_dns_reload
 	[ -s "$HOSTS_AUTO" ] && _hosts_auto_put "$region" "$(date +%s)" ""
-	# grep -c при нуле совпадений печатает 0 и выходит с кодом 1: «|| echo 0» дописывал второй 0 и ломал JSON
 	kept="$(grep -c . "$HOSTS_ON" 2>/dev/null)"
 	printf '{"ok":true,"region":"%s","kept":%s}\n' "$region" "${kept:-0}"
 }
@@ -19668,8 +19612,13 @@ hosts_file_set() {
 	[ -n "$content" ] || { echo '{"error":"пустой файл — сохранение отменено"}'; return 1; }
 	[ "$(printf '%s' "$content" | wc -c)" -gt "$HOSTS_EDIT_MAX" ] && { echo '{"error":"файл слишком большой для редактора"}'; return 1; }
 	cp "$HOSTS_FILE" "$HOSTS_FILE.zm-bak" 2>/dev/null
-	printf '%s' "$content" > "$HOSTS_FILE"
-	[ -n "$(tail -c 1 "$HOSTS_FILE" 2>/dev/null)" ] && echo >> "$HOSTS_FILE"
+	printf '%s\n' "$content" | tr -d '\r' > "$HOSTS_FILE.zmtmp" 2>/dev/null
+	if ! [ -s "$HOSTS_FILE.zmtmp" ] || ! cat "$HOSTS_FILE.zmtmp" > "$HOSTS_FILE" 2>/dev/null || ! cmp -s "$HOSTS_FILE.zmtmp" "$HOSTS_FILE"; then
+		rm -f "$HOSTS_FILE.zmtmp"
+		[ -s "$HOSTS_FILE.zm-bak" ] && cat "$HOSTS_FILE.zm-bak" > "$HOSTS_FILE" 2>/dev/null
+		echo '{"error":"не удалось записать /etc/hosts — проверьте свободное место на роутере"}'; return 1
+	fi
+	rm -f "$HOSTS_FILE.zmtmp"
 	_hosts_on_sync
 	_hosts_dns_reload
 	printf '{"ok":true}\n'
@@ -20186,7 +20135,6 @@ _zo_rkn_fetch() {
 	rm -f "$tmp"
 	if [ "$(_zo_rkn_src)" = tachyon ]; then
 		_zm_fetch "$ST_TCH_RAW/release/domains/ru_blocked.lst" "$tmp" 60 || _zm_fetch "$ST_TCH_CDN/release/domains/ru_blocked.lst" "$tmp" 60 || { rm -f "$tmp"; return 1; }
-		# YouTube у Zapret идёт своим блоком стратегии: в общем списке РКН он перехватил бы его на себя
 		tr -d '\r' < "$tmp" | awk -v G="/opt/zapret/ipset/zapret-hosts-google.txt" '
 			BEGIN { split("youtube.com youtu.be googlevideo.com ytimg.com ggpht.com youtube-nocookie.com youtubei.googleapis.com yt.be", a, " "); for (i in a) S[a[i]] = 1
 				while ((getline l < G) > 0) { sub(/\r$/, "", l); if (l != "") S[tolower(l)] = 1 } close(G) }
@@ -20272,7 +20220,6 @@ zapret_opt_set() {
 			[ "$(_zo_rkn_src)" = "$val" ] && { status; return 0; }
 			mkdir -p "$ZM_STATE_DIR"
 			if [ "$val" = tachyon ]; then echo tachyon > "$ZO_RKN_SRC_FILE"; else rm -f "$ZO_RKN_SRC_FILE"; fi
-			# списки РКН уже используются (Zapret или Zapret2) — сразу скачиваем новый, иначе он скачается при включении
 			if [ -s "$ZO_RKN_FILE" ] || [ -f "$ZO_RKN_FLAG" ] || _zo_rkn_on; then
 				if ! _zo_rkn_fetch; then
 					if [ "$val" = tachyon ]; then rm -f "$ZO_RKN_SRC_FILE"; else echo tachyon > "$ZO_RKN_SRC_FILE"; fi
@@ -20390,7 +20337,7 @@ _zs2_pid() {
 	local q="$1" p
 	[ -n "$q" ] || return 1
 	for p in $(pgrep -f '/nfqws' 2>/dev/null); do
-		tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q -- "--qnum=$q " && { echo "$p"; return 0; }
+		tr '\0' ' ' 2>/dev/null < "/proc/$p/cmdline" | grep -q -- "--qnum=$q " && { echo "$p"; return 0; }
 	done
 	return 1
 }
@@ -21004,7 +20951,7 @@ _test_domain_urls() {
 
 _test_hl_inject() {
 	local csv
-	csv="$(tr -s ' \n' ',,' < "$TEST_DIR/custom_dom_list" 2>/dev/null | sed 's/^,*//; s/,*$//')"
+	csv="$(tr -s ' \n' ',,' 2>/dev/null < "$TEST_DIR/custom_dom_list" | sed 's/^,*//; s/,*$//')"
 	[ -n "$csv" ] || { cat "$1"; return 0; }
 	awk -v D="--hostlist-domains=$csv" '
 		function flush(   i) { for (i = 1; i <= n; i++) print b[i]; if (hl) print D; n = 0; hl = 0 }
@@ -21383,7 +21330,7 @@ test_results() {
 	f="$(_test_rf "$(_test_results_file "$mode")")"
 	d="$(_test_rf "$(_test_detail_file "$mode")")"
 	[ -s "$f" ] || { echo '{"lines":"","detail":""}'; return; }
-	printf '{"lines":"%s","detail":"%s"}\n' "$(esc_ml "$(if [ "$(wc -c < "$f")" -gt 60000 ]; then tail -c 60000 "$f" | sed 1d; else cat "$f"; fi)")" "$(esc_ml "$(if [ "$(wc -c < "$d" 2>/dev/null || echo 0)" -gt 150000 ]; then head -n1 "$d"; tail -n +2 "$d" | tail -c 150000 | sed 1d; else cat "$d" 2>/dev/null; fi)")"
+	printf '{"lines":"%s","detail":"%s"}\n' "$(esc_ml "$(if [ "$(wc -c < "$f")" -gt 60000 ]; then tail -c 60000 "$f" | sed 1d; else cat "$f"; fi)")" "$(esc_ml "$(if [ "$(wc -c 2>/dev/null < "$d" || echo 0)" -gt 150000 ]; then head -n1 "$d"; tail -n +2 "$d" | tail -c 150000 | sed 1d; else cat "$d" 2>/dev/null; fi)")"
 }
 
 _test_gvo_pick() {
@@ -21413,7 +21360,7 @@ test_apply() {
 	f="$JOBS_DIR/test_apply"
 	mkdir -p "$JOBS_DIR" "$ZM_STATE_DIR"
 	if [ "$base" = custom_yt ]; then
-		_test_custom_clean < "$TEST_CUSTOM_FILE" 2>/dev/null | awk -v N="#$name" '/^#/ { p = ($0 == N) } p' > "$f"
+		_test_custom_clean 2>/dev/null < "$TEST_CUSTOM_FILE" | awk -v N="#$name" '/^#/ { p = ($0 == N) } p' > "$f"
 		[ "$(grep -c '^--' "$f")" -gt 0 ] || { rm -f "$f"; printf '{"error":"%s"}\n' "$(esc "стратегии «$name» уже нет в вашем списке")"; return 1; }
 		[ "$ip" = on ] && { _test_ipid_add "$f" > "$f.ip" && mv -f "$f.ip" "$f"; }
 	fi
@@ -21737,7 +21684,7 @@ _zt_detect() {
 	set -- $(awk -F'\t' '{ n[$1]++; if (!($1 in o)) { o[$1] = NR; c[$1] = $2 } } END { b = ""; for (z in n) if (b == "" || n[z] > n[b] || (n[z] == n[b] && o[z] < o[b])) b = z; if (b != "") print b, n[b] }' "$d/all")
 	ZT_ZONE="$1"; ZT_VOTES="${2:-0}"
 	ZT_CITY="$(awk -F'\t' -v z="$ZT_ZONE" '$1 == z && $2 != "" { print $2; exit }' "$d/all")"
-	ZT_OFF="$(tr -d '\n' < "$d/1" 2>/dev/null | grep -o '"offset"[[:space:]]*:[[:space:]]*-\{0,1\}[0-9]*' | head -n 1 | sed 's/.*://' | awk '{ s = $1 + 0; g = s < 0 ? "-" : "+"; if (s < 0) s = -s; if ($1 != "") printf "%s%02d:%02d\n", g, int(s / 3600), int((s % 3600) / 60) }')"
+	ZT_OFF="$(tr -d '\n' 2>/dev/null < "$d/1" | grep -o '"offset"[[:space:]]*:[[:space:]]*-\{0,1\}[0-9]*' | head -n 1 | sed 's/.*://' | awk '{ s = $1 + 0; g = s < 0 ? "-" : "+"; if (s < 0) s = -s; if ($1 != "") printf "%s%02d:%02d\n", g, int(s / 3600), int((s % 3600) / 60) }')"
 	rm -rf "$d"
 	[ -n "$ZT_ZONE" ]
 }
@@ -26261,8 +26208,6 @@ _stl_fetch() {
 	return 1
 }
 
-# Менеджер плагинов steer узнаёт архитектуру из /etc/apk/arch или строк «arch» в настройках opkg — на части прошивок
-# их нет, и он пишет «нет сборки под » (пусто). Даём ему архитектуру сами: ту, под которую поставлен steer-core
 _stl_parch() {
 	local a
 	a="$(head -n1 "$ST_DIR/core.arch" 2>/dev/null)"
@@ -26270,8 +26215,6 @@ _stl_parch() {
 	printf '%s' "$a"
 }
 
-# На apk без /etc/apk/arch записать его — только если это ровно то, что apk и так считает своей архитектурой.
-# Тогда плагины встают и из postinst пакета ядра, и при фоновом обновлении самим ядром
 _stl_arch_fix() {
 	local a p
 	[ "$PKG" = apk ] || return 0
@@ -26431,10 +26374,6 @@ _stl_untaken() {
 	printf '%s' "$o"
 }
 
-# Сервис, выбранный в нескольких секциях: через первую по порядку, а секции ниже — её запасной путь.
-# Правило первой секции ведёт в группу «pick: order» из выходов этих секций: упала первая — ядро steer
-# само переводит сервис на следующую живую, упали все — on_fail группы. Без перезапусков и apply.
-# fob — строки «правило^выход владельца^запасной выход»
 _stl_fo_take() {
 	local x e o IFS=,
 	FO_OWNER=""
@@ -26731,7 +26670,7 @@ _stl_spec() {
 _stl_check() {
 	local r c
 	if stl_running && [ -S "$STL_SOCK" ]; then
-		r="$(_stl_t 150 steer ctl check < "$1" 2>/dev/null)"
+		r="$(_stl_t 150 steer ctl check 2>/dev/null < "$1")"
 		c="$(printf '%s' "$r" | jsonfilter -e '@.code' 2>/dev/null)"
 		case "$c" in
 			0) return 0 ;;
@@ -26752,7 +26691,7 @@ _stl_upd_hint() {
 }
 
 stl_apply() {
-	local new="$STL_SPEC.zm.$$" prev="$STL_TMP/spec.prev" err w=0 i=0 ck=0 fx="" again=""
+	local new="$STL_SPEC.zm.$$" prev="$STL_TMP/spec.prev" err w=0 i=0 ck=0 fx="" again="" plg="" x
 	local ZM_STL_NOV6T="" ZM_STL_NOCTTL="" ZM_STL_NODNS="" ZM_STL_NOFO="" ZM_STL_NOTQ=""
 	STL_DUP_SAID=""
 	mkdir -p "$STL_ETC" "$STL_TMP"
@@ -26762,7 +26701,13 @@ stl_apply() {
 	err="$(_stl_check "$new")" && ck=1
 	while [ "$ck" = 0 ] && [ "$i" -lt 8 ]; do
 		i=$((i + 1))
-		if [ -z "$ZM_STL_NOV6T" ] && grep -q '"kind":"tunnel"' "$new" && printf '%s' "$err" | grep -qi 'ipv6'; then ZM_STL_NOV6T=1
+		x=""; [ -z "$plg" ] && stl_v2 && ! _st_ver_lt "$(stl_version)" 2.1.0 &&
+			x="$(printf '%s\n' "$err" | sed -n 's/.*нужен плагин \([a-z0-9_-]*\).*/\1/p; s/.*требует пакет steer-\([a-z0-9_-]*\).*/\1/p' | grep -E '^(vless|hysteria2|proxy)$' | awk '!s[$0]++' | tr '\n' ' ')"
+		if [ -n "$(echo $x)" ]; then
+			plg=1
+			_stl_say "Ядро steer не нашло плагины протоколов: $(echo $x | sed 's/ /, /g') — ставим"
+			_stl_plug_add $x >&2
+		elif [ -z "$ZM_STL_NOV6T" ] && grep -q '"kind":"tunnel"' "$new" && printf '%s' "$err" | grep -qi 'ipv6'; then ZM_STL_NOV6T=1
 		elif [ -z "$ZM_STL_NOCTTL" ] && grep -q '"cache_ttl"' "$new" && printf '%s' "$err" | grep -q 'cache_ttl'; then ZM_STL_NOCTTL=1; fx="$fx ct"
 		elif [ -z "$ZM_STL_NODNS" ] && grep -q '"zm_tun' "$new" && printf '%s' "$err" | grep -q 'zm_tun'; then ZM_STL_NODNS=1; fx="$fx dns"
 		elif [ -z "$ZM_STL_NOTQ" ] && grep -qE '"(torrent|quic)":' "$new" && printf '%s' "$err" | grep -qiE 'torrent|quic'; then ZM_STL_NOTQ=1; fx="$fx tq"
@@ -26920,8 +26865,11 @@ function hostport(l, f,    r, j, t) {
 	r = l; sub(/^[A-Za-z0-9]+:\/\//, "", r)
 	if (f == "vmess") { sub(/#.*/, "", r); j = b64d(r); H = jfield(j, "add"); P = jfield(j, "port"); return }
 	if (f == "shadowsocks") { t = r; sub(/[?#].*$/, "", t); if (index(t, "@") == 0) { j = b64d(t); if (index(j, "@")) { sub(/^.*@/, "", j); r = j } } }
-	sub(/[\/?#].*$/, "", r)
+	sub(/#.*$/, "", r)
+	t = index(r, "@"); j = index(t ? substr(r, t + 1) : r, "?")
+	if (j) r = substr(r, 1, t + j - 1)
 	sub(/^.*@/, "", r)
+	sub(/[\/?].*$/, "", r)
 	if (r ~ /^\[/) { H = r; sub(/\].*$/, "", H); sub(/^\[/, "", H); P = r; sub(/^.*\]:?/, "", P); return }
 	H = r; sub(/:.*$/, "", H); P = r; if (index(P, ":")) sub(/^[^:]*:/, "", P); else P = ""
 }
@@ -26931,7 +26879,6 @@ END {
 	if (substr(buf, 1, 3) == "\357\273\277") buf = substr(buf, 4)
 	t = buf; sub(/^[ \t\n]+/, "", t)
 	if (t ~ /^[\{\[]/) { printf "%s", buf > OUT; printf "" > MAP; exit 0 }
-	# Clash / Mihomo YAML (ключ proxies:): ядро разбирает узлы по отступам — подписка идёт как есть
 	if (("\n" buf) ~ /\nproxies:[ \t]*(\[|\n)/) { printf "%s", buf > OUT; printf "" > MAP; exit 0 }
 	if (!index(buf, "://")) { d = b64d(buf); if (index(d, "://")) buf = d }
 	gsub(/\r/, "", buf)
@@ -27022,7 +26969,7 @@ BEGIN {
 END { if (META != "") printf "usable=%d\nskipped=%d\nreasons=[%s]\n", usable, skipped, reasons > META }
 ' | sort -n -k1,1 | LC_ALL=C awk -F'\t' 'BEGIN { OFS = "\t" }
 		{ k = $5; c = ++D[k]; if (c > 1) k = k " (" c ")"; while (k in U) { c++; k = $5 " (" c ")" } U[k] = 1
-		  print NR - 1, $2, $3, $4, k, $6, $7, $8 }' > "$2"
+		  print NR - 1, $2, $3, $4, k, $6, $7, $8, $1 }' > "$2"
 }
 
 stl_sub_check() {
@@ -27431,7 +27378,7 @@ _st_geo_line() {
 		g="$(_st_geo_get "$i")"
 		set -- $g
 		[ "$1" = "$c" ] && [ -n "$2" ] && [ "$2" != - ] && out="${out:+$out, }$2 ($c)"
-	done < "$ST_WARP_UP" 2>/dev/null
+	done 2>/dev/null < "$ST_WARP_UP"
 	echo "$out"
 }
 
@@ -27626,7 +27573,7 @@ _st_warp_scan1() {
 	if [ -n "$pool" ]; then
 		for f in "$r" "$r.same" "$r.notls" "$r.nc"; do
 			[ -s "$f" ] || continue
-			case "$f" in *.ru) cls=1 ;; *.notls) cls=2 ;; *.nc) cls=3 ;; *) cls=0 ;; esac
+			case "$f" in *.notls) cls=2 ;; *.nc) cls=3 ;; *) cls=0 ;; esac
 			awk -v c="$cls" '{ printf "%d %s %s %s\n", c * 100000000 + $1 * 100000 + $2, $3, $4, $5 }' "$f"
 		done | sort -n | awk '{ print $2, $3, $4, $1 }' > "$pool"
 	fi
@@ -27634,7 +27581,7 @@ _st_warp_scan1() {
 		echo "   ответили только российские узлы ($(awk '{ print $5 }' "$r.ru" | sort -u | tr '\n' ' ' | sed 's/ $//')) — их не берём: заблокированное через них не открывается" >&2
 	for f in "$r" "$r.same" "$r.notls" "$r.nc"; do
 		[ -s "$f" ] || continue
-		case "$f" in *.ru) cls=1 ;; *.notls) cls=2 ;; *.nc) cls=3 ;; *) cls=0 ;; esac
+		case "$f" in *.notls) cls=2 ;; *.nc) cls=3 ;; *) cls=0 ;; esac
 		pick=$(awk -v c="$cls" '{ k = c * 100000000 + $1 * 100000 + $2; printf "%d\t%s %s %s %d\n", k, $3, $4, $5, k }' "$f" |
 			sort -n | head -n1 | cut -f2)
 		case "$f" in
@@ -28094,7 +28041,7 @@ _st_tgws_warp() {
 	while read -r i c; do
 		[ -n "$i" ] || continue
 		_st_warp_is_ru "$c" || echo "$i" >> "$ST_TGWS_WARP.tmp"
-	done < "$ST_WARP_UP" 2>/dev/null
+	done 2>/dev/null < "$ST_WARP_UP"
 	mv "$ST_TGWS_WARP.tmp" "$ST_TGWS_WARP"
 }
 
@@ -28209,7 +28156,6 @@ _json_flat() {
 	}' "$1"
 }
 
-# Разбор каталога списков формата splify2-lists: kp — приставка ключей, gname — название своего каталога
 ZM_CAT_AWK='
 		function key(id) { id = tolower(id); sub(/^svc_/, "", id); gsub(/[^a-z0-9_]/, "_", id); return kp id }
 		function clean(s) { gsub(/[|\t\r\n]/, " ", s); return s }
@@ -28255,7 +28201,6 @@ ZM_CAT_AWK='
 			grp = clean(f[e, "source_name"])
 			if (grp == "" && fo[e]) grp = (tolower(f[e, "id"] " " f[e, "source"]) ~ /b4geoip/) ? "b4geoip" : "itdoginfo (allow-domains)"
 			if (grp == "") return
-			# свой каталог: группы с его названием, «свои списки» его автора не берём
 			if (gname != "") { if (grp == "Свои списки каталога") return; grp = gname " (" grp ")" }
 			if (tolower(f[e, "id"] " " f[e, "source"]) ~ /itdoginfo/) {
 				u = f[e, "url"]; b = u; sub(/.*\//, "", b); sub(/\.srs$/, "", b)
@@ -28283,7 +28228,6 @@ _st_cat_build() {
 	mv -f "$ST_CAT_META.tmp" "$ST_CAT_META"
 }
 
-# Свой каталог: $1 — lists.json, $2 — приставка (zmcN), $3 — название. Пишет $ST_RUN/owncat.svc и .idx
 _st_owncat_build() {
 	local flat="$ST_RUN/owncat.flat" bsets bnames
 	mkdir -p "$ST_RUN"
@@ -28323,27 +28267,20 @@ _st_tch_build() {
 			G["ai"] = "ИИ и нейросети"; G["media"] = "Видео, музыка и кино"; G["social"] = "Соцсети и мессенджеры"; G["gaming"] = "Игры"
 			G["tech"] = "Технологии и разработка"; G["infra"] = "Хостинги и CDN"; G["regional"] = "Регионы и блокировки"; G["other"] = "Разное"
 			split("ai media social gaming tech infra regional other", ord, " ")
-			# Используются все списки каталога. Списки с тем же сервисом, что и встроенная плитка (у itdoginfo YouTube —
-			# 18 доменов, у Tachyon — 182), не дублируют плитку, а добавляются к ней. Ключ — id в Tachyon, значение — id плитки
 			EN["youtube"] = "youtube"; EN["discord"] = "discord"; EN["telegram"] = "telegram"; EN["twitter"] = "x"
 			EN["tiktok"] = "tiktok"; EN["roblox"] = "roblox"; EN["google_ai"] = "google_ai"; EN["google_play"] = "google_play"
 			EN["geoblock"] = "geoblock"; EN["porn"] = "porn"; EN["russia_outside"] = "russia_outside"; EN["ukraine_inside"] = "ukraine_inside"
 			EN["whatsapp"] = "whatsapp"; EN["github"] = "github"; EN["google_meet"] = "google_meet"; EN["hdrezka"] = "hdrezka"
 			EN["anime"] = "anime"; EN["block"] = "block"; EN["news"] = "news"; EN["hodca"] = "hodca"
 			EN["cloudflare"] = "cloudflare"; EN["cloudfront"] = "cloudfront"; EN["digitalocean"] = "digitalocean"; EN["hetzner"] = "hetzner"; EN["ovh"] = "ovh"
-			# У этих охват другой, чем у встроенной плитки с тем же id, — отдельная плитка под своим именем
 			SEP["meta"] = "Meta целиком"; SEP["russia_inside"] = "Россия внутри (сводный)"
-			# понятные имена вместо каталожных
 			NM["ru_blocked"] = "Заблокированные в РФ"
 			for (e = 0; e < cnt; e++) {
 				id = tolower(f[e, "id"]); if (id !~ /^[a-z0-9_]+$/) continue
 				act = f[e, "recommended_action"]; grp = f[e, "group"]
 				nd = f[e, "counts.domain"] + f[e, "counts.domain_suffix"]; ni = f[e, "counts.ipv4_cidr"] + 0
 				if (nd + ni == 0) continue
-				# огромные списки (больше 100 тыс. записей) не берём совсем: тяжело для флеша и памяти роутера.
-				# Исключение — «Заблокированные в РФ» (74 тыс. доменов + 89 тыс. подсетей): самый нужный из больших
 				if (nd + ni > 100000 && id != "ru_blocked") { nbig++; continue }
-				# списки блокировки (реклама, опасные IP) работают в «Блокировке рекламы», а не в маршрутах
 				if (act == "block") { nb++; continue }
 				t = clean(f[e, "title"]); nm = t; ds = ""
 				p = index(t, " — ")
@@ -28355,12 +28292,10 @@ _st_tch_build() {
 				if (nd + ni >= 20000) ds = "большой список: " (nd ? num(nd) " доменов" : "") (nd && ni ? ", " : "") (ni ? num(ni) " подсетей" : "") (ds != "" ? " · " ds : "")
 				st = ""
 				fd = f[e, "files.domains"]; fs = f[e, "files.subnets"]
-				# пятое поле — сколько записей в наборе: по нему Steer проверяет, хватит ли места и памяти
 				if (nd > 0 && fd ~ /^release\/domains\/[a-z0-9_]+\.lst$/) { st = "t_" id; line[st] = st "|lst|" raw "/" fd "|d|" nd }
 				if (ni > 0 && fs ~ /^release\/subnets\/[a-z0-9_]+\.lst$/) { sub(/^release\/subnets\//, "release/subnets/ipv4/", fs); line["t_" id "_ip"] = "t_" id "_ip|lst|" raw "/" fs "|s|" ni; st = st (st != "" ? "," : "") "t_" id "_ip" }
 				if (st == "") continue
 				if (act == "direct") { print "t_" id "|" nm "|" ds "|" st > dir; nx++; keepset(st); continue }
-				# служебные (GeoIP США) и новые группы, которых панель ещё не знает, — тоже в каталог
 				if (grp == "internal") grp = "regional"
 				if (!(grp in G)) grp = "other"
 				if (index(b, " " id " ")) {
@@ -28381,7 +28316,6 @@ _st_tch_build() {
 	rm -f "$flat"
 	[ -s "$ST_TCH_SVC.tmp" ] && [ -s "$ST_TCH_IDX.tmp" ] || { rm -f "$ST_TCH_SVC.tmp" "$ST_TCH_DIRECT.tmp" "$ST_TCH_IDX.tmp" "$ST_TCH_META.tmp" "$ST_TCH_PLUS.tmp"; return 1; }
 	touch "$ST_TCH_DIRECT.tmp" "$ST_TCH_PLUS.tmp"
-	# добавки меняем, только если они правда поменялись: файл — повод пересобрать правила Steer
 	if cmp -s "$ST_TCH_PLUS.tmp" "$ST_TCH_PLUS" 2>/dev/null; then rm -f "$ST_TCH_PLUS.tmp"; else mv -f "$ST_TCH_PLUS.tmp" "$ST_TCH_PLUS"; fi
 	mv -f "$ST_TCH_IDX.tmp" "$ST_TCH_IDX"
 	mv -f "$ST_TCH_SVC.tmp" "$ST_TCH_SVC"
@@ -28479,7 +28413,6 @@ _st_srs_get() {
 			touch "$ST_RUN/srs.$set.done"
 			return 0
 		fi
-		# на флеш — копией со сверкой: кончилось место — остаётся прежний набор, а не обрубок
 		for x in dom pfx; do
 			if ! cp -f "$f.$x" "$d/$set.$x.tmp" 2>/dev/null || ! cmp -s "$f.$x" "$d/$set.$x.tmp"; then
 				rm -f "$f" "$f.dom" "$f.pfx" "$d/$set".*.tmp
@@ -28523,8 +28456,6 @@ _st_srs_get() {
 	touch "$ST_RUN/srs.$set.done"
 }
 
-# Наборы Tachyon, добавленные к встроенному сервису: они необязательные — если не скачались,
-# сервис идёт по своему основному списку, а не откатывается на резервный
 _st_tch_plus_of() { [ -f "$ST_TCH_OFF" ] || awk -F'|' -v k="$1" '$1 == k { gsub(/,/, " ", $2); print $2; exit }' "$ST_TCH_PLUS" 2>/dev/null; }
 
 _st_svc_lists() {
@@ -28534,9 +28465,6 @@ $(_rb_svc_row "$id")
 ZM_ROW
 	sets="$(echo $sets | tr ',' ' ')"; pkd="$(echo $pkd | tr ',' ' ')"; pkp="$(echo $pkp | tr ',' ' ')"
 	plus=" $(_st_tch_plus_of "$id") "
-	# Сервис идёт по ВСЕМ своим спискам сразу: наборы каталога, добавки Tachyon, списки панели
-	# (itdoginfo Services и Subnets, v2fly, свои _extra) и основные домены. Не скачался один —
-	# остальные остаются, а не откатываются целиком на запасной вариант
 	if [ "$id" = custom ]; then echo "   → «$name»: доменов $(cat "$ST_CUSTOM.lst" 2>/dev/null | grep -c .), подсетей $(cat "$ST_CUSTOM.pfx" 2>/dev/null | grep -c .)" >&2
 	else
 		[ -n "$(echo $sets)" ] && say="списки $(echo $sets | sed 's/ /, /g')"
@@ -28564,11 +28492,8 @@ ZM_ROW
 	for set in $took; do touch "$ST_RUN/used.$set"; done
 	if [ "$id" != custom ]; then
 		f="$(_st_pkg_lists "$pkd" "$mt")"; [ -n "$f" ] && dom="$dom $f"
-		# подсети панели — только без основного набора: в наборе они уже есть, и с сужением, которого
-		# в текстовом списке нет (discord.srs: подсети Cloudflare и Google — только UDP голоса)
 		[ -z "$mt" ] && { f="$(_st_pkg_lists "$pkp")"; [ -n "$f" ] && pfx="$pfx $f"; }
 	fi
-	# добавки Tachyon у сервисов без своих наборов (WhatsApp, GitHub)
 	for set in $plus; do
 		case " $took $pfail " in *" $set "*) continue ;; esac
 		[ -f "$ST_RUN/used.$set" ] && continue
@@ -28581,7 +28506,6 @@ ZM_ROW
 			_rb_warn "Дополнение Tachyon $set для «$name» не скачалось — сервис идёт по остальным спискам" >&2
 		fi
 	done
-	# основные домены сервиса — всегда: самые нужные адреса идут нужным путём, даже если списки не скачались
 	if [ "$id" != custom ]; then
 		f="$(_st_base_dom "$id" "$f5" "$f6")"
 		if [ -n "$f" ]; then
@@ -28598,8 +28522,6 @@ ZM_ROW
 	for f in $pfx; do printf 'pfx\t%s\n' "$f"; done
 }
 
-# Списки панели (itdoginfo, v2fly, свои _extra). Когда у сервиса уже есть скачанные наборы, это
-# дополнение: не скачался недавно — не ждём его заново на каждом применении
 _st_pkg_lists() {
 	local f p
 	for f in $1; do
@@ -28609,7 +28531,6 @@ _st_pkg_lists() {
 	done
 }
 
-# Основные домены сервиса (поля 5 и 6) отдельным файлом; на флеш пишется, только если поменялись
 _st_base_dom() {
 	local f="$ST_DIR/lists/$1.base.dom" t
 	mkdir -p "$ST_DIR/lists" "$ST_RUN"
@@ -29375,7 +29296,7 @@ do_steer_warp_remove() {
 	done
 	[ "$netrl" = 1 ] && { uci commit network; /etc/init.d/network reload >/dev/null 2>&1; echo "   ✓ Туннели WARP удалены:$gone"; }
 	rm -f "$ST_WARP_MODE" "$ST_DIR/warp.conf" "$ST_DIR"/warp[0-9].conf "$ST_WARP_OWN" "$ST_WARP_OWN_KEEP" "$ST_DIR/warp.pending" \
-		"$ST_WARP_UP" "$ST_WARP_UP_AUTO" "$ST_WARP_GEO" "$ST_DIR/warp.colo" "$ST_WARP_PICK" "$ST_WARP_ORDER" "$ST_TGWS_WARP"
+		"$ST_WARP_UP" "$ST_WARP_UP_AUTO" "$ST_WARP_GEO" "$ST_DIR/warp.colo" "$ST_DIR/warp.ports" "$ST_WARP_PICK" "$ST_WARP_ORDER" "$ST_TGWS_WARP"
 	_st_mode_vars
 	if _st_owns "fw $ST_WARP_ZONE" && [ "$(uci -q get "firewall.$ST_WARP_ZONE")" = zone ]; then
 		z="$(_st_secs_zoneless | tr '\n' ' ' | sed 's/ $//')"
@@ -30020,7 +29941,14 @@ _do_steer_remove_core() {
 		/etc/init.d/cron restart >/dev/null 2>&1
 		echo "   ✓ Задания расписания Steer убраны"
 	fi
-	if [ -n "$foreign" ] && grep -qsw -- "$STL_VPN_DEV" "$STL_SPEC" "$STL_YAML"; then :; else _st_vpn_zone off; fi
+	if [ -n "$foreign" ] && grep -qsw -- "$STL_VPN_DEV" "$STL_SPEC" "$STL_YAML"; then :
+	elif [ -n "$(uci -q get "firewall.$ST_VPN_ZONE")$(uci -q get "firewall.${ST_VPN_ZONE}_fwd")" ]; then
+		uci -q delete "firewall.$ST_VPN_ZONE"
+		uci -q delete "firewall.${ST_VPN_ZONE}_fwd"
+		uci commit firewall
+		/etc/init.d/firewall reload >/dev/null 2>&1
+		sed -i "/^fw $ST_VPN_ZONE\$/d" "$ST_OWNED" 2>/dev/null
+	fi
 	for p in $(sed -n 's/^pkg \(steer[a-z0-9-]*\)$/\1/p' "$ST_OWNED" 2>/dev/null); do pkgs="$pkgs $p"; done
 	if [ -z "$foreign" ] && [ -z "$alien" ]; then
 		for p in $(stl_pkgs_installed); do case " $pkgs " in *" $p "*) ;; *) pkgs="$pkgs $p" ;; esac; done
@@ -30158,7 +30086,10 @@ steer_status() {
 	_st_warp_on && won=true
 	stl_v2 && { [ ! -s "$ST_SUB" ] || _st_feats_ok $(_st_sub_feats); } && ext=true
 	if [ -s "$STL_CACHE" ]; then latest="$(cat "$STL_CACHE")"
-	elif stl_present; then ( stl_latest >/dev/null 2>&1 & ); fi
+	elif stl_present && [ -z "$(find "$JOBS_DIR/steer.latest.try" -mmin -10 2>/dev/null)" ]; then
+		: > "$JOBS_DIR/steer.latest.try"
+		( stl_latest >/dev/null 2>&1 & )
+	fi
 	if [ "$run" = true ] && _st_owns "steer-spec" && stl_state "$vexit"; then
 		failed="$STL_FAILED"
 		[ "$vexit" = vpn ] || [ "$vexit" = iface ] || [ "$failed" = true ] || active="$STL_DEV"
@@ -30269,7 +30200,6 @@ _st_srs_dump() {
 	local j="$2.json.$$"
 	if command -v steer >/dev/null 2>&1; then
 		steer srs-read "$1" --out "$2" --prefixes-out "$3" >/dev/null 2>&1 && return 0
-		# набор с сужением по протоколу и портам (discord.srs) без --meta-out ядро не отдаёт
 		steer srs-read "$1" --out "$2" --prefixes-out "$3" --meta-out "$2.meta.$$" >/dev/null 2>&1 && { rm -f "$2.meta.$$"; return 0; }
 		rm -f "$2.meta.$$"
 	fi
@@ -30293,8 +30223,6 @@ _st_dom_build() {
 		[ -s "$ST_CUSTOM.pfx" ] && echo "$ST_CUSTOM.pfx" >> "$pfx"
 		ST_DOM_SRC="ваши строки"
 	else
-		# те же источники, что у маршрута (_st_svc_lists): все наборы сервиса, добавки Tachyon, списки
-		# панели и основные домены. Не скачался один набор — показываем остальные, а не четыре домена
 		sets="$(_st_dom_f 8 | tr ',' ' ')"
 		plus=" $(_st_tch_plus_of "$id") "
 		for set in $plus; do case " $sets " in *" $set "*) ;; *) sets="$sets $set" ;; esac; done
@@ -30335,7 +30263,6 @@ _st_dom_build() {
 			if [ "$dl" = 1 ]; then _rb_list_get "$f" >/dev/null 2>&1; fi
 			[ -s "$ZM_LISTS_DIR/$f" ] && { echo "$ZM_LISTS_DIR/$f" >> "$src"; x=1; }
 		done
-		# подсети панели — как у маршрута: только когда основного набора нет
 		if [ -z "$mt" ]; then
 			for f in $(_st_dom_f 4 | tr ',' ' '); do
 				case "$f" in *[!A-Za-z0-9_.-]*|'') continue ;; esac
@@ -30636,7 +30563,7 @@ _st_nodes() {
 		if stl_sub_norm "$ST_SUB" "$ST_SUB.n"; then mv -f "$ST_SUB.n.map" "$ST_SUB.map"; mv -f "$ST_SUB.n" "$ST_SUB"; chmod 600 "$ST_SUB"; fi
 		rm -f "$ST_SUB.n" "$ST_SUB.n.map"
 	fi
-	mods="$(_stl_mods_present)$(_stl_insec "$ST_SUB" && echo insecure)"
+	mods="$(_stl_mods_present)$(_stl_insec "$ST_SUB" && echo insecure) n2"
 	if [ ! -s "$ST_SUB_NODES" ] || [ "$ST_SUB" -nt "$ST_SUB_NODES" ] || [ "$(sed -n 's/^mods=//p' "$ST_SUB_NODES.meta" 2>/dev/null)" != "$mods" ]; then
 		mkdir -p "$ST_DIR"
 		stl_sub_nodes "$ST_SUB" "$ST_SUB_NODES.tmp" "$ST_SUB_NODES.meta"
@@ -30654,10 +30581,16 @@ _st_nodes_kv() { local t; t="$(_st_nodes)" && cut -f1,5 "$t"; }
 _st_key_hidden() { [ -n "$1" ] && _st_nodes_kv | ZM_W="$1" awk -F'\t' '$2 == ENVIRON["ZM_W"]' | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | grep -q .; }
 
 _st_order_head() {
-	local t hid
+	local t hid x all g gi=""
 	[ "$(_st_pick)" = ping ] && [ -s "$ST_SUB_ORDER" ] && t="$(_st_nodes)" || return 0
-	hid=" $(cut -f1,5 "$t" | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | tr '\n' ' ') "
-	awk -F'\t' -v h="$hid" -v of="$ST_SUB_ORDER" 'index(h, " " $1 " ") { x[$5] = 1 } END { while ((getline l < of) > 0) if (l != "" && !(l in x)) { print l; exit } }' "$t"
+	all="$(grep -c . "$t")"
+	hid="$(cut -f1,5 "$t" | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | tr '\n' ' ')"
+	x="$(cut -f1,5 "$t" | _zm_excl_hits "$ST_SUB_NOAUTO_MK" "$ST_SUB_NOAUTO" | tr '\n' ' ')"
+	[ "$(echo $hid $x | tr ' ' '\n' | grep . | sort -u | wc -l)" -lt "$all" ] && hid="$hid $x"
+	x="$(_st_stub_ids "$t" | tr '\n' ' ')"
+	[ "$(echo $hid $x | tr ' ' '\n' | grep . | sort -u | wc -l)" -lt "$all" ] && hid="$hid $x"
+	g="$(_st_grp_cur)"; [ -n "$g" ] && gi=" $(_st_grp_ids "$g" "$t" | tr '\n' ' ') "
+	awk -F'\t' -v h=" $hid " -v gi="$gi" -v of="$ST_SUB_ORDER" 'index(h, " " $1 " ") || (gi != "" && !index(gi, " " $1 " ")) { x[$5] = 1 } END { while ((getline l < of) > 0) if (l != "" && !(l in x)) { print l; exit } }' "$t"
 }
 
 _st_hidden_drop() {
@@ -30709,9 +30642,9 @@ _st_grp_ids() {
 		BEGIN {
 			while ((getline l < G) > 0) { split(l, a, "\t"); GN[a[1]] = 1; if (a[1] == ENVIRON["ZM_W"]) { nm = split(a[3], W, " ") } }
 			while ((getline l < M) > 0) { split(l, b, "\t"); K[b[1]] = b[2] "|" tolower(b[3]) "|" b[4] }
-			ln = 0; while ((getline l < S) > 0) { ln++; if (ln in K) { pt = qv(l, "path"); if (pt == "") pt = qv(l, "serviceName"); sub(/\?.*$/, "", pt); P[ln] = pt } }
+			ln = 0; while ((getline l < S) > 0) { ln++; if (ln in K) { pt = qv(l, "path"); if (pt == "") pt = qv(l, "serviceName"); sub(/\?.*$/, "", pt); gsub(/ /, "%20", pt); P[ln] = pt } }
 		}
-		{ r++; id[r] = $1; lk[r] = ($1 in K) ? K[$1] : ""; sk[r] = lk[r] "|" P[$1]; ar[r] = (index($5, "\342\254\207") || index($5, "\342\254\206")) ? 1 : 0; gs[r] = ($5 in GN) ? 1 : 0 }
+		{ r++; id[r] = $1; lk[r] = ($9 in K) ? K[$9] : ""; sk[r] = lk[r] "|" P[$9]; ar[r] = (index($5, "\342\254\207") || index($5, "\342\254\206")) ? 1 : 0; gs[r] = ($5 in GN) ? 1 : 0 }
 		END {
 			for (j = 1; j <= nm; j++) {
 				m = W[j]; x = m; sub(/\|[^|]*$/, "", x); pa = 0
@@ -30725,12 +30658,7 @@ _st_grp_ids() {
 
 _st_stub_ids() {
 	[ -s "$ST_SUB.map" ] || return 0
-	LC_ALL=C awk -F'\t' -v G="$ST_SUB_GRPS" -v M="$ST_SUB.map" '
-		BEGIN {
-			while ((getline l < G) > 0) { split(l, a, "\t"); GN[a[1]] = 1 }
-			while ((getline l < M) > 0) { split(l, b, "\t"); K[b[1]] = b[2] "|" tolower(b[3]) "|" b[4] }
-		}
-		$5 in GN { print $1 }' "$1"
+	LC_ALL=C awk -F'\t' -v G="$ST_SUB_GRPS" 'BEGIN { while ((getline l < G) > 0) { split(l, a, "\t"); GN[a[1]] = 1 } } $5 in GN { print $1 }' "$1"
 }
 
 _st_grps_json() {
@@ -30819,8 +30747,6 @@ _st_sub_filter() {
 			case "$hid" in *" $1 "*) ;; *) printf 'tun\t%s\t%s\t%s\n' "$2" "$3" "$mk"; return 0 ;; esac
 		fi
 	fi
-	# «Не брать в Авто»: ручной выбор выше уже отработал, дальше узлы выбирает сам Steer — эти убираем.
-	# Если так уходят все видимые узлы, правило не применяем: VPN без узлов работать не сможет
 	na="$(cut -f1,5 "$t" | _zm_excl_hits "$ST_SUB_NOAUTO_MK" "$ST_SUB_NOAUTO" | tr '\n' ' ')"
 	if [ -n "$(echo $na)" ]; then
 		if [ "$(echo $hid $na | tr ' ' '\n' | grep . | sort -u | wc -l)" -ge "$all" ]; then echo "!! «Не брать в Авто» убрал бы все узлы — пока Авто выбирает из всех" >&2
@@ -30944,6 +30870,18 @@ _st_need_mods() {
 	_st_phase sub
 }
 
+_st_links_split() {
+	tr '\r\t' '\n ' | ZM_RE="$STL_LINK_RE" awk '{
+		n = split($0, w, / +/); o = ""
+		for (i = 1; i <= n; i++) {
+			if (w[i] == "") continue
+			if (tolower(w[i]) ~ ENVIRON["ZM_RE"]) { if (o != "") print o; o = w[i] }
+			else if (o != "") o = o " " w[i]
+		}
+		if (o != "") print o
+	}' | awk '!s[$0]++'
+}
+
 _st_sub_take() {
 	rm -f "$ST_SUB.new" "$ST_SUB.new.map"
 	stl_sub_norm "$1" "$ST_SUB.new" || { rm -f "$ST_SUB.new" "$ST_SUB.new.map"; echo "ОШИБКА: в подписке пусто"; return 1; }
@@ -31002,11 +30940,6 @@ _st_sub_get() {
 	stl_sub_fetch "$@"
 }
 
-# Ядро steer 2.x качает подписку своим HTTP-клиентом: подменить ему curl нельзя, а привязать к
-# устройству — тоже. Через подключение качаем сами — curl, привязанным к устройству, и представляемся
-# так же, как ядро (User-Agent steer/<версия>, заголовки устройства из steer sub-hwid): иначе панель
-# отдаёт заглушку. Ответ без пригодных узлов — повтор по адресу …/json, как у ядра. Записывает то же,
-# что stl_sub_fetch: файл подписки, остаток трафика (--info) и STL_SUB_URL / STL_SUB_TITLE
 _st_sub_curl() {
 	local c="$1" dv="$2" u="$3" out="$4" info="$5" t="$4.via" h="$4.via.hdr" j id os md ua k v x try
 	STL_SUB_URL=""; STL_SUB_TITLE=""; STL_SUB_WARN=""; STL_SUB_ERR=""
@@ -31024,7 +30957,6 @@ _st_sub_curl() {
 		[ -s "$t" ] || "$c" -fsSL --compressed -m 60 --connect-timeout 10 --max-redirs 10 --max-filesize 67108864 -b "" --interface "$dv" -A "$ua" \
 			-D "$h" -o "$t" "$try" 2>/dev/null || rm -f "$t"
 		[ -s "$t" ] || { STL_SUB_ERR="панель не ответила"; continue; }
-		# сжатое тело без Content-Encoding (nginx с gzip_static always) — распаковываем по сигнатуре
 		if [ "$(head -c 2 "$t" | od -An -tx1 | tr -d ' \n')" = 1f8b ]; then
 			gzip -dc "$t" > "$t.gz" 2>/dev/null && [ -s "$t.gz" ] && mv -f "$t.gz" "$t" || { rm -f "$t" "$t.gz"; STL_SUB_ERR="панель прислала испорченный gzip"; continue; }
 		fi
@@ -31034,15 +30966,13 @@ _st_sub_curl() {
 		[ "$try" = "$u" ] && case "$u" in */json|*/json/) break ;; esac
 	done
 	[ -s "$t" ] || { rm -f "$t" "$h"; return 1; }
-	# остаток трафика и срок — заголовок subscription-userinfo, в файл того же вида, что пишет ядро
-	x="$(tr -d '\r' < "$h" 2>/dev/null | grep -i '^subscription-userinfo:' | tail -n 1 | cut -d: -f2-)"
+	x="$(tr -d '\r' 2>/dev/null < "$h" | grep -i '^subscription-userinfo:' | tail -n 1 | cut -d: -f2-)"
 	for k in upload download total expire; do
 		v="$(printf '%s' "$x" | tr ';' '\n' | sed -n "s/^[[:space:]]*$k[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/p" | head -n 1)"
 		printf '%s=%s\n' "$k" "$v"
 	done > "$info"
-	# название — profile-title (часто «base64:…»), запасной путь — имя файла в content-disposition
-	x="$(tr -d '\r' < "$h" 2>/dev/null | grep -i '^profile-title:' | tail -n 1 | cut -d: -f2- | sed 's/^[[:space:]]*//')"
-	[ -n "$x" ] || x="$(tr -d '\r' < "$h" 2>/dev/null | grep -i '^content-disposition:' | tail -n 1 | sed -n 's/.*filename="\{0,1\}\([^";]*\).*/\1/p')"
+	x="$(tr -d '\r' 2>/dev/null < "$h" | grep -i '^profile-title:' | tail -n 1 | cut -d: -f2- | sed 's/^[[:space:]]*//')"
+	[ -n "$x" ] || x="$(tr -d '\r' 2>/dev/null < "$h" | grep -i '^content-disposition:' | tail -n 1 | sed -n 's/.*filename="\{0,1\}\([^";]*\).*/\1/p')"
 	case "$x" in [Bb][Aa][Ss][Ee]64:*)
 		x="${x#*:}"
 		if command -v base64 >/dev/null 2>&1; then x="$(printf '%s' "$x" | base64 -d 2>/dev/null)"
@@ -31116,7 +31046,7 @@ do_steer_sub_set() {
 			[ -n "$old" ] && [ "$old" = "$(head -n1 "$ST_SUB_URL" 2>/dev/null)" ] && keep=1
 			;;
 		*)
-			printf '%s\n' "$in" | tr ' \t\r' '\n\n\n' | grep -iE "$STL_LINK_RE" | awk '!s[$0]++' > "$ST_SUB.raw"
+			printf '%s\n' "$in" | _st_links_split > "$ST_SUB.raw"
 			[ -s "$ST_SUB.raw" ] || { rm -f "$ST_SUB.raw"; echo "ОШИБКА: в тексте нет ссылок на серверы (vless://, trojan://, ss://, vmess://, hysteria2://, socks5://)"; return 1; }
 			_st_sub_take "$ST_SUB.raw" || { rm -f "$ST_SUB.raw"; return 1; }
 			rm -f "$ST_SUB.raw"
@@ -31145,7 +31075,7 @@ do_steer_sub_links() {
 	_st_phase sub
 	[ -s "$f" ] || { echo "ОШИБКА: нет ссылок"; return 1; }
 	_st_need_ext || { rm -f "$f"; return 1; }
-	tr ' \t\r' '\n\n\n' < "$f" | grep -iE "$STL_LINK_RE" | awk '!s[$0]++' > "$ST_SUB.raw"
+	_st_links_split < "$f" > "$ST_SUB.raw"
 	rm -f "$f"
 	[ -s "$ST_SUB.raw" ] || { rm -f "$ST_SUB.raw"; echo "ОШИБКА: в тексте нет ссылок на серверы"; return 1; }
 	n="$(grep -c . "$ST_SUB.raw")"
@@ -31169,12 +31099,12 @@ do_steer_sub_update() {
 	[ -s "$ST_SUB_URL" ] || { echo "ОШИБКА: это не подписка, а свои ссылки — обновлять нечего"; return 1; }
 	_st_need_ext || return 1
 	_rb_say "Обновляем подписку"
-	was="$(md5sum < "$ST_SUB" 2>/dev/null)"
+	was="$(md5sum 2>/dev/null < "$ST_SUB")"
 	if ! _st_sub_fetch "$(head -n1 "$ST_SUB_URL")"; then
 		[ "$1" = auto ] && echo "   · прежний список серверов остался в работе"
 		return 1
 	fi
-	now="$(md5sum < "$ST_SUB" 2>/dev/null)"
+	now="$(md5sum 2>/dev/null < "$ST_SUB")"
 	_st_use_vpn || { _rb_say "Готово"; return 0; }
 	if [ "$1" = auto ] && [ "$was" = "$now" ] && [ ! -f "$ST_OFF" ] && stl_running && _st_vpn_probe; then
 		_rb_say "Список серверов не изменился, VPN работает — туннель не трогаем"
@@ -31246,8 +31176,6 @@ do_steer_home_back() {
 	do_steer_switch "$prev"
 }
 
-# Работает ли сейчас другая секция Steer (по последней проверке VPN не старше 10 минут). Перезапуск службы
-# steer рвёт туннели ВСЕХ секций — ради одной упавшей так делать нельзя, если остальные возят трафик
 _st_others_alive() {
 	local s f t r k now
 	now="$(date +%s)"
@@ -31533,14 +31461,12 @@ steer_sub_action() {
 				printf '%s' "$mode" | jsonfilter -e '@.names[*]' > "$nf" 2>/dev/null
 				tsv="$(_st_nodes_kv)"
 				total="$(printf '%s\n' "$tsv" | grep -c .)"
-				# сколько узлов останется для «Авто»: не скрытые и не убранные из «Авто»
 				cnt="$( { printf '%s\n' "$tsv" | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE"; printf '%s\n' "$tsv" | _zm_excl_hits "$xf" "$nf"; } | grep . | sort -u | wc -l)"
 				if [ "$total" -gt 0 ] && [ "${cnt:-0}" -ge "$total" ]; then rm -f "$nf" "$xf"; echo '{"error":"для «Авто» должен остаться хотя бы один сервер"}'; return 1; fi
 				if [ -s "$xf" ]; then mv -f "$xf" "$ST_SUB_NOAUTO_MK"; else rm -f "$xf" "$ST_SUB_NOAUTO_MK"; fi
 				_zm_names_save "$nf" "$ST_SUB_NOAUTO"
 				rm -f "$nf"
 			fi
-			# закреплённый вручную узел не трогаем; «Авто» пересчитает узлы при следующем переключении
 			if _st_use_vpn && _st_installed && [ ! -f "$ST_OFF" ] && [ -z "$(_st_blocker)" ] && _st_work && [ ! -s "$ST_SUB_NODE" ]; then
 				job_start steer do_steer_switch -
 			else
@@ -31636,7 +31562,7 @@ do_steer_engine() {
 	rm -f "$ST_STOP_FLAG"
 	_st_installed || { echo "ОШИБКА: Steer ещё не установлен"; return 1; }
 	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: ядро steer сейчас настраивает не Zapret Manager"; return 1; }
-	rm -f "$STL_CACHE"
+	rm -f "$STL_CACHE" "$JOBS_DIR/steer.latest.try"
 	_ensure_deps
 	_st_install_steer || return 1
 	if [ ! -f "$ST_OFF" ] && _st_work; then
@@ -32151,9 +32077,11 @@ _st_ping_refresh() {
 	total="$(grep -c . "$ST_SUB_PING")"; ok="$(awk -F'\t' '$2 > 0' "$ST_SUB_PING" | grep -c .)"
 	blk="$(awk -F'\t' '$3 == "b"' "$ST_SUB_PING" | grep -c .)"
 	_st_ping_order "$cur"
-	best="$(head -n1 "$ST_SUB_ORDER")"; ms="$(_st_ping_line "$best")"
+	best="$(_st_order_head)"; [ -n "$best" ] || best="$(head -n1 "$ST_SUB_ORDER")"
+	ms="$(_st_ping_line "$best")"
 	[ "$blk" -gt 0 ] && echo "   • Порт открыт, но трафик не идёт (похоже, блокирует провайдер): $blk — эти узлы в конце"
-	if [ "$ok" -gt 0 ]; then echo "   ✓ Отвечают $ok из $total, первым — «$best» (${ms} мс)"
+	if [ "$ok" -gt 0 ] && [ "${ms:-0}" -gt 0 ] 2>/dev/null; then echo "   ✓ Отвечают $ok из $total, первым — «$best» (${ms} мс)"
+	elif [ "$ok" -gt 0 ]; then echo "   ✓ Отвечают $ok из $total"
 	else _rb_warn "Ни один узел не ответил на пинг — ядро steer переберёт их само по порядку"; fi
 	return 0
 }
@@ -35027,7 +34955,6 @@ _ab_num() { echo "${1:-0}" | awk '{ s = $1; o = ""; while (length(s) > 3) { o = 
 
 _ab_dom() { echo "$(_ab_num "$1") $(echo "${1:-0}" | awk '{ n = $1 % 100; m = $1 % 10; print (n >= 11 && n <= 14) ? "доменов" : (m == 1 ? "домен" : (m >= 2 && m <= 4 ? "домена" : "доменов")) }')"; }
 
-# Включённые списки Tachyon (настройка tch=a,b): только известные, в порядке каталога панели
 _ab_tch() { local x c=",$(_ab_get tch "")," ; for x in $AB_TCH_DOM $AB_TCH_IP; do case "$c" in *",$x,"*) echo "$x" ;; esac; done; }
 _ab_tch_dom() { local x; for x in $(_ab_tch); do case " $AB_TCH_DOM " in *" $x "*) echo "$x" ;; esac; done; }
 _ab_tch_ip() { local x; for x in $(_ab_tch); do case " $AB_TCH_IP " in *" $x "*) echo "$x" ;; esac; done; }
@@ -35229,7 +35156,6 @@ _ab_dl() {
 	f="$(_ab_file "$id")" || return 1
 	min="$(_ab_min "$id")"
 	mkdir -p "$AB_DIR/src"
-	# HaGeZi — в формате dnsmasq; списки Tachyon — просто домены, по одному в строке
 	case "$id" in
 		t_*) urls="$ST_TCH_RAW/release/domains/$f $ST_TCH_CDN/release/domains/$f" ;;
 		*) urls="$AB_URL_GH/$f $AB_URL_CDN/$f" ;;
@@ -35269,7 +35195,6 @@ _ab_build() {
 	ids="$(_ab_ids)"
 	rm -f "$out.note"
 	for id in $ids; do _ab_src "$id" >/dev/null || case "$id" in t_*) ;; *) echo "нет скачанного списка $(_ab_title "$id")" >&2; return 1 ;; esac; done
-	# необязательные списки Tachyon, которые ни разу не скачались, просто не входят в сборку
 	ids="$(for id in $ids; do case "$id" in t_*) _ab_src "$id" >/dev/null && echo "$id" ;; *) echo "$id" ;; esac; done | tr '\n' ' ')"
 	set -- $ids; [ $# -gt 1 ] && dedup=1
 	if [ "$dedup" = 1 ]; then
@@ -35466,8 +35391,6 @@ _ab_stats_guard() {
 	return 1
 }
 
-# Сброс статистики: счётчики, топы и журнал — с нуля, блокировка и запись статистики продолжают работать.
-# Журнал dnsmasq обнуляется, а не удаляется: dnsmasq держит файл открытым и писал бы в удалённый
 _ab_stats_reset() {
 	local lk="$AB_STATS_DIR/.lock" t=0
 	mkdir -p "$AB_STATS_DIR"
@@ -35515,7 +35438,7 @@ _ab_jcap() {
 _ab_jtrim() {
 	local n
 	[ -f "$1" ] || return 0
-	n="$(wc -l < "$1" 2>/dev/null)"
+	n="$(wc -l 2>/dev/null < "$1")"
 	[ "${n:-0}" -gt "$2" ] 2>/dev/null || return 0
 	tail -n "$2" "$1" > "$1.t" 2>/dev/null && mv -f "$1.t" "$1"
 	rm -f "$1.t"
@@ -35926,9 +35849,6 @@ _ab_free_json() {
 	printf ']}\n'
 }
 
-# ---------- Опасные IP из Tachyon Lists: отдельная таблица nft, файрвол OpenWrt не трогаем ----------
-# Чистим список: только IPv4/маска от /8, без частных, служебных и CGNAT-сетей (100.64/10 — это и Tailscale,
-# и сеть провайдера за NAT): если такое попадёт в список, пропадёт доступ к роутеру или интернету
 _ab_ip_clean() {
 	awk -F'[./]' '
 		function ip(a, b, c, d) { return ((a * 256 + b) * 256 + c) * 256 + d }
@@ -35939,7 +35859,6 @@ _ab_ip_clean() {
 		}
 		{ sub(/\r$/, ""); sub(/[ \t].*$/, "") }
 		{
-			# без {1,3} в регулярках: так понимает любой awk; проверяем по частям
 			if ($0 !~ /^[0-9][0-9.]*[0-9](\/[0-9]+)?$/) next
 			z = $0; if (gsub(/\./, ".", z) != 3 || gsub(/\//, "/", z) > 1) next
 			for (i = 1; i <= 4; i++) if ($i == "" || length($i) > 3 || $i + 0 > 255) next
@@ -35977,7 +35896,6 @@ _ab_ip_dl() {
 	return 1
 }
 
-# Адреса, которые блокировать нельзя ни при каком списке: шлюз провайдера и DNS-серверы роутера
 _ab_ip_keep() {
 	{ ip -4 route show default 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "via") print $(i + 1) }'
 	  cat /tmp/resolv.conf.d/resolv.conf.auto /tmp/resolv.conf.auto 2>/dev/null | awk '$1 == "nameserver" { print $2 }'
@@ -35990,7 +35908,6 @@ _ab_ip_stop() {
 	return 0
 }
 
-# Загружаем таблицу целиком одним файлом: nft применяет его атомарно — либо всё, либо ничего
 _ab_ip_load() {
 	local f="$JOBS_DIR/adblock.ip.nft" id src="" keep av
 	for id in $1; do [ -s "$AB_IP_DIR/$id.txt" ] && src="$src $AB_IP_DIR/$id.txt"; done
@@ -36022,7 +35939,6 @@ _ab_ip_load() {
 	return 1
 }
 
-# Таблица в памяти ядра пропадает при перезагрузке — сторож панели возвращает её по скачанным файлам
 _ab_ip_sync() {
 	local ids sig n=0 id
 	ids="$(_ab_tch_ip | tr '\n' ' ' | sed 's/ $//')"
@@ -36033,7 +35949,6 @@ _ab_ip_sync() {
 	_ab_ip_load "$ids"
 }
 
-# Сколько адресов загружено и сколько соединений с ними уже отброшено
 _ab_ip_tbl() { nft -a list table inet "$AB_IP_NFT" 2>/dev/null | sed -n '1s/.*# handle \([0-9]*\).*/\1/p'; }
 _ab_ip_hits() { for c in forward_bad input_bad output_bad; do nft list chain inet "$AB_IP_NFT" "$c" 2>/dev/null; done | awk '/drop/ { for (i = 1; i < NF; i++) if ($i == "packets") s += $(i + 1) } END { print s + 0 }'; }
 
@@ -36043,7 +35958,6 @@ _ab_ip_json() {
 		live=true
 		n="$(awk '{ print $NF + 0 }' "$JOBS_DIR/adblock.ip.sig" 2>/dev/null)"
 		hits="$(_ab_ip_hits)"
-		# после «Сбросить статистику» считаем от запомненного значения той же таблицы; таблицу пересоздали — её счётчики и так с нуля
 		h0="$(cat "$JOBS_DIR/adblock.ip.hits0" 2>/dev/null)"
 		case "$h0" in
 			*" "*) if [ "${h0%% *}" = "$(_ab_ip_tbl)" ] && [ "${hits:-0}" -ge "${h0#* }" ] 2>/dev/null; then hits=$((hits - ${h0#* })); else rm -f "$JOBS_DIR/adblock.ip.hits0"; fi ;;
@@ -40839,7 +40753,7 @@ case "$1" in
 	call)
 		t="/tmp/zm-rpc.$$"
 		call_method "$2" > "$t"
-		sz="$(wc -c < "$t" 2>/dev/null | tr -d ' ')"
+		sz="$(wc -c 2>/dev/null < "$t" | tr -d ' ')"
 		if [ "${sz:-0}" -gt 400000 ]; then
 			echo '{"error":"ответ роутера слишком большой — отменено, чтобы не перегрузить службу входа (rpcd)"}'
 		else
@@ -42665,8 +42579,6 @@ function svcGrid(list) {
 	return E('div', { 'class': 'zm-svc-grid' }, list);
 }
 
-// Каталог Tachyon Lists качается в фоне (raw.githubusercontent.com бывает медленным): блок показывает
-// «обновляется…», кнопки ждут, а когда роутер закончит — итог и свежий список сервисов. Один опрос на страницу
 var tchPoll = null;
 function tachyonBlock(t, o) {
 	t = t || {};
@@ -42709,7 +42621,6 @@ function tachyonBlock(t, o) {
 		}).catch(function() { toast('Роутер не ответил', 'error'); });
 	} }, on ? 'Выключить каталог' : 'Включить каталог'));
 	box.appendChild(E('div', { 'class': 'zm-actions zm-cat-src-actions' }, b));
-	// каталог обновляется сам (по расписанию или после включения) — следим и за ним, без всплывающих сообщений
 	if (busy && !tchPoll) { tchPoll = { user: false, t0: Date.now(), o: o, box: box }; setTimeout(tchTick, 2500); }
 	else if (tchPoll) { tchPoll.box = box; tchPoll.o = o; }
 	return box;
@@ -42722,7 +42633,6 @@ function tchTick() {
 	callSteerAction('tachyon', 'state').then(function(st) {
 		if (tchPoll !== p) return;
 		if (st && !st.error && st.busy && Date.now() - p.t0 < 360000) {
-			// tachyonBlock() сам запишет в p.box новый блок — старый берём заранее
 			var was = p.box;
 			if (document.body.contains(was)) was.replaceWith(tachyonBlock(st, p.o));
 			setTimeout(tchTick, 2500);
@@ -42730,7 +42640,6 @@ function tchTick() {
 		}
 		tchPoll = null;
 		if (p.user) {
-			// в ответе «error» — признак неудачного скачивания (true/false); строка — ошибка самого вызова
 			if (!st || typeof st.error === 'string' || st.busy) toast('Роутер не сообщил, чем закончилось обновление каталога — обновите страницу', 'warning');
 			else if (st.error) toast('Каталог Tachyon Lists не скачался — проверьте доступ к GitHub и попробуйте позже', 'error');
 			else toast(p.mode === 'on' ? 'Tachyon Lists включён' : 'Каталог Tachyon Lists обновлён', 'info');
@@ -42743,8 +42652,6 @@ function tchTick() {
 	});
 }
 
-// Каталог splify2-lists — общий для Steer и Forkozz, тот же вид и те же кнопки, что у Tachyon Lists.
-// Свой источник каталога больше не задаётся: свои списки добавляются рядом, в «Моих списках»
 function catalogBlock(c, o) {
 	c = c || {};
 	var box = E('div', { 'class': 'zm-cat-src' }), busy = !c.off && !!c.busy;
@@ -42779,7 +42686,6 @@ function catalogBlock(c, o) {
 		if (c.off) { toast('Включаем каталог списков — скачиваем его…', 'info'); act('on', 'Каталог списков включён'); }
 		else act('off', 'Каталог списков выключен — остались только встроенные сервисы');
 	} }, c.off ? 'Включить каталог' : 'Выключить каталог'));
-	// раньше источник можно было сменить — тем, у кого он свой, даём вернуть стандартный
 	if (c.custom && !c.off) b.push(E('button', { 'class': 'cbi-button', 'disabled': busy ? '' : null, 'title': 'Сейчас каталог берётся по вашей ссылке', 'click': function() {
 		toast('Скачиваем стандартный каталог…', 'info');
 		act('', 'Вернули стандартный каталог списков');
@@ -42788,8 +42694,6 @@ function catalogBlock(c, o) {
 	return box;
 }
 
-// «Мои списки»: свои списки доменов и подсетей по ссылке, общие для Steer и Forkozz. Каталоги не меняются —
-// свои списки появляются рядом, отдельной группой в «Дополнительных списках»
 var OWN_GROUP = 'Мои списки (добавлены вами)', ownBusy = '';
 function ownWord(n, a, b, c) { var m = n % 10, h = n % 100; return m === 1 && h !== 11 ? a : m >= 2 && m <= 4 && (h < 12 || h > 14) ? b : c; }
 function ownCounts(r) {
@@ -43270,7 +43174,6 @@ function hideTokens(names, exact) {
 	return out.filter(function(t) { return used[t.kind]++ < lim[t.kind]; });
 }
 
-// Подписи для выбора «не брать в Авто» — общие для Steer и Forkozz
 var NOAUTO_WORDS = { hide: 'Убрать из «Авто»', hidden: 'Не в «Авто»', on: 'не в Авто', off: 'в Авто',
 	desc: 'На эти серверы «Авто» не переключается. Вручную их можно выбрать как обычно.',
 	hint: 'Отметьте серверы, на которые «Авто» не должен переключаться, и нажмите «Сохранить». Вручную их по-прежнему можно выбрать.',
@@ -43973,10 +43876,6 @@ function qrSvg(text, size) {
 	return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + (n + 8) + ' ' + (n + 8) + '" width="' + (size || 240) + '" height="' + (size || 240) + '" shape-rendering="crispEdges" role="img" aria-label="QR-код"><rect width="100%" height="100%" fill="#fff"/><path fill="#000" d="' + d + '"/></svg>';
 }
 
-// Сервис запускается или останавливается не мгновенно: ответ на «Запустить»
-// может прийти раньше, чем процесс поднимется. settle() переспрашивает
-// fetch(), пока done(r) не станет true (или не выйдет maxMs), и отдаёт
-// каждый свежий ответ в onStep — карточка не застревает на старом состоянии
 function settle(fetch, done, onStep, maxMs) {
 	var t0 = Date.now(), lim = maxMs || 15000, waits = [ 700, 1000, 1500, 2000, 2500, 3000 ], n = 0;
 	return new Promise(function(resolve) {
@@ -43995,7 +43894,6 @@ function settle(fetch, done, onStep, maxMs) {
 		})(null);
 	});
 }
-// Сообщить оболочке (точки в боковом меню, баннеры), что состояние сервисов поменялось
 function changed(detail) { try { window.dispatchEvent(new CustomEvent('zm:changed', { detail: detail || {} })); } catch (e) {} }
 
 return baseclass.extend({
@@ -44363,8 +44261,6 @@ return view.extend({
 			var ramAvail = mem.available != null ? mem.available : ((mem.free || 0) + (mem.buffered || 0) + (mem.cached || 0));
 			var ru = zm.parseSize(sysInfo.root_used), rf = zm.parseSize(sysInfo.root_free);
 			var tu = zm.parseSize(sysInfo.tmp_used), tf = zm.parseSize(sysInfo.tmp_free);
-			// объём раздела — как в LuCI и «Мониторинге» (колонка Size у df), а не «занято + свободно»:
-			// файловая система держит резерв, и сумма выходила меньше настоящего размера
 			var rt = zm.parseSize(sysInfo.root_total), tt = zm.parseSize(sysInfo.tmp_total);
 			if (!(rt > 0)) rt = ru + rf;
 			if (!(tt > 0)) tt = tu + tf;
@@ -47805,7 +47701,6 @@ return view.extend({
 			setCard.appendChild(E('p', { 'class': 'zm-hint' }, ct
 				? 'Адрес сервиса остаётся в туннеле не меньше ' + (ct >= 3600 ? 'часа' : ct / 60 + ' минут') + ' после DNS-ответа. Помогает, если приложение (Instagram, YouTube) подвисает раз в минуту: оно держит адрес дольше, чем живёт DNS-ответ, и уходило мимо туннеля.'
 				: 'Адрес сервиса живёт в туннеле столько, сколько разрешает DNS-ответ (часто минуту). Если приложение подвисает — поставьте 5 или 15 минут.'));
-			// торренты и QUIC — ключи правил ядра steer 2.1
 			var v21 = !data.version || !verLt(String(data.version), '2.1.0'), need = v21 ? '' : ' Нужно ядро steer 2.1 — обновите его в карточке ядра.';
 			var tor = data.torrent || 'allow';
 			setCard.appendChild(seg('Торренты', [
@@ -49354,7 +49249,7 @@ return view.extend({
 		function subHidden() { var h = {}; ((subData && subData.hidden) || []).forEach(function(i) { h[i] = true; }); return h; }
 		var hideMode = false;
 		var linksOpen = false, linksBusy = false, linksVal = '';
-		var linksEd = zm.linksEditor({ re: /^(vless|vmess|trojan|ss|socks4a?|socks5?|https?|hysteria2|hy2):\/\/\S+$/i, kinds: 'vless, trojan, ss, vmess, hysteria2, socks5, http', placeholder: 'vless://…\ntrojan://…\nhysteria2://…',
+		var linksEd = zm.linksEditor({ re: /^(vless|vmess|trojan|ss|socks4a?|socks5?|https?|hysteria2|hy2):\/\/[^\s#]+(#.*)?$/i, kinds: 'vless, trojan, ss, vmess, hysteria2, socks5, http', placeholder: 'vless://…\ntrojan://…\nhysteria2://…',
 			empty: 'Серверов в списке нет — добавьте хотя бы одну ссылку на сервер.',
 			busy: function() { return busy || linksBusy; },
 			onChange: function(v) { linksVal = v; renderLinksBar(); } });
@@ -49453,7 +49348,6 @@ return view.extend({
 				onReset: function() { return subActP('sub_hide', JSON.stringify({ reset: true }), 'Возвращаем все серверы'); } });
 		}
 		var hidePick = mkHide();
-		// «Не брать в Авто»: сервер остаётся в списке и выбирается вручную, но «Авто» на него не переключается
 		var pickWho = '';
 		function mkNoAuto() {
 			return zm.hidePicker({ noun: 'серверы', words: zm.NOAUTO_WORDS, busy: function() { return busy; },
@@ -49797,7 +49691,6 @@ return view.extend({
 			var skIns = sk.some(function(r) { return /allowInsecure|insecure/i.test(r.reason || ''); });
 			if (subData.list && subData.list.skipped > 0) subCard.appendChild(E('p', { 'class': 'zm-hint' },
 				[ 'Пропущено узлов: ' + subData.list.skipped + (sk.length ? ' — ' + sk.map(function(r) { return r.reason; }).slice(0, 2).join('; ') : '') + '. Steer умеет VLESS, Hysteria2, Trojan, Shadowsocks, VMess, SOCKS или HTTP; TUIC, AnyTLS и WireGuard из подписки он не берёт.' ]));
-			// узлы с allowInsecure: ядро берёт их только по явному согласию — переключатель виден, когда такие узлы есть или он уже включён
 			if (subData.insecure || skIns) subCard.appendChild(zm.swRow(!!subData.insecure, 'Узлы без проверки сертификата',
 				subData.insecure ? 'Включено: узлы, у которых в подписке стоит allowInsecure, работают. Сертификат таких серверов не проверяется — подменить сервер проще, поэтому включайте, только если доверяете своему VPN.'
 					: 'В подписке есть узлы с allowInsecure — сервер просит не проверять его сертификат. Steer их пропускает. Включите, если доверяете своему VPN: такие узлы появятся в списке.',
@@ -50946,7 +50839,6 @@ var LISTS = [
 var LIST_BY_ID = {};
 LISTS.forEach(function(l) { LIST_BY_ID[l.id] = l; });
 
-// Списки блокировки из Tachyon Lists (Dushnilin): сайты — через DNS вместе с HaGeZi, опасные IP — в файрволе
 var TCH_DOM = [
 	{ id: 'gambling_block', name: 'Казино и букмекеры', approx: '90 тыс. доменов', text: 'Онлайн-казино, букмекеры, слоты и тысячи их зеркал.' },
 	{ id: 'android_ads_block', name: 'Реклама в играх и приложениях Android', approx: '5 тыс. доменов', text: 'AdMob, Unity Ads, AppLovin, IronSource, Яндекс и MyTarget — ролики между уровнями и баннеры в бесплатных приложениях.' },
@@ -52879,8 +52771,6 @@ return view.extend({
 				});
 			}
 
-			// Запуск, остановка и перезапуск: значок «запускается…», пока роутер не
-			// подтвердит нужное состояние, затем итог. Боковое меню обновляется вместе с карточкой
 			function zSvcAction(action) {
 				var want = action !== 'stop';
 				var isNow = function(d) { return (d && d.zapret_running === true) === want; };
@@ -52895,7 +52785,6 @@ return view.extend({
 					renderV();
 					zm.toast(ok ? OK[action] : BAD[action], ok ? 'info' : 'error');
 					zm.changed({ svc: 'zapret' });
-					// nfqws с ошибкой в стратегии может упасть через пару секунд после старта — перепроверяем тихо
 					if (ok && want) setTimeout(function() {
 						if (zPend || !document.body.contains(zCardWrap)) return;
 						zm.status().then(function(d2) {
@@ -52915,7 +52804,6 @@ return view.extend({
 					status = res;
 					zm.settle(zm.status, isNow, null, 20000).then(function(x) { fin(x.r || res, x.ok); });
 				}).catch(function() {
-					// ответа нет (обрыв, долгий запуск) — состояние всё равно узнаём у роутера
 					zm.settle(zm.status, isNow, null, 20000).then(function(x) { fin(x.r || status, x.ok); });
 				});
 			}
@@ -53126,7 +53014,6 @@ return view.extend({
 					? '⚠ Текущая стратегия не подходит для списков РКН. Они включатся сами, когда вы выберете подходящую.'
 					: 'Основная стратегия будет обходить блокировку только для сайтов из списка РКН' + (status.rkn_on && status.rkn_count > 0 ? ' (' + status.rkn_count + ' доменов)' : '') + ' и вашего списка хостов, а не для всех сайтов, кроме исключений. Помогает, если стратегия мешает обычным сайтам. Список сохраняется при смене стратегии.';
 				extraCard.appendChild(zm.swRow(!!status.rkn, extraBusy === 'rkn' ? 'Обход по спискам РКН — применяем…' : 'Обход по спискам РКН', rknHint, function() { toggleExtra('rkn', !status.rkn); }, !!extraBusy || (!!status.main_off && !status.rkn)));
-				// какой список РКН качать: общий для Zapret и Zapret2
 				var rknSrc = status.rkn_src === 'tachyon' ? 'tachyon' : 'z4r';
 				var RKN_SRC = [ [ 'z4r', 'zapret4rocket', 'Реестр РКН целиком, около 125 тыс. доменов: больше охват, но много давно не работающих сайтов.' ],
 					[ 'tachyon', 'Tachyon Lists', '«Заблокированные в РФ» — только действующие домены, около 74 тыс.: список легче, Zapret быстрее его читает. YouTube из него убран — у Zapret для него свой блок.' ] ];
@@ -53211,7 +53098,6 @@ return view.extend({
 					}).catch(function() {});
 				}, 1500);
 			};
-			// вернулись на вкладку браузера — сверяем статус: за это время Zapret мог упасть или подняться
 			var zsVis = function() { if (!document.hidden) zsSync(); };
 			window.addEventListener('zm:zstatus', zsSync);
 			document.addEventListener('visibilitychange', zsVis);
@@ -55805,7 +55691,6 @@ return view.extend({
 		var LABELS = { install: 'Устанавливаем Zapret2', update: 'Обновляем Zapret2', remove: 'Удаляем Zapret2', start: 'Запускаем Zapret2', stop: 'Останавливаем Zapret2', restart: 'Перезапускаем Zapret2' };
 		zm.toast(LABELS[action] || 'Выполняем', 'warning');
 		if (!job) {
-			// запуск/остановка/перезапуск: ждём, пока роутер подтвердит состояние, а не верим первому ответу
 			var want = action !== 'stop', isNow = function(d) { return (d && d.zapret2_running === true) === want; };
 			var OK = { start: 'Zapret2 запущен', stop: 'Zapret2 остановлен', restart: 'Zapret2 перезапущен' };
 			var fin = function(d, ok) {
@@ -62194,7 +62079,6 @@ return view.extend({
 
 		var busyMap = {};
 
-		// Перезапуск только этого прокси — «Перезапустить все» внизу страницы трогает все сразу
 		function restartBtn(v) {
 			return E('button', {
 				'class': 'cbi-button',
@@ -62217,7 +62101,6 @@ return view.extend({
 			}, 'Перезапустить');
 		}
 
-		// Переустановка по умолчанию сохраняет порт, ключ и параметры; «с нуля» — только осознанным выбором
 		function reinstallAsk(v) {
 			var proto = v.kind !== 'socks';
 			zm.dialog({
@@ -62312,7 +62195,6 @@ return view.extend({
 			layoutCards();
 		}
 
-		// Две независимые колонки: раскрытая панель сдвигает вниз только свою колонку. На узком экране — одна колонка в прежнем порядке.
 		function layoutCards() {
 			var els = [], block = null, col = 0, n = 0;
 			Array.prototype.forEach.call(cards.children, function(ch) {
@@ -70905,7 +70787,6 @@ function refreshShellStatus() {
 var lastZapretDot = null;
 function applyHealth(h) {
 	if (!h) return;
-	// Точка Zapret в меню сменилась (запустили, остановили, упал) — пусть открытая страница Zapret сверит свой статус
 	if (typeof h.zapret === 'number') {
 		if (lastZapretDot !== null && lastZapretDot !== h.zapret) { try { window.dispatchEvent(new Event('zm:zstatus')); } catch (e) {} }
 		lastZapretDot = h.zapret;
