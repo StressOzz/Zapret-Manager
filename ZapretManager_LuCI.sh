@@ -5865,6 +5865,7 @@ STL_SOCK="$STL_ETC/steer.sock"
 STL_INIT="${STL_INIT:-/etc/init.d/steer}"
 STL_SBIN="${STL_SBIN:-/usr/sbin}"
 STL_STATE="${STL_STATE:-/var/lib/steer}"
+STL_PLUG="${STL_PLUG:-/usr/lib/steer/plugins}"
 STL_MIN="2.0.0"
 STL_MODS="vless xsteer obfs tgws hysteria2 proxy"
 STL_REL_URLS="${STL_REL_URLS:-https://raw.githubusercontent.com/splify2/releases/main/version.json https://cdn.jsdelivr.net/gh/splify2/releases@main/version.json https://splify2.github.io/releases/version.json}"
@@ -5886,12 +5887,13 @@ _stl_ver_ok() { _zm_re "$1" '^[0-9]+\.[0-9]+\.[0-9]+$' && [ "${1%%.*}" -ge 2 ]; 
 stl_present() { command -v steer >/dev/null 2>&1; }
 stl_version() { steer --version 2>/dev/null | awk 'NR == 1 { print $2 }'; }
 stl_v2() { _stl_ver_ok "$(stl_version)"; }
+_stl_mod_x() { [ -x "$STL_SBIN/steer-$1" ] || [ -s "$STL_PLUG/$1/plugin.json" ]; }
 stl_has() {
 	stl_v2 || return 1
 	case "$1" in
-		vpn|vless) [ -x "$STL_SBIN/steer-vless" ] ;;
-		hy2|hysteria2) [ -x "$STL_SBIN/steer-hysteria2" ] ;;
-		proxy) [ -x "$STL_SBIN/steer-proxy" ] ;;
+		vpn|vless) _stl_mod_x vless ;;
+		hy2|hysteria2) _stl_mod_x hysteria2 ;;
+		proxy) _stl_mod_x proxy ;;
 		*) return 1 ;;
 	esac
 }
@@ -5901,7 +5903,7 @@ stl_busy_by() {
 	for b in podkop; do [ -e "${i%/*}/$b" ] && by="${by:+$by, }$b"; done
 	echo "${by:-steer-box-connector}"
 }
-_stl_mods_present() { local m; for m in $STL_MODS; do [ -x "$STL_SBIN/steer-$m" ] && printf '%s ' "$m"; done; }
+_stl_mods_present() { local m; for m in $STL_MODS; do _stl_mod_x "$m" && printf '%s ' "$m"; done; }
 
 _stl_rel() {
 	local f="$STL_TMP/version.json" u
@@ -5937,6 +5939,7 @@ stl_latest() {
 
 stl_pkgs_installed() {
 	local p m
+	_st_ver_lt "$(stl_version)" 2.1.0 || { _pkg_is_installed steer-core && printf 'steer-core '; return 0; }
 	for p in $(for m in $STL_MODS; do echo "steer-$m"; done) steer-extended steer-core steer libsteer libsteer-wolfssl; do
 		_pkg_is_installed "$p" && printf '%s ' "$p"
 	done
@@ -25706,8 +25709,19 @@ _stl_fetch() {
 	return 1
 }
 
+_stl_plug_add() {
+	local m
+	for m; do
+		_stl_mod_x "$m" && continue
+		_stl_say "Ставим плагин ядра steer: $m"
+		_stl_t 300 steer plugin install "$m" >&2
+		_stl_mod_x "$m" || { echo "ОШИБКА: плагин $m ядра steer не установился"; return 1; }
+	done
+	return 0
+}
+
 stl_engine_install() {
-	local ver="$1" arch m p n f mods="" pkgs files="" old="" back="" legacy="" keep="$STL_TMP/spec.keep" was_on="" rc
+	local ver="$1" arch m p n f mods="" pkgs files="" old="" back="" legacy="" keep="$STL_TMP/spec.keep" was_on="" rc p21="" plug=""
 	shift
 	_stl_ver_ok "$ver" || { echo "ОШИБКА: версия ядра steer $ver — нужна 2.0.0 или новее"; return 1; }
 	arch="$(_rb_arch)"
@@ -25718,8 +25732,14 @@ stl_engine_install() {
 		case " $legacy " in *" steer-extended "*) mods="$mods vless" ;; esac
 	fi
 	mods="$(for m in $mods $(_stl_mods_present); do echo "$m"; done | awk '!s[$0]++' | tr '\n' ' ')"
-	pkgs="steer-core$(for m in $mods; do printf ' steer-%s' "$m"; done)"
-	stl_v2 && _pkg_is_installed steer-extended && pkgs="$pkgs steer-extended"
+	_st_ver_lt "$ver" 2.1.0 || { p21=1; for m in $mods; do [ "$m" = tgws ] || plug="$plug $m"; done; }
+	pkgs="steer-core$([ -n "$p21" ] || for m in $mods; do printf ' steer-%s' "$m"; done)"
+	[ -z "$p21" ] && stl_v2 && _pkg_is_installed steer-extended && pkgs="$pkgs steer-extended"
+	if [ -n "$STL_MODS_ONLY" ] && stl_v2 && [ "$(stl_version)" = "$ver" ] && [ -n "$p21" ]; then
+		STL_NEW=""; STL_PKGS=""
+		_stl_plug_add $plug
+		return
+	fi
 	if [ -n "$STL_MODS_ONLY" ] && stl_v2 && [ "$(stl_version)" = "$ver" ]; then
 		pkgs="$(for p in $pkgs; do _pkg_is_installed "$p" || printf '%s ' "$p"; done)"
 		pkgs="$(echo $pkgs)"
@@ -25758,6 +25778,7 @@ stl_engine_install() {
 		fi
 	elif [ "$PKG" = apk ]; then
 		for n in $legacy; do if [ "$n" = steer ]; then apk add steer >/dev/null 2>&1; else old="$old !$n"; fi; done
+		[ -n "$p21" ] && old="$old $(awk -F'><' 'NF > 1 && $1 ~ /^steer-(vless|hysteria2|proxy|xsteer|obfs|warpbox|tgws|extended)$/ { print $1 }' /etc/apk/world 2>/dev/null)"
 		$INSTALL $files $old >&2; rc=$?
 		[ "$rc" = 0 ] && for n in $legacy; do apk del "$n" >/dev/null 2>&1; done
 	else
@@ -25792,7 +25813,9 @@ stl_engine_install() {
 		echo "ОШИБКА: ядро steer $ver не установилось"
 		return 1
 	fi
+	[ -n "$plug" ] && { _stl_plug_add $plug || rc=1; }
 	if [ -n "$was_on" ]; then stl_restart >/dev/null 2>&1; else stl_stop; fi
+	[ "$rc" = 0 ] || return 1
 	_stl_say "Ядро steer $(stl_version) установлено$( [ -n "$mods" ] && printf ', модули: %s' "$(echo $mods | sed 's/ /, /g')")"
 	return 0
 }
@@ -26288,7 +26311,7 @@ END {
 stl_sub_nodes() {
 	local m
 	{ for m in vless hysteria2 proxy; do
-		[ -x "$STL_SBIN/steer-$m" ] || continue
+		_stl_mod_x "$m" || continue
 		printf '@%s\t' "$m"; _stl_t 30 steer "$m-nodes" "$1" 2>/dev/null | tr '\n\t' '  '; echo
 	done; } | LC_ALL=C awk -v MAP="$1.map" -v META="$3" '
 function junesc(s,    o, i, n, c, d) {
@@ -26478,11 +26501,11 @@ _st_devs_save() {
 	return 0
 }
 
-_st_splify2_pkg() { grep -qx 'P:luci-app-splify2' /lib/apk/db/installed 2>/dev/null || [ -f /usr/lib/opkg/info/luci-app-splify2.control ]; }
+_st_splify2_pkg() { grep -qxE 'P:(luci-app-)?splify2' /lib/apk/db/installed 2>/dev/null || [ -f /usr/lib/opkg/info/luci-app-splify2.control ] || [ -f /usr/lib/opkg/info/splify2.control ]; }
 
 _st_splify2() {
 	[ -x /usr/libexec/rpcd/splify2 ] || return 1
-	_st_splify2_pkg || [ -f /www/luci-static/resources/view/splify2/home.js ]
+	_st_splify2_pkg || [ -f /www/luci-static/resources/view/splify2/home.js ] || [ -f /www/luci-static/resources/view/splify2/index.js ]
 }
 
 _st_spec_foreign() {
@@ -30793,7 +30816,7 @@ _st_hp_build() {
 	[ -s "$hp" ] && [ ! "$ST_SUB" -nt "$hp" ] && [ ! "$ST_SUB_NODES" -nt "$hp" ] && return 0
 	mkdir -p "$ST_DIR"
 	{ for m in vless proxy; do
-		[ -x "$STL_SBIN/steer-$m" ] || continue
+		_stl_mod_x "$m" || continue
 		_stl_t 30 steer "$m-nodes" "$ST_SUB" 2>/dev/null | tr '\n\t' '  ' | awk -v M="$m" '{
 			j = $0; p = index(j, "\"nodes\":["); if (!p) next
 			j = substr(j, p + 9); n = split(j, C, /\{"index":/)
