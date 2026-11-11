@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.060
+# Version: 5.061
 ZM_VERSION_EOF
 set -e
 
@@ -10989,7 +10989,7 @@ _pg_inst() {
 }
 
 _pg_st_dir() {
-	if [ ! -s "$ST_OWNED" ] && _fk_installed && [ -z "$(ls -A "$ST_DIR" 2>/dev/null | grep -vxE 'services\.remote|catalog\.(idx|meta|url|off|err)')" ]; then return 0; fi
+	if [ ! -s "$ST_OWNED" ] && _fk_installed && [ -z "$(ls -A "$ST_DIR" 2>/dev/null | grep -vxE 'services\.remote|catalog\.(idx|meta|url|off|err)|tachyon\.(svc|idx|meta|plus|direct|off|err)|own\.(svc|idx)')" ]; then return 0; fi
 	echo "$ST_DIR"
 }
 
@@ -26087,19 +26087,44 @@ _stl_fetch() {
 	return 1
 }
 
+# Менеджер плагинов steer узнаёт архитектуру из /etc/apk/arch или строк «arch» в настройках opkg — на части прошивок
+# их нет, и он пишет «нет сборки под » (пусто). Даём ему архитектуру сами: ту, под которую поставлен steer-core
+_stl_parch() {
+	local a
+	a="$(head -n1 "$ST_DIR/core.arch" 2>/dev/null)"
+	[ -n "$a" ] || a="$(_rb_arch)"
+	printf '%s' "$a"
+}
+
+# На apk без /etc/apk/arch записать его — только если это ровно то, что apk и так считает своей архитектурой.
+# Тогда плагины встают и из postinst пакета ядра, и при фоновом обновлении самим ядром
+_stl_arch_fix() {
+	local a p
+	[ "$PKG" = apk ] || return 0
+	[ -s /etc/apk/arch ] && return 0
+	a="$(_rb_arch)"; p="$(apk --print-arch 2>/dev/null)"
+	[ -n "$a" ] && [ "$a" = "$p" ] || return 0
+	printf '%s' "$a" | grep -qE '^[A-Za-z0-9_-]+$' || return 0
+	mkdir -p /etc/apk && printf '%s\n' "$a" > /etc/apk/arch && _stl_say "Записали архитектуру роутера $a в /etc/apk/arch — по ней ядро steer выбирает сборки плагинов"
+	return 0
+}
+
+_stl_plug_run() { ( STEER_PLUGIN_ARCH="$(_stl_parch)"; export STEER_PLUGIN_ARCH; _stl_t 600 steer plugin "$@" ); }
+
 _stl_plug_add() {
 	local m
+	_stl_arch_fix
 	for m; do
 		_stl_mod_x "$m" && continue
 		_stl_say "Ставим плагин ядра steer: $m"
-		_stl_t 600 steer plugin ensure "$m" >&2 || _stl_mod_x "$m" || _stl_t 600 steer plugin install "$m" >&2
+		_stl_plug_run ensure "$m" >&2 || _stl_mod_x "$m" || _stl_plug_run install "$m" >&2
 		_stl_mod_x "$m" || { echo "ОШИБКА: плагин $m ядра steer не установился"; return 1; }
 	done
 	return 0
 }
 
 stl_engine_install() {
-	local ver="$1" arch m p n f mods="" pkgs files="" old="" back="" legacy="" keep="$STL_TMP/spec.keep" was_on="" rc p21="" plug=""
+	local ver="$1" arch m p n f mods="" pkgs files="" old="" back="" legacy="" keep="$STL_TMP/spec.keep" was_on="" rc p21="" plug="" STL_CORE_ARCH=""
 	shift
 	_stl_ver_ok "$ver" || { echo "ОШИБКА: версия ядра steer $ver — нужна 2.0.0 или новее"; return 1; }
 	arch="$(_rb_arch)"
@@ -26138,12 +26163,14 @@ stl_engine_install() {
 			_stl_say "Сборки $p для $arch нет — берём совместимую $pa"
 			_zm_arch_accept "$pa"
 		fi
+		[ "$p" = steer-core ] && STL_CORE_ARCH="$pa"
 		files="$files $f"
 	done
 	stl_enabled && was_on=1
 	case " $pkgs " in *" steer-core "*) _stl_say "Ставим ядро steer $ver: $(echo $pkgs | sed 's/ /, /g')" ;; *) _stl_say "Ставим к ядру steer $ver: $(echo $pkgs | sed 's/ /, /g')" ;; esac
 	$UPDATE >&2
 	[ -s "$STL_SPEC" ] && cp -f "$STL_SPEC" "$keep"
+	[ -n "$p21" ] && _stl_arch_fix
 	local seedspec=""
 	if [ -n "$p21" ] && [ ! -s "$STL_SPEC" ] && [ ! -s "$STL_YAML" ]; then
 		mkdir -p "$STL_ETC"
@@ -26191,6 +26218,7 @@ stl_engine_install() {
 	[ -s "$keep" ] && [ ! -s "$STL_SPEC" ] && { mkdir -p "$STL_ETC"; cp -f "$keep" "$STL_SPEC"; }
 	rm -f "$keep"
 	[ -n "$seedspec" ] && [ "$(cat "$STL_SPEC" 2>/dev/null)" = "$STL_SEED_SPEC" ] && rm -f "$STL_SPEC"
+	[ "$rc" = 0 ] && [ -n "$p21" ] && [ -n "$STL_CORE_ARCH" ] && { mkdir -p "$ST_DIR"; echo "$STL_CORE_ARCH" > "$ST_DIR/core.arch"; }
 	if [ "$rc" != 0 ] || ! stl_v2; then
 		[ -n "$legacy" ] && ! stl_present && echo "!! Прежнее ядро steer снято, а новое не встало — нажмите установку ещё раз, когда появится интернет"
 		[ -n "$was_on" ] && stl_present && stl_restart >/dev/null 2>&1
@@ -26199,7 +26227,7 @@ stl_engine_install() {
 	fi
 	if [ -n "$p21" ] && [ -z "$seedspec" ] && { [ -s "$STL_SPEC" ] || [ -s "$STL_YAML" ]; }; then
 		_stl_say "Ставим плагины ядра steer по правилам"
-		_stl_t 600 steer plugin migrate 2>&1 | _zm_pkg_fmt >&2
+		_stl_plug_run migrate 2>&1 | _zm_pkg_fmt >&2
 	fi
 	[ -n "$plug" ] && { _stl_plug_add $plug || rc=1; }
 	if [ -n "$was_on" ]; then stl_restart >/dev/null 2>&1; else stl_stop; fi
