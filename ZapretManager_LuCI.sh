@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.061
+# Version: 5.062
 ZM_VERSION_EOF
 set -e
 
@@ -1241,6 +1241,7 @@ _st_via_pick() { _zmL steer1 && _st_via_pick "$@"; }
 _st_fetch() { _zmL steer1 && _st_fetch "$@"; }
 _st_cdn_url() { _zmL steer1 && _st_cdn_url "$@"; }
 _st_cat_build() { _zmL steer1 && _st_cat_build "$@"; }
+_st_owncat_build() { _zmL steer1 && _st_owncat_build "$@"; }
 _st_tch_build() { _zmL steer1 && _st_tch_build "$@"; }
 _st_cat_dl() { _zmL steer1 && _st_cat_dl "$@"; }
 _st_set_have() { _zmL steer1 && _st_set_have "$@"; }
@@ -5762,7 +5763,8 @@ _rb_list_get() {
 	if [ -s "$p" ] && [ -n "$(find "$ZM_LISTS_DIR/.$f.fail" -mmin -60 2>/dev/null)" ]; then return 0; fi
 	mkdir -p "$ZM_LISTS_DIR" 2>/dev/null
 	tmp="$ZM_LISTS_DIR/.$f.$$"
-	if _st_fetch "$u" "$tmp"; then
+	# raw.githubusercontent.com бывает недоступен — тот же файл через jsDelivr
+	if _st_fetch "$u" "$tmp" || { _st_cdn_url "$u" >/dev/null 2>&1 && _st_fetch "$(_st_cdn_url "$u")" "$tmp"; }; then
 		_rb_list_norm "$f" "$tmp" > "$tmp.ok"
 		if [ -s "$tmp.ok" ]; then
 			mv -f "$tmp.ok" "$p"
@@ -5793,10 +5795,12 @@ _rb_conf_plus() {
 		($1 in P) && P[$1] != "" && $8 != "" { n = split($8, c, ","); for (i = 1; i <= n; i++) h[c[i]] = 1; m = split(P[$1], a, ","); for (i = 1; i <= m; i++) if (a[i] != "" && !(a[i] in h)) $8 = $8 ($8 != "" ? "," : "") a[i]; delete h }
 		{ print }' "$RB_SHARE/services.conf" 2>/dev/null
 }
-_rb_svc_src() { _rb_conf_plus; cat "$ST_OWN_SVC" 2>/dev/null; [ -f "$ST_CAT_OFF" ] || awk -F'|' -v skip="$ST_CAT_SKIP" -v conf="$RB_SHARE/services.conf" 'BEGIN { while ((getline l < conf) > 0) { if (l ~ /^#/) continue; split(l, a, "|"); if (a[1] == "") continue; b[a[1]] = 1; m = split(a[8], c, ","); for (i = 1; i <= m; i++) if (c[i] != "") b[c[i]] = 1 } } $9 != "" && $9 != "Свои списки каталога" { k = $1; sub(/^c_/, "", k); if (index(skip, " " k " ")) next; if (k ~ /^itdoginfo_/ && (substr(k, 11) in b)) next; print }' "$ST_CAT_SVC" 2>/dev/null; [ -f "$ST_TCH_OFF" ] || cat "$ST_TCH_SVC" 2>/dev/null; }
-_rb_svc_field() { _rb_svc_src | grep "^$1|" | head -n1 | cut -d'|' -f"$2"; }
+_rb_svc_src() { _rb_conf_plus; cat "$ST_OWN_SVC" "$ST_OWN_CSVC" 2>/dev/null; [ -f "$ST_CAT_OFF" ] || awk -F'|' -v skip="$ST_CAT_SKIP" -v conf="$RB_SHARE/services.conf" 'BEGIN { while ((getline l < conf) > 0) { if (l ~ /^#/) continue; split(l, a, "|"); if (a[1] == "") continue; b[a[1]] = 1; m = split(a[8], c, ","); for (i = 1; i <= m; i++) if (c[i] != "") b[c[i]] = 1 } } $9 != "" && $9 != "Свои списки каталога" { k = $1; sub(/^c_/, "", k); if (index(skip, " " k " ")) next; if (k ~ /^itdoginfo_/ && (substr(k, 11) in b)) next; print }' "$ST_CAT_SVC" 2>/dev/null; [ -f "$ST_TCH_OFF" ] || cat "$ST_TCH_SVC" 2>/dev/null; }
+_rb_svc_field() { _rb_svc_src | awk -F'|' -v k="$1" -v n="$2" '$1 == k { print $n; exit }'; }
+# Строка сервиса целиком: один проход вместо вызова _rb_svc_field на каждое поле
+_rb_svc_row() { _rb_svc_src | awk -F'|' -v k="$1" '$1 == k { print; exit }'; }
 _rb_svc_names() { local id; for id in $1; do printf '%s, ' "$(_rb_svc_field "$id" 2)"; done | sed 's/, $//'; }
-_rb_routable() { [ "$1" = custom ] && [ -n "$(_rb_svc_field custom 1)" ] && return 0; [ -n "$(_rb_svc_field "$1" 3)$(_rb_svc_field "$1" 4)$(_rb_svc_field "$1" 8)" ]; }
+_rb_routable() { _rb_svc_src | awk -F'|' -v k="$1" '$1 == k { r = k == "custom" || $3 $4 $8 != ""; exit } END { exit !r }'; }
 _job_alive() { _job_running "$1"; }
 
 _rb_rpcd_ensure() {
@@ -5831,6 +5835,10 @@ ST_OWN_SVC="$ST_DIR/own.svc"
 ST_OWN_IDX="$ST_DIR/own.idx"
 ST_OWN_GRP="Мои списки (добавлены вами)"
 ST_OWN_MAX=30
+ST_OWN_CATS="$ST_DIR/own.cats"
+ST_OWN_CSVC="$ST_DIR/own.cat.svc"
+ST_OWN_CIDX="$ST_DIR/own.cat.idx"
+ST_OWN_CMAX=5
 ST_TCH_RAW="https://raw.githubusercontent.com/Dushnilin/tachyon-lists/main"
 ST_TCH_CDN="https://cdn.jsdelivr.net/gh/Dushnilin/tachyon-lists@main"
 ST_SKIP="$ST_DIR/skip"
@@ -6591,7 +6599,7 @@ _st_age() { echo $(( $(date +%s) - $(date -r "$1" +%s 2>/dev/null || echo 0) ));
 
 _st_tch_idx_merge() {
 	mkdir -p "$ST_DIR"
-	{ grep -vE '^(t|zmu)_' "$ST_CAT_IDX" 2>/dev/null; _st_tch_on && cat "$ST_TCH_IDX" 2>/dev/null; cat "$ST_OWN_IDX" 2>/dev/null; } > "$ST_CAT_IDX.t$$"
+	{ grep -vE '^(t|zmu|zmc[0-9]+)_' "$ST_CAT_IDX" 2>/dev/null; _st_tch_on && cat "$ST_TCH_IDX" 2>/dev/null; cat "$ST_OWN_IDX" "$ST_OWN_CIDX" 2>/dev/null; } > "$ST_CAT_IDX.t$$"
 	if [ -s "$ST_CAT_IDX.t$$" ] || [ -f "$ST_CAT_IDX" ]; then mv -f "$ST_CAT_IDX.t$$" "$ST_CAT_IDX"; else rm -f "$ST_CAT_IDX.t$$"; fi
 }
 
@@ -6645,6 +6653,7 @@ _st_tch_json() {
 
 _st_cat_bg() {
 	_st_tch_bg
+	_st_owncat_bg
 	[ -f "$ST_CAT_OFF" ] && return 0
 	[ -d "$ST_RUN/cat.lock" ] && [ -z "$(find "$ST_RUN/cat.lock" -maxdepth 0 -mmin +5 2>/dev/null)" ] && return 0
 	if grep -q '|Свои списки каталога$' "$ST_CAT_SVC" 2>/dev/null; then ( _st_cat_refresh force >/dev/null 2>&1 & ); return 0; fi
@@ -6678,9 +6687,17 @@ _st_cat_json() {
 # Общие для Steer и Forkozz: добавили в одном — список есть и в другом
 _st_own_used() {
 	local id="$1" u w=""
-	grep -qsx "$id" "$ST_DIR/services" "$ST_SEC_DIR"/*/services && w="Steer"
-	u="$(awk -F'|' -v k="$id" '$1 == k { print $3; exit }' "$ST_OWN_IDX" 2>/dev/null)"
-	[ -n "$u" ] && grep -qsF "$u" /etc/config/netshift && w="${w:+$w, }Forkozz"
+	case "$id" in
+		zmc[0-9]*)
+			grep -qs "^${id}_" "$ST_DIR/services" "$ST_SEC_DIR"/*/services && w="Steer"
+			for u in $(awk -F'|' -v k="${id}_" 'index($1, k) == 1 { print $3 }' "$ST_OWN_CIDX" 2>/dev/null); do
+				grep -qsF "$u" /etc/config/netshift && { w="${w:+$w, }Forkozz"; break; }
+			done ;;
+		*)
+			grep -qsx "$id" "$ST_DIR/services" "$ST_SEC_DIR"/*/services && w="Steer"
+			u="$(awk -F'|' -v k="$id" '$1 == k { print $3; exit }' "$ST_OWN_IDX" 2>/dev/null)"
+			[ -n "$u" ] && grep -qsF "$u" /etc/config/netshift && w="${w:+$w, }Forkozz" ;;
+	esac
 	printf '%s' "$w"
 }
 
@@ -6691,9 +6708,16 @@ _st_own_json() {
 		[ -n "$id" ] || continue
 		name="$(awk -F'|' -v k="$id" '$1 == k { print $2; exit }' "$ST_OWN_SVC" 2>/dev/null)"
 		w="$(_st_own_used "$id")"
-		printf '%s{"id":"%s","name":"%s","url":"%s","fmt":"%s","dom":%s,"pfx":%s,"used":"%s"}' "$sep" "$id" "$(esc "${name:-$id}")" "$(esc "$url")" "$fmt" "${dom:-0}" "${pfx:-0}" "$(esc "$w")"
+		printf '%s{"id":"%s","kind":"list","name":"%s","url":"%s","fmt":"%s","dom":%s,"pfx":%s,"used":"%s"}' "$sep" "$id" "$(esc "${name:-$id}")" "$(esc "$url")" "$fmt" "${dom:-0}" "${pfx:-0}" "$(esc "$w")"
 		sep=","
 	done < "$ST_OWN_IDX" 2>/dev/null
+	local sets svcs ver ts
+	while IFS='|' read -r id name url sets svcs ver ts; do
+		[ -n "$id" ] || continue
+		w="$(_st_own_used "$id")"
+		printf '%s{"id":"%s","kind":"catalog","name":"%s","url":"%s","sets":%s,"svcs":%s,"version":"%s","age":%s,"used":"%s"}' "$sep" "$id" "$(esc "$name")" "$(esc "$url")" "${sets:-0}" "${svcs:-0}" "$(esc "$ver")" "$(( $(date +%s) - ${ts:-0} ))" "$(esc "$w")"
+		sep=","
+	done < "$ST_OWN_CATS" 2>/dev/null
 	printf ']'
 }
 
@@ -6733,7 +6757,13 @@ _st_own_probe() {
 		grep -E '^[a-z0-9]([a-z0-9_-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9_-]*[a-z0-9])?)+$' | grep -vE '^[0-9.]+$' | awk '!s[$0]++' | wc -l | tr -d ' ')"
 	if [ "$d" = 0 ] && [ "$p" = 0 ]; then
 		if grep -qiE '<html|<!doctype' "$f"; then echo "ERR:по ссылке открылась веб-страница, а не список — нужна прямая ссылка на файл (на GitHub — кнопка «Raw»)"
-		elif grep -qE '^[[:space:]]*[{[]' "$f"; then echo "ERR:это файл JSON, а не список — нужен текстовый файл: один домен или подсеть на строке"
+		elif grep -qE '^[[:space:]]*[{[]' "$f"; then
+			if grep -q '"domain_lists"\|"categories"' "$f" && cp -f "$f" "$ST_RUN/own.cat.new" && _st_owncat_build "$ST_RUN/own.cat.new" zmc0 x; then
+				rm -f "$f" "$f.n" "$ST_RUN"/owncat.*
+				echo "cat 0 0"; return 0
+			fi
+			rm -f "$ST_RUN/own.cat.new" "$ST_RUN"/owncat.*
+			echo "ERR:это файл JSON, но не каталог списков — нужен каталог в формате splify2-lists (lists.json) или текстовый список: один домен или подсеть на строке"
 		elif grep -qE '^(0\.0\.0\.0|127\.0\.0\.1)[[:space:]]+[a-z0-9]' "$f.n"; then echo "ERR:это файл hosts — нужен список, где на строке только домен или подсеть"
 		elif grep -qE '^\|\|' "$f.n"; then echo "ERR:это фильтр блокировщика рекламы — нужен список, где на строке только домен или подсеть"
 		else echo "ERR:в файле не нашлось ни доменов, ни подсетей IPv4 — на строке должен быть один домен или подсеть"; fi
@@ -6744,12 +6774,61 @@ _st_own_probe() {
 	echo "lst $d $p"
 }
 
-# название уже занято другим списком (без учёта регистра, и для кириллицы — awk роутера её не понижает)
+# название уже занято другим списком или каталогом (без учёта регистра, и для кириллицы — awk роутера её не понижает)
 _st_own_taken() {
 	awk -F'|' -v nm="$1" -v k="$2" '
 		function lc(x,    i) { x = tolower(x); for (i = 1; i <= 33; i++) gsub(U[i], L[i], x); return x }
 		BEGIN { n = split("А Б В Г Д Е Ё Ж З И Й К Л М Н О П Р С Т У Ф Х Ц Ч Ш Щ Ъ Ы Ь Э Ю Я", U, " "); split("а б в г д е ё ж з и й к л м н о п р с т у ф х ц ч ш щ ъ ы ь э ю я", L, " "); nm = lc(nm) }
-		$1 != k && lc($2) == nm { f = 1 } END { exit !f }' "$ST_OWN_SVC" 2>/dev/null
+		$1 != k && lc($2) == nm { f = 1 } END { exit !f }' $(for f in "$ST_OWN_SVC" "$ST_OWN_CATS"; do [ -f "$f" ] && echo "$f"; done) /dev/null 2>/dev/null
+}
+
+# имя по умолчанию: у GitHub — «владелец/репозиторий», иначе имя файла
+_st_own_dname() {
+	local n
+	n="$(printf '%s' "$1" | sed -n 's#^https://raw\.githubusercontent\.com/\([^/]*\)/\([^/]*\)/.*#\1/\2#p; s#^https://github\.com/\([^/]*\)/\([^/]*\)/.*#\1/\2#p' | head -n1)"
+	[ -n "$n" ] && [ "$2" = cat ] && { printf '%s' "$n"; return; }
+	n="${1%%[?#]*}"; n="${n##*/}"; n="${n%.*}"
+	printf '%s' "${n:-Мой список}"
+}
+
+# Свой каталог: собрать заново из $ST_RUN/own.cat.new и заменить его строки в own.cat.svc / own.cat.idx
+_st_owncat_put() {
+	local id="$1" name="$2" url="$3" svcs sets ver
+	_st_owncat_build "$ST_RUN/own.cat.new" "$id" "$name" || return 1
+	svcs="$(grep -c . "$ST_RUN/owncat.svc")"; sets="$(grep -c . "$ST_RUN/owncat.idx")"
+	ver="$(sed -n 's/^version=//p' "$ST_RUN/owncat.meta" | tr -d '|')"
+	mkdir -p "$ST_DIR"
+	{ grep -v "^${id}_" "$ST_OWN_CSVC" 2>/dev/null; cat "$ST_RUN/owncat.svc"; } > "$ST_OWN_CSVC.t" && mv -f "$ST_OWN_CSVC.t" "$ST_OWN_CSVC"
+	{ grep -v "^${id}_" "$ST_OWN_CIDX" 2>/dev/null; cat "$ST_RUN/owncat.idx"; } > "$ST_OWN_CIDX.t" && mv -f "$ST_OWN_CIDX.t" "$ST_OWN_CIDX"
+	{ grep -v "^$id|" "$ST_OWN_CATS" 2>/dev/null; printf '%s|%s|%s|%s|%s|%s|%s\n' "$id" "$name" "$url" "$sets" "$svcs" "$ver" "$(date +%s)"; } > "$ST_OWN_CATS.t" && mv -f "$ST_OWN_CATS.t" "$ST_OWN_CATS"
+	rm -f "$ST_RUN"/owncat.* "$ST_RUN/own.cat.new"
+	_st_tch_idx_merge
+	OWNCAT_SVCS="$svcs"
+	return 0
+}
+
+# Обновить свой каталог (все — без аргумента). Список на месте, если не скачался
+_st_owncat_refresh() {
+	local id name url rest r rc=0
+	[ -s "$ST_OWN_CATS" ] || return 0
+	while IFS='|' read -r id name url rest; do
+		[ -n "$id" ] || continue
+		[ -n "$1" ] && [ "$1" != "$id" ] && continue
+		r="$ST_RUN/own.cat.new"
+		if _st_fetch "$url" "$r" || { _st_cdn_url "$url" >/dev/null && _st_fetch "$(_st_cdn_url "$url")" "$r"; }; then
+			_st_owncat_put "$id" "$name" "$url" || { rm -f "$r"; rc=1; }
+		else rm -f "$r"; rc=1; fi
+	done < "$ST_OWN_CATS"
+	return $rc
+}
+
+# раз в сутки — в фоне, как стандартные каталоги
+_st_owncat_bg() {
+	[ -s "$ST_OWN_CATS" ] || return 0
+	[ -d "$ST_RUN/owncat.lock" ] && [ -z "$(find "$ST_RUN/owncat.lock" -maxdepth 0 -mmin +5 2>/dev/null)" ] && return 0
+	[ "$(_st_age "$ST_OWN_CATS")" -lt 86400 ] && return 0
+	mkdir -p "$ST_RUN"; rmdir "$ST_RUN/owncat.lock" 2>/dev/null; mkdir "$ST_RUN/owncat.lock" 2>/dev/null || return 0
+	( _st_owncat_refresh; touch "$ST_OWN_CATS"; rmdir "$ST_RUN/owncat.lock" ) >/dev/null 2>&1 &
 }
 
 _st_own_add() {
@@ -6761,11 +6840,12 @@ _st_own_add() {
 	[ "${#u}" -le 500 ] || { echo '{"error":"слишком длинная ссылка"}'; return 1; }
 	u="$(_st_own_url "$u")"
 	[ "${#name}" -le 120 ] || { echo '{"error":"слишком длинное название"}'; return 1; }
-	if [ -z "$name" ]; then name="${u%%[?#]*}"; name="${name##*/}"; name="${name%.*}"; [ -n "$name" ] || name="Мой список"; fi
+	case "${u%%[?#]*}" in *.json) [ -n "$name" ] || name="$(_st_own_dname "$u" cat)" ;; *) [ -n "$name" ] || name="$(_st_own_dname "$u")" ;; esac
 	x="$(awk -F'|' -v u="$u" '$3 == u { print $1; exit }' "$ST_OWN_IDX" 2>/dev/null)"
 	[ -n "$x" ] && { printf '{"error":"этот список уже добавлен — «%s»"}\n' "$(esc "$(awk -F'|' -v k="$x" '$1 == k { print $2; exit }' "$ST_OWN_SVC")")"; return 1; }
+	x="$(awk -F'|' -v u="$u" '$3 == u { print $2; exit }' "$ST_OWN_CATS" 2>/dev/null)"
+	[ -n "$x" ] && { printf '{"error":"этот каталог уже добавлен — «%s»"}\n' "$(esc "$x")"; return 1; }
 	_st_own_taken "$name" "" && { echo '{"error":"список с таким названием уже есть — назовите его иначе"}'; return 1; }
-	[ "$(grep -c . "$ST_OWN_IDX" 2>/dev/null || echo 0)" -lt "$ST_OWN_MAX" ] || { echo "{\"error\":\"своих списков уже $ST_OWN_MAX — удалите ненужный\"}"; return 1; }
 	r="$(_zm_run 17 _st_own_probe "$u")"
 	case $? in
 		0) ;;
@@ -6773,6 +6853,16 @@ _st_own_add() {
 		*) r="$(printf '%s\n' "$r" | sed -n 's/^ERR://p' | head -n1)"; printf '{"error":"%s"}\n' "$(esc "${r:-список не скачался}")"; return 1 ;;
 	esac
 	set -- $(printf '%s\n' "$r" | tail -n1); fmt="$1"; d="${2:-0}"; p="${3:-0}"
+	[ "$fmt" = cat ] || [ "$(grep -c . "$ST_OWN_IDX" 2>/dev/null || echo 0)" -lt "$ST_OWN_MAX" ] || { echo "{\"error\":\"своих списков уже $ST_OWN_MAX — удалите ненужный\"}"; return 1; }
+	if [ "$fmt" = cat ]; then
+		[ "$(grep -c . "$ST_OWN_CATS" 2>/dev/null || echo 0)" -lt "$ST_OWN_CMAX" ] || { rm -f "$ST_RUN/own.cat.new"; echo "{\"error\":\"своих каталогов уже $ST_OWN_CMAX — удалите ненужный\"}"; return 1; }
+		name="$(printf '%s' "$name" | tr -d '()')"
+		n="$(awk -F'|' '{ sub(/^zmc/, "", $1); if ($1 + 0 > m) m = $1 + 0 } END { print m + 1 }' "$ST_OWN_CATS" 2>/dev/null)"
+		id="zmc${n:-1}"
+		_st_owncat_put "$id" "$name" "$u" || { rm -f "$ST_RUN/own.cat.new"; echo '{"error":"в каталоге не нашлось ни одного списка"}'; return 1; }
+		printf '{"ok":true,"id":"%s","kind":"catalog","name":"%s","svcs":%s}\n' "$id" "$(esc "$name")" "${OWNCAT_SVCS:-0}"
+		return 0
+	fi
 	case "$fmt" in lst|srs) ;; *) echo '{"error":"список не скачался"}'; return 1 ;; esac
 	n="$(awk -F'|' '{ sub(/^zmu_/, "", $1); if ($1 + 0 > m) m = $1 + 0 } END { print m + 1 }' "$ST_OWN_IDX" 2>/dev/null)"
 	id="zmu_${n:-1}"
@@ -6788,7 +6878,22 @@ _st_own_add() {
 
 _st_own_del() {
 	local id="$1" w
-	case "$id" in zmu_[0-9]*) ;; *) echo '{"error":"нет такого списка"}'; return 1 ;; esac
+	case "$id" in
+		zmc[0-9]*)
+			grep -q "^$id|" "$ST_OWN_CATS" 2>/dev/null || { echo '{"error":"нет такого каталога — обновите страницу"}'; return 1; }
+			w="$(_st_own_used "$id")"
+			[ -n "$w" ] && { printf '{"error":"списки этого каталога включены в %s — снимите с них отметки, сохраните и удалите снова"}\n' "$w"; return 1; }
+			grep -v "^$id|" "$ST_OWN_CATS" > "$ST_OWN_CATS.t"; mv -f "$ST_OWN_CATS.t" "$ST_OWN_CATS"
+			grep -v "^${id}_" "$ST_OWN_CSVC" > "$ST_OWN_CSVC.t" 2>/dev/null; mv -f "$ST_OWN_CSVC.t" "$ST_OWN_CSVC"
+			grep -v "^${id}_" "$ST_OWN_CIDX" > "$ST_OWN_CIDX.t" 2>/dev/null; mv -f "$ST_OWN_CIDX.t" "$ST_OWN_CIDX"
+			[ -s "$ST_OWN_CATS" ] || rm -f "$ST_OWN_CATS" "$ST_OWN_CSVC" "$ST_OWN_CIDX"
+			rm -f "$ST_DIR/lists/${id}_"* "$ST_RUN/dom/${id}_"*
+			grep -v "^${id}_" "$ST_DOMCNT" > "$ST_DOMCNT.t" 2>/dev/null && mv -f "$ST_DOMCNT.t" "$ST_DOMCNT"
+			_st_tch_idx_merge
+			printf '{"ok":true}\n'; return 0 ;;
+		zmu_[0-9]*) ;;
+		*) echo '{"error":"нет такого списка"}'; return 1 ;;
+	esac
 	grep -q "^$id|" "$ST_OWN_IDX" 2>/dev/null || { echo '{"error":"нет такого списка — обновите страницу"}'; return 1; }
 	w="$(_st_own_used "$id")"
 	[ -n "$w" ] && { printf '{"error":"список включён в %s — снимите с него отметку, сохраните и удалите снова"}\n' "$w"; return 1; }
@@ -6805,12 +6910,20 @@ _st_own_ren() {
 	local id name
 	id="$(printf '%s' "$1" | jsonfilter -e '@.id' 2>/dev/null)"
 	name="$(printf '%s' "$1" | jsonfilter -e '@.name' 2>/dev/null | tr -d '\000-\037|"\\' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
-	case "$id" in zmu_[0-9]*) ;; *) echo '{"error":"нет такого списка"}'; return 1 ;; esac
-	grep -q "^$id|" "$ST_OWN_SVC" 2>/dev/null || { echo '{"error":"нет такого списка — обновите страницу"}'; return 1; }
+	case "$id" in zmu_[0-9]*|zmc[0-9]*) ;; *) echo '{"error":"нет такого списка"}'; return 1 ;; esac
+	case "$id" in zmc*) name="$(printf '%s' "$name" | tr -d '()')"; grep -q "^$id|" "$ST_OWN_CATS" 2>/dev/null ;; *) grep -q "^$id|" "$ST_OWN_SVC" 2>/dev/null ;; esac || { echo '{"error":"нет такого списка — обновите страницу"}'; return 1; }
 	[ -n "$name" ] || { echo '{"error":"название не может быть пустым"}'; return 1; }
 	[ "${#name}" -le 120 ] || { echo '{"error":"слишком длинное название"}'; return 1; }
 	_st_own_taken "$name" "$id" && { echo '{"error":"список с таким названием уже есть"}'; return 1; }
-	awk -F'|' -v OFS='|' -v nm="$name" -v k="$id" '$1 == k { $2 = nm } { print }' "$ST_OWN_SVC" > "$ST_OWN_SVC.t" && mv -f "$ST_OWN_SVC.t" "$ST_OWN_SVC"
+	case "$id" in
+		zmc*)
+			local old
+			old="$(awk -F'|' -v k="$id" '$1 == k { print $2; exit }' "$ST_OWN_CATS")"
+			awk -F'|' -v OFS='|' -v nm="$name" -v k="$id" '$1 == k { $2 = nm } { print }' "$ST_OWN_CATS" > "$ST_OWN_CATS.t" && mv -f "$ST_OWN_CATS.t" "$ST_OWN_CATS"
+			# группы его списков — «название (источник)»: меняем только название
+			awk -F'|' -v OFS='|' -v nm="$name" -v o="$old (" -v k="${id}_" 'index($1, k) == 1 && index($9, o) == 1 { $9 = nm " (" substr($9, length(o) + 1) } { print }' "$ST_OWN_CSVC" > "$ST_OWN_CSVC.t" && mv -f "$ST_OWN_CSVC.t" "$ST_OWN_CSVC" ;;
+		*) awk -F'|' -v OFS='|' -v nm="$name" -v k="$id" '$1 == k { $2 = nm } { print }' "$ST_OWN_SVC" > "$ST_OWN_SVC.t" && mv -f "$ST_OWN_SVC.t" "$ST_OWN_SVC" ;;
+	esac
 	printf '{"ok":true}\n'
 }
 
@@ -7460,10 +7573,22 @@ steer_action() {
 				*) echo '{"error":"неизвестное действие"}'; return 1 ;;
 			esac
 			;;
-		own_add|own_del|own_ren)
+		own_add|own_del|own_ren|own_refresh)
 			_st_running && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
 			mkdir -p "$ST_DIR" "$ST_RUN"
-			case "$action" in own_add) _st_own_add "$mode" ;; own_del) _st_own_del "$mode" ;; own_ren) _st_own_ren "$mode" ;; esac
+			case "$action" in
+				own_add) _st_own_add "$mode" ;;
+				own_del) _st_own_del "$mode" ;;
+				own_ren) _st_own_ren "$mode" ;;
+				own_refresh)
+					case "$mode" in zmc[0-9]*) grep -q "^$mode|" "$ST_OWN_CATS" 2>/dev/null ;; *) false ;; esac || { echo '{"error":"нет такого каталога — обновите страницу"}'; return 1; }
+					_zm_run 17 _st_owncat_refresh "$mode" >/dev/null 2>&1
+					case $? in
+						0) printf '{"ok":true,%s}\n' "$(awk -F'|' -v k="$mode" '$1 == k { printf "\"svcs\":%d,\"version\":\"%s\"", $5, $6; exit }' "$ST_OWN_CATS")" ;;
+						137|143) rm -f "$ST_RUN/own.cat.new" "$ST_RUN"/owncat.*; echo '{"error":"каталог не успел скачаться за 17 секунд — прежний оставлен, попробуйте позже"}'; return 1 ;;
+						*) echo '{"error":"каталог не скачался или в нём нет списков — прежний оставлен"}'; return 1 ;;
+					esac ;;
+			esac
 			;;
 		xsets)
 			_st_running && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
@@ -10375,9 +10500,9 @@ _zm_junk_raw() {
 		fi
 	fi
 	if [ -d "$ST_DIR/lists" ] && [ -s "$RB_SHARE/services.conf" ] && [ -z "$foreign" ] && ! _st_running; then
-		ls "$ST_DIR/lists" 2>/dev/null | awk -F'|' -v sel="$ST_SEL" -v conf="$RB_SHARE/services.conf" -v rem="$ST_CAT_SVC" -v tch="$ST_TCH_SVC" -v own="$ST_OWN_SVC" -v pls="$ST_TCH_PLUS" -v xs="$ST_TCH_XSETS" -v dir="$ST_DIR/lists" '
+		ls "$ST_DIR/lists" 2>/dev/null | awk -F'|' -v sels="$ST_DIR/services $(ls "$ST_SEC_DIR"/*/services 2>/dev/null | tr '\n' ' ')" -v conf="$RB_SHARE/services.conf" -v rem="$ST_CAT_SVC" -v tch="$ST_TCH_SVC" -v own="$ST_OWN_SVC" -v ownc="$ST_OWN_CSVC" -v pls="$ST_TCH_PLUS" -v xs="$ST_TCH_XSETS" -v dir="$ST_DIR/lists" '
 			function load(file,    l, a, c, m, i) { while ((getline l < file) > 0) { if (l ~ /^#/) continue; split(l, a, "|"); if (!(a[1] in on)) continue; m = split(a[8], c, ","); for (i = 1; i <= m; i++) if (c[i] != "") keep[c[i]] = 1 } close(file) }
-			BEGIN { while ((getline l < sel) > 0) if (l != "") { on[l] = 1; keep[l] = 1 } close(sel); load(conf); load(rem); load(tch); load(own)
+			BEGIN { ns = split(sels, sl, " "); for (k = 1; k <= ns; k++) { while ((getline l < sl[k]) > 0) if (l != "") { on[l] = 1; keep[l] = 1 } close(sl[k]) } load(conf); load(rem); load(tch); load(own); load(ownc)
 				while ((getline l < pls) > 0) { i = index(l, "|"); if (i > 1 && (substr(l, 1, i - 1) in on)) { m = split(substr(l, i + 1), c, ","); for (j = 1; j <= m; j++) if (c[j] != "") keep[c[j]] = 1 } } close(pls)
 				while ((getline l < xs) > 0) if (l != "") { keep[l] = 1; keep[l "_ip"] = 1 } close(xs) }
 			{ n = $0; sub(/\..*$/, "", n); if (n == "" || (n in keep)) next; print dir "/" $0 }' | while IFS= read -r f; do
@@ -10989,7 +11114,7 @@ _pg_inst() {
 }
 
 _pg_st_dir() {
-	if [ ! -s "$ST_OWNED" ] && _fk_installed && [ -z "$(ls -A "$ST_DIR" 2>/dev/null | grep -vxE 'services\.remote|catalog\.(idx|meta|url|off|err)|tachyon\.(svc|idx|meta|plus|direct|off|err)|own\.(svc|idx)')" ]; then return 0; fi
+	if [ ! -s "$ST_OWNED" ] && _fk_installed && [ -z "$(ls -A "$ST_DIR" 2>/dev/null | grep -vxE 'services\.remote|catalog\.(idx|meta|url|off|err)|tachyon\.(svc|idx|meta|plus|direct|off|err)|own\.(svc|idx|cats|cat\.svc|cat\.idx)')" ]; then return 0; fi
 	echo "$ST_DIR"
 }
 
@@ -16571,7 +16696,6 @@ _ow_v6_mode() {
 	elif { [ -z "$ra" ] || [ "$ra" = disabled ]; } && { [ -z "$dv" ] || [ "$dv" = disabled ]; }; then echo off
 	else echo lan; fi
 }
-_ow_v6_on() { [ "$(_ow_v6_mode)" != off ]; }
 
 # Без префикса ULA устройства в режиме «Только дома» получат лишь link-local — задаём его, если нет
 _ow_v6_ula() {
@@ -28030,15 +28154,9 @@ _json_flat() {
 	}' "$1"
 }
 
-_st_cat_build() {
-	local flat="$ST_RUN/cat.flat" bsets bnames
-	mkdir -p "$ST_RUN" "$ST_DIR"
-	_json_flat "$1" > "$flat" 2>/dev/null
-	grep -q '^domain_lists\.0\.id	\|^categories\.0\.id	' "$flat" || { rm -f "$flat"; return 1; }
-	bsets=" $(grep -v '^#' "$RB_SHARE/services.conf" | cut -d'|' -f8 | tr ',\n' '  ') "
-	bnames="$(grep -v '^#' "$RB_SHARE/services.conf" | cut -d'|' -f2 | tr 'A-Z' 'a-z' | tr '\n' '|')"
-	awk -F'\t' -v skip="$ST_CAT_SKIP" -v bsets="$bsets" -v bnames="|$bnames" -v idx="$ST_CAT_IDX.tmp" -v meta="$ST_CAT_META.tmp" '
-		function key(id) { id = tolower(id); sub(/^svc_/, "", id); gsub(/[^a-z0-9_]/, "_", id); return "c_" id }
+# Разбор каталога списков формата splify2-lists: kp — приставка ключей, gname — название своего каталога
+ZM_CAT_AWK='
+		function key(id) { id = tolower(id); sub(/^svc_/, "", id); gsub(/[^a-z0-9_]/, "_", id); return kp id }
 		function clean(s) { gsub(/[|\t\r\n]/, " ", s); return s }
 		{
 			p = $1; v = $2
@@ -28082,6 +28200,8 @@ _st_cat_build() {
 			grp = clean(f[e, "source_name"])
 			if (grp == "" && fo[e]) grp = (tolower(f[e, "id"] " " f[e, "source"]) ~ /b4geoip/) ? "b4geoip" : "itdoginfo (allow-domains)"
 			if (grp == "") return
+			# свой каталог: группы с его названием, «свои списки» его автора не берём
+			if (gname != "") { if (grp == "Свои списки каталога") return; grp = gname " (" grp ")" }
 			if (tolower(f[e, "id"] " " f[e, "source"]) ~ /itdoginfo/) {
 				u = f[e, "url"]; b = u; sub(/.*\//, "", b); sub(/\.srs$/, "", b)
 				if (index(bsets, " " b " ") || index(bnames, "|" tolower(nm) "|")) return
@@ -28089,14 +28209,37 @@ _st_cat_build() {
 			if (ek[e] in out) return
 			out[ek[e]] = 1; svcs++
 			print ek[e] "|" nm "|||||" "|" st "|" grp
-		}' "$flat" > "$ST_CAT_SVC.tmp" || { rm -f "$flat" "$ST_CAT_SVC.tmp" "$ST_CAT_IDX.tmp" "$ST_CAT_META.tmp"; return 1; }
+		}'
+
+_st_cat_build() {
+	local flat="$ST_RUN/cat.flat" bsets bnames
+	mkdir -p "$ST_RUN" "$ST_DIR"
+	_json_flat "$1" > "$flat" 2>/dev/null
+	grep -q '^domain_lists\.0\.id	\|^categories\.0\.id	' "$flat" || { rm -f "$flat"; return 1; }
+	bsets=" $(grep -v '^#' "$RB_SHARE/services.conf" | cut -d'|' -f8 | tr ',\n' '  ') "
+	bnames="$(grep -v '^#' "$RB_SHARE/services.conf" | cut -d'|' -f2 | tr 'A-Z' 'a-z' | tr '\n' '|')"
+	awk -F'\t' -v kp=c_ -v gname= -v skip="$ST_CAT_SKIP" -v bsets="$bsets" -v bnames="|$bnames" -v idx="$ST_CAT_IDX.tmp" -v meta="$ST_CAT_META.tmp" "$ZM_CAT_AWK" "$flat" > "$ST_CAT_SVC.tmp" || { rm -f "$flat" "$ST_CAT_SVC.tmp" "$ST_CAT_IDX.tmp" "$ST_CAT_META.tmp"; return 1; }
 	rm -f "$flat"
 	[ -s "$ST_CAT_SVC.tmp" ] && [ -s "$ST_CAT_IDX.tmp" ] || { rm -f "$ST_CAT_SVC.tmp" "$ST_CAT_IDX.tmp" "$ST_CAT_META.tmp"; return 1; }
 	_st_tch_on && [ -s "$ST_TCH_IDX" ] && cat "$ST_TCH_IDX" >> "$ST_CAT_IDX.tmp"
-	[ -s "$ST_OWN_IDX" ] && cat "$ST_OWN_IDX" >> "$ST_CAT_IDX.tmp"
+	cat "$ST_OWN_IDX" "$ST_OWN_CIDX" 2>/dev/null >> "$ST_CAT_IDX.tmp"
 	mv -f "$ST_CAT_IDX.tmp" "$ST_CAT_IDX"
 	mv -f "$ST_CAT_SVC.tmp" "$ST_CAT_SVC"
 	mv -f "$ST_CAT_META.tmp" "$ST_CAT_META"
+}
+
+# Свой каталог: $1 — lists.json, $2 — приставка (zmcN), $3 — название. Пишет $ST_RUN/owncat.svc и .idx
+_st_owncat_build() {
+	local flat="$ST_RUN/owncat.flat" bsets bnames
+	mkdir -p "$ST_RUN"
+	_json_flat "$1" > "$flat" 2>/dev/null
+	grep -q '^domain_lists\.0\.id	\|^categories\.0\.id	' "$flat" || { rm -f "$flat"; return 1; }
+	bsets=" $(grep -v '^#' "$RB_SHARE/services.conf" | cut -d'|' -f8 | tr ',\n' '  ') "
+	bnames="$(grep -v '^#' "$RB_SHARE/services.conf" | cut -d'|' -f2 | tr 'A-Z' 'a-z' | tr '\n' '|')"
+	awk -F'\t' -v kp="$2_" -v gname="$3" -v skip="" -v bsets="$bsets" -v bnames="|$bnames" -v idx="$ST_RUN/owncat.idx" -v meta="$ST_RUN/owncat.meta" "$ZM_CAT_AWK" "$flat" > "$ST_RUN/owncat.svc" || { rm -f "$flat" "$ST_RUN"/owncat.*; return 1; }
+	rm -f "$flat"
+	[ -s "$ST_RUN/owncat.svc" ] && [ -s "$ST_RUN/owncat.idx" ] || { rm -f "$ST_RUN"/owncat.*; return 1; }
+	return 0
 }
 
 _st_tch_build() {
@@ -28330,57 +28473,49 @@ _st_srs_get() {
 _st_tch_plus_of() { [ -f "$ST_TCH_OFF" ] || awk -F'|' -v k="$1" '$1 == k { gsub(/,/, " ", $2); print $2; exit }' "$ST_TCH_PLUS" 2>/dev/null; }
 
 _st_svc_lists() {
-	local id="$1" name sets set dom="" pfx="" srs="" f fmt took="" plus pfail=""
-	name="$(_rb_svc_field "$id" 2)"
-	sets="$(_rb_svc_field "$id" 8 | tr ',' ' ')"
+	local id="$1" name sets set dom="" pfx="" srs="" f fmt took="" plus pfail="" pkd pkp say="" mt="" f5 f6 x
+	IFS='|' read -r x name pkd pkp f5 f6 x sets x <<ZM_ROW
+$(_rb_svc_row "$id")
+ZM_ROW
+	sets="$(echo $sets | tr ',' ' ')"; pkd="$(echo $pkd | tr ',' ' ')"; pkp="$(echo $pkp | tr ',' ' ')"
 	plus=" $(_st_tch_plus_of "$id") "
-	if [ -n "$(echo $sets)" ]; then echo "   → «$name»: списки $(echo $sets | sed 's/ /, /g')" >&2
-	elif [ "$id" = custom ]; then echo "   → «$name»: доменов $(cat "$ST_CUSTOM.lst" 2>/dev/null | grep -c .), подсетей $(cat "$ST_CUSTOM.pfx" 2>/dev/null | grep -c .)" >&2
-	else echo "   → «$name»: список из репозитория$([ -n "$(echo $plus)" ] && echo " + Tachyon ($(echo $plus | sed 's/ /, /g'))")" >&2; fi
+	# Сервис идёт по ВСЕМ своим спискам сразу: наборы каталога, добавки Tachyon, списки панели
+	# (itdoginfo Services и Subnets, v2fly, свои _extra) и основные домены. Не скачался один —
+	# остальные остаются, а не откатываются целиком на запасной вариант
+	if [ "$id" = custom ]; then echo "   → «$name»: доменов $(cat "$ST_CUSTOM.lst" 2>/dev/null | grep -c .), подсетей $(cat "$ST_CUSTOM.pfx" 2>/dev/null | grep -c .)" >&2
+	else
+		[ -n "$(echo $sets)" ] && say="списки $(echo $sets | sed 's/ /, /g')"
+		[ -n "$(echo $pkd $pkp)" ] && say="$say${say:+ + }$(echo $pkd $pkp | sed 's/ /, /g')"
+		for set in $plus; do case " $sets " in *" $set "*) ;; *) say="$say${say:+ + }Tachyon ($(echo $plus | sed 's/ /, /g'))"; break ;; esac; done
+		echo "   → «$name»: ${say:-основные домены}" >&2
+	fi
 	for set in $sets; do
 		[ -f "$ST_RUN/used.$set" ] && continue
 		if _st_srs_get "$set"; then
 			took="$took $set"
 			f="$ST_DIR/lists/$set"
-			fmt="$(awk -F'|' -v k="$set" '$1 == k { print $2; exit }' "$ST_CAT_IDX" 2>/dev/null)"
-			if [ "$fmt" != lst ]; then srs="$srs $f.srs"; continue; fi
-			[ -s "$f.dom" ] && dom="$dom $f.dom"
-			[ -s "$f.pfx" ] && pfx="$pfx $f.pfx"
+			fmt="$(_st_set_fmt "$set")"
+			if [ "$fmt" != lst ]; then srs="$srs $f.srs"
+			elif [ -s "$f.dom" ] || [ -s "$f.pfx" ]; then
+				[ -s "$f.dom" ] && dom="$dom $f.dom"
+				[ -s "$f.pfx" ] && pfx="$pfx $f.pfx"
+			else continue; fi
+			case "$plus" in *" $set "*) ;; *) mt="$mt $set" ;; esac
 		else
-			case "$plus" in *" $set "*) pfail="$pfail $set"; _rb_warn "Дополнение Tachyon $set для «$name» не скачалось — сервис идёт по основному списку" >&2; continue ;; esac
-			if [ -n "$(_rb_svc_field "$id" 3)$(_rb_svc_field "$id" 4)" ]; then _rb_warn "Список $set не скачался или не раскрылся — беру резервный список" >&2
-			else _rb_warn "Список «$name» не скачался или не раскрылся — пропускаем его в этот раз" >&2; fi
-			sets=""
-			break
+			case "$plus" in *" $set "*) pfail="$pfail $set"; _rb_warn "Дополнение Tachyon $set для «$name» не скачалось — сервис идёт по остальным спискам" >&2; continue ;; esac
+			_rb_warn "Список $set для «$name» не скачался или не раскрылся — сервис идёт по остальным спискам" >&2
 		fi
 	done
-	for set in $took; do [ -n "$sets" ] && touch "$ST_RUN/used.$set"; done
-	if [ -n "$sets" ]; then
-		for f in $(_rb_svc_field "$id" 3 | tr ',' ' '); do
-			case "$f" in *_extra.lst) f="$(_st_pkg_lists "$f")"; [ -n "$f" ] && dom="$dom $f" ;; esac
-		done
+	for set in $took; do touch "$ST_RUN/used.$set"; done
+	if [ "$id" != custom ]; then
+		f="$(_st_pkg_lists "$pkd" "$mt")"; [ -n "$f" ] && dom="$dom $f"
+		# подсети панели — только без основного набора: в наборе они уже есть, и с сужением, которого
+		# в текстовом списке нет (discord.srs: подсети Cloudflare и Google — только UDP голоса)
+		[ -z "$mt" ] && { f="$(_st_pkg_lists "$pkp")"; [ -n "$f" ] && pfx="$pfx $f"; }
 	fi
-	if [ -z "$sets" ]; then
-		dom="$(_st_pkg_lists "$(_rb_svc_field "$id" 3 | tr ',' ' ')")"
-		pfx="$(_st_pkg_lists "$(_rb_svc_field "$id" 4 | tr ',' ' ')")"
-		srs=""
-		if [ -z "$dom$pfx" ] && [ "$id" != custom ]; then
-			f="$ST_DIR/lists/$id.base.dom"
-			mkdir -p "$ST_DIR/lists"
-			printf '%s,%s\n' "$(_rb_svc_field "$id" 5)" "$(_rb_svc_field "$id" 6)" | tr ',' '\n' | grep -E '^[a-z0-9.-]+\.[a-z]+$' | awk '!s[$0]++' > "$f"
-			if [ -s "$f" ]; then
-				_rb_warn "Списки «$name» не скачались — пока беру только основные домены сервиса ($(wc -l < "$f" | tr -d ' ')), полный список панель попробует докачать в фоне" >&2
-				dom="$f"
-			else
-				rm -f "$f"
-			fi
-		fi
-	fi
-	# добавки Tachyon поверх списков из репозитория: у сервисов без своих наборов (WhatsApp, GitHub)
-	# и когда основной набор не скачался и сервис перешёл на резервный список
+	# добавки Tachyon у сервисов без своих наборов (WhatsApp, GitHub)
 	for set in $plus; do
-		[ -n "$sets" ] && case " $took " in *" $set "*) continue ;; esac
-		case " $pfail " in *" $set "*) continue ;; esac
+		case " $took $pfail " in *" $set "*) continue ;; esac
 		[ -f "$ST_RUN/used.$set" ] && continue
 		if _st_srs_get "$set"; then
 			f="$ST_DIR/lists/$set"
@@ -28388,21 +28523,49 @@ _st_svc_lists() {
 			[ -s "$f.pfx" ] && pfx="$pfx $f.pfx"
 			touch "$ST_RUN/used.$set"
 		else
-			_rb_warn "Дополнение Tachyon $set для «$name» не скачалось — сервис идёт по основному списку" >&2
+			_rb_warn "Дополнение Tachyon $set для «$name» не скачалось — сервис идёт по остальным спискам" >&2
 		fi
 	done
+	# основные домены сервиса — всегда: самые нужные адреса идут нужным путём, даже если списки не скачались
+	if [ "$id" != custom ]; then
+		f="$(_st_base_dom "$id" "$f5" "$f6")"
+		if [ -n "$f" ]; then
+			[ -z "$srs$dom$pfx" ] && _rb_warn "Списки «$name» не скачались — пока беру только основные домены сервиса ($(wc -l < "$f" | tr -d ' ')), полный список панель попробует докачать в фоне" >&2
+			dom="$dom $f"
+		fi
+	fi
 	[ "$id" = custom ] && [ -s "$ST_CUSTOM.lst" ] && dom="$ST_CUSTOM.lst"
 	[ "$id" = custom ] && [ -s "$ST_CUSTOM.pfx" ] && pfx="$ST_CUSTOM.pfx"
-	[ -n "$srs$dom$pfx" ] || return 0
+	[ -n "$srs$dom$pfx" ] || { [ -n "$(echo $sets)" ] && [ "$id" != custom ] && _rb_warn "Список «$name» не скачался или не раскрылся — пропускаем его в этот раз" >&2; return 0; }
 	printf 'svc\t%s\t%s\n' "$id" "$name"
 	for f in $srs; do printf 'srs\t%s\n' "$f"; done
 	for f in $dom; do printf 'dom\t%s\n' "$f"; done
 	for f in $pfx; do printf 'pfx\t%s\n' "$f"; done
 }
 
+# Списки панели (itdoginfo, v2fly, свои _extra). Когда у сервиса уже есть скачанные наборы, это
+# дополнение: не скачался недавно — не ждём его заново на каждом применении
 _st_pkg_lists() {
-	local f
-	for f in $1; do _rb_list_get "$f" && [ -s "$ZM_LISTS_DIR/$f" ] && echo "$ZM_LISTS_DIR/$f"; done
+	local f p
+	for f in $1; do
+		p="$ZM_LISTS_DIR/$f"
+		if [ -n "$(echo $2)" ] && [ ! -s "$p" ] && [ -n "$(find "$ZM_LISTS_DIR/.$f.fail" -mmin -60 2>/dev/null)" ]; then continue; fi
+		_rb_list_get "$f" && [ -s "$p" ] && echo "$p"
+	done
+}
+
+# Основные домены сервиса (поля 5 и 6) отдельным файлом; на флеш пишется, только если поменялись
+_st_base_dom() {
+	local f="$ST_DIR/lists/$1.base.dom" t
+	mkdir -p "$ST_DIR/lists" "$ST_RUN"
+	t="$ST_RUN/$1.base.$$"
+	[ $# -ge 3 ] || set -- "$1" "$(_rb_svc_field "$1" 5)" "$(_rb_svc_field "$1" 6)"
+	printf '%s,%s\n' "$2" "$3" | tr ',' '\n' | tr 'A-Z' 'a-z' | grep -E '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$' | awk '!s[$0]++' > "$t"
+	if [ ! -s "$t" ]; then rm -f "$t" "$f"; return 0; fi
+	if cmp -s "$t" "$f" 2>/dev/null; then rm -f "$t"
+	elif ! cp -f "$t" "$f.tmp" 2>/dev/null || ! cmp -s "$t" "$f.tmp" || ! mv -f "$f.tmp" "$f"; then rm -f "$t" "$f.tmp"; [ -s "$f" ] || return 0
+	else rm -f "$t"; fi
+	echo "$f"
 }
 
 _st_model_head() {
@@ -30051,6 +30214,9 @@ _st_srs_dump() {
 	local j="$2.json.$$"
 	if command -v steer >/dev/null 2>&1; then
 		steer srs-read "$1" --out "$2" --prefixes-out "$3" >/dev/null 2>&1 && return 0
+		# набор с сужением по протоколу и портам (discord.srs) без --meta-out ядро не отдаёт
+		steer srs-read "$1" --out "$2" --prefixes-out "$3" --meta-out "$2.meta.$$" >/dev/null 2>&1 && { rm -f "$2.meta.$$"; return 0; }
+		rm -f "$2.meta.$$"
 	fi
 	command -v sing-box >/dev/null 2>&1 && command -v jsonfilter >/dev/null 2>&1 || return 1
 	GOMEMLIMIT="$(_zm_gml)" sing-box rule-set decompile -o "$j" "$1" >/dev/null 2>&1 && [ -s "$j" ] || { rm -f "$j"; return 1; }
@@ -30061,8 +30227,9 @@ _st_srs_dump() {
 }
 
 _st_dom_build() {
-	local id="$1" out="$2" src="$2.src.$$" pfx="$2.pfx.$$" dep="$2.dep.$$" dl=1 sets set f fmt x ok=1
+	local id="$1" out="$2" src="$2.src.$$" pfx="$2.pfx.$$" dep="$2.dep.$$" dl=1 sets set f fmt x plus mt="" how="" ST_DOM_ROW="$ST_DOM_ROW"
 	ST_DOM_SRC=""; ST_DOM_MISS=""
+	[ -n "$ST_DOM_ROW" ] || [ "$id" = custom ] || ST_DOM_ROW="$(_rb_svc_row "$id")"
 	{ _st_running || [ -n "$ST_DOM_NODL" ]; } && dl=0
 	mkdir -p "${out%/*}" "$ST_DIR/lists" "$ST_RUN/srsdump"
 	: > "$src"; : > "$pfx"; : > "$dep"
@@ -30071,54 +30238,66 @@ _st_dom_build() {
 		[ -s "$ST_CUSTOM.pfx" ] && echo "$ST_CUSTOM.pfx" >> "$pfx"
 		ST_DOM_SRC="ваши строки"
 	else
+		# те же источники, что у маршрута (_st_svc_lists): все наборы сервиса, добавки Tachyon, списки
+		# панели и основные домены. Не скачался один набор — показываем остальные, а не четыре домена
 		sets="$(_st_dom_f 8 | tr ',' ' ')"
+		plus=" $(_st_tch_plus_of "$id") "
+		for set in $plus; do case " $sets " in *" $set "*) ;; *) sets="$sets $set" ;; esac; done
 		for set in $sets; do
-			fmt="$(awk -F'|' -v k="$set" '$1 == k { print $2; exit }' "$ST_CAT_IDX" 2>/dev/null)"
+			case "$set" in *[!A-Za-z0-9_-]*) continue ;; esac
+			fmt="$(_st_set_fmt "$set")"
+			f="$ST_DIR/lists/$set"
 			if [ "$fmt" = lst ]; then
-				f="$ST_DIR/lists/$set.dom"
-				[ -s "$f" ] || [ -s "$ST_DIR/lists/$set.pfx" ] || { [ "$dl" = 1 ] && _st_srs_get "$set" >/dev/null 2>&1; }
-				[ -s "$ST_DIR/lists/$set.pfx" ] && echo "$ST_DIR/lists/$set.pfx" >> "$pfx"
-				if [ -s "$f" ]; then echo "$f" >> "$src"
-				elif [ ! -s "$ST_DIR/lists/$set.pfx" ]; then ST_DOM_MISS="$ST_DOM_MISS $set"; ok=0; break; fi
-			else
-				f="$ST_DIR/lists/$set.srs"
-				[ -s "$f" ] || { [ "$dl" = 1 ] && _st_srs_get "$set" >/dev/null 2>&1; }
-				echo "$f" >> "$dep"
-				[ -s "$f" ] || ST_DOM_MISS="$ST_DOM_MISS $set"
-				[ -s "$f" ] || { ok=0; break; }
-				x="$ST_RUN/srsdump/$(printf '%s' "$f" | tr -c 'A-Za-z0-9_.-' '_')"
-				if { [ ! -s "$x.dom" ] && [ ! -s "$x.pfx" ]; } || [ "$f" -nt "$x.dom" ]; then
-					rm -f "$x.dom" "$x.pfx"
-					_st_srs_dump "$f" "$x.dom" "$x.pfx" || rm -f "$x.dom" "$x.pfx"
+				echo "$f.dom" >> "$dep"; echo "$f.pfx" >> "$dep"
+				[ -s "$f.dom" ] || [ -s "$f.pfx" ] || grep -qx zones "$f.meta" 2>/dev/null || { [ "$dl" = 1 ] && _st_srs_get "$set" >/dev/null 2>&1; }
+				if [ ! -s "$f.dom" ] && [ ! -s "$f.pfx" ]; then
+					grep -qx zones "$f.meta" 2>/dev/null || ST_DOM_MISS="$ST_DOM_MISS $set"
+					continue
 				fi
-				[ -f "$x.dom" ] || { ok=0; break; }
+				[ -s "$f.dom" ] && echo "$f.dom" >> "$src"
+				[ -s "$f.pfx" ] && echo "$f.pfx" >> "$pfx"
+			else
+				echo "$f.srs" >> "$dep"
+				[ -s "$f.srs" ] || { [ "$dl" = 1 ] && _st_srs_get "$set" >/dev/null 2>&1; }
+				[ -s "$f.srs" ] || { ST_DOM_MISS="$ST_DOM_MISS $set"; continue; }
+				x="$ST_RUN/srsdump/$(printf '%s' "$f.srs" | tr -c 'A-Za-z0-9_.-' '_')"
+				if { [ ! -s "$x.dom" ] && [ ! -s "$x.pfx" ]; } || [ "$f.srs" -nt "$x.dom" ]; then
+					rm -f "$x.dom" "$x.pfx"
+					_st_srs_dump "$f.srs" "$x.dom" "$x.pfx" || rm -f "$x.dom" "$x.pfx"
+				fi
+				[ -f "$x.dom" ] || continue
 				[ -s "$x.dom" ] && echo "$x.dom" >> "$src"
 				[ -s "$x.pfx" ] && echo "$x.pfx" >> "$pfx"
 			fi
+			case "$plus" in *" $set "*) ;; *) mt="$mt $set" ;; esac
+			case "$set" in t_*) x="Tachyon Lists" ;; zmu_*|zmc[0-9]*) x="ваши списки" ;; *) x="каталог списков" ;; esac
+			case "|$how|" in *"|$x|"*) ;; *) how="$how${how:+|}$x" ;; esac
 		done
-		if [ -n "$sets" ] && [ "$ok" = 1 ]; then ST_DOM_SRC="каталог списков"
-		else
-			: > "$src"; : > "$pfx"
+		x=""
+		for f in $(_st_dom_f 3 | tr ',' ' '); do
+			case "$f" in *[!A-Za-z0-9_.-]*|'') continue ;; esac
+			echo "$ZM_LISTS_DIR/$f" >> "$dep"
+			if [ "$dl" = 1 ]; then _rb_list_get "$f" >/dev/null 2>&1; fi
+			[ -s "$ZM_LISTS_DIR/$f" ] && { echo "$ZM_LISTS_DIR/$f" >> "$src"; x=1; }
+		done
+		# подсети панели — как у маршрута: только когда основного набора нет
+		if [ -z "$mt" ]; then
 			for f in $(_st_dom_f 4 | tr ',' ' '); do
+				case "$f" in *[!A-Za-z0-9_.-]*|'') continue ;; esac
+				echo "$ZM_LISTS_DIR/$f" >> "$dep"
 				if [ "$dl" = 1 ]; then _rb_list_get "$f" >/dev/null 2>&1; fi
-				[ -s "$ZM_LISTS_DIR/$f" ] && echo "$ZM_LISTS_DIR/$f" >> "$pfx"
+				[ -s "$ZM_LISTS_DIR/$f" ] && { echo "$ZM_LISTS_DIR/$f" >> "$pfx"; x=1; }
 			done
-			for f in $(_st_dom_f 3 | tr ',' ' '); do
-				if [ "$dl" = 1 ]; then _rb_list_get "$f" >/dev/null 2>&1; fi
-				[ -s "$ZM_LISTS_DIR/$f" ] && echo "$ZM_LISTS_DIR/$f" >> "$src"
-			done
-			if [ -s "$src" ]; then ST_DOM_SRC="списки сервиса"
-			else
-				printf '%s,%s\n' "$(_st_dom_f 5)" "$(_st_dom_f 6)" | tr ',' '\n' > "$out.base.$$"
-				[ -s "$out.base.$$" ] && echo "$out.base.$$" >> "$src"
-				ST_DOM_SRC="основные домены сервиса"
-			fi
 		fi
+		[ -n "$x" ] && how="$how${how:+|}списки сервиса"
+		printf '%s,%s\n' "$(_st_dom_f 5)" "$(_st_dom_f 6)" | tr ',' '\n' | grep . > "$out.base.$$"
+		if [ -s "$out.base.$$" ]; then echo "$out.base.$$" >> "$src"; how="$how${how:+|}основные домены сервиса"; fi
+		ST_DOM_SRC="$(printf '%s' "$how" | sed 's/|/ + /g')"
 	fi
 	while IFS= read -r f; do cat "$f"; echo; done < "$src" | _st_dom_norm | sort -u > "$out.$$"
 	mv -f "$out.$$" "$out"
 	mv -f "$pfx" "$out.pfxsrc"
-	grep -v "\.base\.$$\$" "$src" | cat - "$out.pfxsrc" "$dep" > "$out.deps"
+	grep -v "\.base\.$$\$" "$src" | cat - "$out.pfxsrc" "$dep" | awk '!s[$0]++' > "$out.deps"
 	rm -f "$src" "$dep" "$out.base.$$"
 	printf '%s\n' "$ST_DOM_MISS" > "$out.miss"
 	printf '%s\n' "$ST_DOM_SRC" > "$out.how"
@@ -30136,7 +30315,7 @@ _st_dom_stale() {
 	local f
 	[ -f "$1.deps" ] || return 0
 	[ -n "$(find "$1" -mmin +720 2>/dev/null)" ] && return 0
-	for f in "$RB_SHARE/services.conf" "$ST_CAT_IDX" "$ST_CAT_SVC" "$ST_TCH_SVC" "$ST_TCH_PLUS" "$ST_OWN_SVC" $(cat "$1.deps" 2>/dev/null); do
+	for f in "$RB_SHARE/services.conf" "$ST_CAT_IDX" "$ST_CAT_SVC" "$ST_TCH_SVC" "$ST_TCH_PLUS" "$ST_OWN_SVC" "$ST_OWN_CSVC" $(cat "$1.deps" 2>/dev/null); do
 		[ "$f" -nt "$1" ] && return 0
 	done
 	return 1
@@ -30172,7 +30351,8 @@ steer_svc_dom() {
 	_rb_routable "$id" || { echo '{"error":"у этого пункта нет списка"}'; return 1; }
 	f="$ST_RUN/dom/$id.txt"
 	[ "$id" = custom ] && [ -n "$ST_SEC" ] && f="$ST_RUN/dom/custom.$ST_SEC.txt"
-	if [ ! -f "$f" ] || [ ! -f "$f.how" ] || [ ! -f "$f.ipn" ] || [ ! -f "$f.ips" ] || _st_dom_stale "$f" || { [ "$o" = 0 ] && [ "$id" = custom ] && [ "$k" != ip ]; }; then
+	if [ ! -f "$f" ] || [ ! -f "$f.how" ] || [ ! -f "$f.ipn" ] || [ ! -f "$f.ips" ] || _st_dom_stale "$f" || { [ "$o" = 0 ] && [ "$id" = custom ] && [ "$k" != ip ]; } ||
+		{ [ "$o" = 0 ] && [ -s "$f.miss" ] && grep -q '[^ ]' "$f.miss" && [ -n "$(find "$f.miss" -mmin +10 2>/dev/null)" ]; }; then
 		_st_dom_build "$id" "$f" >/dev/null 2>&1 </dev/null
 	fi
 	n="$(wc -l < "$f" | tr -d ' ')"
@@ -32267,7 +32447,7 @@ _st_where() {
 				x="$ST_RUN/srsdump/$(printf '%s' "$path" | tr -c 'A-Za-z0-9_.-' '_')"
 				if { [ ! -s "$x.dom" ] && [ ! -s "$x.pfx" ]; } || [ "$path" -nt "$x.dom" ]; then
 					rm -f "$x.dom" "$x.pfx"
-					steer srs-read "$path" --out "$x.dom" --prefixes-out "$x.pfx" >/dev/null 2>&1 || rm -f "$x.dom" "$x.pfx"
+					_st_srs_dump "$path" "$x.dom" "$x.pfx" || rm -f "$x.dom" "$x.pfx"
 				fi
 				if [ -f "$x.dom" ]; then
 					printf '%s\t%s\t%s\t%s\t%s\n' "$st" "$id" "$name" "$x.dom" "$path"
@@ -32347,7 +32527,7 @@ _st_dnslog_fix() {
 				x="$ST_RUN/srsdump/$(printf '%s' "$path" | tr -c 'A-Za-z0-9_.-' '_')"
 				if [ -s "$path" ] && { { [ ! -s "$x.dom" ] && [ ! -s "$x.pfx" ]; } || [ "$path" -nt "$x.dom" ]; }; then
 					rm -f "$x.dom" "$x.pfx"
-					steer srs-read "$path" --out "$x.dom" --prefixes-out "$x.pfx" >/dev/null 2>&1 || rm -f "$x.dom" "$x.pfx"
+					_st_srs_dump "$path" "$x.dom" "$x.pfx" || rm -f "$x.dom" "$x.pfx"
 				fi
 				[ -s "$x.dom" ] && printf '%s\t%s\n' "$nm" "$x.dom" ;;
 			*) [ -s "$path" ] && printf '%s\t%s\n' "$nm" "$path" ;;
@@ -36373,7 +36553,7 @@ function catalog_items(known_list) {
 	for (let k in known_list) known[k] = true;
 	let cat_off = !!fs.access(ST_DIR + "/catalog.off"), tch_off = !!fs.access(ST_DIR + "/tachyon.off");
 	// own.idx — «Мои списки»: читаем и напрямую, на случай если общий индекс ещё не пересобран
-	for (let fn in [ "/catalog.idx", "/own.idx" ]) for (let l in split(s(fs.readfile(ST_DIR + fn)), "\n")) {
+	for (let fn in [ "/catalog.idx", "/own.idx", "/own.cat.idx" ]) for (let l in split(s(fs.readfile(ST_DIR + fn)), "\n")) {
 		let f = split(l, "|");
 		if (length(f) >= 3 && f[0] != "" && match(f[2], /^https:\/\//))
 			idx[f[0]] = { fmt: f[1], url: f[2], kind: s(f[3]) };
@@ -36416,11 +36596,12 @@ function catalog_items(known_list) {
 		seen[id] = true;
 		push(items, { id, name: s(f[1]) || id, group: s(f[8]), desc: s(f[9]), targets: uniq(t) });
 	}
-	if (cat_off && tch_off) return items;
+	// свои каталоги — всегда, даже когда стандартные выключены
+	let rlines = filter(split(s(fs.readfile(ST_DIR + "/own.cat.svc")), "\n"), (l) => l != "");
+	if (cat_off && tch_off && !length(rlines)) return items;
 	let covered = {};
 	for (let it in items) for (let tk in it.targets) covered[tk] = true;
-	let rlines = [];
-	if (!cat_off) rlines = split(s(fs.readfile(ST_DIR + "/services.remote")), "\n");
+	if (!cat_off) rlines = [ ...rlines, ...split(s(fs.readfile(ST_DIR + "/services.remote")), "\n") ];
 	if (!tch_off) rlines = [ ...rlines, ...split(s(fs.readfile(ST_DIR + "/tachyon.svc")), "\n") ];
 	for (let l in rlines) {
 		let f = split(l, "|"), id = f[0], grp = s(f[8]), t = [], cat = false;
@@ -42492,6 +42673,7 @@ function catalogBlock(c, o) {
 var OWN_GROUP = 'Мои списки (добавлены вами)', ownBusy = '';
 function ownWord(n, a, b, c) { var m = n % 10, h = n % 100; return m === 1 && h !== 11 ? a : m >= 2 && m <= 4 && (h < 12 || h > 14) ? b : c; }
 function ownCounts(r) {
+	if (r.kind === 'catalog') return 'каталог: ' + (+r.svcs || 0) + ' ' + ownWord(+r.svcs || 0, 'список', 'списка', 'списков') + (r.version ? ' · версия ' + r.version : '');
 	var d = +r.dom || 0, p = +r.pfx || 0, o = [];
 	if (d) o.push(d.toLocaleString('ru-RU') + ' ' + ownWord(d, 'домен', 'домена', 'доменов'));
 	if (p) o.push(p.toLocaleString('ru-RU') + ' ' + ownWord(p, 'подсеть', 'подсети', 'подсетей'));
@@ -42505,8 +42687,8 @@ function ownBlock(c, o) {
 		E('div', { 'class': 'zm-cat-src-title' }, [ 'Мои списки ', E('span', { 'class': 'zm-badge ' + (ownBusy ? 'zm-warn zm-busy' : own.length ? 'zm-ok' : 'zm-off') },
 			[ ownBusy ? E('span', { 'class': 'zm-dot' }) : E([]), ownBusy ? 'проверяем' : own.length ? own.length + ' ' + ownWord(own.length, 'список', 'списка', 'списков') : 'нет' ]) ]),
 		E('div', { 'class': 'zm-cat-src-state' }, ownBusy ? 'скачиваем и проверяем список по ссылке…'
-			: own.length ? 'Отмечаются в «Дополнительных списках» → «Мои списки», работают и в Steer, и в Forkozz.'
-			: 'Свой список доменов и подсетей по ссылке — например, файл на GitHub. Каталоги выше при этом не меняются.')
+			: own.length ? (own.some(function(r) { return r.kind === 'catalog'; }) ? 'Отмечаются в «Дополнительных списках»: свои списки — в группе «Мои списки», каталоги — в группах со своим названием. Работают и в Steer, и в Forkozz.' : 'Отмечаются в «Дополнительных списках» → «Мои списки», работают и в Steer, и в Forkozz.')
+			: 'Свой список доменов и подсетей по ссылке — например, файл на GitHub, или целый каталог lists.json. Каталоги выше при этом не меняются.')
 	]));
 	box.appendChild(E('div', { 'class': 'zm-actions zm-cat-src-actions' }, [
 		E('button', { 'class': 'cbi-button cbi-button-action', 'disabled': ownBusy || own.length >= max ? '' : null,
@@ -42520,6 +42702,7 @@ function ownBlock(c, o) {
 				E('div', { 'class': 'zm-cat-src-url' }, [ E('a', { 'href': r.url, 'target': '_blank', 'rel': 'noopener' }, String(r.url).replace(/^https:\/\//, '')) ])
 			]),
 			E('div', { 'class': 'zm-own-btns' }, [
+				r.kind === 'catalog' ? E('button', { 'class': 'cbi-button', 'disabled': ownBusy ? '' : null, 'click': function() { refresh(r); } }, ownBusy === r.id ? 'Обновляется…' : 'Обновить') : E([]),
 				E('button', { 'class': 'cbi-button', 'disabled': ownBusy ? '' : null, 'click': function() { ren(r); } }, 'Переименовать'),
 				E('button', { 'class': 'cbi-button cbi-button-remove', 'disabled': ownBusy ? '' : null, 'click': function() { del(r); } }, 'Удалить')
 			])
@@ -42534,7 +42717,7 @@ function ownBlock(c, o) {
 			blocks: [
 				err ? { type: 'note', kind: 'warn', text: err } : null,
 				{ type: 'input', id: 'url', title: 'Ссылка на список', value: v.url || '', placeholder: 'https://raw.githubusercontent.com/…/list.txt',
-					hint: 'Текстовый файл: на строке домен (example.com) или подсеть IPv4 (203.0.113.0/24), # — комментарий. Подойдёт и набор правил sing-box .srs. Ссылку со страницы GitHub панель сама превратит в прямую.' },
+					hint: 'Текстовый файл: на строке домен (example.com) или подсеть IPv4 (203.0.113.0/24), # — комментарий. Подойдёт и набор правил sing-box .srs, и целый каталог lists.json (как у splify2-lists и Tachyon) — его списки появятся отдельными группами. Ссылку со страницы GitHub панель сама превратит в прямую.' },
 				{ type: 'input', id: 'name', title: 'Название', value: v.name || '', placeholder: 'например, Рабочие сайты', hint: 'Можно не заполнять — возьмём имя файла.' }
 			]
 		}).then(function(x) {
@@ -42544,14 +42727,24 @@ function ownBlock(c, o) {
 			callSteerAction('own_add', JSON.stringify(q)).then(function(res) {
 				ownBusy = '';
 				if (!res || res.error) { redraw(); add(q, (res && res.error) ? res.error.charAt(0).toUpperCase() + res.error.slice(1) : 'Роутер не ответил'); return; }
-				toast('Список «' + res.name + '» добавлен: ' + ownCounts(res) + '. Отметьте его в «Мои списки» и сохраните', 'info');
-				if (o.added) o.added(OWN_GROUP, res.id);
+				if (res.kind === 'catalog') toast('Каталог «' + res.name + '» добавлен: ' + (+res.svcs || 0) + ' ' + ownWord(+res.svcs || 0, 'список', 'списка', 'списков') + '. Они в «Дополнительных списках», в группах «' + res.name + '»', 'info');
+				else toast('Список «' + res.name + '» добавлен: ' + ownCounts(res) + '. Отметьте его в «Мои списки» и сохраните', 'info');
+				if (o.added && res.kind !== 'catalog') o.added(OWN_GROUP, res.id);
 				o.reload();
 			}).catch(function() { ownBusy = ''; redraw(); add(q, 'Роутер не ответил — попробуйте ещё раз'); });
 		});
 	}
+	function refresh(r) {
+		ownBusy = r.id; redraw();
+		callSteerAction('own_refresh', r.id).then(function(res) {
+			ownBusy = '';
+			if (!res || res.error) { toast((res && res.error) || 'Роутер не ответил', 'error'); redraw(); return; }
+			toast('Каталог «' + r.name + '» обновлён: ' + (+res.svcs || 0) + ' ' + ownWord(+res.svcs || 0, 'список', 'списка', 'списков'), 'info');
+			o.reload();
+		}).catch(function() { ownBusy = ''; toast('Роутер не ответил', 'error'); redraw(); });
+	}
 	function ren(r) {
-		askText({ title: 'Название списка', value: r.name, okText: 'Сохранить' }).then(function(nm) {
+		askText({ title: r.kind === 'catalog' ? 'Название каталога' : 'Название списка', value: r.name, okText: 'Сохранить' }).then(function(nm) {
 			if (nm === null || !nm.trim() || nm.trim() === r.name) return;
 			callSteerAction('own_ren', JSON.stringify({ id: r.id, name: nm.trim() })).then(function(res) {
 				if (!res || res.error) { toast((res && res.error) || 'Роутер не ответил', 'error'); return; }
@@ -42561,12 +42754,12 @@ function ownBlock(c, o) {
 		});
 	}
 	function del(r) {
-		if (r.used) { toast('Список «' + r.name + '» включён в ' + r.used + ' — снимите с него отметку, сохраните и удалите снова', 'warning'); return; }
-		ask('Удалить список «' + r.name + '»?\n\nОн пропадёт из «Моих списков» в Steer и Forkozz. Сам файл по ссылке не трогается.').then(function(yes) {
+		if (r.used) { toast((r.kind === 'catalog' ? 'Списки каталога «' + r.name + '» включены в ' : 'Список «' + r.name + '» включён в ') + r.used + ' — снимите отметки, сохраните и удалите снова', 'warning'); return; }
+		ask(r.kind === 'catalog' ? 'Удалить каталог «' + r.name + '»?\n\nЕго списки пропадут из «Дополнительных списков» в Steer и Forkozz.' : 'Удалить список «' + r.name + '»?\n\nОн пропадёт из «Моих списков» в Steer и Forkozz. Сам файл по ссылке не трогается.').then(function(yes) {
 			if (!yes) return;
 			callSteerAction('own_del', r.id).then(function(res) {
 				if (!res || res.error) { toast((res && res.error) || 'Роутер не ответил', 'error'); o.reload(); return; }
-				toast('Список «' + r.name + '» удалён', 'info');
+				toast((r.kind === 'catalog' ? 'Каталог «' : 'Список «') + r.name + '» удалён', 'info');
 				o.reload();
 			}).catch(function() { toast('Роутер не ответил', 'error'); });
 		});
@@ -72451,12 +72644,6 @@ html[data-theme="bento"] #zmw-view .zm-seg-item.zm-active, html[data-theme="retr
 .zmw-theme-group:first-child { padding-top: 4px; }
 .zmw-theme-opt { min-width: 0; }
 .zmw-theme-opt > span:nth-of-type(1) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.zmw-anim-group { margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--border); }
-.zmw-anim-seg { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; padding: 3px; margin: 0 2px 2px; border-radius: 12px; background: var(--surface-2); }
-.zmw-anim-seg .zmw-theme-opt { flex-direction: column; justify-content: center; gap: 4px; padding: 8px 2px 7px; font-size: 12px; font-weight: 600; text-align: center; }
-.zmw-anim-seg .zmw-theme-opt > span:nth-of-type(1) { flex: none; max-width: 100%; }
-.zmw-anim-seg.zmw-anim-seg5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-.zmw-anim-seg.zmw-anim-seg5 .zmw-theme-opt { font-size: 11px; padding-left: 0; padding-right: 0; }
 .zmw-bg-head { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; margin-top: 4px; padding: 10px 6px 4px 10px; border-top: 1px solid var(--border); }
 .zmw-bg-title { flex: 1; min-width: 0; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
 .zmw-bg-hide { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 8px; border-radius: 9px; border: 1px solid var(--border-2); background: var(--surface-solid); color: var(--text); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; }
@@ -72488,9 +72675,6 @@ html.zm-bgo-idle, html.zm-bgo-idle * { cursor: none !important; }
 .zmw-bgo-hint.zmw-bgo-off { opacity: 0; }
 @media (max-width: 480px) { .zmw-bg-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } .zmw-bg-hide span { display: none; } .zmw-bg-hide { padding: 0 8px; } }
 @media (prefers-reduced-motion: reduce) { .zmw-bgo, .zmw-bgo-hint, html.zm-bg-only body > * { transition: none !important; } }
-html[data-theme="micro"] .zmw-anim-group { border-top-color: #e3e6ee; }
-html[data-theme="micro"] .zmw-anim-seg { background: #f0f3fa; }
-html[data-theme="retro"] .zmw-anim-seg, html[data-theme="matrix"] .zmw-anim-seg, html[data-theme="neon"] .zmw-anim-seg, html[data-theme="noir"] .zmw-anim-seg { border-radius: 0; }
 html[data-theme="micro"] .zmw-bg-head { border-top-color: #e3e6ee; }
 html[data-theme="micro"] .zmw-bg-react { background: #f0f3fa; }
 html[data-theme="retro"] :is(.zmw-bg-tile, .zmw-bg-react, .zmw-bg-hide), html[data-theme="matrix"] :is(.zmw-bg-tile, .zmw-bg-react, .zmw-bg-hide), html[data-theme="neon"] :is(.zmw-bg-tile, .zmw-bg-react, .zmw-bg-hide), html[data-theme="noir"] :is(.zmw-bg-tile, .zmw-bg-react, .zmw-bg-hide), html[data-zm-rad="sharp"] :is(.zmw-bg-tile, .zmw-bg-react, .zmw-bg-hide) { border-radius: 0; }
@@ -73343,8 +73527,6 @@ html[data-theme="ink"] #zmw-view .zm-zp-own { border-color: #0a0a0a; }
 html[data-theme="micro"] #zmw-view :is(.zm-zp-note, .zm-zp-sum, .zm-zp-legend, .zm-zp-cur summary, .zm-zp-own) { color: #000000; }
 html[data-theme="micro"] #zmw-view .zm-zp-own { border-color: #000000; }
 html[data-theme="matrix"] #zmw-view .zm-zp-note { color: var(--text); }
-html[data-theme="metro"] .zmw-anim-group { border-top-color: #e1e1dc; }
-html[data-theme="metro"] .zmw-anim-seg { background: #efefeb; }
 html[data-theme="metro"] .zmw-bg-head { border-top-color: #e1e1dc; }
 html[data-theme="metro"] .zmw-bg-react { background: #efefeb; }
 html[data-theme="metro"] {
@@ -73449,7 +73631,7 @@ html[data-zm-acc] { --a1: var(--zm-acc) !important; --a2: var(--zm-acc) !importa
 html[data-zm-acc] #zmw-view .zm-seg-item.zm-active, html[data-zm-acc] .zm-dock .zm-seg-item.zm-active, html[data-zm-acc] .zmw-modal .zm-seg-item.zm-active,
 html[data-zm-acc] #zmw-view .cbi-button-positive, html[data-zm-acc] .zm-dock .cbi-button-positive, html[data-zm-acc] .zmw-modal .cbi-button-positive, html[data-zm-acc] .zm-refresh-banner .cbi-button-positive,
 html[data-zm-acc] #zmw-view .zmw-tabs .cbi-button-positive, html[data-zm-acc] #zmw-view .zm-tile.zm-active, html[data-zm-acc] #zmw-view .zm-svc-dom.zm-active,
-html[data-zm-acc] .zmw-nav-item.zmw-active .zmw-nav-ico, html[data-zm-acc] .zmw-btn-primary, html[data-zm-acc] .zmw-nav-gear.zmw-on, html[data-zm-acc] .zmw-anim-seg .zmw-theme-opt.zmw-on {
+html[data-zm-acc] .zmw-nav-item.zmw-active .zmw-nav-ico, html[data-zm-acc] .zmw-btn-primary, html[data-zm-acc] .zmw-nav-gear.zmw-on {
 	background: var(--zm-acc) !important; color: var(--zm-on) !important; border-color: transparent !important; box-shadow: none !important; outline-color: var(--zm-acc) !important;
 }
 html[data-zm-acc] #zmw-view .cbi-button-positive:hover, html[data-zm-acc] .zm-dock .cbi-button-positive:hover, html[data-zm-acc] .zmw-modal .cbi-button-positive:hover { background: color-mix(in srgb, var(--zm-acc) 86%, #000) !important; color: var(--zm-on) !important; }
