@@ -95,6 +95,7 @@ dahuasecurity.com
 rockstargames.com
 docs.altlinux.org
 battleye.b-cdn.net
+files.nexus-cdn.com
 tiktoklinksafety.com
 documentfoundation.org
 marketplace.visualstudio.com
@@ -143,6 +144,7 @@ paragon.com
 spyjinx.com
 3lateral.com
 fortnite.com
+deepseek.com
 epicgames.com
 epicgames.dev
 hyprsense.com
@@ -725,4 +727,17 @@ kaspersky-labs.com
 #################################### nVidia
 nvidia.com
 geforce.com
+#################################### Oppo
+oplus.com
+myoppo.com
+coloros.com
+allawnos.com
+oppomobile.com
+heytapmobi.com
+heytapmobile.com
+heytapdownload.com
+#################################### imgbb
+ibb.co
+imgbb.com
+simgbb.com
 ####################################
