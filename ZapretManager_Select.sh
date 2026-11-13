@@ -21,6 +21,9 @@ tailscale|Удалённый доступ|Сеть|роутер из любой 
 terminal|Терминал|Сеть|SSH в браузере
 monitor|Монитор ресурсов|Сервис|процессор, память
 openwrt|Настройка OpenWrt|Сервис|время, Wi-Fi, зеркало'
+# Где держать панель: 1 — флеш, 2 — страницы в памяти и архив на флеше, 3 — всё в памяти до перезагрузки
+MODES="1 2 3"
+MODE_ARG_1=flash; MODE_ARG_2=light; MODE_ARG_3=ram
 
 say() { echo -e "${CYAN}==>${NC} $*"; }
 ok() { echo -e "   ${GREEN}✓${NC} $*"; }
@@ -35,6 +38,7 @@ files() {
 	esac
 }
 num() { echo "$1" | sed -e ':a' -e 's/\([0-9]\)\([0-9]\{3\}\)\($\| \)/\1 \2\3/' -e 'ta'; }
+mb() { awk -v k="$1" 'BEGIN { m = k / 1024; if (m < 10) printf "%.1f МБ", m; else printf "%d МБ", m + 0.5 }' | tr '.' ','; }
 kfree() { df -kP "$1" 2>/dev/null | awk 'NR == 2 { print $4 + 0; f = 1 } END { if (!f) print 0 }'; }
 
 get() {
@@ -75,7 +79,10 @@ set_on() {
 	ON="${out# }"
 }
 fix() { local id; for id in $IDS; do lock "$id" >/dev/null && set_on "$id" 1; done; return 0; }
+# Размер файла из установщика (байты): таблица «путь<TAB>байты» собирается одним проходом
+sz() { printf '%s\n' "$TABLE" | awk -F'\t' -v p="$1" '$1 == p { print $2 + 0; f = 1; exit } END { if (!f) print 0 }'; }
 kb() { printf '%s' "$SIZES" | awk -v id="$1" '$1 == id { print int(($2 + 1023) / 1024); exit }'; }
+pb() { printf '%s' "$SIZES" | awk -v id="$1" '$1 == id { print $2 + 0; exit }'; }
 bar() {
 	local n i=0 b=""
 	n=$(( ($1 * 14 + MAX - 1) / MAX ))
@@ -114,7 +121,7 @@ draw() {
 	echo
 	if [ -n "$MSG" ]; then echo -e "  ${YELLOW}$MSG${NC}"; echo; fi
 	echo -e "  ${CYAN}Цифра${NC} — поставить или убрать страницу, можно несколько: ${CYAN}3 4 9${NC}"
-	echo -e "  ${CYAN}a${NC} — все   ${CYAN}m${NC} — минимум   ${CYAN}Enter${NC} — установить   ${CYAN}q${NC} — отменить"
+	echo -e "  ${CYAN}a${NC} — все   ${CYAN}m${NC} — минимум   ${CYAN}Enter${NC} — дальше   ${CYAN}q${NC} — отменить"
 	return 0
 }
 menu() {
@@ -129,7 +136,7 @@ menu() {
 		ans="$(printf '%s' "$ans" | tr ',;' '  ' | tr 'A-Z' 'a-z')"
 		case "$ans" in
 			''|' ') return 0 ;;
-			q|й) echo; echo -e "${YELLOW}Установка отменена — на роутере ничего не изменилось${NC}"; rm -f "$ZMS_SRC"; exit 0 ;;
+			q|й) cancel ;;
 			a|ф|all) ON="$IDS"; MSG="Отмечены все страницы" ;;
 			m|ь|min) ON=""; fix; MSG="Оставлен минимум — только то, без чего нельзя" ;;
 			*)
@@ -144,8 +151,114 @@ menu() {
 		esac
 	done
 }
+cancel() { echo; echo -e "${YELLOW}Установка отменена — на роутере ничего не изменилось${NC}"; rm -f "$ZMS_SRC"; exit 0; }
+
+# ---- Где держать панель ----
+# Сколько займёт каждый вариант (КБ): ui — страницы и модули, be — основа панели (backend и Forkozz), core — остальное.
+# На флеше файлы лежат сжатыми (~в 2 раза меньше), архив страниц сжат gzip (~в 4 раза меньше)
+calc() {
+	local id p b off=""
+	for id in $IDS; do is_on "$id" || off="$off $(files "$id")"; done
+	UI_B=0; BE_B=0; CORE_B=0
+	eval "$(printf '%s\n' "$TABLE" | awk -F'\t' -v off=" $off " '
+		index(off, " " $1 " ") { next }
+		$1 ~ /^\$_zmi_st\/mod\// || $1 ~ /^\/www\/luci-static\/resources\/(view\/)?(zapret-manager|bytetube)\// || $1 ~ /^\/www\/zm\// { u += $2; next }
+		$1 == "$_zmi_st/backend.sh" || $1 == "/opt/zapret-manager-luci/netshift.uc" { b += $2; next }
+		{ c += $2 }
+		END { printf "UI_B=%d; BE_B=%d; CORE_B=%d\n", u, b, c }')"
+	UI=$(( (UI_B + 1023) / 1024 )); BE=$(( (BE_B + 1023) / 1024 )); CORE=$(( (CORE_B + 1023) / 1024 ))
+	FL_1=$(( (UI + BE + CORE) / 2 )); RAM_1=0
+	FL_2=$(( (BE + CORE) / 2 + UI / 4 )); RAM_2=$UI
+	FL_3=$(( CORE / 2 )); RAM_3=$(( UI + BE ))
+}
+# Почему вариант нельзя выбрать (пусто — можно)
+why_not() {
+	local need
+	[ "$1" = 1 ] && return 0
+	case "$1" in
+		2) [ -n "$CAN_LIGHT" ] || { echo "этот установщик ещё не умеет — обновите его"; return; } ;;
+		3) [ -n "$CAN_RAM" ] || { echo "этот установщик ещё не умеет — обновите его"; return; } ;;
+	esac
+	need=$(( $(eval echo "\$RAM_$1") + 4096 )); [ "$need" -lt 12288 ] && need=12288
+	[ "${TFREE:-0}" -ge "$need" ] || { echo "мало оперативной памяти: нужно $(mb "$need"), свободно $(mb "${TFREE:-0}")"; return; }
+	[ -n "$NOSYM" ] && { echo "веб-сервер uhttpd настроен не открывать файлы по ссылкам (no_symlinks)"; return; }
+	[ "$1" = 2 ] && ! { command -v tar >/dev/null 2>&1 && command -v gzip >/dev/null 2>&1; } && { echo "на роутере нет tar или gzip"; return; }
+	return 0
+}
+mdraw() {
+	local m mark col tcol t d1 d2 fl ram w
+	calc
+	clear 2>/dev/null || printf '\033[2J\033[H'
+	echo -e "${MAGENTA}Zapret Manager $VER — где держать панель${NC}"
+	echo
+	echo -e "  ${DGRAY}Свободно: флеш $(num "${FREE:-0}") КБ · память $(mb "${TFREE:-0}")${NC}"
+	[ -n "$CUR_TXT" ] && echo -e "  ${DGRAY}Сейчас: $CUR_TXT${NC}"
+	echo
+	for m in $MODES; do
+		case "$m" in
+			1) t="На флеше        "; d1="обычная установка, всё сохраняется"; d2="" ;;
+			2) t="В памяти + архив"; d1="страницы в оперативной памяти, на флеше их сжатый архив,"; d2="переживает перезагрузку" ;;
+			3) t="Только в памяти "; d1="до перезагрузки роутера, потом запустить установщик снова;"; d2="Zapret, Steer и остальное работают и без панели" ;;
+		esac
+		fl="$(eval echo "\$FL_$m")"; ram="$(eval echo "\$RAM_$m")"
+		w="$(why_not "$m")"
+		if [ -n "$w" ]; then mark="[×]"; col="$DGRAY"; tcol="$DGRAY"
+		elif [ "$m" = "$MODE" ]; then mark="[✓]"; col="$GREEN"; tcol="$NC"
+		else mark="[ ]"; col="$DGRAY"; tcol="$NC"; fi
+		if [ "$m" = 3 ]; then fl="почти 0"; else fl="≈ $(num "$fl") КБ"; fi
+		printf "  %b%s%b %d  %b%s%b   %bфлеш %s%s%b\n" "$col" "$mark" "$NC" "$m" "$tcol" "$t" "$NC" "$DGRAY" "$fl" "$([ "$ram" -gt 0 ] && echo " · память $(mb "$ram")")" "$NC"
+		if [ -n "$w" ]; then echo -e "        ${DGRAY}нельзя: $w${NC}"
+		else
+			echo -e "        ${DGRAY}$d1${NC}"
+			[ -n "$d2" ] && echo -e "        ${DGRAY}$d2${NC}"
+		fi
+	done
+	echo
+	if [ -n "$MSG" ]; then echo -e "  ${YELLOW}$MSG${NC}"; echo; fi
+	echo -e "  ${CYAN}1–3${NC} — выбрать   ${CYAN}Enter${NC} — установить"
+	echo -e "  ${CYAN}b${NC} — назад к страницам   ${CYAN}q${NC} — отменить"
+}
+mmenu() {
+	local ans w eof=""
+	MSG=""
+	calc
+	w="$(why_not "$MODE")"
+	if [ -n "$w" ]; then
+		MSG="Вариант $MODE сейчас нельзя: $w — отмечен вариант 1"
+		MODE=1
+	fi
+	while :; do
+		mdraw
+		printf '  > '
+		ans=""
+		IFS= read -r ans <&3 || { echo; ans=""; eof=1; }
+		MSG=""
+		ans="$(printf '%s' "$ans" | tr -d ' ' | tr 'A-Z' 'a-z')"
+		case "$ans" in
+			'')
+				w="$(why_not "$MODE")"
+				[ -z "$w" ] && return 0
+				[ -n "$eof" ] && cancel
+				MSG="Этот вариант сейчас нельзя: $w — выберите другой" ;;
+			q|й) cancel ;;
+			b|и) return 1 ;;
+			1|2|3)
+				w="$(why_not "$ans")"
+				if [ -n "$w" ]; then MSG="Вариант $ans нельзя: $w"; else MODE="$ans"; fi ;;
+			*) MSG="Не понял «$ans» — введите 1, 2 или 3, b, q или просто Enter" ;;
+		esac
+	done
+}
 
 [ "$(id -u 2>/dev/null)" = 0 ] || die "Запустите установщик от root"
+PRESET=""
+case "${1:-}" in
+	'') ;;
+	flash) PRESET=1 ;;
+	light) PRESET=2 ;;
+	ram) PRESET=3 ;;
+	*) die "Не понял «$1». Можно: flash — на флеш, light — в память с архивом на флеше, ram — в память до перезагрузки" ;;
+esac
 clear 2>/dev/null || true
 echo -e "${MAGENTA}Zapret Manager — установка с выбором страниц${NC}\n"
 say "Скачиваем полный установщик панели"
@@ -164,23 +277,43 @@ if ! grep -q '_zpg_enforce' "$ZMS_SRC"; then
 	sh "$ZMS_SRC"; r=$?; rm -f "$ZMS_SRC"; exit $r
 fi
 
-SIZES=""; PAGES=0; MAX=1
+say "Считаем размеры"
+# Один проход по установщику: путь каждого встроенного файла и его размер
+TABLE="$(LC_ALL=C awk -v q="'" '
+	f && $0 == "ZM_INSTALLER_EOF" { print p "\t" n; f = 0; next }
+	f { n += length($0) + 1; next }
+	/ << .ZM_INSTALLER_EOF.$/ && / > / {
+		p = $0; sub(/ << .ZM_INSTALLER_EOF.$/, "", p); sub(/.* > /, "", p); gsub("[\"" q "]", "", p)
+		f = 1; n = 0
+	}' "$ZMS_SRC")"
+SIZES=""; PAGES=0; MAX=1; PB=0
 for id in $IDS; do
 	b=0
-	for p in $(files "$id"); do
-		s="$(awk -v h="cat > '$p' << 'ZM_INSTALLER_EOF'" 'f && $0 == "ZM_INSTALLER_EOF" { exit } f { n += length($0) + 1 } $0 == h { f = 1 } END { print n + 0 }' "$ZMS_SRC")"
-		b=$((b + ${s:-0}))
-	done
+	for p in $(files "$id"); do s="$(sz "$p")"; b=$((b + ${s:-0})); done
 	SIZES="$SIZES$id $b
 "
 	k=$(( (b + 1023) / 1024 ))
 	PAGES=$((PAGES + k))
+	PB=$((PB + b))
 	if [ "$k" -gt "$MAX" ]; then MAX=$k; fi
 done
-BASE=$(( $(wc -c < "$ZMS_SRC") / 1024 - PAGES - 24 ))
+BASE=$(( ($(printf '%s\n' "$TABLE" | awk -F'\t' '{ s += $2 } END { print s + 0 }') - PB + 1023) / 1024 ))
 [ "$BASE" -gt 1000 ] || BASE=2210
 FREE="$(kfree /overlay)"
 [ "${FREE:-0}" -gt 0 ] || FREE="$(kfree /)"
+TFREE="$(kfree /tmp)"
+NOSYM=""
+for s in main zmweb; do [ "$(uci -q get "uhttpd.$s.no_symlinks" 2>/dev/null)" = 1 ] && NOSYM=1; done
+CAN_LIGHT=""; CAN_RAM=""
+grep -qF '"$ZM_INST_MODE" = light' "$ZMS_SRC" && CAN_LIGHT=1
+grep -qF '"$ZM_INST_MODE" = ram' "$ZMS_SRC" && CAN_RAM=1
+CUR=""; [ -f "$ZMS_STATE/ui.ram" ] && read -r CUR < "$ZMS_STATE/ui.ram"
+case "$CUR" in
+	light) MODE=2; CUR_TXT="страницы в памяти, архив на флеше" ;;
+	tmp) MODE=3; CUR_TXT="панель в памяти до перезагрузки" ;;
+	*) MODE=1; CUR_TXT=""; [ -x /opt/zapret-manager-luci/backend.sh ] && CUR_TXT="на флеше" ;;
+esac
+[ -n "$PRESET" ] && MODE="$PRESET"
 SAVED=""
 [ -s "$ZMS_STATE/pages.off" ] && SAVED="$(tr -s ' \n' '  ' < "$ZMS_STATE/pages.off")"
 ON=""
@@ -192,7 +325,10 @@ if [ -t 0 ]; then exec 3<&0
 elif ( exec 3</dev/tty ) 2>/dev/null; then exec 3</dev/tty
 else die "Нужен терминал, чтобы выбрать страницы. Запустите так: wget -O /tmp/zm-select.sh <ссылка> && sh /tmp/zm-select.sh"
 fi
-menu
+while :; do
+	menu
+	mmenu && break
+done
 exec 3<&-
 
 OFF=""
@@ -202,19 +338,24 @@ mkdir -p "$ZMS_STATE" || die "Не удалось создать $ZMS_STATE"
 if [ -n "$OFF" ]; then printf '%s\n' "$OFF" > "$ZMS_STATE/pages.off"; else rm -f "$ZMS_STATE/pages.off"; fi
 {
 	[ -s "$ZMS_STATE/pages.size" ] && awk -v off=" $OFF " '!index(off, " " $1 " ")' "$ZMS_STATE/pages.size"
-	for id in $OFF; do printf '%s %s\n' "$id" "$(printf '%s' "$SIZES" | awk -v id="$id" '$1 == id { print $2; exit }')"; done
+	for id in $OFF; do printf '%s %s\n' "$id" "$(pb "$id")"; done
 } > "$ZMS_STATE/pages.size.new" && mv -f "$ZMS_STATE/pages.size.new" "$ZMS_STATE/pages.size"
+
+ARG="$(eval echo "\$MODE_ARG_$MODE")"
+# Старый установщик не знает «flash» — без слова он и так ставит на флеш
+[ "$ARG" = flash ] && [ -z "$CAN_LIGHT" ] && ARG=""
+case "$MODE" in 1) WHERE="на флеш" ;; 2) WHERE="в память, архив страниц — на флеш" ;; 3) WHERE="в память до перезагрузки" ;; esac
 
 clear 2>/dev/null || true
 if [ -n "$OFF" ]; then
 	t=""; for id in $OFF; do t="$t, $(f "$id" 2)"; done
-	echo -e "${MAGENTA}Ставим панель без страниц:${NC} ${t#, }"
+	echo -e "${MAGENTA}Ставим панель $WHERE, без страниц:${NC} ${t#, }"
 else
-	echo -e "${MAGENTA}Ставим панель со всеми страницами${NC}"
+	echo -e "${MAGENTA}Ставим панель $WHERE, со всеми страницами${NC}"
 fi
 echo -e "${DGRAY}Изменить выбор потом можно в панели: Система → Компоненты панели${NC}\n"
 sleep 2
-sh "$ZMS_SRC"
+sh "$ZMS_SRC" $ARG
 r=$?
 rm -f "$ZMS_SRC"
 [ "$r" = 0 ] || exit $r
