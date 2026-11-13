@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.071
+# Version: 5.072
 ZM_VERSION_EOF
 set -e
 
@@ -40349,12 +40349,43 @@ function api_proxies(ep) {
 }
 
 function guard_alive(ep, tag, url) {
-	let tries = [ [ url, 3000 ], [ "http://cp.cloudflare.com/generate_204", 4000 ] ];
+	let tries = [ [ url, 5000 ], [ "http://cp.cloudflare.com/generate_204", 5000 ] ];
 	for (let t in tries) {
 		let j = api_get(ep, "/proxies/" + urlenc(tag) + "/delay", int(t[1] / 1000) + 2, { url: t[0], timeout: t[1] });
 		if (j && int(j.delay || 0) > 0) return true;
 	}
 	return false;
+}
+
+// Сколько байт уже пришло через сервер по каждому открытому соединению: если число растёт — сервер жив, трафик идёт
+function guard_bytes(ep, tag) {
+	let j = api_get(ep, "/connections", 6), r = {};
+	if (!j || type(j.connections) != "array") return null;
+	for (let cn in j.connections) if (type(cn.chains) == "array" && index(cn.chains, tag) >= 0) r[s(cn.id)] = int(cn.download || 0);
+	return r;
+}
+
+function guard_flow(a, b) {
+	if (!a || !b) return false;
+	for (let id in keys(b)) if (a[id] != null && b[id] > a[id]) return true;
+	return false;
+}
+
+// Последний замер сервера в истории sing-box: > 0 — сервер ответил
+function guard_hist(px, tag) {
+	let h = px && px[tag] ? px[tag].history : null;
+	return type(h) == "array" && length(h) ? int(h[length(h) - 1].delay || 0) : 0;
+}
+
+function guard_strike(sec, leaf, n) {
+	let f = "/tmp/zm-fk-guard." + sec;
+	if (n == null) {
+		let l = split(trim(s(fs.readfile(f))), "\n");
+		return s(l[0]) == leaf ? int(l[1] || 0) : 0;
+	}
+	if (n > 0) { try { fs.writefile(f, leaf + "\n" + n + "\n"); } catch (e) {} }
+	else fs.unlink(f);
+	return n;
 }
 
 function cmd_guard() {
@@ -40373,9 +40404,18 @@ function cmd_guard() {
 		let leaf = proxy_now(px, auto);
 		if (leaf == "" || leaf == auto) continue;
 		let url = sec_ext(x).ut_url;
-		if (guard_alive(ep, leaf, url)) continue;
+		if (guard_alive(ep, leaf, url)) { guard_strike(sec, leaf, 0); continue; }
+		// Один неудачный замер — ещё не отказ: перепроверяем дольше и смотрим, идёт ли через сервер трафик прямо сейчас
+		let b0 = guard_bytes(ep, leaf);
+		if (probe_ms(leaf, 6000, 2) > 0) { guard_strike(sec, leaf, 0); continue; }
+		if (guard_flow(b0, guard_bytes(ep, leaf))) { guard_strike(sec, leaf, 0); continue; }
+		// Отказ должен повториться и на следующем круге сторожа (через 20 с)
+		if (guard_strike(sec, leaf, guard_strike(sec, leaf) + 1) < 2) continue;
+		guard_strike(sec, leaf, 0);
 		api_get(ep, "/group/" + urlenc(auto) + "/delay", 14, { url, timeout: 5000 });
 		let px2 = api_proxies(ep), to = px2 ? proxy_now(px2, auto) : leaf, names = sec_names(c, sec);
+		// Автовыбор перемерил всех и оставил этот же сервер с ответом — значит, он жив
+		if (to == leaf && guard_hist(px2, leaf) > 0) continue;
 		let nm = (t) => s(names[t] || (px[t] && px[t].name) || t), label = trim(s(x.zm_label)) || sec;
 		let ev = { sec, label, from: nm(leaf), to: to != leaf && to != auto ? nm(to) : "" };
 		push(events, ev);
@@ -65275,7 +65315,7 @@ return view.extend({
 					: am === 'ping'
 					? 'Forkozz замеряет пинг серверов и включает самый быстрый. Пока сервер отвечает, Forkozz остаётся на нём и раз в 15 минут проверяет, нет ли заметно быстрее (см. «Порог смены» ниже). Сервер оборвался — за 20–40 секунд Forkozz переходит на самый быстрый из рабочих. Выбор сервера вручную выключает режим до нажатия «Авто».'
 					: am === 'guard'
-					? 'Как «По задержке», но текущий сервер ещё проверяется каждые 20 секунд. Не ответил дважды подряд — Forkozz сразу переходит на самый быстрый из рабочих. Обрыв замечается примерно за полминуты.'
+					? 'Как «По задержке», но текущий сервер ещё проверяется каждые 20 секунд. Если он не ответил на двух проверках подряд и трафик через него не идёт — Forkozz переходит на самый быстрый из рабочих. Обрыв замечается примерно за минуту.'
 					: 'Раз в ' + ivl + ' Forkozz проверяет все серверы и включает самый быстрый из ответивших. Если сервер оборвётся между проверками, замена будет при следующей — в течение ' + ivl + '. Чтобы не ждать, выберите «быструю замену».', 0));
 				if (!prio && am !== 'ping') box.appendChild(row('Плановая проверка', seg(UT_IV, draft.ut_iv, function(v) { set('ut_iv', v); })));
 				box.appendChild(row('Порог смены', inp('ut_tol', '50', 80, 'мс')));
