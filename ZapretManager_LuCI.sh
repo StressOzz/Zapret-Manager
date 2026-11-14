@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.078
+# Version: 5.080
 ZM_VERSION_EOF
 set -e
 
@@ -6090,7 +6090,9 @@ _stl_t() { _zm_tmo "$@"; }
 _stl_out() { case "$1" in vpn) echo "$STL_VPN_OUT" ;; iface) echo "zm_if${ST_SEC#s}" ;; *) echo "$STL_WARP_OUT" ;; esac; }
 _stl_ver_ok() { _zm_re "$1" '^[0-9]+\.[0-9]+\.[0-9]+$' && [ "${1%%.*}" -ge 2 ]; }
 
-stl_present() { command -v steer >/dev/null 2>&1; }
+# Оболочка запоминает, где лежала команда: после удаления пакета «command -v» в том же процессе ещё находит
+# её — поэтому проверяем сам файл
+stl_present() { local p; p="$(command -v steer 2>/dev/null)" && [ -x "$p" ]; }
 stl_version() { steer --version 2>/dev/null | awk 'NR == 1 { print $2 }'; }
 stl_v2() { _stl_ver_ok "$(stl_version)"; }
 _stl_mod_x() { [ -x "$STL_SBIN/steer-$1" ] || [ -s "$STL_PLUG/$1/plugin.json" ]; }
@@ -6229,6 +6231,8 @@ stl_state() {
 		[ "$STL_KIND" = group ] && [ "$STL_FAILED" = true ] && [ -z "$STL_PSTATE" ] && { STL_PSTATE=failed; STL_PTOTAL=0; }
 	fi
 	[ "$STL_UP" = true ] && STL_NWHY=""
+	# Ядро обрезает причину по байтам, посреди слова: «…соединения не открыва»
+	case "$STL_NWHY" in "проверка проходит, а соединения не "*) STL_NWHY="проверка проходит, а соединения не открываются" ;; esac
 	printf '%s' "$STL_DEV" | grep -qE '^[A-Za-z0-9_.-]+$' || STL_DEV=""
 	case "$STL_PSTATE" in probing|failed|no_such_node|excluded) ;; *) STL_PSTATE="" ;; esac
 	case "$STL_PNODE" in ''|*[!0-9]*) STL_PNODE=0 ;; esac
@@ -27328,8 +27332,17 @@ _stl_plug_add() {
 _stl_purge() {
 	local was="$(stl_version)"
 	_stl_say "Снимаем ядро steer $was — новое встанет начисто, настройки Steer сохранятся"
+	local p pk="" sb
 	"$STL_INIT" stop >/dev/null 2>&1
-	stl_engine_remove $(stl_pkgs_installed) >/dev/null 2>&1
+	# Все пакеты ядра любой версии: у 2.1 это steer-core и плагины, у 2.0 — ещё отдельные пакеты модулей
+	for p in $(for m in $STL_MODS warpbox; do echo "steer-$m"; done) steer-extended steer-core steer libsteer libsteer-wolfssl; do
+		_pkg_is_installed "$p" && pk="$pk $p"
+	done
+	stl_engine_remove $pk >/dev/null 2>&1
+	# Команда осталась без пакета (остаток прошлого обновления) — убираем файл сам
+	if stl_present && ! _pkg_is_installed steer-core && ! _pkg_is_installed steer; then
+		sb="$(command -v steer)"; killall steer steerd >/dev/null 2>&1; rm -f "$sb"
+	fi
 	if stl_present; then
 		echo "ОШИБКА: прежнее ядро steer $was снять не удалось — оставляем его"
 		return 1
@@ -31303,13 +31316,14 @@ steer_status() {
 	if [ "$vup" = true ] && [ "$vexit" = vpn ] && [ "$off" = false ]; then
 		_st_vpn_live; case $? in 0) vlive=true ;; 1) vlive=false ;; esac
 	fi
-	printf '{"running":%s,"phase":"%s","blocker":"%s","installed":%s,"stopped":%s,"version":"%s","steer_running":%s,"channels":%s,"warp_up":%s,"warp_colo":"%s","warp_host":"%s","warp_port":"%s","warp_hs_age":"%s","warp_rx":%s,"warp_tx":%s,"autorestart":"%s","dns_conflict":%s,"doh":"%s","doh_mode":"%s","exit":"%s","vpn_up":%s,"vpn_live":%s,"has_sub":%s,"sub_label":"%s","latest":"%s","ext":%s,"warp_on":%s,"warp_mode":"%s","warp_iface":"%s","warp_pick":"%s","onfail":"%s","warp_own_saved":%s,"tunnels":%s,"warp_active":"%s","catalog":%s,"wfix":%s,"lists_via":%s,"sub_via":%s,"lists":%s,"failopen":%s,"warp_failed":%s,"hosts_extra":%s,"dnsmode":"%s","realip":"%s","cttl":%s,"torrent":"%s","quic":"%s","devices":[%s],"services":[%s],"main_name":"%s","main_off":%s,"exit_want":"%s","main_tun":%s,"main_over":"%s","order":[%s],"sec_max":%s,"sec_vpn_max":%s,"sections":[%s],"awg_by_steer":%s,"awg_other":%s,"xsets":[%s],"pin":"%s","newest":"%s","legacy":"%s"}\n' \
+	printf '{"running":%s,"phase":"%s","blocker":"%s","installed":%s,"stopped":%s,"version":"%s","steer_running":%s,"channels":%s,"warp_up":%s,"warp_colo":"%s","warp_host":"%s","warp_port":"%s","warp_hs_age":"%s","warp_rx":%s,"warp_tx":%s,"autorestart":"%s","dns_conflict":%s,"doh":"%s","doh_mode":"%s","exit":"%s","vpn_up":%s,"vpn_live":%s,"has_sub":%s,"sub_label":"%s","latest":"%s","ext":%s,"warp_on":%s,"warp_mode":"%s","warp_iface":"%s","warp_pick":"%s","onfail":"%s","warp_own_saved":%s,"tunnels":%s,"warp_active":"%s","catalog":%s,"wfix":%s,"lists_via":%s,"sub_via":%s,"lists":%s,"failopen":%s,"warp_failed":%s,"hosts_extra":%s,"dnsmode":"%s","realip":"%s","cttl":%s,"torrent":"%s","quic":"%s","devices":[%s],"services":[%s],"main_name":"%s","main_off":%s,"exit_want":"%s","main_tun":%s,"main_over":"%s","order":[%s],"sec_max":%s,"sec_vpn_max":%s,"sections":[%s],"awg_by_steer":%s,"awg_other":%s,"xsets":[%s],"pin":"%s","newest":"%s","legacy":"%s","nopq":{"mode":"%s","auto":"%s","on":%s}}\n' \
 		"$running" "$(esc "$phase")" "$(esc "$blk")" "$installed" "$off" "$(esc "$ver")" "$run" "${chans:-0}" "$warp_up" "$(esc "$colo")" \
 		"$(esc "$host")" "$(esc "$port")" "$age" "${rx:-0}" "${tx:-0}" "$(_st_cron_get)" "$dns" "$doh" "$(_doh_force_mode)" \
 		"$vexit" "$vup" "$vlive" "$vsub" "$(esc "$(_st_sub_label)")" "$(esc "$latest")" "$ext" "$won" "$(_st_warp_modename)" "$(esc "$(_st_ext_if)")" "$(_st_warp_pick)" "$(_st_onfail)" "$(_st_own_saved && echo true || echo false)" "$(_st_tunnels_json)" "$active" "$(_st_cat_json)" "$(_st_wfix_json)" "$([ -f "$ST_DIR/lists.via" ] && echo true || echo false)" "$([ -f "$ST_SUB_VIA" ] && echo true || echo false)" "$(_st_lists_json)" "$failed" "$wfail" "$(_hosts_extra)" "$(_st_dnsmode)" "$(_st_realip)" "$(_st_cttl)" "$(_st_torrent)" "$(_st_quic)" "$(_st_devs_json)" "$svc" "$(esc "$(_st_sec_name main)")" "$(_st_sec_off main && echo true || echo false)" "$(esc "$(cat "$ST_DIR/exit" 2>/dev/null)")" "$mtun" "$(_st_sec_over main)" "$(_st_order_json)" "$ST_SEC_MAX" "$ST_SEC_VPN_MAX" "$(_st_secs_json)" \
 		"$(_st_owns "pkg kmod-amneziawg" || _st_owns "pkg amneziawg-tools" && echo true || echo false)" \
 		"$(uci -q -X show network 2>/dev/null | sed -n "s/^network\.\([^.=]*\)\.proto='amneziawg'\$/\1/p" | grep -cvE '^zmwarp[0-9]*$')" \
-		"$(_st_xsets_json)" "$(esc "$pin")" "$(esc "$newest")" "$STL_LEGACY"
+		"$(_st_xsets_json)" "$(esc "$pin")" "$(esc "$newest")" "$STL_LEGACY" \
+		"$(_st_nopq_mode)" "$(esc "$(head -n1 "$ST_NOPQ_AUTO" 2>/dev/null)")" "$(_st_nopq_have && echo true || echo false)"
 }
 
 _st_xsets_json() {
@@ -31889,6 +31903,10 @@ _st_grp_has() { [ -n "$1" ] && [ -s "$ST_SUB_GRPS" ] && ZM_W="$1" awk -F'\t' '$1
 
 _st_grp_cur() { local g; g="$(head -n1 "$ST_SUB_GRP" 2>/dev/null)"; [ -n "$g" ] && _st_grp_has "$g" && printf '%s' "$g"; }
 
+# Узлы группы АВТО: сервер балансировщика из ответа для Happ (протокол|адрес|порт|путь|SNI) ищем среди узлов
+# подписки. Несколько серверов часто сидят на одном адресе и порту (вход через общий ретранслятор) и
+# различаются путём или SNI — поэтому сверяем и их. Чужой путь или SNI — не тот сервер. Если путь и SNI ничего
+# не решают, берём узел только когда он на этом адресе и порту один: лучше не показать, чем показать не тот
 _st_grp_ids() {
 	[ -s "$ST_SUB.map" ] && [ -s "$ST_SUB_GRPS" ] || return 0
 	LC_ALL=C ZM_W="$1" awk -F'\t' -v G="$ST_SUB_GRPS" -v M="$ST_SUB.map" -v S="$ST_SUB" '
@@ -31909,25 +31927,52 @@ _st_grp_ids() {
 		}
 		BEGIN {
 			while ((getline l < G) > 0) { split(l, a, "\t"); GN[a[1]] = 1; if (a[1] == ENVIRON["ZM_W"]) { nm = split(a[3], W, " ") } }
-			while ((getline l < M) > 0) { split(l, b, "\t"); K[b[1]] = b[2] "|" tolower(b[3]) "|" b[4] }
-			ln = 0; while ((getline l < S) > 0) { ln++; if (ln in K) { pt = qv(l, "path"); if (pt == "") pt = qv(l, "serviceName"); sub(/\?.*$/, "", pt); gsub(/ /, "%20", pt); P[ln] = pt } }
+			while ((getline l < M) > 0) { nb = split(l, b, "\t"); K[b[1]] = b[2] "|" tolower(b[3]) "|" b[4]; if (nb >= 6) { P[b[1]] = b[5]; SN[b[1]] = tolower(b[6]) } }
+			ln = 0; js = 0
+			while ((getline l < S) > 0) {
+				ln++; if (ln == 1 && l ~ /^[ \t]*[[{]/) js = 1
+				if (js || !(ln in K)) continue
+				pt = qv(l, "path"); if (pt == "") pt = qv(l, "serviceName"); sub(/\?.*$/, "", pt); gsub(/ /, "%20", pt); P[ln] = pt
+				sn = qv(l, "sni"); if (sn == "") sn = qv(l, "peer"); SN[ln] = tolower(sn)
+			}
 		}
-		{ r++; id[r] = $1; lk[r] = ($9 in K) ? K[$9] : ""; sk[r] = lk[r] "|" P[$9]; ar[r] = (index($5, "\342\254\207") || index($5, "\342\254\206")) ? 1 : 0; bn = $5; gs[r] = (($5 in GN) || (sub(/ \([0-9]+\)$/, "", bn) && (bn in GN))) ? 1 : 0 }
+		{
+			r++; id[r] = $1; lk[r] = ($9 in K) ? K[$9] : ""; pa[r] = P[$9]; sa[r] = SN[$9]
+			ar[r] = (index($5, "\342\254\207") || index($5, "\342\254\206")) ? 1 : 0
+			bn = $5; gs[r] = 0; gn[r] = (($5 in GN) || (sub(/ \([0-9]+\)$/, "", bn) && (bn in GN))) ? 1 : 0
+		}
 		END {
 			for (j = 1; j <= nm; j++) {
-				m = W[j]; x = m; sub(/\|[^|]*$/, "", x); pa = 0
-				if (split(m, z, "|") >= 4 && z[4] != "") for (i = 1; i <= r; i++) if (sk[i] == m && !gs[i] && !ar[i]) { pa = i; break }
-				if (!pa) for (i = 1; i <= r; i++) if (lk[i] != "" && lk[i] == x && !gs[i] && !ar[i]) { pa = i; break }
-				if (pa) on[pa] = 1
+				split(W[j], z, "|"); x = z[1] "|" z[2] "|" z[3]; mp = z[4]; ms = tolower(z[5])
+				best = 0; bs = -1; cnt = 0
+				for (i = 1; i <= r; i++) {
+					if (lk[i] == "" || lk[i] != x || gs[i] || ar[i]) continue
+					if (mp != "" && pa[i] != "" && mp != pa[i]) continue
+					if (ms != "" && sa[i] != "" && ms != sa[i]) continue
+					# При равенстве берём сервер с собственным именем, а не строку с именем группы
+					cnt++; sc = ((mp != "" && mp == pa[i]) * 2 + (ms != "" && ms == sa[i])) * 2 + !gn[i]
+					if (sc > bs) { bs = sc; best = i }
+				}
+				if (best && (bs > 1 || cnt == 1)) on[best] = 1
 			}
 			for (i = 1; i <= r; i++) if (on[i]) print id[i]
 		}' "$2"
 }
 
+# Узлы-копии групп АВТО, которые прячем: только у подписки JSON Xray — там ядро steer превращает каждый сервер
+# балансировщика в узел «Группа», «Группа (2)»… Строка подписки из ссылок с именем группы — настоящий сервер
+# (так панель провайдера отдаёт группу приложениям без балансировщиков): её показываем, как любой узел
 _st_stub_ids() {
-	[ -s "$ST_SUB.map" ] || return 0
-	LC_ALL=C awk -F'\t' -v G="$ST_SUB_GRPS" 'BEGIN { while ((getline l < G) > 0) { split(l, a, "\t"); GN[a[1]] = 1 } }
-		{ b = $5; if (b in GN) { print $1; next } if (sub(/ \([0-9]+\)$/, "", b) && (b in GN)) print $1 }' "$1"
+	[ -s "$ST_SUB.map" ] && [ -s "$ST_SUB_GRPS" ] || return 0
+	head -c 256 "$ST_SUB" 2>/dev/null | tr -d ' \t\r\n' | grep -q '^[[{]' || return 0
+	# Копию прячем, только если тот же сервер (адрес, порт, путь, SNI) есть в списке под своим именем
+	LC_ALL=C awk -F'\t' -v G="$ST_SUB_GRPS" -v M="$ST_SUB.map" '
+		BEGIN {
+			while ((getline l < G) > 0) { split(l, a, "\t"); GN[a[1]] = 1 }
+			while ((getline l < M) > 0) { split(l, b, "\t"); FK[b[1]] = b[2] "|" tolower(b[3]) "|" b[4] "|" b[5] "|" tolower(b[6]) }
+		}
+		{ r++; id[r] = $1; k[r] = ($9 in FK) ? FK[$9] : ""; nn = $5; cp[r] = (($5 in GN) || (sub(/ \([0-9]+\)$/, "", nn) && (nn in GN))) ? 1 : 0; if (!cp[r] && k[r] != "") own[k[r]] = 1 }
+		END { for (i = 1; i <= r; i++) if (cp[i] && k[i] != "" && (k[i] in own)) print id[i] }' "$1"
 }
 
 _st_happ_miss() {
@@ -31939,9 +31984,13 @@ _st_happ_miss() {
 			while ((getline l < N) > 0) { split(l, z, "\t"); NM[z[5]] = 1 }
 		}
 		$1 != "" && !($1 in NM) && !($1 in S) {
-			n = split($2, w, " "); hit = 0
-			for (i = 1; i <= n; i++) if (w[i] in K) hit = 1
-			if (!hit) { S[$1] = 1; printf "%s\"%s\"", (c++ ? "," : ""), j($1) }
+			n = split($2, w, " "); hit = 0; real = 0
+			for (i = 1; i <= n; i++) {
+				if (w[i] in K) hit = 1
+				split(w[i], q, "|"); if (q[2] !~ /^(127\.|localhost$|0\.0\.0\.0$|::1?$|\[::1\]$)/) real = 1
+			}
+			# Заглушка провайдера на 127.0.0.1 («Торренты запрещены», «Подключитесь через Happ») — не сервер
+			if (real && !hit) { S[$1] = 1; printf "%s\"%s\"", (c++ ? "," : ""), j($1) }
 		}' "$ST_SUB_GRPS.all"
 }
 
@@ -31962,7 +32011,7 @@ _st_report() {
 	ids="$(cut -f1,5 "$t" | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | tr '\n' ' ')"
 	[ -n "$ids" ] && echo "Скрыты фильтром: $ids"
 	ids="$(_st_stub_ids "$t" | tr '\n' ' ')"
-	[ -n "$ids" ] && echo "Заглушки групп (не показаны): $ids"
+	[ -n "$ids" ] && echo "Копии серверов из групп (не показаны): $ids"
 	if [ -s "$ST_SUB_GRPS" ]; then
 		echo "Группы АВТО из ответа для Happ:"
 		while IFS="$(printf '\t')" read -r g _ f || [ -n "$g" ]; do
@@ -31994,11 +32043,11 @@ _st_grps_json() {
 
 _st_autogrp_sync() {
 	local quiet="$1" u t="$ST_RUN/ag.$$" n g dv
-	[ -s "$ST_SUB_URL" ] || { rm -f "$ST_SUB_GRPS" "$ST_SUB_GRPS.chk" "$ST_SUB_GRPS.all" "$ST_SUB_GRP"; return 0; }
+	[ -s "$ST_SUB_URL" ] || { rm -f "$ST_SUB_GRPS" "$ST_SUB_GRPS.chk" "$ST_SUB_GRPS.all" "$ST_SUB_GRPS.v2" "$ST_SUB_GRP"; return 0; }
 	[ -s "$ZM_AG_JQ" ] || return 0
 	u="$(head -n1 "$ST_SUB_URL")"
 	mkdir -p "$ST_RUN" "$ST_VDIR"
-	: > "$ST_SUB_GRPS.chk"
+	: > "$ST_SUB_GRPS.chk"; : > "$ST_SUB_GRPS.v2"
 	[ -f "$ST_SUB_GRPS.all" ] || : > "$ST_SUB_GRPS.all"
 	dv=""; [ -f "$ST_SUB_VIA" ] && dv="$(_st_sub_via_pick 2>/dev/null)" && dv="${dv%%|*}"
 	rm -f "$t"
@@ -32018,7 +32067,7 @@ _st_autogrp_sync() {
 	fi
 	rm -f "$ST_SUB_GRPS.nojq"
 	if jq -c -f "$ZM_AG_JQ" "$t" > "$t.j" 2>/dev/null; then
-		jq -r '.groups[] | [ .name, ((.iv // 0) | tostring), ([ .m[] | "\(.p)|\(.h)|\(.port)|\(.path | split(" ") | join("%20"))" ] | reduce .[] as $k ([]; if index([$k]) == null then . + [$k] else . end) | join(" ")) ] | @tsv' "$t.j" > "$t.g" 2>/dev/null
+		jq -r '.groups[] | [ .name, ((.iv // 0) | tostring), ([ .m[] | "\(.p)|\(.h)|\(.port)|\(.path | split(" ") | join("%20"))|\(.sni | split(" ") | join(""))" ] | reduce .[] as $k ([]; if index([$k]) == null then . + [$k] else . end) | join(" ")) ] | @tsv' "$t.j" > "$t.g" 2>/dev/null
 		jq -r '(.all // [])[] | [ .name, (.k | join(" ")) ] | @tsv' "$t.j" > "$t.a" 2>/dev/null || : > "$t.a"
 	else
 		: > "$t.g"; : > "$t.a"
@@ -32041,7 +32090,7 @@ _st_autogrp_sync() {
 
 _st_autogrp_bg() {
 	[ -s "$ST_SUB_URL" ] && [ -s "$ZM_AG_JQ" ] || return 0
-	[ -f "$ST_SUB_GRPS.chk" ] && [ -f "$ST_SUB_GRPS.all" ] && [ ! "$ST_SUB" -nt "$ST_SUB_GRPS.chk" ] && return 0
+	[ -f "$ST_SUB_GRPS.chk" ] && [ -f "$ST_SUB_GRPS.all" ] && [ -f "$ST_SUB_GRPS.v2" ] && [ ! "$ST_SUB" -nt "$ST_SUB_GRPS.chk" ] && return 0
 	[ -n "$(find "$ST_SUB_GRPS.chk" -mmin -30 2>/dev/null)" ] && return 0
 	mkdir -p "$ST_VDIR"; : > "$ST_SUB_GRPS.chk"
 	( _st_autogrp_sync quiet >/dev/null 2>&1 ) >/dev/null 2>&1 </dev/null &
@@ -32259,8 +32308,13 @@ _st_json_map() {
 		| select($p == "vless" or $p == "trojan" or $p == "shadowsocks" or $p == "hysteria2" or $p == "vmess" or $p == "socks" or $p == "http")
 		| (if .protocol == "hysteria" then { address: .settings.address, port: .settings.port }
 		   else (.settings.vnext[0] // .settings.servers[0] // (if ((.settings.address // "") | tostring) != "" then .settings else {} end)) end) as $s
-		| { p: $p, h: (($s.address // "") | tostring | ascii_downcase), port: (($s.port // 0) | tostring) } | select(.h != "") ]
-		| to_entries[] | "\(.key + 1)\t\(.value.p)\t\(.value.h)\t\(.value.port)"' "$1" > "$1.map.j" 2>/dev/null &&
+		| (.streamSettings // {}) as $t | ($t.network // "tcp") as $n
+		| (if $n == "ws" then ($t.wsSettings.path // "") elif $n == "grpc" then ($t.grpcSettings.serviceName // "")
+		   elif $n == "xhttp" or $n == "splithttp" then (($t.xhttpSettings // $t.splithttpSettings // {}).path // "")
+		   elif $n == "httpupgrade" then ($t.httpupgradeSettings.path // "") else "" end | tostring | (split("?") | .[0] // "") | split(" ") | join("%20")) as $path
+		| (($t.realitySettings.serverName // $t.tlsSettings.serverName // "") | tostring | ascii_downcase | split(" ") | join("") | split("\t") | join("")) as $sni
+		| { p: $p, h: (($s.address // "") | tostring | ascii_downcase), port: (($s.port // 0) | tostring), path: $path, sni: $sni } | select(.h != "") ]
+		| to_entries[] | "\(.key + 1)\t\(.value.p)\t\(.value.h)\t\(.value.port)\t\(.value.path)\t\(.value.sni)"' "$1" > "$1.map.j" 2>/dev/null &&
 		[ -s "$1.map.j" ] && mv -f "$1.map.j" "$1.map"
 	rm -f "$1.map.j"
 	return 0
@@ -32383,13 +32437,56 @@ _st_sub_curl() {
 	esac
 	STL_SUB_TITLE="$(printf '%s' "$x" | tr -d '\000-\037"\\' | cut -c1-120)"
 	rm -f "$h"
-	# Как для Happ: конфиги с балансировщиком — это группы АВТО (их панель берёт отдельно), а не серверы,
-	# в списке узлов они дали бы копии серверов. Убираются, если без них остаются пригодные узлы
+	# Как для Happ: из обычного конфига берётся один сервер — тот, через который Happ и ходит (первый исходящий
+	# или «proxy»); запасные исходящие для правил маршрутизации, цепочки через другой сервер (dialerProxy — Steer
+	# так не умеет) и заглушки на 127.0.0.1 («Торренты запрещены») не берутся. Конфиг с балансировщиком — группа
+	# АВТО: его серверы, которых нет отдельными конфигами, становятся узлами «Группа · 1», «Группа · 2».
+	# Повторы убираются. Без регулярных выражений: jq в OpenWrt может быть собран без них
+	v=""
 	if [ "$6" = happ ] && command -v jq >/dev/null 2>&1 && head -c 256 "$t" | tr -d ' \t\r\n' | grep -q '^[[{]'; then
-		jq -c '(if type == "array" then . else [.] end) | [ .[] | select(type == "object") | select(((.routing.balancers // []) | if type == "array" then length else 0 end) == 0) ]' "$t" > "$t.f" 2>/dev/null &&
-			[ "$(jq 'length' "$t.f" 2>/dev/null)" -gt 0 ] 2>/dev/null && stl_sub_check "$t.f" && mv -f "$t.f" "$t"
-		rm -f "$t.f" "$t.f.map"
+		jq -c '
+			def trim: tostring | explode | until(length == 0 or .[0] > 32; .[1:]) | until(length == 0 or .[-1] > 32; .[:-1]) | implode;
+			def nobal: ((.routing.balancers // []) | if type == "array" then length else 0 end) == 0;
+			def issrv: type == "object" and (.protocol == "vless" or .protocol == "trojan" or .protocol == "shadowsocks" or .protocol == "vmess" or .protocol == "hysteria");
+			def chained: ((.streamSettings.sockopt.dialerProxy // "") | tostring) != "";
+			def peer: if .protocol == "hysteria" then { address: .settings.address, port: .settings.port }
+				else (.settings.vnext[0] // .settings.servers[0] // (if ((.settings.address // "") | tostring) != "" then .settings else {} end)) end;
+			def host: (peer.address // "") | tostring | ascii_downcase;
+			def stub: host as $h | $h == "" or $h == "localhost" or $h == "0.0.0.0" or $h == "::" or $h == "::1" or $h == "[::1]" or ($h | startswith("127."));
+			def tpath: (.streamSettings // {}) as $s | ($s.network // "tcp") as $n
+				| if $n == "ws" then ($s.wsSettings.path // "") elif $n == "grpc" then ($s.grpcSettings.serviceName // "")
+				  elif $n == "xhttp" or $n == "splithttp" then (($s.xhttpSettings // $s.splithttpSettings // {}).path // "")
+				  elif $n == "httpupgrade" then ($s.httpupgradeSettings.path // "") else "" end | tostring | (split("?") | .[0] // "");
+			def fp: "\(.protocol)|\(host)|\(peer.port // 0)|\(tpath)|\(((.streamSettings.realitySettings.serverName // .streamSettings.tlsSettings.serverName // "") | tostring | ascii_downcase))";
+			def ok: issrv and (chained | not) and (stub | not);
+			def main: (.outbounds // []) as $o
+				| if ($o[0] | issrv) then $o[0] else ([ $o[] | select(issrv) ] | (map(select(.tag == "proxy")) + .)[0]) end;
+			(if type == "array" then . else [.] end) | map(select(type == "object")) as $c
+			| [ $c[] | select(nobal) | main | select(. != null and ok) | fp ] as $have
+			| reduce $c[] as $x ({ out: [], seen: [], ch: 0 };
+				(($x.remarks // "") | trim) as $nm
+				| if ($x | nobal) then
+					($x | main) as $m
+					| if $m != null and ($m | issrv) and ($m | chained) then .ch += 1
+				  elif $m == null or ($m | ok | not) then .
+					  else ($m | fp) as $k
+					  | if any(.seen[]; . == $k) then . else .seen += [ $k ] | .out += [ { remarks: $nm, outbounds: [ $m ] } ] end end
+				  else
+					([ $x.routing.balancers[] | (.selector // [])[] | tostring ] | unique) as $sel
+					| [ ($x.outbounds // [])[] | select(ok) | select(.tag as $g | ($sel | length) == 0 or any($sel[]; ($g // "" | tostring) | startswith(.))) ] as $ob
+					| .i = 0
+					| reduce $ob[] as $o (.;
+						($o | fp) as $k
+						| if any(.seen[]; . == $k) or any($have[]; . == $k) then .
+						  else .i += 1 | .seen += [ $k ] | .out += [ { remarks: ((if $nm == "" then "АВТО" else $nm end) + " · " + (.i | tostring)), outbounds: [ $o ] } ] end)
+				  end)
+			| { c: .out, ch: .ch }' "$t" > "$t.j" 2>/dev/null && jq -c '.c' "$t.j" > "$t.f" 2>/dev/null &&
+			[ "$(jq 'length' "$t.f" 2>/dev/null)" -gt 0 ] 2>/dev/null && stl_sub_check "$t.f" && mv -f "$t.f" "$t" &&
+			v="$(jq '.ch' "$t.j" 2>/dev/null | tr -cd '0-9')"
+		rm -f "$t.f" "$t.f.map" "$t.j"
 	fi
+	# Отметка «скачано по-новому» (и сколько цепочек Steer не взял): по ней панель видит подписку от старой версии
+	[ "$6" = happ ] && [ -f "$ST_SUB_URL.happ" ] && printf 'chain=%s\n' "${v:-0}" > "$ST_SUB_URL.happ"
 	mv -f "$t" "$out"
 	return 0
 }
@@ -32709,7 +32806,7 @@ do_steer_sub_remove() {
 	_st_phase sub
 	rm -f "$ST_STOP_FLAG"
 	_st_use_vpn && was=1
-	rm -f "$ST_SUB" "$ST_SUB.bak" "$ST_SUB.map" "$ST_SUB.map.jt" "$ST_SUB_URL.happ" "$ST_SUB_NODES" "$ST_SUB_NODES.meta" "$ST_SUB_NODES.hp" "$ST_VDIR/sub.insecure" "$ST_SUB_INFO" "$ST_SUB_URL" "$ST_SUB_TITLE" "$ST_SUB_NODE" "$ST_SUB_FELL" "$ST_SUB_HOME" "$ST_SUB_PING" "$ST_SUB_ORDER" "$ST_SUB_GRP" "$ST_SUB_GRPS" "$ST_SUB_GRPS.chk" "$ST_SUB_GRPS.nojq" "$ST_SUB_GRPS.all"
+	rm -f "$ST_SUB" "$ST_SUB.bak" "$ST_SUB.map" "$ST_SUB.map.jt" "$ST_SUB_URL.happ" "$ST_SUB_NODES" "$ST_SUB_NODES.meta" "$ST_SUB_NODES.hp" "$ST_VDIR/sub.insecure" "$ST_SUB_INFO" "$ST_SUB_URL" "$ST_SUB_TITLE" "$ST_SUB_NODE" "$ST_SUB_FELL" "$ST_SUB_HOME" "$ST_SUB_PING" "$ST_SUB_ORDER" "$ST_SUB_GRP" "$ST_SUB_GRPS" "$ST_SUB_GRPS.chk" "$ST_SUB_GRPS.nojq" "$ST_SUB_GRPS.all" "$ST_SUB_GRPS.v2"
 	[ -n "$ST_SEC" ] || echo warp > "$ST_EXIT"
 	_st_vpn_zone off
 	[ -n "$(_st_sec_with main eval '[ -s "$ST_SUB_URL" ] && echo 1')$(_st_secs_url)" ] || _st_sub_auto_set off >/dev/null
@@ -33069,7 +33166,7 @@ steer_sub_status() {
 		"$(_st_lat_mode)" "$([ -s "$ST_SUB_PING" ] && awk -F'\t' -v q='"' 'function j(s,    o, i, c, n) { o = ""; n = length(s); for (i = 1; i <= n; i++) { c = substr(s, i, 1); if (c == "\\") o = o "\\\\"; else if (c == "\"") o = o "\\\""; else if (c < " ") o = o " "; else o = o c } return o } $3 == "b" { n = j($1); printf "%s%s%s%s", (c++ ? "," : ""), q, n, q }' "$ST_SUB_PING")" \
 		"$([ -s "$ST_SUB_PING" ] && awk -F'\t' -v q='"' 'function j(s,    o, i, c, n) { o = ""; n = length(s); for (i = 1; i <= n; i++) { c = substr(s, i, 1); if (c == "\\") o = o "\\\\"; else if (c == "\"") o = o "\\\""; else if (c < " ") o = o " "; else o = o c } return o } $3 == "t" { n = j($1); printf "%s%s%s%s", (c++ ? "," : ""), q, n, q }' "$ST_SUB_PING")" \
 		"$(esc "$(head -n1 "$ST_SUB_HOME" 2>/dev/null)")" "$(_st_node_pol)" | sed '$ s/}$//'
-	printf ',"group":"%s","groups":%s,"stubs":[%s],"miss":[%s],"grp_nojq":%s,"insecure":%s,"happ":%s,"nopq":{"mode":"%s","auto":"%s","on":%s}}\n' "$(esc "$grp")" "$grps" "$stubs" "$miss" "$nojq" "$(_stl_insec "$ST_SUB" && echo true || echo false)" "$([ -f "$ST_SUB_URL.happ" ] && echo true || echo false)" \
+	printf ',"group":"%s","groups":%s,"stubs":[%s],"miss":[%s],"grp_nojq":%s,"insecure":%s,"happ":%s,"happ_chain":%s,"happ_old":%s,"nopq":{"mode":"%s","auto":"%s","on":%s}}\n' "$(esc "$grp")" "$grps" "$stubs" "$miss" "$nojq" "$(_stl_insec "$ST_SUB" && echo true || echo false)" "$([ -f "$ST_SUB_URL.happ" ] && echo true || echo false)" "$(sed -n 's/^chain=\([0-9][0-9]*\)$/\1/p' "$ST_SUB_URL.happ" 2>/dev/null | head -n1 | grep . || echo 0)" "$([ -f "$ST_SUB_URL.happ" ] && ! grep -q '^chain=' "$ST_SUB_URL.happ" 2>/dev/null && echo true || echo false)" \
 		"$(_st_nopq_mode)" "$(esc "$(head -n1 "$ST_NOPQ_AUTO" 2>/dev/null)")" "$(_st_nopq_have && echo true || echo false)"
 }
 
@@ -41814,7 +41911,8 @@ def member:
   peer as $p
   | { p: proto, h: (($p.address // "") | tostring | lc), port: (($p.port // 0) | tonumber? // 0),
       c: (cred($p) | tostring), path: tpath, sni: (sni | lc) }
-  | select(.h != "" and .port > 0);
+  | select(.h != "" and .port > 0)
+  | select((.h == "localhost" or .h == "0.0.0.0" or .h == "::" or .h == "::1" or .h == "[::1]" or (.h | startswith("127."))) | not);
 def trimmed:
   tostring | explode
   | (until(length == 0 or .[0] > 32; .[1:])) | (until(length == 0 or .[-1] > 32; .[:-1])) | implode;
@@ -48041,9 +48139,10 @@ function steps(items) {
 	return E('ol', { 'class': 'zm-ts-steps' }, items.filter(Boolean).map(function(it) { return E('li', {}, [ E('div', {}, it) ]); }));
 }
 
-function code(text, okMsg) {
+function code(text, okMsg, priv) {
+	// priv — адрес своего сервера: размыт, как остальные адреса (кнопка «Скопировать» копирует как есть)
 	return E('div', { 'class': 'zm-ts-cmd' }, [
-		E('code', {}, text),
+		E('code', priv ? { 'class': 'zm-blur' } : {}, text),
 		E('button', { 'type': 'button', 'class': 'cbi-button', 'click': function() { zm.copyText(text, okMsg || 'Скопировано'); } }, 'Скопировать')
 	]);
 }
@@ -48330,7 +48429,7 @@ return view.extend({
 						[ 'Нажмите ', E('b', {}, 'Войти через LuCI'), ' — откроется ', luciWhere(), '. Перейдите на вкладку ', E('b', {}, 'Account Settings') ],
 						official()
 							? [ 'Поля ', E('b', {}, 'Custom Login Server'), ' и ', E('b', {}, 'Auth Key'), ' оставьте пустыми' ]
-							: [ 'В ', E('b', {}, 'Custom Login Server'), ' вставьте ', E('code', {}, data.server || ''), ', поле ', E('b', {}, 'Auth Key'), ' оставьте пустым' ],
+							: [ 'В ', E('b', {}, 'Custom Login Server'), ' вставьте ', E('code', {}, [ zm.secret(data.server || '') ]), ', поле ', E('b', {}, 'Auth Key'), ' оставьте пустым' ],
 						[ 'Нажмите ', E('b', {}, 'Login'), ', откройте ссылку и войдите в ', E('b', {}, 'тот же аккаунт'), official() ? ' (Google, Apple, Microsoft или GitHub), что и на телефоне' : ', что и на телефоне' ],
 						[ 'Вернитесь сюда — панель сама увидит вход и включит выход в интернет и домашнюю сеть' ]
 					]),
@@ -48422,7 +48521,7 @@ return view.extend({
 					]) : steps([
 						data.server_kind === 'routerich'
 							? [ 'Откройте ', panelLink('/machines', 'устройства в панели Routerich'), ' (вход по Management Key)' ]
-							: [ 'Откройте панель своего сервера' + (data.server ? ' (' + data.server + ')' : '') ],
+							: [ 'Откройте панель своего сервера', data.server ? [ ' (', zm.secret(data.server), ')' ] : '' ],
 						data.server_kind === 'routerich'
 							? (data.exit_want && !data.exit_ok ? [ 'У роутера ', E('b', {}, data.host || 'openwrt'), ' включите тумблер ', E('b', {}, 'Exit Node'), ' — он между кнопкой «Маршруты» и удалением, его легко не заметить' ] : [ 'Найдите роутер ', E('b', {}, data.host || 'openwrt') ])
 							: [ 'Найдите роутер ', E('b', {}, data.host || 'openwrt'), ' в списке устройств и откройте его маршруты' ],
@@ -48536,7 +48635,7 @@ return view.extend({
 				[ 'Установите приложение ', E('b', {}, 'Tailscale'), '. ' ].concat(android, [ '. ' ], iphone),
 				official()
 					? [ 'Войдите в ', E('b', {}, 'тот же аккаунт'), ', что и на роутере' + (data.tailnet ? ' (' + data.tailnet + ')' : '') ]
-					: [ 'Укажите сервер. Android: шестерёнка → ', E('b', {}, 'Accounts'), ' → «⋮» → ', E('b', {}, 'Use an alternate server'), '. iPhone: «⋯» → ', E('b', {}, 'Settings'), ' → ', E('b', {}, 'Login Server'), '. Затем войдите с ', E('b', {}, 'Device Auth Key'), ' — тем же, что и для роутера', data.server ? code(data.server, 'Адрес сервера скопирован') : E([]) ],
+					: [ 'Укажите сервер. Android: шестерёнка → ', E('b', {}, 'Accounts'), ' → «⋮» → ', E('b', {}, 'Use an alternate server'), '. iPhone: «⋯» → ', E('b', {}, 'Settings'), ' → ', E('b', {}, 'Login Server'), '. Затем войдите с ', E('b', {}, 'Device Auth Key'), ' — тем же, что и для роутера', data.server ? code(data.server, 'Адрес сервера скопирован', true) : E([]) ],
 				[ 'Откройте ', E('b', {}, 'Exit Node'), ', выберите ', host, ' и включите ', E('b', {}, 'Allow LAN access') ],
 				[ 'Включите VPN — готово. ', E('b', {}, 'Use Tailscale DNS'), ' в приложении не выключайте (по умолчанию включено)' ]
 			]));
@@ -48553,7 +48652,7 @@ return view.extend({
 			phoneCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Роутера нет в списке Exit Node? Подождите минуту после входа роутера и откройте список снова. На iPhone помогает включить и выключить «Run as Exit Node».'));
 			if (!official() && data.server) phoneCard.appendChild(E('div', { 'class': 'zm-hint' }, [
 				E('b', {}, 'Ноутбук в поездке'), ': установите Tailscale с сайта tailscale.com, выполните в терминале (Windows — PowerShell) команду ниже и введите Device Auth Key на открывшейся странице. Затем выберите ', E('b', {}, data.host || 'роутер'), ' как Exit Node.',
-				code('tailscale up --login-server=' + data.server, 'Команда скопирована'),
+				code('tailscale up --login-server=' + data.server, 'Команда скопирована', true),
 				'Ноутбук уже был в другой сети? Добавьте к команде --reset --force-reauth.'
 			]));
 			phoneCard.appendChild(E('p', { 'class': 'zm-hint' }, [ E('b', {}, 'Дома VPN Tailscale выключайте'), ' — и на телефоне, и на компьютере. В Wi-Fi роутера Steer, Forkozz и Zapret и так работают, а через Tailscale трафик идёт лишним кругом.' ]));
@@ -49484,6 +49583,18 @@ return view.extend({
 			setCard.appendChild(E('p', { 'class': 'zm-hint' }, (qb
 				? 'QUIC (HTTP/3, UDP) сервисов в туннели не пускается — браузеры и приложения сразу переходят на обычный HTTPS. Видео и сайты через туннель открываются без задержки на попытку QUIC.'
 				: 'Помогает, если туннель плохо возит UDP: Tor и прокси без UDP, провайдер режет UDP. Тогда YouTube и сайты сначала пробуют QUIC и открываются с задержкой — «Запретить» её убирает.') + need));
+			var nq = data.nopq || {}, nqm = nq.mode === 'on' || nq.mode === 'off' ? nq.mode : 'auto';
+			setCard.appendChild(seg('ClientHello', [
+				[ nqm === 'auto', 'Авто', function() { if (nqm !== 'auto') act('nopq', 'auto', 'ClientHello: Авто'); } ],
+				[ nqm === 'on', 'Всегда короткий', function() { if (nqm !== 'on') act('nopq', 'on', 'Включаем короткий ClientHello'); } ],
+				[ nqm === 'off', 'Обычный', function() { if (nqm !== 'off') act('nopq', 'off', 'Возвращаем обычный ClientHello'); } ]
+			]));
+			setCard.appendChild(E('p', { 'class': 'zm-hint' }, nqm === 'on'
+				? 'Без постквантового обмена — провайдер реже обрывает. Новые серверы REALITY с ним не работают.'
+				: nqm === 'off'
+					? 'Всегда как Chrome, с постквантовым обменом.'
+					: nq.auto ? 'Сейчас короткий — без него не пускает узел «' + nq.auto + '».'
+						: 'Как Chrome. Если провайдер обрывает его, а короткий проходит, панель включит короткий сама.'));
 			var lb = lanBlock();
 			if (lb) setCard.appendChild(lb);
 			setCard.appendChild(zm.swRow(!!data.lists_via, 'Скачивать списки сервисов через VPN', 'Списки будут качаться через подключение Steer — WARP, подписку или туннель' + (hasSecs() ? ' основной секции' : '') + '. Помогает, если GitHub у провайдера не открывается. Не ответит подключение — скачаются напрямую.', function() {
@@ -50765,7 +50876,7 @@ return view.extend({
 					var info = [];
 					if (t.colo) info.push('сервер ' + t.colo + (t.city ? ' (' + t.city + ')' : ''));
 					if (t.seen) info.push('сайты видят: ' + country(t.seen));
-					if (t.host) info.push(t.host + ':' + t.port);
+					if (t.host) info.push(zm.secret(t.host + ':' + t.port));
 					if (t.up) info.push('связь ' + fmtAge(t.hs_age));
 					if (t.up) info.push('↓ ' + zm.fmtSize(+t.rx || 0) + ' / ↑ ' + zm.fmtSize(+t.tx || 0));
 					warpCard.appendChild(E('div', { 'class': 'zm-row' }, [
@@ -50774,7 +50885,7 @@ return view.extend({
 						st,
 						cur,
 						fix,
-						info.length ? E('span', { 'style': 'flex:1 1 100%; order:1; min-width:0; overflow-wrap:anywhere' }, info.join(' · ')) : ''
+						info.length ? E('span', { 'style': 'flex:1 1 100%; order:1; min-width:0; overflow-wrap:anywhere' }, info.reduce(function(a, x, i) { if (i) a.push(' · '); a.push(x); return a; }, [])) : ''
 					]));
 				});
 			} else {
@@ -51099,37 +51210,39 @@ return view.extend({
 			var L = subData.list || {}, out = [], PN = { hysteria2: 'Hysteria2', proxy: 'Trojan, Shadowsocks, VMess, SOCKS и HTTP', vless: 'VLESS' };
 			var warn = function(kids) { return E('div', { 'class': 'zm-dlg-note zm-dlg-note-warn', 'style': 'margin:10px 0 0' }, kids); };
 			var nomod = (L.nomod || []).map(function(m) { return PN[m] || m; });
-			if (nomod.length) out.push(warn([ E('b', {}, 'Не все узлы в списке. '), 'В подписке есть узлы ' + nomod.join(', ') + ', а модуля ядра steer для них нет. Нажмите «Обновить» у подписки — панель поставит модуль сама.' ]));
+			if (nomod.length) out.push(warn([ E('b', {}, 'Не все узлы в списке. '), 'Нет модуля для ' + nomod.join(', ') + ' — нажмите «Обновить», панель поставит его.' ]));
 			var fl = (L.fail || []).map(function(f) { return (PN[f.mod] || f.mod) + (f.error ? ' (' + f.error + ')' : ''); });
-			if (fl.length) out.push(warn([ E('b', {}, 'Не все узлы в списке. '), 'Ядро steer не прочитало узлы ' + fl.join(', ') + '. Панель повторит через 5 минут; если не пройдёт — переустановите Steer.' ]));
+			if (fl.length) out.push(warn([ E('b', {}, 'Не все узлы в списке. '), 'Ядро не прочитало ' + fl.join(', ') + '. Повтор через 5 минут, если не поможет — переустановите Steer.' ]));
 			var miss = subData.miss || [];
-			if (miss.length && !subData.happ) out.push(warn([ E('b', {}, 'Провайдер отдал Steer не все серверы. '), 'В подписке для Happ есть ' + miss.map(function(x) { return '«' + x + '»'; }).join(', ') +
-				', а в ответе для Steer их нет — панель провайдера отдаёт разным приложениям разный набор серверов.',
+			if (miss.length && !subData.happ) out.push(warn([ E('b', {}, 'Steer получил не все серверы. '), 'У Happ есть ещё: ' + miss.map(function(x) { return '«' + x + '»'; }).join(', ') + '.',
 				E('div', { 'class': 'zm-actions', 'style': 'margin:8px 0 0' }, [ E('button', { 'class': 'cbi-button cbi-button-action', 'disabled': busy ? '' : null, 'click': function() {
 					act('sub_happ', 'on', 'Берём узлы как у Happ');
 				} }, 'Брать узлы как у Happ') ]) ]));
 			if (subData.happ) out.push(E('div', { 'class': 'zm-hint', 'style': 'display:flex; align-items:center; gap:10px; flex-wrap:wrap' }, [
-				E('span', {}, 'Узлы берутся как у Happ — подписка качается в том виде, в каком её получает приложение Happ.' + (miss.length ? ' Не нашлись: ' + miss.join(', ') + '.' : '')),
+				E('span', {}, 'Узлы как у Happ.' + (subData.happ_old ? ' Нажмите «Обновить», чтобы убрать повторы.' : '') + (miss.length ? ' Не нашлись: ' + miss.join(', ') + '.' : '') +
+					(subData.happ_chain > 0 ? ' Цепочек через другой сервер: ' + subData.happ_chain + ' — Steer их не умеет.' : '')),
 				E('button', { 'class': 'cbi-button', 'disabled': busy ? '' : null, 'click': function() { act('sub_happ', 'off', 'Возвращаем обычную подписку'); } }, 'Как обычно') ]));
 			if (L.skipped > 0) {
-				var items = sk.map(function(r) {
-					return E('li', {}, [ String(r.reason || 'без причины'), r.count > 0 ? ' — ' + r.count + ' ' + plural(r.count, 'узел', 'узла', 'узлов') : '', r.example ? E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, ', например «' + r.example + '»') : '' ]);
-				});
-				out.push(E('div', { 'class': 'zm-hint' }, [ 'Пропущено узлов: ' + L.skipped + (items.length ? ':' : '.'),
-					items.length ? E('ul', { 'style': 'margin:4px 0 4px 18px; padding:0' }, items) : '',
-					'Steer умеет VLESS, Hysteria2, Trojan, Shadowsocks, VMess, SOCKS и HTTP; TUIC, AnyTLS и WireGuard из подписки он не берёт.' ]));
+				// Коротко: «Пропущено узлов: 1: «Имя»» и под ним причина; причин несколько — у каждой свой пример
+				var why = function(t) { return String(t || 'без причины').replace(/не поддержан[аоы]?(?![а-яё])/g, 'не поддерживается'); };
+				var ex = function(r) { return r.example ? '«' + r.example + '»' + (r.count > 1 ? ' и ещё ' + (r.count - 1) : '') : ''; };
+				var one = sk.length === 1 && sk[0].example;
+				out.push(E('div', { 'class': 'zm-hint' }, [ 'Пропущено узлов: ' + L.skipped + (one ? ': ' + ex(sk[0]) : ''),
+					sk.length ? E('ul', { 'style': 'margin:4px 0 0 18px; padding:0' }, sk.map(function(r) {
+						return E('li', {}, why(r.reason) + (!one && r.example ? ' — ' + ex(r) : !one && r.count > 0 ? ' — ' + r.count : ''));
+					})) : '' ]));
 			}
 			var st = (subData.stubs || []).length;
-			if (st && (subData.groups || []).length) out.push(E('p', { 'class': 'zm-hint' }, 'Не показаны ' + st + ' ' + plural(st, 'строка', 'строки', 'строк') + ' подписки с именами групп АВТО — это не серверы, а заглушки для приложений без групп. Группы — в режиме «Группа АВТО».'));
+			if (st && (subData.groups || []).length) out.push(E('p', { 'class': 'zm-hint' }, 'Скрыто копий серверов из групп: ' + st + ' — они уже есть в списке.'));
 			return out;
 		}
 		function helloDiag(l) {
 			var w = String((l && l.why) || ''), np = l && l.nopq;
 			if (!/ClientHello/.test(w)) return '';
-			if (np && np.ok) return 'Сервер отвечает только на короткий ClientHello: длинный — с постквантовым обменом, как у Chrome и Happ — провайдер роутера обрывает и после этого ненадолго закрывает сервер. Включите «ClientHello: Авто» в настройках подписки — Steer перейдёт на короткий сам.';
-			if (np && /не признал ключ/.test(np.why || '')) return 'Сервер доступен, но длинный ClientHello до него не доходит — его обрывает провайдер роутера, а короткий этот сервер не принимает (так настроены новые серверы REALITY).';
-			if (np) return 'Порт открыт, но с роутера сервер не ответил на TLS-рукопожатие — ни на длинный ClientHello, ни на короткий. Чаще всего так провайдер роутера закрывает сервер по имени (SNI). Если этот узел работает в Happ через этот же Wi-Fi, Happ обходит блокировку — например, фрагментацией.';
-			return 'Порт открыт, но с роутера сервер не ответил на TLS-рукопожатие (ClientHello). Чаще всего так провайдер закрывает сервер по имени (SNI); в Happ на телефоне узел может работать через мобильную сеть или с фрагментацией.';
+			if (np && np.ok) return 'Узел пускает только с коротким ClientHello — обычный обрывает провайдер. Поставьте «ClientHello: Авто» в настройках Steer.';
+			if (np && /не признал ключ/.test(np.why || '')) return 'Обычный ClientHello обрывает провайдер, а короткий этот сервер не принимает (так настроены новые REALITY).';
+			if (np) return 'Порт открыт, но сервер не ответил ни на обычный, ни на короткий ClientHello — скорее всего, провайдер блокирует его по имени (SNI). Happ может обходить это фрагментацией.';
+			return 'Порт открыт, но сервер не ответил на ClientHello — скорее всего, провайдер блокирует его по имени (SNI).';
 		}
 		function askDead(n, l) {
 			var b = bestNode([ n.name, subData.node || '' ]);
@@ -51358,7 +51471,7 @@ return view.extend({
 				}).then(function(v) { if (v) subAct('sub_remove', '', own ? 'Удаляем серверы' : 'Удаляем подписку'); });
 			} }, subData.kind === 'links' ? 'Удалить серверы' : 'Удалить подписку'));
 			if (!hideMode) subCard.appendChild(E('div', { 'class': 'zm-actions' }, acts));
-			if (!hideMode && !(linksOpen && subData.kind === 'links') && nodes.length > 1) subCard.appendChild(zm.swRow(sortPing, 'Сортировать по пингу', 'Серверы идут от быстрых к медленным, неотвечающие — в конце.', function() {
+			if (!hideMode && !(linksOpen && subData.kind === 'links') && nodes.length > 1) subCard.appendChild(zm.swRow(sortPing, 'Сортировать по пингу', 'Быстрые — первыми, неотвечающие — в конце.', function() {
 				sortPing = !sortPing;
 				try { localStorage.setItem('zm.steer.sort', sortPing ? 'ping' : 'list'); } catch (e) {}
 				var tested = nodes.some(function(n) { return lat[n.index] && !lat[n.index].busy; });
@@ -51380,8 +51493,8 @@ return view.extend({
 					} }, o.label);
 				}))));
 				subCard.appendChild(E('p', { 'class': 'zm-hint' }, lm === 'fast'
-					? 'Только TCP: открывается ли порт узла. Быстро и почти не нагружает роутер, но узел, который блокирует провайдер, может показывать хороший пинг. Подходит для слабых роутеров и больших подписок.'
-					: 'Сначала проверяется, открыт ли порт узла (TCP), затем — настоящий запрос через него; цифра — задержка. «Порт открыт, не пускает» — узел отвечает, но трафик не проходит (обычно блокирует провайдер). По этой проверке выбирает узел и автовыбор «По пингу».'));
+					? 'Проверяется только порт — быстро и легко для роутера, но узел под блокировкой может выглядеть живым.'
+					: 'Порт и настоящий запрос через узел. «Порт открыт, не пускает» — трафик не проходит, обычно блокирует провайдер.'));
 			}
 			if (linksOpen && subData.kind === 'links' && !hideMode) {
 				subCard.appendChild(E('div', { 'class': 'zm-hide-box', 'style': 'border-style:solid; border-color:rgba(127,127,127,.3); background:transparent' }, [
@@ -51423,8 +51536,8 @@ return view.extend({
 						subData.ping_at > 0 ? E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'Последний замер: ' + fmtAge(Math.max(0, Math.floor(Date.now() / 1000) - subData.ping_at))) : E([]) ]));
 				}
 				subCard.appendChild(E('p', { 'class': 'zm-hint' }, isPing
-					? 'Роутер замеряет пинг всех узлов и ставит первым самый быстрый. Пока узел отвечает, Steer остаётся на нём и раз в ' + ((IVS.filter(function(o) { return o.id === +subData.pick_iv; })[0] || IVS[0]).label) + ' проверяет, нет ли заметно быстрее. Узел оборвался — Steer сам переходит на следующий по скорости. Порог смены — на сколько миллисекунд другой узел должен быть быстрее, чтобы Steer ушёл с работающего. Выбор узла вручную выключает автовыбор до нажатия «Авто».'
-					: 'Работает первый отвечающий узел по порядку подписки; если он оборвался, ядро steer само переходит на следующий. «По пингу» — первым встаёт самый быстрый.'));
+					? 'Первым встаёт самый быстрый узел; раз в ' + ((IVS.filter(function(o) { return o.id === +subData.pick_iv; })[0] || IVS[0]).label) + ' Steer ищет быстрее. Порог смены — насколько быстрее должен быть другой узел, чтобы перейти на него.'
+					: 'Работает первый отвечающий узел по порядку подписки. «По пингу» — первым встаёт самый быстрый.'));
 			}
 			if (!hideMode && nodes.length > 1) {
 				var NP = [ { id: 'back', label: 'Перейти и вернуться' }, { id: 'switch', label: 'Перейти на рабочий' }, { id: 'hold', label: 'Держать выбранный' } ];
@@ -51442,25 +51555,10 @@ return view.extend({
 					} }, o.label);
 				}))));
 				subCard.appendChild(E('p', { 'class': 'zm-hint' }, np === 'hold'
-					? 'Steer остаётся на выбранном вручную узле и ничего не перезапускает — пока узел не ответит, ' + (data.onfail === 'drop' ? 'выбранные сервисы остановлены' : 'выбранные сервисы идут напрямую') + '. Для узлов, которые ненадолго пропадают.'
+					? 'Steer ждёт узел, пока тот молчит — сервисы ' + (data.onfail === 'drop' ? 'остановлены' : 'идут напрямую') + '.'
 					: np === 'switch'
-						? 'Если выбранный вручную узел перестал отвечать, Steer переходит на рабочий и остаётся на нём. Вернуться — нажать на узел в списке.'
-						: 'Если выбранный вручную узел перестал отвечать, Steer переходит на рабочий, а выбранный проверяет раз в 10 минут и возвращается на него, как только он ответит. Перед выбором узел проверяется.'));
-			}
-			if (!hideMode && nodes.length) {
-				var nq = subData.nopq || {}, NQ = [ { id: 'auto', label: 'Авто' }, { id: 'on', label: 'Всегда короткий' }, { id: 'off', label: 'Обычный' } ];
-				subCard.appendChild(row('ClientHello', E('div', { 'class': 'zm-seg' }, NQ.map(function(o) {
-					return E('div', { 'class': 'zm-seg-item' + ((nq.mode || 'auto') === o.id ? ' zm-active' : ''), 'click': function() {
-						if ((nq.mode || 'auto') === o.id || busy) return;
-						subAct('nopq', o.id, o.id === 'on' ? 'Включаем короткий ClientHello' : o.id === 'off' ? 'Возвращаем обычный ClientHello' : 'ClientHello: Авто');
-					} }, o.label);
-				}))));
-				subCard.appendChild(E('p', { 'class': 'zm-hint' }, nq.mode === 'on'
-					? 'Steer шлёт короткий ClientHello, без постквантового обмена, — его реже обрывает провайдер. Новые серверы REALITY, которым нужен постквантовый обмен, с ним не работают.'
-					: nq.mode === 'off'
-						? 'Steer всегда шлёт обычный ClientHello, как Chrome, — с постквантовым обменом.'
-						: nq.auto ? 'Сейчас короткий: узел «' + nq.auto + '» пускает только с ним. Обычный — с постквантовым обменом, как у Chrome — провайдер к нему обрывает.'
-							: 'Steer шлёт обычный ClientHello, как Chrome. Если проверка узла покажет, что провайдер обрывает его, а короткий проходит, панель включит короткий сама.'));
+						? 'Узел замолчал — Steer переходит на рабочий и остаётся на нём.'
+						: 'Узел замолчал — Steer переходит на рабочий и возвращается, когда выбранный ответит.'));
 			}
 			var grid = E('div', { 'class': 'zm-nodes' });
 			if (subData.node) manualView = false;
@@ -51478,10 +51576,12 @@ return view.extend({
 							else { manualView = true; renderSub(); }
 						} ]
 					]));
+					// На карточке группы — её серверы коротко (без флагов и значков): сразу видно, через что пойдёт трафик
+					var shortName = function(n) { return String(n.name || '').replace(/[\uD83C-\uDBFF][\uDC00-\uDFFF]/g, '').replace(/[\u2190-\u21FF\u2600-\u27BF\u2B00-\u2BFF\uFE0F\u200D]/g, '').replace(/\s+/g, ' ').trim() || String(n.name || ''); };
 					if (gmode === 'group') subCard.appendChild(E('div', { 'class': 'zm-nodes', 'style': 'margin-top:4px' }, grps.map(function(g) {
 						var on = curGrp === g;
 						return nodeCard({
-							name: g.name, foot: g.nodes.length + ' ' + plural(g.nodes.length, 'узел', 'узла', 'узлов') + (isPing ? ' · по пингу' : ' · по порядку'),
+							name: g.name, foot: g.nodes.map(shortName).join(', ') + (isPing ? ' · по пингу' : ''),
 							active: on, grp: true, title: 'Группа АВТО из подписки: ' + g.nodes.map(function(n) { return n.name; }).join(', '),
 							click: function() { if (!on && !busy) grpSelectS(g); }
 						});
@@ -51515,7 +51615,7 @@ return view.extend({
 				if (l && l.busy) txt = '…';
 				else if (l && l.pend) { txt = l.ms + ' мс…'; ttl = 'TCP ' + l.ms + ' мс — проверяем запросом через узел'; }
 				else if (l && l.inUse) { txt = 'в работе'; cls = 'zm-lat-good';
-					ttl = 'Через этот узел сейчас идёт трафик туннеля — узел работает. Разовая проверка с роутера не прошла' + (l.why ? ' (' + l.why + ')' : '') + ': так бывает, когда роутер занят или узел медленно отвечает на служебный запрос'; }
+					ttl = 'Узел работает — через него идёт трафик. Разовая проверка не прошла' + (l.why ? ': ' + l.why : ''); }
 				else if (l && l.blocked) { txt = 'порт открыт, не\u00a0пускает'; cls = 'zm-lat-blk'; dead = true;
 					ttl = 'Порт узла открыт' + (l.tcp > 0 ? ' (TCP ' + l.tcp + ' мс)' : '') + (/ClientHello/.test(l.why || '')
 						? ', но на TLS-рукопожатие с роутера узел не ответил — чаще всего так провайдер закрывает сервер по имени (SNI). Нажмите на узел — панель проверит подробнее'
@@ -51536,12 +51636,14 @@ return view.extend({
 					}
 				}));
 			});
+			var inGrp = {}; grps.forEach(function(g) { g.nodes.forEach(function(n) { inGrp[n.index] = true; }); });
+			var outN = nodes.filter(function(n) { return !inGrp[n.index]; });
 			if (!hideMode) subCard.appendChild(grid);
-			if (!hideMode && gmode === 'group') subCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Группа АВТО из подписки — как в Happ: в списке только её ' + curGrp.nodes.length + ' ' + plural(curGrp.nodes.length, 'узел', 'узла', 'узлов') + ', Steer работает только через них — ' +
-				(isPing ? 'первым стоит самый быстрый по пингу' : 'первый отвечающий по порядку подписки (чтобы первым был самый быстрый, включите «По пингу»)') + '. Узел оборвался — ядро steer само переходит на следующий узел группы. Группа остаётся выбранной и после перезапуска. Нажмите на узел, чтобы закрепить его.'));
-			else if (!hideMode && grps.length && gmode === 'auto') subCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Авто: Steer выбирает из всех узлов подписки. Нажмите на узел, чтобы закрепить его, или включите «Группа АВТО».'));
-			else if (!hideMode && grps.length && gmode === 'manual') subCard.appendChild(E('p', { 'class': 'zm-hint' }, subData.node ? 'Закреплён узел «' + subData.node + '». Чтобы Steer снова выбирал сам, включите «Авто» или «Группа АВТО».' : 'Нажмите на узел, чтобы закрепить его.'));
-			if (!hideMode && subData.grp_nojq) subCard.appendChild(E('p', { 'class': 'zm-hint' }, 'В подписке есть группы АВТО (как в Happ). Нажмите «Обновить» у подписки — панель поставит небольшой пакет jq и покажет их.'));
+			if (!hideMode && gmode === 'group') subCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Группа как в Happ: ' + curGrp.nodes.length + ' ' + plural(curGrp.nodes.length, 'узел', 'узла', 'узлов') + ', работает ' + (isPing ? 'самый быстрый' : 'первый отвечающий') + '. Нажмите на узел, чтобы закрепить его.' +
+				(outN.length ? ' Ещё ' + outN.length + ' ' + plural(outN.length, 'узел', 'узла', 'узлов') + ' — в «Вручную».' : '')));
+			else if (!hideMode && grps.length && gmode === 'auto') subCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Steer выбирает узел сам. Нажмите на узел, чтобы закрепить его.'));
+			else if (!hideMode && grps.length && gmode === 'manual') subCard.appendChild(E('p', { 'class': 'zm-hint' }, subData.node ? 'Закреплён «' + subData.node + '». Вернуть автовыбор — «Авто» или «Группа АВТО».' : 'Нажмите на узел, чтобы закрепить его.'));
+			if (!hideMode && subData.grp_nojq) subCard.appendChild(E('p', { 'class': 'zm-hint' }, 'В подписке есть группы АВТО — нажмите «Обновить», панель поставит jq и покажет их.'));
 			var hn = subData.hide_names || [];
 			hidePick.update(allNodes.filter(function(n) { return !!n.name; }).map(function(n, ni) {
 				var byName = hn.indexOf(n.name || '') >= 0;
@@ -57764,6 +57866,9 @@ html.zm-theme-dark body:not(.zmw-body) .zm-meter-bar { background: rgba(255,255,
 .zm-kv-web { background: linear-gradient(135deg, #7c5cff 0%, #5b4bff 55%, #4338ca 100%) border-box; border-color: transparent; color: #ffffff !important; box-shadow: 0 8px 20px -10px rgba(91,75,255,.85); }
 .zm-kv-web:hover { background: linear-gradient(135deg, #6f4dff 0%, #4f3ff0 55%, #3a30b5 100%) border-box; box-shadow: 0 10px 22px -10px rgba(91,75,255,.95); }
 .zm-kv-thx .zm-kv-i svg path { fill: #ef4444; stroke: #e11d48; }
+.zm-kv-thx .zm-kv-i svg { transform-origin: 50% 55%; animation: zm-kv-beat 1.8s cubic-bezier(.4,0,.2,1) infinite; }
+.zm-kv-thx:hover .zm-kv-i svg { animation-duration: 1s; }
+@keyframes zm-kv-beat { 0%, 38%, 100% { transform: scale(1); } 9% { transform: scale(1.2); } 17% { transform: scale(.96); } 26% { transform: scale(1.12); } }
 @media (prefers-reduced-motion: reduce) { .zm-kv-go, .zm-kv-go:hover, .zm-kv-go-out, .zm-kv-go:hover .zm-kv-go-out { transition: none; transform: none; } }
 .zm-kv-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .zm-kv-it { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 14px; background: #f7f6ff; border: 1px solid #e6e3fb; color: #1e1b4b; font-size: 14px; line-height: 1.4; min-width: 0; }
@@ -64199,11 +64304,11 @@ return view.extend({
 				var link, extra, outLink = '';
 				if (v.kind === 'socks') {
 					link = 'tg://socks?server=' + host + '&port=' + port;
-					extra = 'SOCKS5-адрес: ' + host + ':' + port;
+					extra = [ 'SOCKS5-адрес: ', zm.secret(host + ':' + port) ];
 				} else {
 					if (!st.secret) return;
 					link = 'tg://proxy?server=' + host + '&port=' + port + '&secret=' + st.secret;
-					extra = [ 'Хост: ' + host + '   Порт: ' + port + '   Ключ: ', zm.secret(st.secret) ];
+					extra = [ 'Хост: ', zm.secret(host), '   Порт: ' + port + '   Ключ: ', zm.secret(st.secret) ];
 					outLink = extLink(st, st.ext);
 				}
 
@@ -66442,7 +66547,7 @@ return view.extend({
 			if (hideBtn) acts.push(hideBtn);
 			srvCard.appendChild(E('div', { 'class': 'zm-actions' }, acts));
 			srvCard.appendChild(hidePick);
-			if (tags.length > 1) srvCard.appendChild(zm.swRow(sortPing, 'Сортировать по пингу', 'Серверы идут от быстрых к медленным, неотвечающие — в конце.', function() {
+			if (tags.length > 1) srvCard.appendChild(zm.swRow(sortPing, 'Сортировать по пингу', 'Быстрые — первыми, неотвечающие — в конце.', function() {
 				sortPing = !sortPing;
 				try { localStorage.setItem('zm.fk.sort', sortPing ? 'ping' : 'list'); } catch (e) {}
 				var tested = tags.some(function(t) { return ns[t] && ns[t].delay >= 0; });
@@ -66460,8 +66565,8 @@ return view.extend({
 				}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
 			})));
 			srvCard.appendChild(E('p', { 'class': 'zm-hint' }, lm === 'fast'
-				? 'Только TCP: открывается ли порт сервера. Быстро и почти не нагружает роутер, но сервер, который блокирует провайдер, может показывать хороший пинг. Подходит для слабых роутеров и больших подписок.'
-				: 'Сначала проверяется, открыт ли порт сервера (TCP), затем — настоящий запрос через него; цифра — задержка. «Порт открыт, не пускает» — сервер отвечает, но трафик не проходит (обычно блокирует провайдер). По этой проверке выбирает сервер и «Авто по пингу».'));
+				? 'Проверяется только порт — быстро и легко для роутера, но сервер под блокировкой может выглядеть живым.'
+				: 'Порт и настоящий запрос через сервер. «Порт открыт, не пускает» — трафик не проходит, обычно блокирует провайдер.'));
 			if (manual.length > 1) {
 				var np = servers.node_pol === 'switch' || servers.node_pol === 'hold' ? servers.node_pol : 'back';
 				srvCard.appendChild(row('Если сервер не отвечает', seg([ { id: 'back', label: 'Перейти и вернуться' }, { id: 'switch', label: 'Перейти на рабочий' }, { id: 'hold', label: 'Держать выбранный' } ], np, function(v) {
@@ -66474,12 +66579,12 @@ return view.extend({
 					}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
 				})));
 				srvCard.appendChild(E('p', { 'class': 'zm-hint' }, np === 'hold'
-					? 'Forkozz остаётся на выбранном вручную сервере, даже если тот не отвечает, — пока вы не выберете другой. Для серверов, которые ненадолго пропадают.'
+					? 'Forkozz ждёт сервер, даже если тот молчит.'
 					: np === 'switch'
-						? 'Если выбранный вручную сервер перестал отвечать, Forkozz через 2–4 минуты переходит на рабочий и остаётся на нём.'
-						: 'Если выбранный вручную сервер перестал отвечать, Forkozz через 2–4 минуты переходит на рабочий, а выбранный проверяет раз в 10 минут и возвращается на него, как только он ответит. Перед выбором сервер проверяется.'));
+						? 'Сервер замолчал — через 2–4 минуты Forkozz переходит на рабочий и остаётся на нём.'
+						: 'Сервер замолчал — через 2–4 минуты Forkozz переходит на рабочий и возвращается, когда выбранный ответит.'));
 			}
-			srvCard.appendChild(E('p', { 'class': 'zm-hint' }, grp ? 'Группа АВТО из подписки — как в Happ: Forkozz раз в ' + grpIv(grp) + ' проверяет ' + grp.n + ' ' + plural(grp.n, 'сервер', 'сервера', 'серверов') + ' группы, работает через самый быстрый и сам переходит на другой, если сервер перестал отвечать. Группа остаётся выбранной и после перезапуска Forkozz. Нажмите на сервер, чтобы закрепить его.' : isAuto ? servers.priority ? 'Авто: используется первая доступная подписка в порядке ссылок. После её восстановления Forkozz возвращается к ней, даже если резервная быстрее. Нажатие на сервер включает ручной выбор.' : servers.ping ? 'Авто по пингу: включён самый быстрый сервер. Если он оборвётся, Forkozz за 20–40 секунд перейдёт на самый быстрый из рабочих. Нажмите на сервер, чтобы закрепить его.' : 'Авто: Forkozz сам выбирает лучший из этих серверов. Нажмите на сервер, чтобы закрепить его.' : servers.priority ? 'Нажмите на сервер, чтобы переключиться. Чтобы снова использовать автоматический порядок подписок, выберите «Авто».' : 'Нажмите на сервер, чтобы переключиться. Выбор сохраняется и после перезапуска Forkozz, перезагрузки роутера и обновления подписки. Что делать, если сервер перестал отвечать, — в настройке «Если сервер не отвечает».'));
+			srvCard.appendChild(E('p', { 'class': 'zm-hint' }, grp ? 'Группа как в Happ: ' + grp.n + ' ' + plural(grp.n, 'сервер', 'сервера', 'серверов') + ', работает самый быстрый, проверка раз в ' + grpIv(grp) + '. Нажмите на сервер, чтобы закрепить его.' : isAuto ? servers.priority ? 'Работает первая доступная подписка по порядку; когда она вернётся, Forkozz вернётся к ней.' : servers.ping ? 'Работает самый быстрый сервер. Нажмите на сервер, чтобы закрепить его.' : 'Forkozz выбирает сервер сам. Нажмите на сервер, чтобы закрепить его.' : servers.priority ? 'Нажмите на сервер, чтобы переключиться. Вернуть порядок подписок — «Авто».' : 'Нажмите на сервер, чтобы переключиться. Выбор сохраняется после перезагрузки и обновления подписки.'));
 			srvCard.appendChild(rlPanel(ns));
 		}
 
@@ -73677,11 +73782,11 @@ html:not([data-zm-motion="0"]) .zmw-nav-item.zmw-nav-folded { clip-path: inset(0
 	background: var(--grad); color: #fff; border-color: transparent;
 	box-shadow: 0 6px 16px -6px rgba(99,102,241,.8);
 }
-.zmw-nav-item[data-route="thanks"] .zmw-nav-ico .zmw-i { transition: transform .25s cubic-bezier(.34,1.56,.64,1); }
+.zmw-nav-item[data-route="thanks"] .zmw-nav-ico .zmw-i { transform-origin: 50% 55%; animation: zmw-beat 1.8s cubic-bezier(.4,0,.2,1) infinite; }
 .zmw-nav-item[data-route="thanks"] .zmw-nav-ico .zmw-i path { fill: #ef4444; stroke: #dc2626; }
 .zmw-nav-item[data-route="thanks"].zmw-active .zmw-nav-ico .zmw-i path { stroke: currentColor; }
-.zmw-nav-item[data-route="thanks"]:hover .zmw-nav-ico .zmw-i { transform: scale(1.14); }
-@media (prefers-reduced-motion: reduce) { .zmw-nav-item[data-route="thanks"] .zmw-nav-ico .zmw-i { transition: none; transform: none; } }
+.zmw-nav-item[data-route="thanks"]:hover .zmw-nav-ico .zmw-i { animation-duration: 1s; }
+@keyframes zmw-beat { 0%, 38%, 100% { transform: scale(1); } 9% { transform: scale(1.14); } 17% { transform: scale(.97); } 26% { transform: scale(1.08); } }
 .zmw-nav-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: none; }
 .zmw-nav-dot.zmw-on, .zmw-nav-dot.zmw-stop, .zmw-nav-dot.zmw-part, .zmw-nav-dot.zmw-idle { display: block; }
 .zmw-nav-dot.zmw-idle { background: #9aa3b2; box-shadow: 0 0 0 3px rgba(154,163,178,.18); }
@@ -74455,6 +74560,7 @@ html.zm-theme-dark .zmw-body .zm-toast-spin, html.zm-theme-dark.zmw-body .zm-toa
 	*, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 	html .zm-toast-spin, html .zm-reboot-spin, html .zmw-btn-primary.zmw-loading::after { animation-duration: 1.4s !important; animation-iteration-count: infinite !important; }
 	html .zm-tsc-spin { animation-duration: 1.2s !important; animation-iteration-count: infinite !important; }
+	html .zmw-nav-item[data-route="thanks"] .zmw-nav-ico .zmw-i, html .zm-kv-thx .zm-kv-i svg { animation-duration: 1.8s !important; animation-iteration-count: infinite !important; }
 	html .zm-ok .zm-dot::after, html .zm-sx-info .zm-dot::after, html .zmw-nav-dot.zmw-on::after { animation-duration: 2.4s !important; animation-iteration-count: infinite !important; }
 	html .zmw-nav-dot.zmw-stop { animation-duration: 1.6s !important; animation-iteration-count: infinite !important; }
 }
