@@ -1,16 +1,17 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.072
+# Version: 5.074
 ZM_VERSION_EOF
 set -e
 
 ZM_INST_MODE="${1:-}"
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; NC="\033[0m"
 # Где держать панель: flash — на флеше; light — страницы в памяти, на флеше сжатый архив; ram — всё в памяти до перезагрузки.
-# Без слова — как стояла (после «ram» — снова на флеш). Проверяем заранее, пока на роутере ничего не тронуто
+# Без слова — как стояла (после «ram» — снова на флеш). Проверяем заранее, пока на роутере ничего не тронуто.
+# pc — для программы ZapretManager_PC: основа панели в памяти до перезагрузки, а страницы открываются с компьютера
 case "$ZM_INST_MODE" in
 	''|flash) ;;
-	ram|light)
+	ram|light|pc)
 		_zmi_e=""
 		[ "$(df -kP /tmp 2>/dev/null | awk 'NR == 2 { print $4 + 0 }')" -ge 12288 ] 2>/dev/null || _zmi_e="нужно хотя бы 12 МБ свободной оперативной памяти в /tmp"
 		for _zmi_s in main zmweb; do [ "$(uci -q get "uhttpd.$_zmi_s.no_symlinks" 2>/dev/null)" = 1 ] && _zmi_e="веб-сервер uhttpd настроен не открывать файлы по ссылкам (no_symlinks) — из памяти панель не откроется"; done
@@ -96,7 +97,8 @@ _zmi_uip="/www/luci-static/resources/view/zapret-manager /www/luci-static/resour
 _zmi_uim=""
 [ -f /opt/zapret-manager-luci/state/ui.ram ] && read -r _zmi_uim < /opt/zapret-manager-luci/state/ui.ram || true
 case "$_zmi_uim" in light|tmp) ;; *) _zmi_uim="" ;; esac
-if [ "$ZM_INST_MODE" = ram ]; then
+[ "$ZM_INST_MODE" = pc ] || rm -f /opt/zapret-manager-luci/state/ui.pc
+if [ "$ZM_INST_MODE" = ram ] || [ "$ZM_INST_MODE" = pc ]; then
 	_zmi_uim=tmp
 elif [ "$ZM_INST_MODE" = light ]; then
 	if [ "$_zmi_uim" = tmp ]; then
@@ -1020,8 +1022,9 @@ monitor_procs() {
 }
 
 ui_net_get() {
-	local d
-	d="$(_mon_dev wan)"
+	local d=""
+	case "$1" in ''|*[!A-Za-z0-9._@-]*) ;; *) grep -q "^[[:space:]]*$1:" /proc/net/dev 2>/dev/null && d="$1" ;; esac
+	[ -n "$d" ] || d="$(_mon_dev wan)"
 	[ -n "$d" ] || d="$(awk 'NR > 1 && $2 == "00000000" { print $1; exit }' /proc/net/route 2>/dev/null)"
 	awk -v d="$d" '
 		FILENAME == "/proc/uptime" { t = $1 + 0 }
@@ -1034,7 +1037,7 @@ ui_net_get() {
 
 case "$1" in
 	system_info) system_info; exit ;;
-	ui_net_get)  ui_net_get; exit ;;
+	ui_net_get)  ui_net_get "$2"; exit ;;
 	monitor)       monitor_snapshot; exit ;;
 	monitor_procs) monitor_procs; exit ;;
 	job_status)  job_status "$2"; exit ;;
@@ -2131,7 +2134,7 @@ ui_nav_set() {
 	local id out="" n=0
 	for id in $(printf '%s' "$1" | tr ',' ' '); do
 		printf '%s' "$id" | grep -qE '^[a-z0-9_]{1,32}$' || { echo '{"error":"неверный раздел"}'; return 1; }
-		case "$id" in dashboard|pages|thanks) continue ;; esac
+		case "$id" in dashboard|thanks) continue ;; esac
 		case " $out " in *" $id "*) continue ;; esac
 		out="$out $id"; n=$((n + 1))
 		[ "$n" -le 64 ] || { echo '{"error":"слишком много разделов"}'; return 1; }
@@ -3671,6 +3674,7 @@ _zpg_lock() {
 }
 _zpg_have() {
 	local f
+	[ -f "$ZM_STATE_DIR/ui.pc" ] && return 0
 	for f in $(_zpg_files "$1"); do [ -s "$f" ] || return 1; done
 	grep -q 'zmPageOff' "$ZPG_V/$1.js" 2>/dev/null && return 1
 	return 0
@@ -8067,7 +8071,7 @@ AWF_LOG="$ZM_STATE_DIR/awgfix.log"
 AWF_TAG="# zm-awgfix"
 AWF_TRIES=4
 
-_awf_min() { case "$(cat "$AWF_MODE" 2>/dev/null)" in 30) echo 30 ;; 60) echo 60 ;; 180) echo 180 ;; esac; }
+_awf_min() { case "$(cat "$AWF_MODE" 2>/dev/null)" in 5) echo 5 ;; 15) echo 15 ;; 30|60|180) echo 30 ;; esac; }
 
 AWG_API1="https://api.cloudflareclient.com/v0a4005/reg"
 AWG_API2="https://api.cloudflareclient.com/v0i1909051800/reg"
@@ -9096,7 +9100,7 @@ case "$cmd" in
 	tsc_watch)                            tsc_watch ;;
 	tsc_lan_ip)                           _zm_lan_ip ;;
 	monitor)                              monitor_snapshot ;;
-	ui_net_get)                           ui_net_get ;;
+	ui_net_get)                           ui_net_get "$2" ;;
 	monitor_procs)                        monitor_procs ;;
 	monitor_action)                       monitor_action "$1" "$2" ;;
 	htop_gone)                            htop_gone ;;
@@ -12800,6 +12804,10 @@ _zm_job_label() {
 
 zm_update_action() {
 	local j
+	if [ -f "$ZM_STATE_DIR/ui.pc" ]; then
+		echo '{"error":"панель открыта с компьютера — обновите саму программу ZapretManager_PC: скачайте новую со страницы релиза и запустите её"}'
+		return 1
+	fi
 	if j="$(_zm_busy_job)"; then
 		printf '{"error":"%s"}\n' "$(esc "идёт операция «$j» — дождитесь её окончания и обновите панель")"
 		return 1
@@ -12808,7 +12816,11 @@ zm_update_action() {
 }
 
 do_zm_update() {
-	local tmp="/tmp/zm_update_install.sh" why v
+	local tmp="/tmp/zm_update_install.sh" why v m="" arg=""
+	if [ -f "$ZM_STATE_DIR/ui.pc" ]; then
+		echo "ОШИБКА: панель открыта с компьютера программой ZapretManager_PC — обновите саму программу: скачайте новую со страницы релиза и запустите её"
+		return 1
+	fi
 	echo "==> Скачиваем новую версию панели с GitHub"
 	if ! why="$(_zm_update_fetch "$tmp")"; then
 		rm -f "$tmp"
@@ -12819,8 +12831,11 @@ do_zm_update() {
 	echo "   ✓ Установщик скачан и проверен: версия $v"
 	chmod +x "$tmp"
 	rm -f "$ZM_STATE_DIR/latest.panel"
+	# Панель поставлена в память до перезагрузки («ram») — обновляем её туда же, а не на флеш
+	[ -f "$ZM_STATE_DIR/ui.ram" ] && read -r m < "$ZM_STATE_DIR/ui.ram"
+	[ "$m" = tmp ] && { arg=ram; echo "   · Панель стоит в оперативной памяти — новая версия тоже встанет в память"; }
 	echo "==> Запускаем установку — панель на полминуты пропадёт"
-	( sleep 5; sh "$tmp" >/tmp/zm_update_install.log 2>&1; rm -f "$tmp" ) >/dev/null 2>&1 </dev/null &
+	( sleep 5; sh "$tmp" $arg >/tmp/zm_update_install.log 2>&1; rm -f "$tmp" ) >/dev/null 2>&1 </dev/null &
 	return 0
 }
 ZM_INSTALLER_EOF
@@ -17789,7 +17804,7 @@ start() {
 				sed -i '\#/opt/zapret-manager-luci/backend.sh#d' /etc/crontabs/root
 			fi
 			logger -t zapret-manager "Панель стояла в оперативной памяти и после перезагрузки убрана. Zapret, Steer и остальное работают; вернуть панель — тем же установщиком: sh <файл> ram"
-			rm -f /opt/zapret-manager-luci/state/ui.ram
+			rm -f /opt/zapret-manager-luci/state/ui.ram /opt/zapret-manager-luci/state/ui.pc
 			/etc/init.d/zm-ui disable 2>/dev/null
 			rm -f /etc/init.d/zm-ui ;;
 	esac
@@ -17917,8 +17932,8 @@ zm_uiram() {
 		status|'')
 			m="$(_zui_mode)"
 			raw="$(_zui_flash_kb)"; ram="$(_zui_ram_kb)"; arc="$(_zui_kb "$ZUI_ARC")"
-			printf '{"mode":"%s","flash_kb":%s,"ram_kb":%s,"arc_kb":%s,"tmp_free":%s,"fl_free":%s,"tools":%s,"nosym":%s,"job":%s}\n' \
-				"$m" "${raw:-0}" "${ram:-0}" "${arc:-0}" "$(_zui_df /tmp)" "$(_zui_df /opt/zapret-manager-luci)" \
+			printf '{"mode":"%s","pc":%s,"flash_kb":%s,"ram_kb":%s,"arc_kb":%s,"tmp_free":%s,"fl_free":%s,"tools":%s,"nosym":%s,"job":%s}\n' \
+				"$m" "$([ -f "$ZM_STATE_DIR/ui.pc" ] && echo true || echo false)" "${raw:-0}" "${ram:-0}" "${arc:-0}" "$(_zui_df /tmp)" "$(_zui_df /opt/zapret-manager-luci)" \
 				"$(_zui_tools && echo true || echo false)" "$(_zui_nosym && echo true || echo false)" "$(_job_running uiram && echo true || echo false)" ;;
 		on) _job_running uiram && { echo '{"error":"переключение уже идёт"}'; return 1; }; job_start uiram _zui_on ;;
 		off) _job_running uiram && { echo '{"error":"переключение уже идёт"}'; return 1; }; job_start uiram _zui_off ;;
@@ -22949,6 +22964,8 @@ autoupd_run() {
 	[ -s "$AU_LOCK/plan" ] && ZM_VER_LOCAL=1 do_versions_refresh >/dev/null 2>&1
 	printf '%s\n' "$list" | grep '^Zapret Manager	' | head -n 1 > "$AU_LOCK/panel"
 	IFS='	' read -r pn pf pt < "$AU_LOCK/panel"
+	# Панель открыта с компьютера — её обновляет программа ZapretManager_PC, а не роутер
+	[ -f "$ZM_STATE_DIR/ui.pc" ] && pt=""
 	if [ -n "$pt" ]; then
 		echo "Zapret Manager" > "$AU_LOCK/cur"
 		if ! _au_wait_free; then _au_add "$pn" "$pf" "$pt" fail "роутер занят — идёт «$AU_BUSY»; попробуем в следующий раз"
@@ -34030,7 +34047,7 @@ _awf_ep() { local p; p="$(_awg_peer_sec "$1")"; printf '%s:%s' "$(uci -q get "ne
 
 _awf_cron() {
 	local want=""
-	[ -n "$(_awf_min)" ] && want="*/10 * * * * /opt/zapret-manager-luci/backend.sh awg_action fix_tick x >/dev/null 2>&1 $AWF_TAG"
+	[ -n "$(_awf_min)" ] && want="*/5 * * * * /opt/zapret-manager-luci/backend.sh awg_action fix_tick x >/dev/null 2>&1 $AWF_TAG"
 	if [ -n "$want" ]; then
 		[ "$(grep -cF "$AWF_TAG" "$CRON_FILE" 2>/dev/null)" = 1 ] && grep -qxF "$want" "$CRON_FILE" && return 0
 	else
@@ -34046,7 +34063,7 @@ _awf_cron() {
 _awf_set() {
 	case "$1" in
 		off) rm -f "$AWF_MODE" "$AWF_STATE" "$AWG_RUN/fix.last" "$AWG_RUN/fix.nonet" ;;
-		30|60|180) mkdir -p "$ZM_STATE_DIR"; echo "$1" > "$AWF_MODE" ;;
+		5|15|30) mkdir -p "$ZM_STATE_DIR"; echo "$1" > "$AWF_MODE" ;;
 		*) echo '{"error":"неверный интервал"}'; return 1 ;;
 	esac
 	_awf_cron
@@ -34069,6 +34086,7 @@ _awf_tick() {
 	local lim now i since tries last all=1 any=0 pick="" age why
 	lim="$(_awf_min)"
 	[ -n "$lim" ] || return 0
+	_awf_cron
 	_awg_installed || return 0
 	_job_alive awg && return 0
 	_job_alive steer && return 0
@@ -41587,7 +41605,7 @@ list_methods() {
 	json_add_object "ui_radio_set";           json_add_string "mode" "string"; json_close_object
 	json_add_object "ui_radio_now";           json_add_string "mode" "string"; json_close_object
 	json_add_object "monitor";                json_close_object
-	json_add_object "ui_net_get";             json_close_object
+	json_add_object "ui_net_get";             json_add_string "dev" "string"; json_close_object
 	json_add_object "monitor_procs";          json_close_object
 	json_add_object "monitor_action";         json_add_string "action" "string"; json_add_string "mode" "string"; json_close_object
 	json_add_object "watch_status";           json_close_object
@@ -41758,7 +41776,7 @@ call_method() {
 		tsc_status)              "$BACKEND" tsc_status ;;
 		tsc_action)              json_get_var action action; json_get_var mode mode; printf '%s' "$mode" | "$BACKEND" tsc_action "$action" @stdin ;;
 		monitor)                 "$BACKEND" monitor ;;
-		ui_net_get)              "$BACKEND" ui_net_get ;;
+		ui_net_get)              json_get_var dev dev; "$BACKEND" ui_net_get "$dev" ;;
 		monitor_procs)           "$BACKEND" monitor_procs ;;
 		monitor_action)          json_get_var action action; json_get_var mode mode; printf '%s' "$mode" | "$BACKEND" monitor_action "$action" @stdin ;;
 		watch_status)            "$BACKEND" watch_status ;;
@@ -42200,6 +42218,7 @@ var callTermAction = zmDeclare({ object: 'zapret-manager', method: 'term_action'
 var callTscStatus = zmDeclare({ object: 'zapret-manager', method: 'tsc_status', expect: {} });
 var callTscAction = zmDeclare({ object: 'zapret-manager', method: 'tsc_action', params: ['action', 'mode'], expect: {} });
 var callMonitor = zmDeclare({ object: 'zapret-manager', method: 'monitor', expect: {} });
+var callNetNow = zmDeclare({ object: 'zapret-manager', method: 'ui_net_get', params: ['dev'], expect: {} });
 var callMonitorProcs = zmDeclare({ object: 'zapret-manager', method: 'monitor_procs', expect: {} });
 var callMonitorAction = zmDeclare({ object: 'zapret-manager', method: 'monitor_action', params: ['action', 'mode'], expect: {} });
 var callWatchStatus = zmDeclare({ object: 'zapret-manager', method: 'watch_status', expect: {} });
@@ -45196,6 +45215,7 @@ return baseclass.extend({
 	tscStatus: callTscStatus,
 	tscAction: bigArg2(callTscAction),
 	monitor: callMonitor,
+	netNow: callNetNow,
 	monitorProcs: callMonitorProcs,
 	monitorAction: callMonitorAction,
 	watchStatus: callWatchStatus,
@@ -47060,7 +47080,7 @@ return view.extend({
 			list.forEach(function(f) { ifCard.appendChild(ifBlock(f)); });
 		}
 
-		var FIX_MODES = [ { id: 'off', label: 'Выключено' }, { id: '30', label: '30 минут' }, { id: '60', label: '1 час' }, { id: '180', label: '3 часа' } ];
+		var FIX_MODES = [ { id: 'off', label: 'Выключено' }, { id: '5', label: '5 минут' }, { id: '15', label: '15 минут' }, { id: '30', label: '30 минут' } ];
 		function fixAct(action, mode, okText) {
 			return zm.awgAction(action, mode).then(function(res) {
 				if (!res || res.error) { zm.toast((res && res.error) || 'Роутер не ответил', 'error'); return; }
@@ -47081,11 +47101,11 @@ return view.extend({
 			(w.dead || []).forEach(function(d) { dead[d.name] = d; });
 			function dur(sec) { var m = Math.max(1, Math.round(sec / 60)); return m >= 60 ? Math.floor(m / 60) + ' ч' + (m % 60 ? ' ' + (m % 60) + ' мин' : '') : m + ' мин'; }
 			function clock(t) { var d = new Date(t * 1000); return ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2); }
-			function tickAt(t) { return Math.ceil(Math.max(t, now + 1) / 600) * 600; }
+			function tickAt(t) { return Math.ceil(Math.max(t, now + 1) / 300) * 300; }
 
-			var AFTER = { '30': '30 минут', '60': 'часа', '180': '3 часов' };
+			var AFTER = { '5': '5 минут', '15': '15 минут', '30': '30 минут' };
 			fixCard.appendChild(E('h3', {}, [ 'Автопочинка WARP ', on ? badge('zm-ok', 'включена') : E([]) ]));
-			fixCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:-6px' }, 'Раз в 10 минут роутер проверяет отмеченные туннели WARP. Если туннель не работает или попал на российский узел Cloudflare (DME и др. — через них блокировки не обходятся) дольше выбранного времени, роутер подбирает ему зарубежную точку входа, а с третьей попытки — и новые ключи. Новая настройка остаётся, только если стало лучше, иначе возвращается прежняя. Рабочие туннели не трогаются.'));
+			fixCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin-top:-6px' }, 'Раз в 5 минут роутер проверяет отмеченные туннели WARP. Если туннель не работает или попал на российский узел Cloudflare (DME и др. — через них блокировки не обходятся) дольше выбранного времени, роутер подбирает ему зарубежную точку входа, а с третьей попытки — и новые ключи. Новая настройка остаётся, только если стало лучше, иначе возвращается прежняя. Рабочие туннели не трогаются.'));
 
 			var rows = E('div', { 'class': 'zm-afix-list' });
 			list.forEach(function(f) {
@@ -57131,7 +57151,19 @@ html.zm-theme-dark body:not(.zmw-body) .zm-meter-bar { background: rgba(255,255,
 .zm-kv-free { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 999px; background: #e9f8ef; color: #166534; font-size: 13.5px; font-weight: 700; white-space: nowrap; }
 .zm-kv-free-i, .zm-kv-i { line-height: 0; }
 .zm-kv-lead { margin: 0; font-size: 15px; line-height: 1.6; opacity: .9; max-width: 720px; }
-.zm-kvn .zm-kv-btns { margin-top: 0; }
+.zm-kv-cta { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.zm-kv-go { box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 52px; padding: 12px 18px; border-radius: 14px; border: 1px solid transparent; font-size: 15.5px; font-weight: 700; line-height: 1.2; text-align: center; text-decoration: none !important; transition: background .15s, border-color .15s, box-shadow .15s, transform .15s; }
+.zm-kv-go:hover { transform: translateY(-1px); }
+.zm-kv-go:active { transform: none; }
+.zm-kv-go:focus-visible { outline: 2px solid #229ed9; outline-offset: 2px; }
+.zm-kv-go-i { flex: none; line-height: 0; }
+.zm-kv-go small { font-size: 13.5px; font-weight: 500; opacity: .7; }
+.zm-kv-tg { background: #229ed9; border-color: #229ed9; color: #ffffff !important; box-shadow: 0 8px 20px -10px rgba(34,158,217,.8); }
+.zm-kv-tg:hover { background: #1c8cc2; border-color: #1c8cc2; box-shadow: 0 10px 22px -10px rgba(34,158,217,.9); }
+.zm-kv-web { background: #f4f3ff; border-color: #dcd8fb; color: #1e1b4b !important; }
+.zm-kv-web:hover { background: #ebe8ff; border-color: #c9c3f6; }
+.zm-kv-thx .zm-kv-i svg path { fill: #ef4444; stroke: #e11d48; }
+@media (prefers-reduced-motion: reduce) { .zm-kv-go, .zm-kv-go:hover { transition: none; transform: none; } }
 .zm-kv-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .zm-kv-it { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 14px; background: #f7f6ff; border: 1px solid #e6e3fb; color: #1e1b4b; font-size: 14px; line-height: 1.4; min-width: 0; }
 .zm-kv-i { flex: none; width: 34px; height: 34px; border-radius: 10px; background: #e8e5ff; color: #3C3489; display: flex; align-items: center; justify-content: center; }
@@ -57143,8 +57175,11 @@ html.zm-theme-dark .zm-kv-it { background: rgba(255,255,255,.05); border-color: 
 html.zm-theme-dark .zm-kv-i { background: rgba(155,140,255,.18); color: #b7abff; }
 html.zm-theme-dark .zm-kv-thx { background: rgba(225,29,72,.14); border-color: rgba(225,29,72,.28); color: #ffd6df; }
 html.zm-theme-dark .zm-kv-thx .zm-kv-i { background: rgba(225,29,72,.22); color: #fb7185; }
+html.zm-theme-dark .zm-kv-web { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.14); color: #ffffff !important; }
+html.zm-theme-dark .zm-kv-web:hover { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.22); }
+html.zm-theme-dark .zm-kv-tg { box-shadow: none; }
 @media (max-width: 1100px) { .zm-kv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 640px) { .zm-kv-grid { grid-template-columns: minmax(0, 1fr); } .zm-kv-h { font-size: 22px; } .zm-kv-btns .cbi-button { flex: 1 1 auto; justify-content: center; } }
+@media (max-width: 640px) { .zm-kv-grid { grid-template-columns: minmax(0, 1fr); } .zm-kv-h { font-size: 22px; } .zm-kv-cta { grid-template-columns: minmax(0, 1fr); } }
 .zm-sp-count p { margin: 0; font-size: 14.5px; opacity: .8; }
 .zm-sp-count b { font-variant-numeric: tabular-nums; }
 .zm-sp-count[hidden] { display: none; }
@@ -58989,6 +59024,9 @@ html.zm-theme-dark .zm-mon-xtip { background: #1c2128; }
 .zm-mon-ntx { stroke: var(--zm-c-mem); fill: var(--zm-c-mem); }
 .zm-mon-nleg { display: flex; justify-content: space-between; gap: 6px 14px; flex-wrap: wrap; font-size: 13px; margin: 0 0 14px; }
 .zm-mon-nleg i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+.zm-mon-nchart { overflow: hidden; }
+.zm-mon-nchart .zm-mon-narea { stroke: none; }
+.zm-mon-nchart .zm-mon-nline { fill: none; }
 .zm-mon-nleg i.zm-mon-nrx { background: var(--zm-acc2); } .zm-mon-nleg i.zm-mon-ntx { background: var(--zm-c-mem); }
 .zm-mon-nleg small { opacity: .6; margin-left: 6px; }
 .zm-mon-netsel { font-size: 12.5px; padding: 3px 8px; height: auto; max-width: 60%; }
@@ -60642,6 +60680,7 @@ return view.extend({
 			var why = !urD.tools ? 'на роутере нет tar или gzip' : urD.nosym ? 'веб-сервер uhttpd не открывает файлы по ссылкам (no_symlinks)' : '';
 			var dis = tmp || urBusy || (!on && !!why);
 			var sub = urBusy ? 'Переключаем…'
+				: tmp && urD.pc ? 'Панель открыта с компьютера программой ZapretManager_PC: на роутере только её основа в оперативной памяти, страницы — на компьютере. После перезагрузки роутера просто запустите программу снова'
 				: tmp ? 'Панель поставлена в память командой «ram» и исчезнет после перезагрузки роутера. Zapret, Steer и остальное продолжат работать'
 				: on ? 'На флеше — архив ' + urKb(urD.arc_kb) + ', страницы и модули работают из памяти (' + urKb(urD.ram_kb) + ') и распаковываются сами при загрузке роутера'
 				: why ? 'Недоступно: ' + why
@@ -60665,7 +60704,7 @@ return view.extend({
 				'keydown': function(ev) { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); toggle(); } } }, [
 				urBusy ? E('span', { 'class': 'zm-find-spin', 'aria-hidden': 'true' }) : E('div', { 'class': 'zm-switch' + (on || tmp ? ' zm-switch-on' : '') }, [ E('span') ]),
 				E('div', { 'class': 'zm-pg-main' }, [
-					E('div', { 'class': 'zm-pg-line' }, [ E('b', {}, 'Панель в оперативной памяти'), on ? watchBadge('zm-ok', '−' + urKb(Math.max(0, urD.ram_kb - urD.arc_kb)) + ' на флеше') : tmp ? watchBadge('zm-warn', 'до перезагрузки') : E([]) ]),
+					E('div', { 'class': 'zm-pg-line' }, [ E('b', {}, 'Панель в оперативной памяти'), on ? watchBadge('zm-ok', '−' + urKb(Math.max(0, urD.ram_kb - urD.arc_kb)) + ' на флеше') : tmp ? watchBadge('zm-warn', urD.pc ? 'с компьютера' : 'до перезагрузки') : E([]) ]),
 					E('span', { 'class': 'zm-hint' }, sub)
 				])
 			]));
@@ -61012,8 +61051,16 @@ var SP_KVN_ICO = {
 	route: '<circle cx="5" cy="18" r="2"/><circle cx="19" cy="6" r="2"/><path d="M7 18h7a4 4 0 0 0 0-8h-4a4 4 0 0 1 0-8h7"/>',
 	gift: '<rect x="3" y="9" width="18" height="12" rx="2"/><path d="M12 9v12"/><path d="M3 13h18"/><path d="M12 9c-1.5-3-4-4.5-5.5-3.2S7.5 9 12 9z"/><path d="M12 9c1.5-3 4-4.5 5.5-3.2S16.5 9 12 9z"/>',
 	router: '<rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 16.5h.01"/><path d="M11 16.5h.01"/><path d="M17 13V8"/><path d="M14 6.5a4 4 0 0 1 6 0"/>',
-	heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>'
+	heart: '<path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/>',
+	web: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18"/><path d="M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"/>'
 };
+// Значок Telegram — залитый самолётик
+var SP_TG_ICO = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.7 3.6 2.9 10.5c-1.2.5-1.2 1.2-.2 1.5l4.6 1.4 1.7 5.4c.2.6.1.8.7.8.5 0 .7-.2 1-.5l2.3-2.2 4.7 3.5c.9.5 1.5.2 1.7-.8l3.1-14.6c.3-1.3-.5-1.9-1.8-1.4zM9.4 13.5l9.1-5.7c.4-.3.8-.1.5.2l-7.6 6.9-.3 3.3z"/></svg>';
+function spGo(href, cls, ico, label, sub) {
+	var i = E('span', { 'class': 'zm-kv-go-i' });
+	i.innerHTML = ico;
+	return E('a', { 'class': 'zm-kv-go ' + cls, 'href': href, 'target': '_blank', 'rel': 'noreferrer' }, [ i, E('span', {}, label), sub ? E('small', {}, sub) : E([]) ]);
+}
 var SP_KVN_F = [
 	[ 'shield', 'Работает даже при жёсткой фильтрации' ],
 	[ 'list', 'Работает в условиях белых списков' ],
@@ -61083,8 +61130,11 @@ return view.extend({
 						E('span', { 'class': 'zm-kv-free' }, [ spIco('gift', 'zm-kv-free-i', 15), '3 дня бесплатно' ])
 					]),
 					E('p', { 'class': 'zm-kv-lead' }, 'VPN на случай, когда одного Zapret мало. Работает даже при белых списках операторов и подключается к роутеру прямо из Zapret Manager.')
-				]),
-				E('div', { 'class': 'zm-sp-btns zm-kv-btns' }, [ spLink(SP_KVN_BOT, 'Открыть бота', 'cbi-button-action'), spLink(SP_KVN_SITE, 'Открыть сайт') ])
+				])
+			]),
+			E('div', { 'class': 'zm-kv-cta' }, [
+				spGo(SP_KVN_BOT, 'zm-kv-tg', SP_TG_ICO, 'Подключить в Telegram-боте'),
+				spGo(SP_KVN_SITE, 'zm-kv-web', '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + SP_KVN_ICO.web + '</svg>', 'Сайт', 'stresskvn.lol')
 			]),
 			E('div', { 'class': 'zm-kv-grid' }, SP_KVN_F.map(function(f) {
 				return E('div', { 'class': 'zm-kv-it' }, [ spIco(f[0], 'zm-kv-i'), E('span', {}, f[1]) ]);
@@ -62262,28 +62312,91 @@ return view.extend({
 			try { localStorage.setItem(NET_KEY, netPick); } catch (e) {}
 			renderSnap();
 		} });
-		var pRx = svg('path', { 'class': 'zm-mon-nrx' }), pTx = svg('path', { 'class': 'zm-mon-ntx' });
-		var nChart = svg('svg', { viewBox: '0 0 ' + NW + ' ' + NH, preserveAspectRatio: 'none', 'class': 'zm-mon-nchart', role: 'img', 'aria-label': 'Загрузка и отдача за 2 минуты' }, [ pRx, pTx ]);
+		var pRx = svg('path', { 'class': 'zm-mon-nrx zm-mon-narea' }), pTx = svg('path', { 'class': 'zm-mon-ntx zm-mon-narea' });
+		var lRx = svg('path', { 'class': 'zm-mon-nrx zm-mon-nline' }), lTx = svg('path', { 'class': 'zm-mon-ntx zm-mon-nline' });
+		var nChart = svg('svg', { viewBox: '0 0 ' + NW + ' ' + NH, preserveAspectRatio: 'none', 'class': 'zm-mon-nchart', role: 'img', 'aria-label': 'Загрузка и отдача за 2 минуты' }, [ pRx, pTx, lRx, lTx ]);
 		var nLeg = E('div', { 'class': 'zm-mon-nleg' });
 		var netCard = E('div', { 'class': 'zm-card' }, [ E('div', { 'class': 'zm-mon-cardhead' }, [ E('h3', { 'style': 'margin:0' }, 'Сеть сейчас'), netSel ]), nChart, nLeg, netBox ]);
 		function netCur(s) {
 			var l = (s && s.net && s.net.ifs) || [];
 			return l.filter(function(x) { return x.n === netPick; })[0] || l.filter(function(x) { return x.i; })[0] || l.filter(function(x) { return x.n === 'wan'; })[0] || l[0] || null;
 		}
+		// Выбранная сеть опрашивается отдельно раз в секунду, а график плавно едет и цифры плавно меняются — как трафик на живом фоне
+		var netFast = { dev: '', prev: null, fail: 0, busy: false, timer: null, base: null, est: 0, raf: 0, last: 0, mx: 1, rx: 0, tx: 0, cur: null, legRx: null, legTx: null, pkRx: null, pkTx: null };
 		function netTrack(s, p) {
 			var l = (s.net && s.net.ifs) || [], pl = (p && p.net && p.net.ifs) || [], dt = p ? s.t - p.t : 0;
 			l.forEach(function(x) {
+				if (netFast.dev && x.d === netFast.dev && netFast.fail < 3) return;
 				var o = pl.filter(function(y) { return y.d === x.d; })[0], h = netHist[x.d] || (netHist[x.d] = []);
 				if (!o || dt <= 0 || dt > 30) return;
 				h.push({ t: s.t, rx: Math.max(0, (x.c[0] - o.c[0]) / dt), tx: Math.max(0, (x.c[1] - o.c[1]) / dt) });
 				while (h.length && s.t - h[0].t > NET_WIN + 4) h.shift();
 			});
 		}
-		function netArea(h, k, mx, tl) {
-			if (h.length < 2) return '';
-			var pts = h.map(function(q) { return [ NW * (1 - (tl - q.t) / NET_WIN), NH - 2 - (NH - 6) * q[k] / mx ]; });
-			return 'M' + pts.map(function(q) { return q[0].toFixed(1) + ' ' + q[1].toFixed(1); }).join(' L') +
-				' L' + pts[pts.length - 1][0].toFixed(1) + ' ' + NH + ' L' + pts[0][0].toFixed(1) + ' ' + NH + ' Z';
+		// Линия графика и заливка под ней — отдельно: у заливки нет обводки, поэтому её края не рисуют «падение» к нулю
+		function netPaths(h, k, mx, tl, a, l) {
+			if (h.length < 2) { a.setAttribute('d', ''); l.setAttribute('d', ''); return; }
+			var pts = h.map(function(q) { return [ NW * (1 - (tl - q.t) / NET_WIN), NH - 2 - (NH - 6) * Math.min(q[k], mx) / mx ]; });
+			var line = 'M' + pts.map(function(q) { return q[0].toFixed(1) + ' ' + q[1].toFixed(1); }).join(' L');
+			l.setAttribute('d', line);
+			a.setAttribute('d', line + ' L' + pts[pts.length - 1][0].toFixed(1) + ' ' + (NH + 2) + ' L' + pts[0][0].toFixed(1) + ' ' + (NH + 2) + ' Z');
+		}
+		function netFastOn() { return alive() && !paused && mode === 'over' && !document.hidden && !!netFast.dev && netFast.fail < 3; }
+		function netPoll() {
+			clearTimeout(netFast.timer);
+			if (!alive()) return;
+			netFast.timer = setTimeout(netPoll, 1000);
+			if (!netFastOn() || netFast.busy || !zm.netNow) return;
+			var dev = netFast.dev;
+			netFast.busy = true;
+			zm.netNow(dev).then(function(d) {
+				netFast.busy = false;
+				if (!d || d.dev !== dev || typeof d.rx !== 'number' || typeof d.t !== 'number') { netFast.fail++; return; }
+				netFast.fail = 0;
+				var p = netFast.prev, h = netHist[dev] || (netHist[dev] = []);
+				netFast.prev = d;
+				var est = d.t + 0.15;
+				if (!netFast.base || Math.abs(netEst() - est) > 1.5) netFast.base = { rt: est, pt: performance.now() };
+				if (!p || p.dev !== d.dev || d.t <= p.t || d.t - p.t > 10 || d.rx < p.rx || d.tx < p.tx) return;
+				h.push({ t: d.t, rx: (d.rx - p.rx) / (d.t - p.t), tx: (d.tx - p.tx) / (d.t - p.t) });
+				while (h.length && d.t - h[0].t > NET_WIN + 4) h.shift();
+				netAnim();
+			}, function() { netFast.busy = false; netFast.fail++; });
+		}
+		function netEst() { return netFast.base ? netFast.base.rt + (performance.now() - netFast.base.pt) / 1000 : 0; }
+		function netDraw(dt) {
+			var cur = netFast.cur, h = cur ? (netHist[cur.d] || []) : [];
+			if (!h.length) { [ pRx, pTx, lRx, lTx ].forEach(function(p) { p.setAttribute('d', ''); }); return; }
+			var last = h[h.length - 1], mx = 1, pk = { rx: 0, tx: 0 };
+			h.forEach(function(q) { mx = Math.max(mx, q.rx, q.tx); pk.rx = Math.max(pk.rx, q.rx); pk.tx = Math.max(pk.tx, q.tx); });
+			var smooth = dt > 0, kf = smooth ? Math.min(1, dt * 4) : 1;
+			netFast.mx += (mx * 1.1 - netFast.mx) * (smooth ? Math.min(1, dt * 3) : 1);
+			netFast.rx += (last.rx - netFast.rx) * kf;
+			netFast.tx += (last.tx - netFast.tx) * kf;
+			var tl = last.t;
+			if (smooth && netFast.base) tl = Math.max(last.t - 1, Math.min(netEst() - 1, last.t + 1));
+			var hh = h.slice();
+			if (hh[hh.length - 1].t < tl + NET_WIN / NW * 4) hh.push({ t: tl + NET_WIN / NW * 4, rx: last.rx, tx: last.tx });
+			netPaths(hh, 'rx', Math.max(1, netFast.mx), tl, pRx, lRx);
+			netPaths(hh, 'tx', Math.max(1, netFast.mx), tl, pTx, lTx);
+			if (netFast.legRx) {
+				netFast.legRx.textContent = rate(netFast.rx).join(' ');
+				netFast.legTx.textContent = rate(netFast.tx).join(' ');
+				netFast.pkRx.textContent = h.length > 2 ? 'пик ' + rate(pk.rx).join(' ') : '';
+				netFast.pkTx.textContent = h.length > 2 ? 'пик ' + rate(pk.tx).join(' ') : '';
+			}
+		}
+		function netAnim() {
+			if (netFast.raf || !netFastOn() || !window.requestAnimationFrame) { if (!netFast.raf) netDraw(0); return; }
+			netFast.last = 0;
+			netFast.raf = requestAnimationFrame(function step(ts) {
+				netFast.raf = 0;
+				if (!netFastOn()) { netDraw(0); return; }
+				var dt = netFast.last ? Math.min(0.25, (ts - netFast.last) / 1000) : 0;
+				netFast.last = ts;
+				netDraw(dt || 0.016);
+				netFast.raf = requestAnimationFrame(step);
+			});
 		}
 		function renderNet(s) {
 			var l = (s.net && s.net.ifs) || [], cur = netCur(s);
@@ -62294,21 +62407,20 @@ return view.extend({
 			}
 			netSel.style.display = l.length > 1 ? '' : 'none';
 			if (cur) { netSel.value = cur.n; netSel.title = cur.n + ' (' + cur.d + ')'; }
-			var h = cur ? (netHist[cur.d] || []) : [], last = h[h.length - 1], mx = 1;
-			h.forEach(function(q) { mx = Math.max(mx, q.rx, q.tx); });
-			var tl = last ? last.t : 0;
-			pRx.setAttribute('d', netArea(h, 'rx', mx * 1.1, tl));
-			pTx.setAttribute('d', netArea(h, 'tx', mx * 1.1, tl));
 			nChart.style.display = cur ? '' : 'none';
-			nLeg.innerHTML = '';
-			if (!cur) { nLeg.appendChild(E('span', { 'class': 'zm-mon-sub' }, 'Роутер не сообщил сетевые интерфейсы')); return; }
-			function side(cls, arrow, k) {
-				var v = last ? rate(last[k]) : [ '…', '' ], pk = 0;
-				h.forEach(function(q) { pk = Math.max(pk, q[k]); });
-				return E('span', {}, [ E('i', { 'class': cls }), arrow + ' ', E('b', {}, v[0] + ' ' + v[1]), h.length > 2 ? E('small', {}, 'пик ' + rate(pk).join(' ')) : '' ]);
+			var was = netFast.cur ? netFast.cur.d : '';
+			netFast.cur = cur;
+			if (!cur) { netFast.legRx = null; nLeg.innerHTML = ''; nLeg.appendChild(E('span', { 'class': 'zm-mon-sub' }, 'Роутер не сообщил сетевые интерфейсы')); return; }
+			if (cur.d !== netFast.dev) { netFast.dev = cur.d; netFast.prev = null; netFast.fail = 0; }
+			if (!netFast.legRx || cur.d !== was) {
+				var h = netHist[cur.d] || [], lst = h[h.length - 1];
+				netFast.rx = lst ? lst.rx : 0; netFast.tx = lst ? lst.tx : 0; netFast.mx = 1;
+				netFast.legRx = E('b', {}, '…'); netFast.legTx = E('b', {}, '…'); netFast.pkRx = E('small', {}); netFast.pkTx = E('small', {});
+				nLeg.innerHTML = '';
+				nLeg.appendChild(E('span', {}, [ E('i', { 'class': 'zm-mon-nrx' }), '↓ ', netFast.legRx, netFast.pkRx ]));
+				nLeg.appendChild(E('span', {}, [ E('i', { 'class': 'zm-mon-ntx' }), '↑ ', netFast.legTx, netFast.pkTx ]));
 			}
-			nLeg.appendChild(side('zm-mon-nrx', '↓', 'rx'));
-			nLeg.appendChild(side('zm-mon-ntx', '↑', 'tx'));
+			if (netFastOn()) netAnim(); else netDraw(0);
 		}
 		function fanIcon() {
 			return svg('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': 2, 'stroke-linecap': 'round', 'aria-hidden': 'true' }, [
@@ -62733,7 +62845,7 @@ return view.extend({
 				title: 'Как работает монитор',
 				lead: 'Монитор работает, только пока эта страница открыта. Закрыли её — роутер ничего не собирает и не тратит на это ресурсы.',
 				items: [
-					[ 'Раз в 2 секунды', 'роутер отдаёт счётчики, а проценты и графики считает браузер', '↻' ],
+					[ 'Раз в 2 секунды, сеть — каждую секунду', 'роутер отдаёт счётчики, а проценты и графики считает браузер', '↻' ],
 					[ 'График за 5 минут', 'хранится в браузере: после перезагрузки страницы он начнётся заново', '∿' ],
 					[ 'Вкладку можно не держать на экране', 'график продолжит писаться, даже если переключиться на другую', '⇄' ],
 					[ 'Пауза', 'кнопка «Пауза» или вкладка «htop» останавливают опрос', '‖' ],
@@ -62750,7 +62862,8 @@ return view.extend({
 			clock.onmessage = function() { tick(); };
 		} catch (e) { clock = null; }
 		function stop() {
-			clearTimeout(timer); clearTimeout(ptimer);
+			clearTimeout(timer); clearTimeout(ptimer); clearTimeout(netFast.timer);
+			if (netFast.raf && window.cancelAnimationFrame) { cancelAnimationFrame(netFast.raf); netFast.raf = 0; }
 			if (clock) { try { clock.terminate(); } catch (e) {} clock = null; }
 			if (procsView) procsView.close();
 			htopStop();
@@ -62777,6 +62890,7 @@ return view.extend({
 		renderSnap(); renderTop(); renderMem(); renderLive();
 		setTimeout(tick, 1000);
 		setTimeout(ptick, 1500);
+		setTimeout(netPoll, 1200);
 		setTimeout(function() { if (alive()) zm.warnOnce('info_monitor', monInfo); }, 600);
 		return root;
 	}
@@ -72929,6 +73043,11 @@ html:not([data-zm-motion="0"]) .zmw-nav-item.zmw-nav-folded { clip-path: inset(0
 	background: var(--grad); color: #fff; border-color: transparent;
 	box-shadow: 0 6px 16px -6px rgba(99,102,241,.8);
 }
+.zmw-nav-item[data-route="thanks"] .zmw-nav-ico .zmw-i { transition: transform .25s cubic-bezier(.34,1.56,.64,1); }
+.zmw-nav-item[data-route="thanks"] .zmw-nav-ico .zmw-i path { fill: #ef4444; stroke: #dc2626; }
+.zmw-nav-item[data-route="thanks"].zmw-active .zmw-nav-ico .zmw-i path { stroke: currentColor; }
+.zmw-nav-item[data-route="thanks"]:hover .zmw-nav-ico .zmw-i { transform: scale(1.14); }
+@media (prefers-reduced-motion: reduce) { .zmw-nav-item[data-route="thanks"] .zmw-nav-ico .zmw-i { transition: none; transform: none; } }
 .zmw-nav-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: none; }
 .zmw-nav-dot.zmw-on, .zmw-nav-dot.zmw-stop, .zmw-nav-dot.zmw-part, .zmw-nav-dot.zmw-idle { display: block; }
 .zmw-nav-dot.zmw-idle { background: #9aa3b2; box-shadow: 0 0 0 3px rgba(154,163,178,.18); }
@@ -75466,7 +75585,7 @@ if [ -x "$b" ]; then
 	cat "$t.log" 2>/dev/null; rm -f "$t.log"
 	[ "$r" = 0 ] || { rm -f "$t"; [ -n "$e" ] && echo "$e"; echo "Не удалось скачать $u"; exit 1; }
 elif ! get "$u"; then rm -f "$t"; echo "Не удалось скачать $u"; exit 1; fi
-sh "$t"; r=$?; rm -f "$t"; exit $r
+sh "$t" "$@"; r=$?; rm -f "$t"; exit $r
 ZM_GET_EOF
 	chmod +x "/usr/bin/${_zm_c%% *}"
 done
@@ -75475,6 +75594,16 @@ if [ "$_zmi_uim" = light ]; then
 	else _zmi_warn "Архив страниц панели не обновился — после перезагрузки откройте «Система → Компоненты панели» и включите режим заново"; fi
 elif [ "$_zmi_uim" = tmp ]; then
 	/opt/zapret-manager-luci/backend.sh zm_uiram tmp_done >/dev/null 2>&1 || true
+fi
+if [ "$ZM_INST_MODE" = pc ]; then
+	# Страницы открывает программа на компьютере — на роутере оставляем только основу панели
+	_zmi_say "Страницы панели будут открываться с компьютера — убираем их из памяти роутера"
+	for _zm_p in /www/luci-static/resources/view/zapret-manager /www/luci-static/resources/zapret-manager /www/luci-static/resources/view/bytetube /www/luci-static/resources/bytetube; do
+		rm -rf "$_zmi_ui$_zm_p" && mkdir -p "$_zmi_ui$_zm_p"
+	done
+	rm -f "$_zmi_ui/www/zm/app.js" "$_zmi_ui/www/zm/app.css" /www/zm-webui.html /usr/share/luci/menu.d/luci-app-zapret-manager.json /tmp/luci-indexcache* /tmp/luci-modulecache/* 2>/dev/null
+	: > /opt/zapret-manager-luci/state/ui.pc
+	_zmi_ok "На роутере — только основа панели, в оперативной памяти: $(du -sk "$_zmi_ui" 2>/dev/null | awk '{ print $1 }') КБ"
 fi
 ( /opt/zapret-manager-luci/backend.sh zm_stats_hit ) >/dev/null 2>&1 </dev/null &
 _zm_login_restart() {
@@ -75525,6 +75654,11 @@ fi
 if [ "$ZMW_OK" = 1 ]; then _zmi_ok "Web UI включён на порту ${ZMW_PORT:-7788}"
 elif [ "$ZMW_OK" = 2 ]; then _zmi_ok "Web UI выключен — включить его и сменить порт можно в LuCI: Zapret Manager → Система → Web UI"
 else _zmi_warn "Web UI не включён: на роутере нет веб-сервера uhttpd или не установился uhttpd-mod-ubus"; fi
+if [ "$ZM_INST_MODE" = pc ]; then
+	echo -e "\n${GREEN}Готово: основа Zapret Manager $ZM_NEW_VER в памяти роутера${NC}"
+	echo -e "${CYAN}Страницы панели открывает программа на компьютере. После перезагрузки роутера просто запустите её снова.${NC}\n"
+	exit 0
+fi
 echo -e "\n${GREEN}Готово: Zapret Manager для LuCI и Web $ZM_NEW_VER установлен${NC}\n"
 if [ "$_zmi_uim" = tmp ]; then
 	echo -e "${YELLOW}Панель стоит в оперативной памяти: после перезагрузки роутера её не будет.${NC}"
