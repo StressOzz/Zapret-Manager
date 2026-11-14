@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.074
+# Version: 5.078
 ZM_VERSION_EOF
 set -e
 
@@ -1387,6 +1387,7 @@ do_steer_sub_remove() { _zmL steer2 && do_steer_sub_remove "$@"; }
 steer_sub_action() { _zmL steer2 && steer_sub_action "$@"; }
 _st_sub_auto_set() { _zmL steer2 && _st_sub_auto_set "$@"; }
 do_steer_engine() { _zmL steer2 && do_steer_engine "$@"; }
+do_steer_engine_ver() { _zmL steer2 && do_steer_engine_ver "$@"; }
 steer_sub_status() { _zmL steer2 && steer_sub_status "$@"; }
 steer_sub_tcp() { _zmL steer2 && steer_sub_tcp "$@"; }
 _st_bind() { _zmL steer2 && _st_bind "$@"; }
@@ -1405,6 +1406,7 @@ _st_secs_vpn_watch() { _zmL steer2 && _st_secs_vpn_watch "$@"; }
 _st_ping_cron() { _zmL steer2 && _st_ping_cron "$@"; }
 steer_ping_tick() { _zmL steer2 && steer_ping_tick "$@"; }
 steer_sub_probe() { _zmL steer2 && steer_sub_probe "$@"; }
+_st_report() { _zmL steer2 && _st_report "$@"; }
 steer_sec_action() { _zmL steer2 && steer_sec_action "$@"; }
 _awg_proto_ok() { _zmL awg && _awg_proto_ok "$@"; }
 _awg_down() { _zmL awg && _awg_down "$@"; }
@@ -1482,6 +1484,8 @@ _fk_rs_watch() { _zmL forkozz && _fk_rs_watch "$@"; }
 _fk_fakeip_patch() { _zmL forkozz && _fk_fakeip_patch "$@"; }
 _fk_ru_watch() { _zmL forkozz && _fk_ru_watch "$@"; }
 _fk_desync_patch() { _zmL forkozz && _fk_desync_patch "$@"; }
+_fk_ksgap_patch() { _zmL forkozz && _fk_ksgap_patch "$@"; }
+_fk_ksgap_watch() { _zmL forkozz && _fk_ksgap_watch "$@"; }
 _fk_serial_patch() { _zmL forkozz && _fk_serial_patch "$@"; }
 _fk_mlkem_patch() { _zmL forkozz && _fk_mlkem_patch "$@"; }
 _fk_log_mark() { _zmL forkozz && _fk_log_mark "$@"; }
@@ -6058,6 +6062,9 @@ STL_STATE="${STL_STATE:-/var/lib/steer}"
 STL_PLUG="${STL_PLUG:-/usr/lib/steer/plugins}"
 STL_SEED_SPEC='{"version":2,"outputs":{"direct":{"kind":"direct"}}}'
 STL_MIN="2.0.0"
+# Ядро steer 2.0.5 — версия до перехода на плагины. Выбрана при установке — закреплена: обновлений не ищем
+STL_LEGACY="2.0.5"
+STL_PIN="$ST_DIR/engine.pin"
 STL_MODS="vless xsteer obfs tgws hysteria2 proxy"
 STL_REL_URLS="${STL_REL_URLS:-https://raw.githubusercontent.com/splify2/releases/main/version.json https://cdn.jsdelivr.net/gh/splify2/releases@main/version.json https://splify2.github.io/releases/version.json}"
 STL_PKG_URLS="${STL_PKG_URLS:-https://github.com/splify2/releases/releases/download/steer-v@V@ https://github.com/splify2/steer/releases/download/v@V@ https://gitlab.com/xyzmean/steer/-/raw/dist}"
@@ -6118,7 +6125,16 @@ _stl_rel() {
 	return 1
 }
 
+_stl_pin() { local v; v="$(head -n1 "$STL_PIN" 2>/dev/null)"; _stl_ver_ok "$v" && echo "$v"; }
+
+# Версия, до которой панель обновляет ядро: закреплённая или последняя
 stl_latest() {
+	local p
+	p="$(_stl_pin)" && { echo "$p"; return 0; }
+	stl_latest_real
+}
+
+stl_latest_real() {
 	local v="" f u
 	if [ -z "$ZM_VER_FORCE" ] && [ -s "$STL_CACHE" ] && [ -z "$(find "$STL_CACHE" -mmin +360 2>/dev/null)" ]; then cat "$STL_CACHE"; return 0; fi
 	f="$(_stl_rel)" && v="$(jsonfilter -i "$f" -e '@.products.steer.stable' 2>/dev/null)"
@@ -6407,7 +6423,7 @@ _stl_insec_arg() { _stl_insec "$1" && echo --insecure; }
 
 stl_probe() {
 	local j
-	j="$(_stl_t "${4:-40}" steer "$2-probe" "$1" --node "$3" --timeout 8 $(_stl_insec_arg "$1") 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+	j="$([ -f "$ST_NOPQ_ON" ] && export STEER_NOPQ=1; _stl_t "${4:-40}" steer "$2-probe" "$1" --node "$3" --timeout 8 $(_stl_insec_arg "$1") 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
 	case "$j" in '{'*'}') printf '%s' "$j" ;; *) return 1 ;; esac
 }
 
@@ -7216,6 +7232,7 @@ do_steer_apply() {
 	_st_installed || { echo "ОШИБКА: Steer ещё не установлен"; return 1; }
 	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: настройку ядра steer сейчас ведёт не Zapret Manager"; return 1; }
 	rm -f "$ST_OFF"
+	_st_nopq_sync
 	_st_ifs_up
 	_st_apply || return 1
 	_st_lists_cron_sync >/dev/null 2>&1
@@ -7278,7 +7295,10 @@ _st_vpn_probe() {
 		ip="$(echo "$trace" | sed -n 's/^ip=//p')"; loc="$(echo "$trace" | sed -n 's/^loc=//p')"
 		{ [ -n "$ip" ] || [ "$trace" = alive=1 ] || [ "${trace#probe=}" != "$trace" ]; } && r=ok
 		if [ "$r" = ok ] && stl_running && stl_state vpn >/dev/null 2>&1 && [ -n "$STL_KIND" ] && [ "$STL_UP" != true ]; then
-			r=stuck; ST_VPN_STUCK=1
+			# Ответил не тот путь: устройство другого протокола подписки или запасной узел пула. Ядро же
+			# говорит, что узел выхода упал, — значит, VPN не работает, и сторожу пора переходить на рабочий
+			if [ -n "$STL_NWHY" ] || [ "$STL_PSTATE" = failed ] || [ "$STL_PSTATE" = no_such_node ]; then r=fail
+			else r=stuck; ST_VPN_STUCK=1; fi
 		fi
 	fi
 	mkdir -p "$ZM_STATE_DIR"
@@ -7453,6 +7473,82 @@ ST_NODE_POL="$ST_DIR/node.pol"
 ST_SUB_HOME="$ST_DIR/sub.node.home"
 _st_node_pol() { case "$(cat "$ST_NODE_POL" 2>/dev/null)" in switch) echo switch ;; hold) echo hold ;; *) echo back ;; esac; }
 _st_fail_text() { [ "$(_st_onfail)" = drop ] && echo "выбранные сервисы остановлены" || echo "выбранные сервисы идут напрямую"; }
+# Короткий ClientHello (без постквантового обмена) для всего ядра: переменная STEER_NOPQ=1 демона steerd.
+# Режим: auto (по умолчанию — включается, когда проверка узла показала, что он пускает только с коротким), on, off.
+# Файл запуска steer читает флаг ST_NOPQ_ON строкой с меткой zm-nopq; после обновления steer строка ставится снова
+ST_NOPQ_MODE="$ST_DIR/nopq.mode"
+ST_NOPQ_AUTO="$ST_DIR/nopq.auto"
+ST_NOPQ_ON="$ST_DIR/nopq.on"
+_st_nopq_mode() { case "$(cat "$ST_NOPQ_MODE" 2>/dev/null)" in on) echo on ;; off) echo off ;; *) echo auto ;; esac; }
+_st_nopq_want() { case "$(_st_nopq_mode)" in on) return 0 ;; off) return 1 ;; esac; [ -s "$ST_NOPQ_AUTO" ]; }
+_st_nopq_pid() {
+	local p
+	p="$(ubus call service list '{"name":"steer"}' 2>/dev/null | jsonfilter -e '@.steer.instances.*.pid' 2>/dev/null | head -n1)"
+	[ -n "$p" ] || p="$(pidof steerd 2>/dev/null | awk '{ print $1 }')"
+	case "$p" in ''|*[!0-9]*) return 1 ;; esac
+	[ -r "/proc/$p/environ" ] && echo "$p"
+}
+_st_nopq_have() {
+	local p
+	# Без строки панели в файле запуска STEER_NOPQ у ядра взяться неоткуда — ubus и /proc не спрашиваем
+	grep -q 'zm-nopq' "$STL_INIT" 2>/dev/null || return 1
+	p="$(_st_nopq_pid)" && tr '\000' '\n' < "/proc/$p/environ" 2>/dev/null | grep -qx 'STEER_NOPQ=1'
+}
+_st_nopq_patch() {
+	local f="$STL_INIT" t
+	[ -f "$f" ] || return 1
+	grep -q 'zm-nopq' "$f" && return 0
+	[ "$(grep -c 'procd_set_param command' "$f")" = 1 ] || return 1
+	grep -q 'procd_set_param env' "$f" && return 1
+	t="$f.zmnq.$$"
+	awk -v L="	[ -f '$ST_NOPQ_ON' ] && procd_set_param env STEER_NOPQ=1 # zm-nopq" '{ print } !d && /procd_set_param command/ { print L; d = 1 }' "$f" > "$t" && [ -s "$t" ] && cat "$t" > "$f"
+	rm -f "$t"
+	grep -q 'zm-nopq' "$f"
+}
+_st_nopq_sync() {
+	local want=0
+	_st_nopq_want && want=1
+	if [ "$want" = 1 ]; then
+		if ! _st_nopq_patch; then
+			rm -f "$ST_NOPQ_ON"
+			[ -n "$1" ] || _rb_warn "Короткий ClientHello включить не удалось: файл запуска ядра steer не такой, как ожидали"
+			return 1
+		fi
+		mkdir -p "$ST_DIR"; : > "$ST_NOPQ_ON"
+	else
+		rm -f "$ST_NOPQ_ON"
+		grep -q 'zm-nopq' "$STL_INIT" 2>/dev/null || return 0
+	fi
+	stl_running && _st_nopq_pid >/dev/null || return 0
+	if [ "$want" = 1 ]; then _st_nopq_have && { rm -f "$ST_DIR/nopq.fail"; return 0; }; else _st_nopq_have || return 0; fi
+	# Перезапуск уже не помог — не перезапускаем ядро на каждом переключении, пробуем снова через час
+	[ -n "$(find "$ST_DIR/nopq.fail" -mmin -60 2>/dev/null)" ] && return 1
+	if [ "$want" = 1 ]; then
+		[ -n "$1" ] || _rb_say "Включаем короткий ClientHello — перезапускаем ядро steer"
+		logger -t zapret-manager "Steer: включаем короткий ClientHello (без постквантового обмена)"
+	else
+		[ -n "$1" ] || _rb_say "Возвращаем обычный ClientHello — перезапускаем ядро steer"
+		logger -t zapret-manager "Steer: возвращаем обычный ClientHello"
+	fi
+	stl_restart >/dev/null 2>&1
+	sleep 1
+	if [ "$want" = 1 ] && ! _st_nopq_have; then
+		: > "$ST_DIR/nopq.fail"
+		[ -n "$1" ] || _rb_warn "Ядро steer перезапустилось без короткого ClientHello — файл запуска steer не принял настройку"
+		logger -t zapret-manager "Steer: короткий ClientHello не включился после перезапуска"
+		return 1
+	fi
+	rm -f "$ST_DIR/nopq.fail"
+	return 0
+}
+do_steer_nopq() {
+	rm -f "$ST_STOP_FLAG"
+	_st_installed || { _rb_say "Сохранено — включится вместе со Steer"; return 0; }
+	_st_nopq_sync || return 1
+	_st_vpn_check 30 >/dev/null 2>&1
+	_rb_say "Готово"
+	return 0
+}
 _st_diag_node() {
 	case "$1" in
 		"выход "*": узел перестал отвечать"*|"выход "*": соединение с узлом "*" не поднято"*|"выход "*": ни один узел подписки не ответил"*|\
@@ -7607,14 +7703,14 @@ steer_action() {
 			w="${mode#?}"; w="${w%%\~*}"; mode="${mode#?$w?}"
 			_st_sec_ok "$w" || { echo '{"error":"нет такой секции — обновите страницу"}'; return 1; }
 			case "$action" in
-				lists|devs_set|list_set|list_get|list_reset|svc_find|svc_dom|sub_status|sub_probe|sub_tcp|lat_mode|node_pol|sub_home|sub_links_get|sub_set|sub_links|sub_update|sub_remove|sub_node|sub_group|sub_filter|sub_hide|sub_noauto|sub_pick|sub_ping|sub_insecure) ;;
+				lists|devs_set|list_set|list_get|list_reset|svc_find|svc_dom|sub_status|sub_probe|sub_tcp|lat_mode|node_pol|sub_home|sub_links_get|sub_set|sub_links|sub_update|sub_remove|sub_node|sub_group|sub_filter|sub_hide|sub_noauto|sub_pick|sub_ping|sub_insecure|sub_happ) ;;
 				*) echo '{"error":"это действие общее для всех секций"}'; return 1 ;;
 			esac
 			( _st_bind "$w"; steer_action "$action" "$mode" ); return $? ;;
 	esac
 	case "$action" in diag|wfix_tick|explain|lists_bg|lists_cron) ;; *) rm -f "$ST_VPN_PROBE" ;; esac
 	case "$action" in
-		install|apply|start|stop|remove|warp_restart|warp_endpoint|warp_recreate|lists|engine|warp_setup|warp_fix|warp_fixkeys|warp_own|warp_mode|warp_iface|ext_pick|warp_pick|warp_remove|onfail|dnsmode|realip|cttl|torrent|quic|lan_set)
+		install|engine_ver|apply|start|stop|remove|warp_restart|warp_endpoint|warp_recreate|lists|engine|warp_setup|warp_fix|warp_fixkeys|warp_own|warp_mode|warp_iface|ext_pick|warp_pick|warp_remove|onfail|dnsmode|realip|cttl|torrent|quic|lan_set)
 			_st_running && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
 			case "$action" in warp_iface|ext_pick|warp_restart|warp_mode|warp_own) _job_alive awg && { echo '{"error":"на вкладке AmneziaWG идёт операция — дождитесь её окончания"}'; return 1; } ;; esac
 			[ "$action" = remove ] || [ -z "$(_st_blocker)" ] || { echo '{"error":"ядро steer сейчас настраивает не Zapret Manager — панель его не трогает"}'; return 1; }
@@ -7709,7 +7805,13 @@ steer_action() {
 							job_start steer do_steer_warp_pick order "$mode" ;;
 						*) echo '{"error":"неизвестный режим"}'; return 1 ;;
 					esac ;;
-				install)       job_start steer do_steer_install ;;
+				install)
+					case "$mode" in ''|latest|legacy) ;; *) echo '{"error":"неизвестная версия ядра"}'; return 1 ;; esac
+					job_start steer do_steer_install "$mode" ;;
+				engine_ver)
+					case "$mode" in latest|legacy) ;; *) echo '{"error":"неизвестная версия ядра"}'; return 1 ;; esac
+					_st_installed || { echo '{"error":"Steer ещё не установлен"}'; return 1; }
+					job_start steer do_steer_engine_ver "$mode" ;;
 				apply|start)   job_start steer do_steer_apply ;;
 				stop)          job_start steer do_steer_stop ;;
 				remove)        job_start steer do_steer_remove ;;
@@ -7749,6 +7851,25 @@ steer_action() {
 				*) echo '{"error":"неизвестный способ проверки"}'; return 1 ;;
 			esac
 			printf '{"ok":true,"mode":"%s"}\n' "$(_st_lat_mode)" ;;
+		nopq)
+			case "$mode" in
+				auto) rm -f "$ST_NOPQ_MODE" ;;
+				on|off) mkdir -p "$ST_DIR"; echo "$mode" > "$ST_NOPQ_MODE" ;;
+				*) echo '{"error":"неизвестная настройка"}'; return 1 ;;
+			esac
+			[ "$mode" = off ] && rm -f "$ST_NOPQ_AUTO"
+			rm -f "$ST_DIR/nopq.fail"
+			if _st_installed && stl_running && { { _st_nopq_want && ! _st_nopq_have; } || { ! _st_nopq_want && _st_nopq_have; }; }; then
+				job_start steer do_steer_nopq
+			else
+				_st_nopq_want && _st_nopq_patch && { mkdir -p "$ST_DIR"; : > "$ST_NOPQ_ON"; }
+				_st_nopq_want || rm -f "$ST_NOPQ_ON"
+				printf '{"ok":true,"saved":true}\n'
+			fi ;;
+		nopq_auto)
+			[ "$(_st_nopq_mode)" = auto ] || { printf '{"ok":true,"skip":true}\n'; return 0; }
+			mkdir -p "$ST_DIR"; printf '%s\n' "$mode" | head -c 200 > "$ST_NOPQ_AUTO"
+			printf '{"ok":true}\n' ;;
 		node_pol)
 			case "$mode" in
 				back) rm -f "$ST_NODE_POL" ;;
@@ -7766,7 +7887,7 @@ steer_action() {
 			printf '{"links":"%s"}\n' "$(esc_ml "$(grep -iE "$STL_LINK_RE" "$ST_SUB")")"
 			;;
 		sub_ping_tick) steer_ping_tick; _st_secs_ping_tick; printf '{"ok":true}\n' ;;
-		sub_set|sub_links|sub_update|sub_remove|sub_exit|sub_node|sub_group|sub_filter|sub_hide|sub_noauto|sub_pick|sub_ping|sub_insecure|iface_forget)
+		sub_set|sub_links|sub_update|sub_remove|sub_exit|sub_node|sub_group|sub_filter|sub_hide|sub_noauto|sub_pick|sub_ping|sub_insecure|sub_happ|iface_forget)
 			_st_running && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
 			[ -z "$(_st_blocker)" ] || { echo '{"error":"ядро steer сейчас настраивает не Zapret Manager — панель его не трогает"}'; return 1; }
 			steer_sub_action "$action" "$mode"
@@ -8641,6 +8762,7 @@ _fk_service0() {
 	_fk_reality_patch
 	_fk_rsinit_patch
 	_fk_desync_patch
+	_fk_ksgap_patch
 	_fk_fakeip_patch
 	_fk_ghdl_patch
 	_fk_subck_patch
@@ -12938,24 +13060,44 @@ _fk_ping_burst() {
 _fk_cpu_ticks() { awk '{ print $14 + $15 }' "/proc/$1/stat" 2>/dev/null; }
 _fk_net_bytes() { awk -F'[: ]+' 'NR > 2 && $2 != "lo" { s += $3 + $11 } END { printf "%.0f\n", s }' /proc/net/dev 2>/dev/null; }
 _fk_cpu_guard() {
-	local p n c1 c2 b1 b2 busy kb k f="$JOBS_DIR/fk.cpu"
+	local p n c1 c2 b1 b2 d1 d2 busy core kb k hot="" why="" now cnt f="$JOBS_DIR/fk.cpu" h="$ZM_STATE_DIR/fk.cpu.hist"
 	p="$(pidof $FK_SB_PROCS 2>/dev/null | awk '{ print $1 }')"
 	[ -n "$p" ] && [ -r "/proc/$p/stat" ] || { rm -f "$f"; return 0; }
 	n="$(grep -c '^processor' /proc/cpuinfo 2>/dev/null)"; [ "${n:-0}" -ge 1 ] 2>/dev/null || n=1
-	c1="$(_fk_cpu_ticks "$p")"; b1="$(_fk_net_bytes)"
+	# Первые 3 минуты после старта sing-box разбирает списки и законно грузит процессор — не трогаем
+	k="$(awk -v u="$(cut -d' ' -f1 /proc/uptime 2>/dev/null)" '{ printf "%d", u - $22 / 100 }' "/proc/$p/stat" 2>/dev/null)"
+	case "$k" in ''|*[!0-9]*) ;; *) [ "$k" -lt 180 ] && { rm -f "$f"; return 0; } ;; esac
+	c1="$(_fk_cpu_ticks "$p")"; b1="$(_fk_net_bytes)"; d1="$(_fk_dl_pk)"
 	sleep 5
-	c2="$(_fk_cpu_ticks "$p")"; b2="$(_fk_net_bytes)"
+	c2="$(_fk_cpu_ticks "$p")"; b2="$(_fk_net_bytes)"; d2="$(_fk_dl_pk)"
 	case "$c1$c2$b1$b2" in ''|*[!0-9]*) return 0 ;; esac
 	busy=$(( (c2 - c1) * 100 / (500 * n) ))
+	core=$(( (c2 - c1) * 100 / 500 ))
 	kb=$(( (b2 - b1) / 5120 ))
-	if [ "$busy" -lt 70 ] || [ "$kb" -ge 512 ]; then rm -f "$f"; return 0; fi
+	# Завис: почти весь процессор без трафика — или, на многоядерном роутере, одно ядро в упор почти без трафика:
+	# зациклившийся поток sing-box грузит одно ядро, и в общем проценте (25% на 4 ядрах) его прежде не было видно
+	if [ "$busy" -ge 70 ] && [ "$kb" -lt 512 ]; then hot=1
+	elif [ "$n" -gt 1 ] && [ "$core" -ge 90 ] && [ "$kb" -lt 64 ]; then hot=1; fi
+	[ -n "$hot" ] || { rm -f "$f"; return 0; }
 	k=0; [ -f "$f" ] && read -r k < "$f"
 	case "$k" in ''|*[!0-9]*) k=0 ;; esac
 	k=$((k + 1))
-	mkdir -p "$JOBS_DIR"
+	mkdir -p "$JOBS_DIR" "$ZM_STATE_DIR"
 	[ "$k" -lt 2 ] && { echo "$k" > "$f"; return 0; }
 	rm -f "$f"
-	logger -t zapret-manager "$(_fk_name): sing-box грузит процессор на ${busy}% при трафике ${kb} КБ/с — завис, перезапускаем"
+	case "$d1$d2" in *[!0-9]*|'') ;; *) [ $((d2 - d1)) -gt 20 ] && why=", за 5 секунд отброшено $((d2 - d1)) DNS-запросов в петле" ;; esac
+	now="$(date +%s)"
+	{ awk -v t="$now" '$1 + 0 > t - 7200' "$h" 2>/dev/null; echo "$now"; } > "$h.tmp" && mv -f "$h.tmp" "$h"
+	cnt="$(grep -c . "$h" 2>/dev/null)"
+	logger -t zapret-manager "$(_fk_name): sing-box грузит процессор на ${busy}%$([ "$n" -gt 1 ] && echo " (одно ядро — ${core}%)") при трафике ${kb} КБ/с${why} — завис, перезапускаем"
+	if [ "${cnt:-0}" -ge 3 ] && [ -z "$(find "$h.note" -mmin -720 2>/dev/null)" ]; then
+		: > "$h.note"
+		if [ "$(uci -q get netshift.settings.dns_via_outbound)" = 1 ]; then
+			logger -t zapret-manager "$(_fk_name): sing-box зависает снова и снова ($cnt раза за 2 часа). Так бывает с DNS через VPN — попробуйте в настройках DNS Forkozz выключить «через VPN» или оставить один сервер"
+		else
+			logger -t zapret-manager "$(_fk_name): sing-box зависает снова и снова ($cnt раза за 2 часа) — панель каждый раз перезапускает его. Пришлите отчёт Forkozz из «Системной информации»"
+		fi
+	fi
 	_zm_run 180 /etc/init.d/netshift restart >/dev/null 2>&1
 	return 0
 }
@@ -14231,7 +14373,7 @@ _fk_dl_vals() {
 _fk_dl_live() { nft list chain inet fw4 "$FK_DL_CHAIN" >/dev/null 2>&1; }
 
 _fk_dl_load() {
-	local t="$JOBS_DIR/fk-dnsloop.nft"
+	local t="$JOBS_DIR/fk-dnsloop.nft.$$"
 	mkdir -p "$JOBS_DIR"
 	{
 		echo "add chain inet fw4 $FK_DL_CHAIN { type filter hook output priority -160; policy accept; }"
@@ -14284,12 +14426,14 @@ _fk_dnsloop_patch() {
 		rm -f "$tmp"
 	fi
 	if command -v nft >/dev/null 2>&1 && command -v fw4 >/dev/null 2>&1; then
-		tmp="$JOBS_DIR/fk-dnsloop.new"
+		# Свои временные файлы у каждого вызова: сторож и применение настроек зовут это одновременно,
+		# и общий файл один забирал у другого («mv: can't rename … fk-dnsloop.new»)
+		tmp="$JOBS_DIR/fk-dnsloop.new.$$"
 		mkdir -p "$JOBS_DIR" "${FK_DL_NFT%/*}"
 		{ echo "# Zapret Manager: Forkozz — sing-box не шлёт DNS-запросы сам себе (защита от петли)"; _fk_dl_vals; } > "$tmp" 2>/dev/null
-		t="$JOBS_DIR/fk-dnsloop.chk"
+		t="$JOBS_DIR/fk-dnsloop.chk.$$"
 		if grep -q '^chain ' "$tmp" && { echo "table inet zm_dlchk {"; cat "$tmp"; echo "}"; } > "$t" && nft -c -f "$t" >/dev/null 2>&1; then
-			if cmp -s "$tmp" "$FK_DL_NFT"; then rm -f "$tmp"; else mv -f "$tmp" "$FK_DL_NFT"; _fk_dl_drop; fi
+			if cmp -s "$tmp" "$FK_DL_NFT"; then rm -f "$tmp"; else mv -f "$tmp" "$FK_DL_NFT" 2>/dev/null; _fk_dl_drop; fi
 			nft list table inet fw4 >/dev/null 2>&1 && ! _fk_dl_live && _fk_dl_load
 			_fk_dl_live && _fk_dl_count
 		else
@@ -14488,6 +14632,100 @@ _fk_ru_watch() {
 		/etc/init.d/dnsmasq restart >/dev/null 2>&1
 	fi
 	logger -t zapret-manager "$(_fk_name): DNS провайдера для российских сайтов сменился — теперь $(printf '%s' "$now" | sed 's/ /, /g')"
+	return 0
+}
+
+_fk_ksgap_patch() {
+	local f=/usr/bin/netshift tmp a1='    if ! kill_switch_apply; then' a2='    (exec 1000>&-; list_update) &' a3='    rm -f "$TMP_RULESET_FOLDER"/*' a4='list_update)'
+	[ -f "$f" ] && [ -f /usr/lib/netshift/kill_switch.sh ] || return 0
+	grep -q '^# ZM_KSGAP 1$' "$f" && return 0
+	[ "$(grep -cxF "$a1" "$f")" = 1 ] && [ "$(grep -cxF "$a2" "$f")" = 1 ] && [ "$(grep -cxF "$a3" "$f")" = 1 ] && [ "$(grep -cxF "$a4" "$f")" = 1 ] || return 0
+	grep -q '^kill_switch_load_elements() {$' /usr/lib/netshift/kill_switch.sh && grep -q '^kill_switch_read_set() {$' /usr/lib/netshift/kill_switch.sh || return 0
+	tmp="$f.zm-ksgap"
+	cat > "$tmp.fn" << 'ZM_FK_KSGAP_EOF'
+# ZM_KSGAP 1
+# Защита от утечек при запуске. Списки сервисов (подсети и домены) грузит list_update уже ПОСЛЕ старта sing-box:
+# защита, собранная заново без них, и пустые списки открывали окно, в которое сайты уходили напрямую мимо VPN.
+# Теперь до конца загрузки списков прежняя защита (или её копия с прошлого запуска) остаётся в силе, списки
+# доменов не стираются при остановке, а точная защита собирается, когда списки загрузились
+ZM_KS_STALE=/var/run/netshift-zm-guard.stale
+ZM_KS_SNAP=/var/run/netshift-zm-guard
+zm_ks_opt() { [ "$(uci -q get netshift.settings.block_leaks)" = 1 ]; }
+zm_ks_add() {
+    local zm_f
+    nft list set inet "$NFT_GUARD_TABLE_NAME" "$NFT_GUARD_SUBNET_SET_NAME" > /dev/null 2>&1 || return 0
+    zm_f="$(mktemp)" || return 0
+    kill_switch_read_set "$NFT_TABLE_NAME" "$NFT_COMMON_SET_NAME" > "$zm_f"
+    [ -s "$ZM_KS_SNAP.4" ] && cat "$ZM_KS_SNAP.4" >> "$zm_f"
+    sort -u "$zm_f" -o "$zm_f"
+    kill_switch_load_elements "$NFT_GUARD_SUBNET_SET_NAME" "$zm_f" > /dev/null 2>&1
+    if netshift_ipv6_enabled && nft list set inet "$NFT_GUARD_TABLE_NAME" "$NFT_GUARD_SUBNET_SET_NAME_V6" > /dev/null 2>&1; then
+        kill_switch_read_set "$NFT_TABLE_NAME" "$NFT_COMMON_SET_NAME_V6" > "$zm_f"
+        [ -s "$ZM_KS_SNAP.6" ] && cat "$ZM_KS_SNAP.6" >> "$zm_f"
+        sort -u "$zm_f" -o "$zm_f"
+        kill_switch_load_elements "$NFT_GUARD_SUBNET_SET_NAME_V6" "$zm_f" > /dev/null 2>&1
+    fi
+    rm -f "$zm_f"
+    return 0
+}
+zm_ks_start_apply() {
+    if kill_switch_enabled && nft list table inet "$NFT_GUARD_TABLE_NAME" > /dev/null 2>&1; then
+        zm_ks_add
+        : > "$ZM_KS_STALE"
+        log "block_leaks: the previous guard stays armed until the lists are loaded" "info"
+        return 0
+    fi
+    kill_switch_apply || return 1
+    kill_switch_enabled || return 0
+    if [ -s "$ZM_KS_SNAP.4" ] || [ -s "$ZM_KS_SNAP.6" ]; then
+        zm_ks_add
+        : > "$ZM_KS_STALE"
+        log "block_leaks: the guard keeps the subnets of the previous run until the lists are loaded" "info"
+    fi
+    return 0
+}
+zm_ks_exact() {
+    if ! kill_switch_enabled; then
+        rm -f "$ZM_KS_STALE" "$ZM_KS_SNAP.4" "$ZM_KS_SNAP.6"
+        return 0
+    fi
+    if [ -f "$ZM_KS_STALE" ] || [ "$1" = force ]; then
+        kill_switch_apply || return 1
+        rm -f "$ZM_KS_STALE"
+    fi
+    nft list table inet "$NFT_GUARD_TABLE_NAME" > /dev/null 2>&1 || return 0
+    kill_switch_read_set "$NFT_GUARD_TABLE_NAME" "$NFT_GUARD_SUBNET_SET_NAME" > "$ZM_KS_SNAP.4.tmp" && mv -f "$ZM_KS_SNAP.4.tmp" "$ZM_KS_SNAP.4"
+    if netshift_ipv6_enabled; then
+        kill_switch_read_set "$NFT_GUARD_TABLE_NAME" "$NFT_GUARD_SUBNET_SET_NAME_V6" > "$ZM_KS_SNAP.6.tmp" && mv -f "$ZM_KS_SNAP.6.tmp" "$ZM_KS_SNAP.6"
+    fi
+    return 0
+}
+ZM_FK_KSGAP_EOF
+	awk -v bf="$tmp.fn" -v a1="$a1" -v a2="$a2" -v a3="$a3" -v a4="$a4" '
+		NR == 1 { print; while ((getline l < bf) > 0) print l; next }
+		$0 == a1 { print "    if ! zm_ks_start_apply; then"; c++; next }
+		$0 == a2 { print "    (exec 1000>&-; list_update && zm_ks_exact) &"; c++; next }
+		$0 == a3 { print "    zm_ks_opt || rm -f \"$TMP_RULESET_FOLDER\"/*"; c++; next }
+		$0 == a4 { print "zm_ks_exact)"; print "    zm_ks_exact \"$2\""; print "    ;;"; print; getline; print "    list_update && zm_ks_exact"; c++; next }
+		{ print }
+		END { exit c == 4 ? 0 : 1 }' "$f" > "$tmp" &&
+	sh -n "$tmp" && chmod 0755 "$tmp" && mv -f "$tmp" "$f" &&
+	logger -t zapret-manager "$(_fk_name): защита от утечек держится, пока после запуска грузятся списки сервисов — окно утечки при включении закрыто"
+	rm -f "$tmp" "$tmp.fn"
+	return 0
+}
+
+# Если списки после запуска так и не загрузились (нет GitHub), защита остаётся расширенной — сервисы закрыты, а не
+# уходят напрямую. Через полчаса собираем её точно по тому, что есть, чтобы не держать закрытым лишнее
+_fk_ksgap_watch() {
+	local st=/var/run/netshift-zm-guard.stale
+	[ -f "$st" ] && [ -n "$(find "$st" -mmin +30 2>/dev/null)" ] || return 0
+	_fk_up || return 0
+	[ -f /var/run/netshift_list_update.pid ] && kill -0 "$(cat /var/run/netshift_list_update.pid 2>/dev/null)" 2>/dev/null && return 0
+	grep -q '^zm_ks_exact)$' /usr/bin/netshift 2>/dev/null || return 0
+	logger -t zapret-manager "$(_fk_name): списки сервисов после запуска так и не загрузились — собираем защиту от утечек по тому, что есть"
+	_zm_run 120 /usr/bin/netshift zm_ks_exact force >/dev/null 2>&1
+	rm -f "$st"
 	return 0
 }
 
@@ -15259,6 +15497,7 @@ do_fk_install() {
 	_fk_reality_patch
 	_fk_rsinit_patch
 	_fk_desync_patch
+	_fk_ksgap_patch
 	_fk_fakeip_patch
 	_fk_ghdl_patch
 	_fk_updl_patch
@@ -15610,6 +15849,7 @@ do_fk_lists() {
 	_fk_reality_patch
 	_fk_rsinit_patch
 	_fk_desync_patch
+	_fk_ksgap_patch
 	_fk_fakeip_patch
 	_fk_ghdl_patch
 	_fk_updl_patch
@@ -15782,6 +16022,7 @@ do_fk_subs() {
 	_fk_reality_patch
 	_fk_rsinit_patch
 	_fk_desync_patch
+	_fk_ksgap_patch
 	_fk_fakeip_patch
 	_fk_ghdl_patch
 	_fk_updl_patch
@@ -16353,6 +16594,7 @@ forkop_action() {
 			_fk_reality_patch
 			_fk_rsinit_patch
 			_fk_desync_patch
+			_fk_ksgap_patch
 		_fk_fakeip_patch
 			grep -q '^# ZM_REALITY 1$' /usr/bin/netshift 2>/dev/null || { echo '{"error":"эта версия Forkozz не даёт менять настройки REALITY — обновите Forkozz"}'; return 1; }
 			b="$(printf '%s' "$arg" | _fk_ucj rlnode)"
@@ -16551,6 +16793,7 @@ zm_watch() {
 		_fk_reality_patch
 		_fk_rsinit_patch
 		_fk_desync_patch
+		_fk_ksgap_patch
 		_fk_dnslan_patch
 		_fk_dnsloop_patch
 		_fk_fakeip_patch
@@ -16570,6 +16813,7 @@ zm_watch() {
 	_ft_zapret_sync
 	_zp_rsp_sync >/dev/null 2>&1
 	_fk_installed && ! _fk_foreign && _fk_rl_watch
+	_fk_installed && ! _fk_foreign && _fk_ksgap_watch
 	_st_colo_guard
 	_st_vpn_watch
 	_st_secs_vpn_watch
@@ -22617,7 +22861,7 @@ do_versions_refresh() {
 		j="$(tgws_status)"
 		add "$(_ver_item sTGWS "$(_jf "$j" '@.version')" "$(_jf "$j" '@.latest')")"
 	fi
-	stl_present && add "$(_ver_item 'Ядро steer' "$(stl_version)" "$(_vl stl_latest)")"
+	stl_present && add "$(_ver_item 'Ядро steer' "$(stl_version)" "$(_stl_pin || _vl stl_latest)")"
 	_fk_ours && add "$(_ver_item Forkozz "$(_fk_version)" "$(_vl _fk_latest)")"
 	local v
 	[ -n "$ZM_VER_LOCAL" ] || [ -n "$(_ver_feed_latest busybox)" ] || [ -n "$(_zm_busy_job)" ] || { $UPDATE >/dev/null 2>&1; }
@@ -27079,6 +27323,24 @@ _stl_plug_add() {
 	return 0
 }
 
+# Снять ядро steer начисто: пакеты, плагины, состояние, правила — перед сменой версии (2.0.5 <-> последняя).
+# Настройки панели (/etc/zm-steer) и спека остаются; новое ядро ставится как на чистый роутер
+_stl_purge() {
+	local was="$(stl_version)"
+	_stl_say "Снимаем ядро steer $was — новое встанет начисто, настройки Steer сохранятся"
+	"$STL_INIT" stop >/dev/null 2>&1
+	stl_engine_remove $(stl_pkgs_installed) >/dev/null 2>&1
+	if stl_present; then
+		echo "ОШИБКА: прежнее ядро steer $was снять не удалось — оставляем его"
+		return 1
+	fi
+	stl_leftovers >/dev/null 2>&1
+	rm -f "$ST_DIR/core.arch"
+	[ -f "$ST_OWNED" ] && sed -i '/^pkg \(steer\|libsteer\)[a-z0-9-]*$/d' "$ST_OWNED"
+	[ -f /etc/apk/world ] && _stl_world_drop steer steer-core steer-extended libsteer libsteer-wolfssl $(for m in $STL_MODS warpbox; do printf 'steer-%s ' "$m"; done)
+	return 0
+}
+
 stl_engine_install() {
 	local ver="$1" arch m p n f mods="" pkgs files="" old="" back="" legacy="" keep="$STL_TMP/spec.keep" was_on="" rc p21="" plug="" STL_CORE_ARCH=""
 	shift
@@ -27090,10 +27352,17 @@ stl_engine_install() {
 		for n in steer steer-extended libsteer libsteer-wolfssl; do _pkg_is_installed "$n" && legacy="$legacy $n"; done
 		case " $legacy " in *" steer-extended "*) mods="$mods vless" ;; esac
 	fi
-	mods="$(for m in $mods $(_stl_mods_present); do echo "$m"; done | awk '!s[$0]++' | tr '\n' ' ')"
+	if [ -n "$STL_PURGE" ]; then
+		# Смена версии: из прежних модулей берём только протоколы подписки — остальные новой версии могут быть не нужны
+		legacy=""
+		mods="$mods $(for m in $(_stl_mods_present); do case "$m" in vless|hysteria2|proxy) printf '%s ' "$m" ;; esac; done)"
+		mods="$(for m in $mods; do echo "$m"; done | awk '!s[$0]++' | tr '\n' ' ')"
+	else
+		mods="$(for m in $mods $(_stl_mods_present); do echo "$m"; done | awk '!s[$0]++' | tr '\n' ' ')"
+	fi
 	_st_ver_lt "$ver" 2.1.0 || { p21=1; for m in $mods; do [ "$m" = tgws ] || plug="$plug $m"; done; }
 	pkgs="steer-core$([ -n "$p21" ] || for m in $mods; do printf ' steer-%s' "$m"; done)"
-	[ -z "$p21" ] && stl_v2 && _pkg_is_installed steer-extended && pkgs="$pkgs steer-extended"
+	[ -z "$p21" ] && [ -z "$STL_PURGE" ] && stl_v2 && _pkg_is_installed steer-extended && pkgs="$pkgs steer-extended"
 	if [ -n "$STL_MODS_ONLY" ] && stl_v2 && [ "$(stl_version)" = "$ver" ] && [ -n "$p21" ]; then
 		STL_NEW=""; STL_PKGS=""
 		_stl_plug_add $plug
@@ -27126,6 +27395,10 @@ stl_engine_install() {
 	case " $pkgs " in *" steer-core "*) _stl_say "Ставим ядро steer $ver: $(echo $pkgs | sed 's/ /, /g')" ;; *) _stl_say "Ставим к ядру steer $ver: $(echo $pkgs | sed 's/ /, /g')" ;; esac
 	$UPDATE >&2
 	[ -s "$STL_SPEC" ] && cp -f "$STL_SPEC" "$keep"
+	if [ -n "$STL_PURGE" ] && stl_present; then
+		_stl_purge || { rm -f $files "$keep"; [ -n "$was_on" ] && stl_restart >/dev/null 2>&1; return 1; }
+		STL_NEW="$pkgs"
+	fi
 	[ -n "$p21" ] && _stl_arch_fix
 	local seedspec=""
 	if [ -n "$p21" ] && [ ! -s "$STL_SPEC" ] && [ ! -s "$STL_YAML" ]; then
@@ -27550,7 +27823,8 @@ _stl_upd_hint() {
 	local cur new need="$1"
 	cur="$(stl_version)"
 	new="$([ -s "$STL_CACHE" ] && head -n 1 "$STL_CACHE")"
-	if _stl_ver_ok "$new" && _stl_ver_ok "$cur" && _st_ver_lt "$cur" "$new" && { [ -z "$need" ] || ! _st_ver_lt "$new" "$need"; }; then
+	if [ -n "$(_stl_pin)" ]; then echo "В закреплённом ядре steer ${cur:-$STL_LEGACY} этого нет — есть в последней версии (Steer → «Сменить версию»)"
+	elif _stl_ver_ok "$new" && _stl_ver_ok "$cur" && _st_ver_lt "$cur" "$new" && { [ -z "$need" ] || ! _st_ver_lt "$new" "$need"; }; then
 		echo "Обновите ядро steer до $new"
 	elif [ -n "$need" ]; then echo "Заработает само с ядром steer ${need%.0} — сейчас стоит ${cur:-старое}"
 	else echo "Заработает само в новой версии ядра steer"; fi
@@ -27769,11 +28043,16 @@ END {
 }
 
 stl_sub_nodes() {
-	local m
+	local m f nm=""
+	f=" $(stl_sub_mods "$1") "
+	for m in hysteria2 proxy; do
+		_stl_mod_x "$m" && continue
+		case "$m:$f" in "hysteria2:"*" hy2 "*|"proxy:"*" proxy "*) nm="$nm${nm:+,}\"$m\"" ;; esac
+	done
 	{ for m in vless hysteria2 proxy; do
 		_stl_mod_x "$m" || continue
 		printf '@%s\t' "$m"; _stl_t 30 steer "$m-nodes" "$1" $(_stl_insec_arg "$1") 2>/dev/null | tr '\n\t' '  '; echo
-	done; } | LC_ALL=C awk -v MAP="$1.map" -v META="$3" '
+	done; } | LC_ALL=C awk -v MAP="$1.map" -v META="$3" -v NOMOD="$nm" '
 function junesc(s,    o, i, n, c, d) {
 	o = ""; n = length(s)
 	for (i = 1; i <= n; i++) {
@@ -27800,18 +28079,27 @@ function bfield(ch, k) { return (index(ch, "\"" k "\":true") ? 1 : 0) }
 BEGIN {
 	FS = "\t"
 	if (MAP != "") while ((getline l < MAP) > 0) { split(l, a, "\t"); key = a[2] "|" a[3] "|" a[4]; Q[key] = Q[key] (Q[key] == "" ? "" : " ") a[1] }
-	seq = 0; usable = 0; skipped = 0; reasons = ""
+	seq = 0; usable = 0; skipped = 0; rn = 0; fail = ""
 }
 {
 	mod = substr($1, 2); j = $0; sub(/^[^\t]*\t/, "", j)
+	p = index(j, "\"nodes\":[")
+	if (!p) {
+		x = ""; if (match(j, /"error":"([^"\\]|\\.)*"/)) x = substr(j, RSTART + 9, RLENGTH - 10)
+		fail = fail (fail == "" ? "" : ",") "{\"mod\":\"" mod "\",\"error\":\"" x "\"}"
+		next
+	}
 	if (match(j, /"usable":[0-9]+/)) usable += substr(j, RSTART + 9, RLENGTH - 9)
 	if (match(j, /"skipped":[0-9]+/)) skipped += substr(j, RSTART + 10, RLENGTH - 10)
 	r = j
 	while (match(r, /"reason":"([^"\\]|\\.)*"/)) {
 		x = substr(r, RSTART + 10, RLENGTH - 11); r = substr(r, RSTART + RLENGTH)
-		if (!(x in RS_)) { RS_[x] = 1; reasons = reasons (reasons == "" ? "" : ",") "{\"reason\":\"" x "\"}" }
+		o = r; q = index(o, "\"reason\":"); if (q) o = substr(o, 1, q - 1)
+		c = 1; if (match(o, /"count":[0-9]+/)) c = substr(o, RSTART + 8, RLENGTH - 8) + 0
+		e = ""; if (match(o, /"example":"([^"\\]|\\.)*"/)) e = substr(o, RSTART + 11, RLENGTH - 12)
+		if (!(x in RC)) { RO[++rn] = x; RE[x] = e }
+		RC[x] += c
 	}
-	p = index(j, "\"nodes\":["); if (!p) next
 	j = substr(j, p + 9)
 	q = index(j, "],\"skipped_reasons\""); if (q) j = substr(j, 1, q - 1)
 	n = split(j, C, /\{"index":/)
@@ -27832,7 +28120,12 @@ BEGIN {
 		printf "%d\t%s\t%d\t%d\t%s\t%s\t%s\t%d\n", pos, proto, pidx, fidx, name, tr, sec, vis
 	}
 }
-END { if (META != "") printf "usable=%d\nskipped=%d\nreasons=[%s]\n", usable, skipped, reasons > META }
+END {
+	if (META == "") exit
+	reasons = ""
+	for (i = 1; i <= rn; i++) reasons = reasons (i > 1 ? "," : "") "{\"reason\":\"" RO[i] "\",\"count\":" RC[RO[i]] ",\"example\":\"" RE[RO[i]] "\"}"
+	printf "usable=%d\nskipped=%d\nreasons=[%s]\nfail=[%s]\nnomod=[%s]\n", usable, skipped, reasons, fail, NOMOD > META
+}
 ' | sort -n -k1,1 | LC_ALL=C awk -F'\t' 'BEGIN { OFS = "\t" }
 		{ k = $5; c = ++D[k]; if (c > 1) k = k " (" c ")"; while (k in U) { c++; k = $5 " (" c ")" } U[k] = 1
 		  print NR - 1, $2, $3, $4, k, $6, $7, $8, $1 }' > "$2"
@@ -27977,16 +28270,20 @@ _st_spec_foreign() {
 }
 
 _st_install_steer() {
-	local want cur feat="$*" p
-	cur="$(stl_version)"
-	if [ -n "$STL_MODS_ONLY" ] && stl_v2; then want="$cur"; else want="$(stl_latest)"; fi
-	stl_v2 && _st_ver_lt "$want" "$cur" && want="$cur"
+	local want cur feat="$*" p pin STL_PURGE=""
+	cur="$(stl_version)"; pin="$(_stl_pin)"
+	if [ -n "$STL_MODS_ONLY" ] && stl_v2 && { [ -z "$pin" ] || [ "$cur" = "$pin" ]; }; then want="$cur"; else want="$(stl_latest)"; fi
+	[ -z "$pin" ] && stl_v2 && _st_ver_lt "$want" "$cur" && want="$cur"
+	# Версию меняем начисто: ядро другой версии снимается целиком, без смешения пакетов, плагинов и состояния
+	stl_present && [ "$cur" != "$want" ] && { [ -n "$pin" ] || { [ -n "$STL_SWITCH" ] && stl_v2 && { _st_ver_lt "$cur" 2.1.0 || _st_ver_lt "$want" "$cur"; }; }; } && STL_PURGE=1
 	[ -z "$feat" ] && [ -s "$ST_SUB" ] && feat="$(_st_sub_feats)"
 	if stl_v2 && [ "$cur" = "$want" ] && _st_feats_ok $feat; then
-		_rb_say "Ядро steer уже последней версии: $cur"
+		if [ -n "$pin" ]; then _rb_say "Ядро steer $cur уже стоит — версия закреплена, обновлений не ищем"
+		else _rb_say "Ядро steer уже последней версии: $cur"; fi
 		return 0
 	fi
-	if stl_present && ! stl_v2; then _rb_say "Ядро steer $cur — переводим на $want"
+	if [ -n "$STL_PURGE" ]; then _rb_say "Ядро steer $cur — меняем на $want$([ -n "$pin" ] && echo ' (закреплённая версия, без обновлений)')"
+	elif stl_present && ! stl_v2; then _rb_say "Ядро steer $cur — переводим на $want"
 	elif stl_present && [ "$cur" != "$want" ]; then _rb_say "Ядро steer $cur — обновляем до $want"
 	elif stl_v2; then _rb_say "Ставим модули ядра steer $cur для протоколов подписки — само ядро не трогаем"; fi
 	if ! stl_engine_install "$want" $feat; then
@@ -30000,8 +30297,16 @@ _st_selfcheck0() {
 	return $bad
 }
 
+_st_pin_set() {
+	case "$1" in
+		legacy) mkdir -p "$ST_DIR"; echo "$STL_LEGACY" > "$STL_PIN" ;;
+		latest) rm -f "$STL_PIN" ;;
+	esac
+	return 0
+}
+
 do_steer_install() {
-	local blk
+	local blk rc
 	_st_phase install
 	rm -f "$ST_STOP_FLAG"
 	rm -f "$ST_HEAL_STAMP"
@@ -30016,8 +30321,11 @@ do_steer_install() {
 	esac
 	_ensure_deps
 	mkdir -p "$ST_DIR"
+	_st_pin_set "$1"
+	[ "$1" = legacy ] && _rb_say "Ставим ядро steer $STL_LEGACY — версия закрепляется, обновлений панель искать не будет"
 	_st_phase pkgs
-	_st_install_steer || return 1
+	STL_SWITCH=1; _st_install_steer; rc=$?; STL_SWITCH=""
+	[ "$rc" = 0 ] || return 1
 	if ! command -v conntrack >/dev/null 2>&1; then
 		$INSTALL conntrack >&2 && _st_own "pkg conntrack"
 	fi
@@ -30540,6 +30848,7 @@ do_steer_switch() {
 	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: настройку ядра steer сейчас ведёт не Zapret Manager"; return 1; }
 	_st_phase rules
 	_rb_say "Переключаем VPN: $(_st_node_label) — списки сервисов и правила не трогаем"
+	_st_nopq_sync
 	_st_spec_quick; rc=$?
 	if [ "$rc" = 2 ]; then
 		_rb_say "Списки ещё не собирались — применяем настройку целиком"
@@ -30896,7 +31205,7 @@ steer_status() {
 	_st_heal_list
 	ZM_STL_CACHE=1; STL_ST_J=""
 	stl_present && STL_ST_J="$(_stl_t 10 steer status 2>/dev/null)"
-	local running=false phase="" blk colo="" warp_up=false installed=false ver="" run=false chans=0 dns=false
+	local running=false phase="" blk colo="" warp_up=false installed=false ver="" run=false chans=0 dns=false pin="" newest=""
 	local host="" port="" hs="" age="" rx=0 tx=0 off=false svc="" id sel=" " skip w k r
 	_st_running && running=true
 	[ -f "$ST_PHASE_FILE" ] && phase=$(cat "$ST_PHASE_FILE")
@@ -30972,10 +31281,12 @@ steer_status() {
 	_st_warp_on && won=true
 	stl_v2 && { [ ! -s "$ST_SUB" ] || _st_feats_ok $(_st_sub_feats); } && ext=true
 	if [ -s "$STL_CACHE" ]; then latest="$(cat "$STL_CACHE")"
-	elif stl_present && [ -z "$(find "$JOBS_DIR/steer.latest.try" -mmin -10 2>/dev/null)" ]; then
+	elif [ -z "$(find "$JOBS_DIR/steer.latest.try" -mmin -10 2>/dev/null)" ]; then
 		: > "$JOBS_DIR/steer.latest.try"
-		( stl_latest >/dev/null 2>&1 & )
+		( stl_latest_real >/dev/null 2>&1 & )
 	fi
+	pin="$(_stl_pin)"; newest="$latest"
+	[ -n "$pin" ] && latest="$pin"
 	if [ "$run" = true ] && _st_owns "steer-spec" && stl_state "$vexit"; then
 		failed="$STL_FAILED"
 		[ "$vexit" = vpn ] || [ "$vexit" = iface ] || [ "$failed" = true ] || active="$STL_DEV"
@@ -30992,13 +31303,13 @@ steer_status() {
 	if [ "$vup" = true ] && [ "$vexit" = vpn ] && [ "$off" = false ]; then
 		_st_vpn_live; case $? in 0) vlive=true ;; 1) vlive=false ;; esac
 	fi
-	printf '{"running":%s,"phase":"%s","blocker":"%s","installed":%s,"stopped":%s,"version":"%s","steer_running":%s,"channels":%s,"warp_up":%s,"warp_colo":"%s","warp_host":"%s","warp_port":"%s","warp_hs_age":"%s","warp_rx":%s,"warp_tx":%s,"autorestart":"%s","dns_conflict":%s,"doh":"%s","doh_mode":"%s","exit":"%s","vpn_up":%s,"vpn_live":%s,"has_sub":%s,"sub_label":"%s","latest":"%s","ext":%s,"warp_on":%s,"warp_mode":"%s","warp_iface":"%s","warp_pick":"%s","onfail":"%s","warp_own_saved":%s,"tunnels":%s,"warp_active":"%s","catalog":%s,"wfix":%s,"lists_via":%s,"sub_via":%s,"lists":%s,"failopen":%s,"warp_failed":%s,"hosts_extra":%s,"dnsmode":"%s","realip":"%s","cttl":%s,"torrent":"%s","quic":"%s","devices":[%s],"services":[%s],"main_name":"%s","main_off":%s,"exit_want":"%s","main_tun":%s,"main_over":"%s","order":[%s],"sec_max":%s,"sec_vpn_max":%s,"sections":[%s],"awg_by_steer":%s,"awg_other":%s,"xsets":[%s]}\n' \
+	printf '{"running":%s,"phase":"%s","blocker":"%s","installed":%s,"stopped":%s,"version":"%s","steer_running":%s,"channels":%s,"warp_up":%s,"warp_colo":"%s","warp_host":"%s","warp_port":"%s","warp_hs_age":"%s","warp_rx":%s,"warp_tx":%s,"autorestart":"%s","dns_conflict":%s,"doh":"%s","doh_mode":"%s","exit":"%s","vpn_up":%s,"vpn_live":%s,"has_sub":%s,"sub_label":"%s","latest":"%s","ext":%s,"warp_on":%s,"warp_mode":"%s","warp_iface":"%s","warp_pick":"%s","onfail":"%s","warp_own_saved":%s,"tunnels":%s,"warp_active":"%s","catalog":%s,"wfix":%s,"lists_via":%s,"sub_via":%s,"lists":%s,"failopen":%s,"warp_failed":%s,"hosts_extra":%s,"dnsmode":"%s","realip":"%s","cttl":%s,"torrent":"%s","quic":"%s","devices":[%s],"services":[%s],"main_name":"%s","main_off":%s,"exit_want":"%s","main_tun":%s,"main_over":"%s","order":[%s],"sec_max":%s,"sec_vpn_max":%s,"sections":[%s],"awg_by_steer":%s,"awg_other":%s,"xsets":[%s],"pin":"%s","newest":"%s","legacy":"%s"}\n' \
 		"$running" "$(esc "$phase")" "$(esc "$blk")" "$installed" "$off" "$(esc "$ver")" "$run" "${chans:-0}" "$warp_up" "$(esc "$colo")" \
 		"$(esc "$host")" "$(esc "$port")" "$age" "${rx:-0}" "${tx:-0}" "$(_st_cron_get)" "$dns" "$doh" "$(_doh_force_mode)" \
 		"$vexit" "$vup" "$vlive" "$vsub" "$(esc "$(_st_sub_label)")" "$(esc "$latest")" "$ext" "$won" "$(_st_warp_modename)" "$(esc "$(_st_ext_if)")" "$(_st_warp_pick)" "$(_st_onfail)" "$(_st_own_saved && echo true || echo false)" "$(_st_tunnels_json)" "$active" "$(_st_cat_json)" "$(_st_wfix_json)" "$([ -f "$ST_DIR/lists.via" ] && echo true || echo false)" "$([ -f "$ST_SUB_VIA" ] && echo true || echo false)" "$(_st_lists_json)" "$failed" "$wfail" "$(_hosts_extra)" "$(_st_dnsmode)" "$(_st_realip)" "$(_st_cttl)" "$(_st_torrent)" "$(_st_quic)" "$(_st_devs_json)" "$svc" "$(esc "$(_st_sec_name main)")" "$(_st_sec_off main && echo true || echo false)" "$(esc "$(cat "$ST_DIR/exit" 2>/dev/null)")" "$mtun" "$(_st_sec_over main)" "$(_st_order_json)" "$ST_SEC_MAX" "$ST_SEC_VPN_MAX" "$(_st_secs_json)" \
 		"$(_st_owns "pkg kmod-amneziawg" || _st_owns "pkg amneziawg-tools" && echo true || echo false)" \
 		"$(uci -q -X show network 2>/dev/null | sed -n "s/^network\.\([^.=]*\)\.proto='amneziawg'\$/\1/p" | grep -cvE '^zmwarp[0-9]*$')" \
-		"$(_st_xsets_json)"
+		"$(_st_xsets_json)" "$(esc "$pin")" "$(esc "$newest")" "$STL_LEGACY"
 }
 
 _st_xsets_json() {
@@ -31515,12 +31826,17 @@ _st_nodes() {
 		if stl_sub_norm "$ST_SUB" "$ST_SUB.n"; then mv -f "$ST_SUB.n.map" "$ST_SUB.map"; mv -f "$ST_SUB.n" "$ST_SUB"; chmod 600 "$ST_SUB"; fi
 		rm -f "$ST_SUB.n" "$ST_SUB.n.map"
 	fi
-	mods="$(_stl_mods_present)$(_stl_insec "$ST_SUB" && echo insecure) n2"
-	if [ ! -s "$ST_SUB_NODES" ] || [ "$ST_SUB" -nt "$ST_SUB_NODES" ] || [ "$(sed -n 's/^mods=//p' "$ST_SUB_NODES.meta" 2>/dev/null)" != "$mods" ]; then
+	if [ ! -s "$ST_SUB.map" ] && [ ! -f "$ST_SUB.map.jt" ] && command -v jq >/dev/null 2>&1; then
+		_st_json_map "$ST_SUB"; : > "$ST_SUB.map.jt"; [ -s "$ST_SUB.map" ] && rm -f "$ST_SUB_NODES"
+	fi
+	mods="$(_stl_mods_present)$(_stl_insec "$ST_SUB" && echo insecure) n3"
+	if [ ! -s "$ST_SUB_NODES" ] || [ "$ST_SUB" -nt "$ST_SUB_NODES" ] || [ "$(sed -n 's/^mods=//p' "$ST_SUB_NODES.meta" 2>/dev/null)" != "$mods" ] ||
+		{ grep -q '^fail=\[{' "$ST_SUB_NODES.meta" 2>/dev/null && [ -z "$(find "$ST_SUB_NODES.meta" -mmin -5 2>/dev/null)" ]; }; then
 		mkdir -p "$ST_DIR"
 		stl_sub_nodes "$ST_SUB" "$ST_SUB_NODES.tmp" "$ST_SUB_NODES.meta"
 		mv -f "$ST_SUB_NODES.tmp" "$ST_SUB_NODES"
 		echo "mods=$mods" >> "$ST_SUB_NODES.meta"
+		grep -q '^fail=\[{' "$ST_SUB_NODES.meta" && logger -t zapret-manager "Steer: не прочитались узлы подписки — $(sed -n 's/^fail=//p' "$ST_SUB_NODES.meta" | head -c 300)"
 		_st_sub_names_fix
 	fi
 	echo "$ST_SUB_NODES"
@@ -31596,7 +31912,7 @@ _st_grp_ids() {
 			while ((getline l < M) > 0) { split(l, b, "\t"); K[b[1]] = b[2] "|" tolower(b[3]) "|" b[4] }
 			ln = 0; while ((getline l < S) > 0) { ln++; if (ln in K) { pt = qv(l, "path"); if (pt == "") pt = qv(l, "serviceName"); sub(/\?.*$/, "", pt); gsub(/ /, "%20", pt); P[ln] = pt } }
 		}
-		{ r++; id[r] = $1; lk[r] = ($9 in K) ? K[$9] : ""; sk[r] = lk[r] "|" P[$9]; ar[r] = (index($5, "\342\254\207") || index($5, "\342\254\206")) ? 1 : 0; gs[r] = ($5 in GN) ? 1 : 0 }
+		{ r++; id[r] = $1; lk[r] = ($9 in K) ? K[$9] : ""; sk[r] = lk[r] "|" P[$9]; ar[r] = (index($5, "\342\254\207") || index($5, "\342\254\206")) ? 1 : 0; bn = $5; gs[r] = (($5 in GN) || (sub(/ \([0-9]+\)$/, "", bn) && (bn in GN))) ? 1 : 0 }
 		END {
 			for (j = 1; j <= nm; j++) {
 				m = W[j]; x = m; sub(/\|[^|]*$/, "", x); pa = 0
@@ -31610,7 +31926,56 @@ _st_grp_ids() {
 
 _st_stub_ids() {
 	[ -s "$ST_SUB.map" ] || return 0
-	LC_ALL=C awk -F'\t' -v G="$ST_SUB_GRPS" 'BEGIN { while ((getline l < G) > 0) { split(l, a, "\t"); GN[a[1]] = 1 } } $5 in GN { print $1 }' "$1"
+	LC_ALL=C awk -F'\t' -v G="$ST_SUB_GRPS" 'BEGIN { while ((getline l < G) > 0) { split(l, a, "\t"); GN[a[1]] = 1 } }
+		{ b = $5; if (b in GN) { print $1; next } if (sub(/ \([0-9]+\)$/, "", b) && (b in GN)) print $1 }' "$1"
+}
+
+_st_happ_miss() {
+	[ -s "$ST_SUB_GRPS.all" ] && [ -s "$ST_SUB.map" ] && [ -s "$1" ] || return 0
+	LC_ALL=C awk -F'\t' -v M="$ST_SUB.map" -v N="$1" '
+		function j(s,    o, i, c, n) { o = ""; n = length(s); for (i = 1; i <= n; i++) { c = substr(s, i, 1); if (c == "\\") o = o "\\\\"; else if (c == "\"") o = o "\\\""; else if (c < " ") o = o " "; else o = o c } return o }
+		BEGIN {
+			while ((getline l < M) > 0) { split(l, b, "\t"); K[b[2] "|" tolower(b[3]) "|" b[4]] = 1 }
+			while ((getline l < N) > 0) { split(l, z, "\t"); NM[z[5]] = 1 }
+		}
+		$1 != "" && !($1 in NM) && !($1 in S) {
+			n = split($2, w, " "); hit = 0
+			for (i = 1; i <= n; i++) if (w[i] in K) hit = 1
+			if (!hit) { S[$1] = 1; printf "%s\"%s\"", (c++ ? "," : ""), j($1) }
+		}' "$ST_SUB_GRPS.all"
+}
+
+# Отчёт Steer для поддержки (Системная информация): из чего собран список узлов, группы, пропуски, пинг, журнал
+_st_report() {
+	local t g ids f
+	stl_present || return 0
+	echo "Ядро steer: $(stl_version 2>/dev/null)  модули: $(_stl_mods_present)"
+	echo "Выбор узла: $([ -s "$ST_SUB_NODE" ] && echo "закреплён «$(head -n1 "$ST_SUB_NODE")»" || { g="$(_st_grp_cur)"; [ -n "$g" ] && echo "группа «$g»" || echo авто; })  автовыбор: $(_st_pick)  замер: $(_st_lat_mode)"
+	[ -s "$ST_SUB" ] || { echo "Подписки нет"; return 0; }
+	f="ссылки"; head -c 256 "$ST_SUB" | tr -d ' \t\r\n' | grep -q '^[[{]' && f="JSON (Xray)"; grep -qE '^proxies:' "$ST_SUB" && f="Clash YAML"
+	echo "Подписка: $([ -s "$ST_SUB_URL" ] && echo "по адресу" || echo "свои ссылки"), формат: $f, строк: $(grep -c . "$ST_SUB")"
+	[ -s "$ST_SUB.map" ] && echo "Протоколы в подписке: $(cut -f2 "$ST_SUB.map" | sort | uniq -c | awk '{ printf "%s%s %s", (NR > 1 ? ", " : ""), $2, $1 }')"
+	t="$(_st_nodes)" || return 0
+	echo "Узлы в списке ($(grep -c . "$t")):"
+	awk -F'\t' '{ printf "  %s. %s — %s %s %s\n", $1, $5, $2, $6, $7 }' "$t"
+	sed -n 's/^\(skipped\|reasons\|fail\|nomod\)=/  \1: /p' "$ST_SUB_NODES.meta" 2>/dev/null
+	ids="$(cut -f1,5 "$t" | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | tr '\n' ' ')"
+	[ -n "$ids" ] && echo "Скрыты фильтром: $ids"
+	ids="$(_st_stub_ids "$t" | tr '\n' ' ')"
+	[ -n "$ids" ] && echo "Заглушки групп (не показаны): $ids"
+	if [ -s "$ST_SUB_GRPS" ]; then
+		echo "Группы АВТО из ответа для Happ:"
+		while IFS="$(printf '\t')" read -r g _ f || [ -n "$g" ]; do
+			[ -n "$g" ] || continue
+			ids=" $(_st_grp_ids "$g" "$t" | tr '\n' ' ') "
+			echo "  «$g»: в подписке Happ $(echo $f | wc -w), нашлось у Steer: $(awk -F'\t' -v w="$ids" 'index(w, " " $1 " ") { printf "%s%s", (n++ ? ", " : ""), $5 }' "$t")"
+		done < "$ST_SUB_GRPS"
+	fi
+	[ -s "$ST_SUB_GRPS.all" ] && echo "Серверы в ответе для Happ: $(cut -f1 "$ST_SUB_GRPS.all" | awk '{ printf "%s%s", (NR > 1 ? ", " : ""), $0 }')"
+	f="$(_st_happ_miss "$t")"; [ -n "$f" ] && echo "Нет у Steer, но есть у Happ: $f"
+	[ -s "$ST_SUB_PING" ] && { echo "Последний замер (имя, мс, вид):"; sed 's/^/  /' "$ST_SUB_PING"; }
+	echo "Журнал:"
+	logread 2>/dev/null | grep -iE 'steer' | tail -n 40 | sed -E 's/[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*\.[A-Za-z]{2,}(:[0-9]+)/сервер\2/g; s/^/  /'
 }
 
 _st_grps_json() {
@@ -31629,11 +31994,12 @@ _st_grps_json() {
 
 _st_autogrp_sync() {
 	local quiet="$1" u t="$ST_RUN/ag.$$" n g dv
-	[ -s "$ST_SUB_URL" ] || { rm -f "$ST_SUB_GRPS" "$ST_SUB_GRPS.chk" "$ST_SUB_GRP"; return 0; }
+	[ -s "$ST_SUB_URL" ] || { rm -f "$ST_SUB_GRPS" "$ST_SUB_GRPS.chk" "$ST_SUB_GRPS.all" "$ST_SUB_GRP"; return 0; }
 	[ -s "$ZM_AG_JQ" ] || return 0
 	u="$(head -n1 "$ST_SUB_URL")"
 	mkdir -p "$ST_RUN" "$ST_VDIR"
 	: > "$ST_SUB_GRPS.chk"
+	[ -f "$ST_SUB_GRPS.all" ] || : > "$ST_SUB_GRPS.all"
 	dv=""; [ -f "$ST_SUB_VIA" ] && dv="$(_st_sub_via_pick 2>/dev/null)" && dv="${dv%%|*}"
 	rm -f "$t"
 	[ -n "$dv" ] && { curl -fsSL --compressed -m 25 --connect-timeout 10 --max-redirs 10 -b "" -A "Happ/1.0.0" --interface "$dv" -o "$t" "$u" 2>/dev/null || rm -f "$t"; }
@@ -31653,11 +32019,13 @@ _st_autogrp_sync() {
 	rm -f "$ST_SUB_GRPS.nojq"
 	if jq -c -f "$ZM_AG_JQ" "$t" > "$t.j" 2>/dev/null; then
 		jq -r '.groups[] | [ .name, ((.iv // 0) | tostring), ([ .m[] | "\(.p)|\(.h)|\(.port)|\(.path | split(" ") | join("%20"))" ] | reduce .[] as $k ([]; if index([$k]) == null then . + [$k] else . end) | join(" ")) ] | @tsv' "$t.j" > "$t.g" 2>/dev/null
+		jq -r '(.all // [])[] | [ .name, (.k | join(" ")) ] | @tsv' "$t.j" > "$t.a" 2>/dev/null || : > "$t.a"
 	else
-		: > "$t.g"
+		: > "$t.g"; : > "$t.a"
 	fi
 	if [ -s "$t.g" ]; then ( umask 077; cat "$t.g" > "$ST_SUB_GRPS" ); else rm -f "$ST_SUB_GRPS"; fi
-	rm -f "$t" "$t.j" "$t.g"
+	( umask 077; cat "$t.a" > "$ST_SUB_GRPS.all" )
+	rm -f "$t" "$t.j" "$t.g" "$t.a"
 	g="$(head -n1 "$ST_SUB_GRP" 2>/dev/null)"
 	if [ -n "$g" ] && ! _st_grp_has "$g"; then
 		rm -f "$ST_SUB_GRP"
@@ -31673,7 +32041,7 @@ _st_autogrp_sync() {
 
 _st_autogrp_bg() {
 	[ -s "$ST_SUB_URL" ] && [ -s "$ZM_AG_JQ" ] || return 0
-	[ -f "$ST_SUB_GRPS.chk" ] && [ ! "$ST_SUB" -nt "$ST_SUB_GRPS.chk" ] && return 0
+	[ -f "$ST_SUB_GRPS.chk" ] && [ -f "$ST_SUB_GRPS.all" ] && [ ! "$ST_SUB" -nt "$ST_SUB_GRPS.chk" ] && return 0
 	[ -n "$(find "$ST_SUB_GRPS.chk" -mmin -30 2>/dev/null)" ] && return 0
 	mkdir -p "$ST_VDIR"; : > "$ST_SUB_GRPS.chk"
 	( _st_autogrp_sync quiet >/dev/null 2>&1 ) >/dev/null 2>&1 </dev/null &
@@ -31881,15 +32249,34 @@ _st_links_split() {
 	}' | awk '!s[$0]++'
 }
 
+# Карта узлов (номер, протокол, адрес, порт) для подписки JSON Xray: по ней работают группы АВТО и порядок узлов,
+# как у подписки из ссылок. Нужен jq; без него карта пустая, как раньше
+_st_json_map() {
+	head -c 256 "$1" 2>/dev/null | tr -d ' \t\r\n' | grep -q '^[[{]' || return 0
+	command -v jq >/dev/null 2>&1 || return 0
+	jq -r '(if type == "array" then . else [.] end) | [ .[] | select(type == "object") | (.outbounds // [])[] | select(type == "object")
+		| (if .protocol == "hysteria" then "hysteria2" else .protocol end) as $p
+		| select($p == "vless" or $p == "trojan" or $p == "shadowsocks" or $p == "hysteria2" or $p == "vmess" or $p == "socks" or $p == "http")
+		| (if .protocol == "hysteria" then { address: .settings.address, port: .settings.port }
+		   else (.settings.vnext[0] // .settings.servers[0] // (if ((.settings.address // "") | tostring) != "" then .settings else {} end)) end) as $s
+		| { p: $p, h: (($s.address // "") | tostring | ascii_downcase), port: (($s.port // 0) | tostring) } | select(.h != "") ]
+		| to_entries[] | "\(.key + 1)\t\(.value.p)\t\(.value.h)\t\(.value.port)"' "$1" > "$1.map.j" 2>/dev/null &&
+		[ -s "$1.map.j" ] && mv -f "$1.map.j" "$1.map"
+	rm -f "$1.map.j"
+	return 0
+}
+
 _st_sub_take() {
 	rm -f "$ST_SUB.new" "$ST_SUB.new.map"
 	stl_sub_norm "$1" "$ST_SUB.new" || { rm -f "$ST_SUB.new" "$ST_SUB.new.map"; echo "ОШИБКА: в подписке пусто"; return 1; }
+	_st_json_map "$ST_SUB.new"
 	_st_need_mods "$ST_SUB.new" || { rm -f "$ST_SUB.new" "$ST_SUB.new.map"; return 1; }
 	_st_sub_check "$ST_SUB.new" || { rm -f "$ST_SUB.new" "$ST_SUB.new.map"; return 1; }
 }
 
 _st_sub_commit() {
 	mv -f "$ST_SUB.new.map" "$ST_SUB.map" 2>/dev/null || : > "$ST_SUB.map"
+	rm -f "$ST_SUB.map.jt"
 	mv -f "$ST_SUB.new" "$ST_SUB"
 	chmod 600 "$ST_SUB"
 	rm -f "$ST_SUB_NODES"
@@ -31922,6 +32309,17 @@ _st_sub_via_pick() {
 
 _st_sub_get() {
 	local c dv lb
+	if [ -f "$ST_SUB_URL.happ" ] && c="$(_zm_bin curl)"; then
+		if ! command -v jq >/dev/null 2>&1 && [ -z "$(find "$JOBS_DIR/jq.try" -mmin -360 2>/dev/null)" ]; then
+			mkdir -p "$JOBS_DIR"; : > "$JOBS_DIR/jq.try"; _zm_pkg_add jq >/dev/null 2>&1
+		fi
+		dv=""; lb=""
+		[ -f "$ST_SUB_VIA" ] && dv="$(_st_sub_via_pick 2>/dev/null)" && { lb="${dv#*|}"; dv="${dv%%|*}"; }
+		echo "   · Подписку качаем как для Happ${lb:+ через $lb}"
+		_st_sub_curl "$c" "$dv" "$@" happ && return 0
+		[ -n "$dv" ] && _st_sub_curl "$c" "" "$@" happ && return 0
+		echo "   · Как для Happ подписка не скачалась${STL_SUB_ERR:+ ($STL_SUB_ERR)} — качаем как обычно"
+	fi
 	[ -f "$ST_SUB_VIA" ] || { stl_sub_fetch "$@"; return; }
 	if ! c="$(_zm_bin curl)"; then
 		echo "   · Через VPN подписку качать нечем (нет curl) — качаем напрямую"
@@ -31940,20 +32338,21 @@ _st_sub_get() {
 }
 
 _st_sub_curl() {
-	local c="$1" dv="$2" u="$3" out="$4" info="$5" t="$4.via" h="$4.via.hdr" j id os md ua k v x try
+	local c="$1" dv="$2" u="$3" out="$4" info="$5" t="$4.via" h="$4.via.hdr" j id os md ua k v x try ifa=""
 	STL_SUB_URL=""; STL_SUB_TITLE=""; STL_SUB_WARN=""; STL_SUB_ERR=""
+	[ -n "$dv" ] && ifa="--interface $dv"
 	j="$(_stl_t 10 steer sub-hwid 2>/dev/null)"
 	id="$(printf '%s' "$j" | jsonfilter -e '@.hwid' 2>/dev/null | tr -cd 'A-Za-z0-9._:-')"
 	os="$(printf '%s' "$j" | jsonfilter -e '@.os' 2>/dev/null | tr -d '\r\n')"
 	md="$(printf '%s' "$j" | jsonfilter -e '@.model' 2>/dev/null | tr -d '\r\n')"
-	ua="steer/$(stl_version)"
+	ua="steer/$(stl_version)"; [ "$6" = happ ] && ua="Happ/1.0.0"
 	for try in "$u" "${u%/}/json"; do
 		rm -f "$t" "$h"
 		if [ -n "$id" ]; then
-			"$c" -fsSL --compressed -m 60 --connect-timeout 10 --max-redirs 10 --max-filesize 67108864 -b "" --interface "$dv" -A "$ua" \
+			"$c" -fsSL --compressed -m 60 --connect-timeout 10 --max-redirs 10 --max-filesize 67108864 -b "" $ifa -A "$ua" \
 				-H "x-hwid: $id" -H "x-device-os: $os" -H "x-ver-os: $os" -H "x-device-model: $md" -D "$h" -o "$t" "$try" 2>/dev/null || rm -f "$t"
 		fi
-		[ -s "$t" ] || "$c" -fsSL --compressed -m 60 --connect-timeout 10 --max-redirs 10 --max-filesize 67108864 -b "" --interface "$dv" -A "$ua" \
+		[ -s "$t" ] || "$c" -fsSL --compressed -m 60 --connect-timeout 10 --max-redirs 10 --max-filesize 67108864 -b "" $ifa -A "$ua" \
 			-D "$h" -o "$t" "$try" 2>/dev/null || rm -f "$t"
 		[ -s "$t" ] || { STL_SUB_ERR="панель не ответила"; continue; }
 		if [ "$(head -c 2 "$t" | od -An -tx1 | tr -d ' \n')" = 1f8b ]; then
@@ -31962,6 +32361,7 @@ _st_sub_curl() {
 		stl_sub_norm "$t" "$t.n" && stl_sub_check "$t.n" && { rm -f "$t.n" "$t.n.map"; STL_SUB_URL="$try"; break; }
 		rm -f "$t.n" "$t.n.map" "$t"
 		STL_SUB_ERR="в ответе панели нет пригодных узлов"
+		[ "$6" = happ ] && break
 		[ "$try" = "$u" ] && case "$u" in */json|*/json/) break ;; esac
 	done
 	[ -s "$t" ] || { rm -f "$t" "$h"; return 1; }
@@ -31983,6 +32383,13 @@ _st_sub_curl() {
 	esac
 	STL_SUB_TITLE="$(printf '%s' "$x" | tr -d '\000-\037"\\' | cut -c1-120)"
 	rm -f "$h"
+	# Как для Happ: конфиги с балансировщиком — это группы АВТО (их панель берёт отдельно), а не серверы,
+	# в списке узлов они дали бы копии серверов. Убираются, если без них остаются пригодные узлы
+	if [ "$6" = happ ] && command -v jq >/dev/null 2>&1 && head -c 256 "$t" | tr -d ' \t\r\n' | grep -q '^[[{]'; then
+		jq -c '(if type == "array" then . else [.] end) | [ .[] | select(type == "object") | select(((.routing.balancers // []) | if type == "array" then length else 0 end) == 0) ]' "$t" > "$t.f" 2>/dev/null &&
+			[ "$(jq 'length' "$t.f" 2>/dev/null)" -gt 0 ] 2>/dev/null && stl_sub_check "$t.f" && mv -f "$t.f" "$t"
+		rm -f "$t.f" "$t.f.map"
+	fi
 	mv -f "$t" "$out"
 	return 0
 }
@@ -32202,17 +32609,21 @@ _st_vpn_heal() {
 	local pinned who
 	if stl_running && _st_vpn_probe >/dev/null 2>&1; then echo "[ OK ] VPN уже работает — чинить нечего"; return 0; fi
 	who="VPN"; [ -n "$ST_SEC" ] && who="VPN секции «$(_st_sec_name "$ST_SEC")»"
+	pinned="$(cat "$ST_SUB_NODE" 2>/dev/null)"
+	# Закреплённый узел упал — сначала переходим на рабочий (как задано в «Если узел не отвечает»), что бы ни
+	# показала проверка: перезапуск ядра или перечитывание правил узел не оживят
+	if [ -n "$pinned" ] && [ "$(_st_node_pol)" != hold ] && stl_running && stl_state vpn >/dev/null 2>&1 && _st_node_down; then
+		_rb_warn "$who не отвечает: не отвечает выбранный узел «$pinned»${STL_NWHY:+ ($STL_NWHY)}"
+		if _st_node_failover; then _st_vpn_probe >/dev/null 2>&1; echo "[ OK ] $who работает через другой узел"; return 0; fi
+		echo "[FAIL] $who: рабочего узла пока нет — ядро steer продолжит перебирать узлы, панель проверит ещё раз"
+		return 1
+	fi
 	if stl_running && _st_others_alive; then
 		if [ -n "$ST_VPN_STUCK" ]; then
 			_rb_warn "$who отвечает, но трафик сервисов в него не вернулся — перечитываем правила Steer, не перезапуская его: другие секции работают"
 			stl_reload
 			sleep 3
 			_st_vpn_probe >/dev/null 2>&1 && { echo "[ OK ] $who снова работает"; return 0; }
-		else
-			pinned="$(cat "$ST_SUB_NODE" 2>/dev/null)"
-			if [ -n "$pinned" ] && stl_state vpn >/dev/null 2>&1 && _st_node_down && [ "$(_st_node_pol)" != hold ]; then
-				_st_node_failover >/dev/null 2>&1 && { _st_vpn_probe >/dev/null 2>&1; echo "[ OK ] $who работает через другой узел"; return 0; }
-			fi
 		fi
 		_rb_warn "$who не отвечает, а другие секции работают — Steer целиком не перезапускаем, чтобы не оборвать их. Сервисы, выбранные и в других секциях, идут через них, а эту секцию панель проверит ещё раз позже"
 		logger -t zapret-manager "Steer: $who не отвечает — другие секции работают, службу не перезапускаем"
@@ -32228,13 +32639,10 @@ _st_vpn_heal() {
 		echo "[FAIL] После перезапуска Steer трафик в VPN так и не пошёл — панель повторит попытку позже"
 		return 1
 	fi
-	pinned="$(cat "$ST_SUB_NODE" 2>/dev/null)"
+	# Держим выбранный узел («Держать выбранный»): ядро исправно, перезапуск узел не оживит
 	if [ -n "$pinned" ] && stl_running && stl_state vpn >/dev/null 2>&1 && _st_node_down; then
-		_rb_warn "VPN не отвечает: не отвечает выбранный узел «$pinned»${STL_NWHY:+ ($STL_NWHY)} — ядро steer исправно, перезапускать его незачем"
-		_st_node_failover && { _st_vpn_probe >/dev/null 2>&1; echo "[ OK ] VPN работает через другой узел"; return 0; }
-		[ "$(_st_node_pol)" = hold ] && return 0
-		echo "[FAIL] VPN не поднялся — ни один узел подписки не отвечает"
-		return 1
+		_st_node_failover
+		return 0
 	fi
 	_rb_say "VPN не отвечает — перезапускаем Steer"
 	logger -t zapret-manager "Steer: VPN не отвечает — перезапускаем службу"
@@ -32301,7 +32709,7 @@ do_steer_sub_remove() {
 	_st_phase sub
 	rm -f "$ST_STOP_FLAG"
 	_st_use_vpn && was=1
-	rm -f "$ST_SUB" "$ST_SUB.bak" "$ST_SUB.map" "$ST_SUB_NODES" "$ST_SUB_NODES.meta" "$ST_SUB_NODES.hp" "$ST_VDIR/sub.insecure" "$ST_SUB_INFO" "$ST_SUB_URL" "$ST_SUB_TITLE" "$ST_SUB_NODE" "$ST_SUB_FELL" "$ST_SUB_HOME" "$ST_SUB_PING" "$ST_SUB_ORDER" "$ST_SUB_GRP" "$ST_SUB_GRPS" "$ST_SUB_GRPS.chk" "$ST_SUB_GRPS.nojq"
+	rm -f "$ST_SUB" "$ST_SUB.bak" "$ST_SUB.map" "$ST_SUB.map.jt" "$ST_SUB_URL.happ" "$ST_SUB_NODES" "$ST_SUB_NODES.meta" "$ST_SUB_NODES.hp" "$ST_VDIR/sub.insecure" "$ST_SUB_INFO" "$ST_SUB_URL" "$ST_SUB_TITLE" "$ST_SUB_NODE" "$ST_SUB_FELL" "$ST_SUB_HOME" "$ST_SUB_PING" "$ST_SUB_ORDER" "$ST_SUB_GRP" "$ST_SUB_GRPS" "$ST_SUB_GRPS.chk" "$ST_SUB_GRPS.nojq" "$ST_SUB_GRPS.all"
 	[ -n "$ST_SEC" ] || echo warp > "$ST_EXIT"
 	_st_vpn_zone off
 	[ -n "$(_st_sec_with main eval '[ -s "$ST_SUB_URL" ] && echo 1')$(_st_secs_url)" ] || _st_sub_auto_set off >/dev/null
@@ -32375,6 +32783,12 @@ steer_sub_action() {
 			else
 				printf '{"ok":true,"saved":true}\n'
 			fi
+			;;
+		sub_happ)
+			case "$mode" in on|off) ;; *) echo '{"error":"неверное значение"}'; return 1 ;; esac
+			[ -s "$ST_SUB_URL" ] || { echo '{"error":"это работает только для подписки по ссылке"}'; return 1; }
+			if [ "$mode" = on ]; then mkdir -p "$ST_VDIR"; : > "$ST_SUB_URL.happ"; else rm -f "$ST_SUB_URL.happ"; fi
+			job_start steer do_steer_sub_update
 			;;
 		sub_insecure)
 			local was="" t
@@ -32557,6 +32971,37 @@ _st_sub_auto_set() {
 	printf '{"ok":true}\n'
 }
 
+do_steer_engine_ver() {
+	local was rc
+	_st_phase pkgs
+	rm -f "$ST_STOP_FLAG"
+	_st_installed || { echo "ОШИБКА: Steer ещё не установлен"; return 1; }
+	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: настройку ядра steer сейчас ведёт не Zapret Manager"; return 1; }
+	was="$(_stl_pin)"
+	_st_pin_set "$1"
+	[ "$1" = latest ] && rm -f "$STL_CACHE" "$JOBS_DIR/steer.latest.try"
+	_ensure_deps
+	STL_SWITCH=1; _st_install_steer; rc=$?
+	if [ "$rc" != 0 ]; then
+		if [ -n "$was" ]; then _st_pin_set legacy; else _st_pin_set latest; fi
+		# Прежнее ядро уже снято, а новое не встало — ставим прежнее обратно, чтобы Steer не остался без ядра
+		if ! stl_present; then
+			_rb_warn "Новое ядро steer не встало — возвращаем прежнее"
+			_st_install_steer || echo "!! Ядро steer не встало — переустановите Steer, когда появится интернет"
+		fi
+		STL_SWITCH=""
+		stl_present && [ ! -f "$ST_OFF" ] && _st_work && _st_apply >/dev/null 2>&1
+		return 1
+	fi
+	STL_SWITCH=""
+	if [ ! -f "$ST_OFF" ] && _st_work; then
+		_st_phase rules
+		_st_apply || return 1
+	fi
+	if [ "$1" = legacy ]; then _rb_say "Готово: ядро steer $(stl_version), версия закреплена — обновлений не будет"
+	else _rb_say "Готово: ядро steer $(stl_version) — обновления панель найдёт сама"; fi
+}
+
 do_steer_engine() {
 	_st_phase pkgs
 	rm -f "$ST_STOP_FLAG"
@@ -32581,13 +33026,13 @@ do_steer_sub_exit_vpn() {
 _st_nodes_json() {
 	awk -F'\t' -v meta="$ST_SUB_NODES.meta" '
 		function j(s,    o, i, c, n) { o = ""; n = length(s); for (i = 1; i <= n; i++) { c = substr(s, i, 1); if (c == "\\") o = o "\\\\"; else if (c == "\"") o = o "\\\""; else if (c < " ") o = o " "; else o = o c } return o }
-		BEGIN { while ((getline l < meta) > 0) { if (l ~ /^skipped=/) sk = substr(l, 9); if (l ~ /^reasons=/) rs = substr(l, 9) }; printf "{\"nodes\":[" }
+		BEGIN { while ((getline l < meta) > 0) { if (l ~ /^skipped=/) sk = substr(l, 9); if (l ~ /^reasons=/) rs = substr(l, 9); if (l ~ /^fail=/) fl = substr(l, 6); if (l ~ /^nomod=/) nm = substr(l, 7) }; printf "{\"nodes\":[" }
 		{ printf "%s{\"index\":%d,\"name\":\"%s\",\"proto\":\"%s\",\"type\":\"%s\",\"security\":\"%s\",\"vision\":%s}", (NR > 1 ? "," : ""), $1, j($5), $2, j($6), j($7), ($8 == 1 ? "true" : "false") }
-		END { printf "],\"usable\":%d,\"skipped\":%d,\"skipped_reasons\":%s}", NR, sk + 0, (rs == "" ? "[]" : rs) }' "$1"
+		END { printf "],\"usable\":%d,\"skipped\":%d,\"skipped_reasons\":%s,\"fail\":%s,\"nomod\":%s}", NR, sk + 0, (rs == "" ? "[]" : rs), (fl == "" ? "[]" : fl), (nm == "" ? "[]" : nm) }' "$1"
 }
 
 steer_sub_status() {
-	local has=false kind="" url="" title="" ext=false vexit=warp node="" up="" down="" total="" expire="" list=null vpn=null mt=0 hidden="" t stubs="" grps="[]" grp="" nojq=false
+	local has=false kind="" url="" title="" ext=false vexit=warp node="" up="" down="" total="" expire="" list=null vpn=null mt=0 hidden="" t stubs="" grps="[]" grp="" nojq=false miss=""
 	_st_vpn_ok && ext=true
 	vexit="$(_st_exit)"
 	if [ -s "$ST_SUB" ]; then
@@ -32606,6 +33051,7 @@ steer_sub_status() {
 			hidden="$(cut -f1,5 "$t" | _zm_excl_hits "$ST_SUB_EXCL" "$ST_SUB_HIDE" | tr '\n' ',' | sed 's/,$//')"
 			stubs="$(_st_stub_ids "$t" | tr '\n' ',' | sed 's/,$//')"
 			grps="$(_st_grps_json "$t")"
+			miss="$(_st_happ_miss "$t")"
 		fi
 		node="$(cat "$ST_SUB_NODE" 2>/dev/null)"
 		grp="$(_st_grp_cur)"
@@ -32623,7 +33069,8 @@ steer_sub_status() {
 		"$(_st_lat_mode)" "$([ -s "$ST_SUB_PING" ] && awk -F'\t' -v q='"' 'function j(s,    o, i, c, n) { o = ""; n = length(s); for (i = 1; i <= n; i++) { c = substr(s, i, 1); if (c == "\\") o = o "\\\\"; else if (c == "\"") o = o "\\\""; else if (c < " ") o = o " "; else o = o c } return o } $3 == "b" { n = j($1); printf "%s%s%s%s", (c++ ? "," : ""), q, n, q }' "$ST_SUB_PING")" \
 		"$([ -s "$ST_SUB_PING" ] && awk -F'\t' -v q='"' 'function j(s,    o, i, c, n) { o = ""; n = length(s); for (i = 1; i <= n; i++) { c = substr(s, i, 1); if (c == "\\") o = o "\\\\"; else if (c == "\"") o = o "\\\""; else if (c < " ") o = o " "; else o = o c } return o } $3 == "t" { n = j($1); printf "%s%s%s%s", (c++ ? "," : ""), q, n, q }' "$ST_SUB_PING")" \
 		"$(esc "$(head -n1 "$ST_SUB_HOME" 2>/dev/null)")" "$(_st_node_pol)" | sed '$ s/}$//'
-	printf ',"group":"%s","groups":%s,"stubs":[%s],"grp_nojq":%s,"insecure":%s}\n' "$(esc "$grp")" "$grps" "$stubs" "$nojq" "$(_stl_insec "$ST_SUB" && echo true || echo false)"
+	printf ',"group":"%s","groups":%s,"stubs":[%s],"miss":[%s],"grp_nojq":%s,"insecure":%s,"happ":%s,"nopq":{"mode":"%s","auto":"%s","on":%s}}\n' "$(esc "$grp")" "$grps" "$stubs" "$miss" "$nojq" "$(_stl_insec "$ST_SUB" && echo true || echo false)" "$([ -f "$ST_SUB_URL.happ" ] && echo true || echo false)" \
+		"$(_st_nopq_mode)" "$(esc "$(head -n1 "$ST_NOPQ_AUTO" 2>/dev/null)")" "$(_st_nopq_have && echo true || echo false)"
 }
 
 _st_hp_build() {
@@ -33150,7 +33597,8 @@ do_steer_ping() {
 }
 
 steer_sub_probe() {
-	local out t p f
+	local out t p f deep="" o2 w2 left
+	case "$1" in *:d) deep=1; set -- "${1%:d}" ;; esac
 	case "$1" in ''|*[!0-9]*) echo '{"ok":false,"error":"неверный номер узла"}'; return 1 ;; esac
 	[ -s "$ST_SUB" ] && _st_vpn_ok && t="$(_st_nodes)" || { echo '{"ok":false,"error":"подписки нет"}'; return 1; }
 	set -- $(awk -F'\t' -v g="$1" '$1 == g { print $2, $4; exit }' "$t")
@@ -33160,6 +33608,22 @@ steer_sub_probe() {
 	[ -n "$(_st_over_dev)" ] && { echo '{"ok":false,"over":true,"error":"секция выходит через подложку — проверяется только соединение с сервером"}'; return 0; }
 	t="$(date +%s)"
 	out="$(stl_probe "$ST_SUB" "$p" "$f" 17)"
+	# Длинный (постквантовый) ClientHello не дошёл, и повтор коротким тоже. Отдельная проба только коротким
+	# говорит, что именно не так: провайдер режет длинный и после него ненадолго закрывает сервер (короткий
+	# сам по себе проходит), сервер не принимает короткий (новый REALITY) или сервер закрыт целиком
+	if [ -n "$deep" ] && [ "$p" != hysteria2 ] && [ ! -f "$ST_NOPQ_ON" ] && printf '%s' "$out" | grep -q '"ok":false' && printf '%s' "$out" | grep -q 'ClientHello'; then
+		left=$((27 - ($(date +%s) - t))); [ "$left" -gt 12 ] && left=12
+		if [ "$left" -ge 5 ]; then
+			o2="$(export STEER_NOPQ=1; stl_probe "$ST_SUB" "$p" "$f" "$left")"
+			if [ "$(printf '%s' "$o2" | jsonfilter -e '@.results[0].ok' 2>/dev/null)" = true ]; then
+				out="${out%\}},\"nopq\":{\"ok\":true}}"
+			else
+				w2="$(printf '%s' "$o2" | jsonfilter -e '@.results[0].why' 2>/dev/null)"
+				[ -n "$w2" ] || w2="$(printf '%s' "$o2" | jsonfilter -e '@.error' 2>/dev/null)"
+				out="${out%\}},\"nopq\":{\"ok\":false,\"why\":\"$(esc "$w2")\"}}"
+			fi
+		fi
+	fi
 	case "$out" in
 		'{'*) printf '%s\n' "$out" ;;
 		*) if [ $(( $(date +%s) - t )) -ge 16 ]; then echo '{"ok":false,"slow":true,"error":"узел не ответил за 17 секунд"}'
@@ -35732,7 +36196,7 @@ _si_sites() {
 }
 
 do_sysinfo() {
-	local rel arch model kern up d h m mt mf ft fu fa tt tu sw hw fix t prov rate st zv zs zr tcp udp opt hosts pk sites fkr ok=0 all=0 name v list="$JOBS_DIR/sysinfo.urls" res="$JOBS_DIR/sysinfo.res" out="$SI_OUT.tmp"
+	local str="" rel arch model kern up d h m mt mf ft fu fa tt tu sw hw fix t prov rate st zv zs zr tcp udp opt hosts pk sites fkr ok=0 all=0 name v list="$JOBS_DIR/sysinfo.urls" res="$JOBS_DIR/sysinfo.res" out="$SI_OUT.tmp"
 	echo "==> Собираем данные о роутере"
 	rel="$(. /etc/openwrt_release 2>/dev/null; echo "$DISTRIB_RELEASE")"
 	arch="$(. /etc/openwrt_release 2>/dev/null; echo "$DISTRIB_ARCH")"
@@ -35805,6 +36269,11 @@ do_sysinfo() {
 			echo "   · отчёт Forkozz собрать не удалось — остальное собрано"
 		fi
 	fi
+	str=""
+	if _st_installed 2>/dev/null; then
+		echo "==> Собираем отчёт Steer"
+		str="$(_st_report 2>/dev/null | head -c 60000)"
+	fi
 	echo "==> Смотрим Zapret"
 	st="$(status)"
 	zv="$(jsonfilter -s "$st" -e '@.zapret_version' 2>/dev/null)"
@@ -35842,6 +36311,7 @@ do_sysinfo() {
 		[ -f "$CONF" ] && opt="$(uci -q get zapret.config.NFQWS_OPT 2>/dev/null)"
 		printf ',"strategy":"%s"' "$(esc_ml "$(_si_clean "$opt")")"
 		printf ',"fk_report":"%s"' "$(esc_ml "$(_si_mask "$(_si_clean "$fkr")")")"
+		printf ',"st_report":"%s"' "$(esc_ml "$(_si_mask "$(_si_clean "$str")")")"
 		hosts=""
 		if [ -f "$HOSTS_FILE" ] && ! grep -qE 'geohide\.ru|mafioznik|dns\.malw\.link' "$HOSTS_FILE"; then
 			hosts="$(grep '^#' "$HOSTS_FILE" | cut -c2- | sed 's/^[[:space:]]*//' | grep -v '^$' | while IFS= read -r v; do printf '"%s",' "$(esc "$(_si_clean "$v")")"; done)"
@@ -41349,8 +41819,14 @@ def trimmed:
   tostring | explode
   | (until(length == 0 or .[0] > 32; .[1:])) | (until(length == 0 or .[-1] > 32; .[:-1])) | implode;
 def in_sel($sel): .tag as $t | ($sel | length) == 0 or any($sel[]; ($t | tostring) | startswith(.));
+def nobal: ((.routing.balancers // []) | if type == "array" then length else 0 end) == 0;
 
 (if type == "array" then . else [.] end)
+| ([ .[] | select(type == "object") | select(nobal)
+    | (.remarks // "" | trimmed) as $name
+    | select($name != "")
+    | { name: $name, k: ([ (.outbounds // [])[] | usable | member | "\(.p)|\(.h)|\(.port)" ] | unique) }
+    | select((.k | length) > 0) ]) as $all
 | [ .[] | select(type == "object")
     | ((.routing.balancers // []) | if type == "array" then . else [] end) as $bal
     | select(($bal | length) > 0)
@@ -41367,7 +41843,7 @@ def in_sel($sel): .tag as $t | ($sel | length) == 0 or any($sel[]; ($t | tostrin
     | (if .seen[$n] then $n + " · " + ((.seen[$n] + 1) | tostring) else $n end) as $nn
     | .seen[$n] = ((.seen[$n] // 0) + 1)
     | .out += [ $g | .name = $nn ])
-| { groups: .out }
+| { groups: .out, all: $all }
 ZM_INSTALLER_EOF
 chmod 0644 '/opt/zapret-manager-luci/autogrp.jq'
 cat > '/opt/zapret-manager-luci/autogrp-fk.jq' << 'ZM_INSTALLER_EOF'
@@ -43434,6 +43910,25 @@ function dialog(o) {
 							E('div', {}, [ E('div', { 'class': 'zm-swrow-label' }, x.label), x.hint ? E('div', { 'class': 'zm-hint' + (x.warn ? ' zm-dlg-warn' : '') }, x.hint) : E([]) ])
 						]));
 					});
+				} else if (b.type === 'cards') {
+					// Крупные карточки выбора рядом: заголовок, значок, короткий список. На телефоне — одна под другой
+					if (b.title) body.appendChild(E('div', { 'class': 'zm-dlg-title' }, b.title));
+					body.appendChild(E('div', { 'class': 'zm-dlg-cards' }, (b.options || []).map(function(x) {
+						var on = vals[b.id] === x.id;
+						return E('div', {
+							'class': 'zm-dlg-card' + (on ? ' zm-active' : '') + (x.disabled ? ' zm-dlg-card-off' : '') + (x.tone ? ' zm-dlg-card-' + x.tone : ''),
+							'role': 'radio', 'aria-checked': on ? 'true' : 'false', 'tabindex': x.disabled ? '-1' : '0',
+							'click': function() { if (x.disabled || on) return; vals[b.id] = x.id; draw(); },
+							'keydown': function(ev) { if ((ev.key === 'Enter' || ev.key === ' ') && !x.disabled) { ev.preventDefault(); vals[b.id] = x.id; draw(); } }
+						}, [
+							E('div', { 'class': 'zm-dlg-card-head' }, [
+								E('div', { 'class': 'zm-dlg-card-title' }, [ E('b', {}, x.label), x.sub ? E('span', {}, x.sub) : E([]) ]),
+								E('span', { 'class': 'zm-dlg-card-check' })
+							]),
+							x.badge ? E('span', { 'class': 'zm-dlg-card-badge' }, x.badge) : E([]),
+							E('ul', { 'class': 'zm-dlg-card-list' }, (x.points || []).map(function(t) { return E('li', {}, t); }))
+						]);
+					})));
 				} else if (b.type === 'switch') {
 					body.appendChild(swRow(!!vals[b.id], b.label, b.hint, function() { vals[b.id] = !vals[b.id]; draw(); }, b.disabled));
 				} else if (b.type === 'input') {
@@ -43453,7 +43948,7 @@ function dialog(o) {
 
 		okBtn = E('button', { 'class': 'cbi-button ' + (o.danger ? 'cbi-button-remove' : 'cbi-button-positive'), 'click': function() { if (allowed()) close(vals); } }, o.okText || 'Продолжить');
 		wrap = E('div', { 'class': 'zm-dlg-wrap', 'click': function(ev) { if (ev.target === wrap) close(null); } }, [
-			E('div', { 'class': 'zm-card zm-dlg zmw-modal' }, [
+			E('div', { 'class': 'zm-card zm-dlg zmw-modal' + (o.wide ? ' zm-dlg-wide' : '') }, [
 				E('h3', {}, o.title || ''),
 				o.intro ? E('p', { 'class': 'zm-dlg-intro' }, o.intro) : E([]),
 				body,
@@ -43480,7 +43975,7 @@ function deadNodeDialog(o) {
 	var noun = o.noun || 'узел', app = o.app || 'Steer';
 	var Noun = noun.charAt(0).toUpperCase() + noun.slice(1);
 	var cut = function(t) { t = String(t || ''); return t.length > 26 ? t.slice(0, 25) + '…' : t; };
-	var reason = o.blocked
+	var reason = o.diag ? o.diag : o.blocked
 		? 'Порт ' + (noun === 'узел' ? 'узла' : 'сервера') + ' открыт, но трафик через него не идёт — похоже, его блокирует провайдер.'
 		: Noun + ' не ответил на проверку — он выключен, перегружен или недоступен из вашей сети.';
 	if (o.why) reason += '\nПричина: ' + o.why;
@@ -48145,7 +48640,7 @@ var PHASE_TEXT = {
 };
 
 var STEER_TABS = [ { id: 'conn', label: 'Подключение' }, { id: 'svc', label: 'Сервисы' }, { id: 'dev', label: 'Устройства' }, { id: 'byp', label: 'Исключения', common: true }, { id: 'set', label: 'Настройки', common: true } ];
-var SEC_BOUND = { sub_noauto: 1, lists: 1, devs_set: 1, sub_status: 1, sub_probe: 1, sub_tcp: 1, lat_mode: 1, node_pol: 1, sub_home: 1, sub_links_get: 1, sub_set: 1, sub_links: 1, sub_update: 1, sub_remove: 1, sub_node: 1, sub_group: 1, sub_filter: 1, sub_hide: 1, sub_pick: 1, sub_ping: 1, sub_insecure: 1 };
+var SEC_BOUND = { sub_noauto: 1, lists: 1, devs_set: 1, sub_status: 1, sub_probe: 1, sub_tcp: 1, lat_mode: 1, node_pol: 1, sub_home: 1, sub_links_get: 1, sub_set: 1, sub_links: 1, sub_update: 1, sub_remove: 1, sub_node: 1, sub_group: 1, sub_filter: 1, sub_hide: 1, sub_pick: 1, sub_ping: 1, sub_insecure: 1, sub_happ: 1 };
 
 function latClass(ms) {
 	if (!(ms > 0)) return 'zm-lat-none';
@@ -48434,6 +48929,7 @@ return view.extend({
 			else if (/^sub_/.test(lastAction)) msg = 'Готово';
 			else if (lastAction === 'devs_set') msg = 'Готово, выбор устройств применён';
 			else if (lastAction === 'engine') msg = 'Движок Steer обновлён';
+			else if (lastAction === 'engine_ver') msg = 'Версия ядра steer сменена';
 			else if (lastAction === 'lists_bg') msg = 'Готово, свежие списки работают';
 			else if (lastAction === 'sec_kind') msg = 'Подключение секции «' + secName(secCur) + '» применено';
 			else if (lastAction === 'sec_del') msg = 'Секция удалена';
@@ -48504,9 +49000,31 @@ return view.extend({
 				lastAction = action;
 				data.running = true;
 				setTimeout(function() { try { logEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch (e) {} }, 50);
-				data.phase = action === 'install' ? 'pkgs' : action === 'remove' ? 'remove' : /^(warp_|ext_)/.test(action) ? 'warp' : /^sub_/.test(action) ? 'sub' : action === 'engine' ? 'pkgs' : 'rules';
+				data.phase = action === 'install' ? 'pkgs' : action === 'remove' ? 'remove' : /^(warp_|ext_)/.test(action) ? 'warp' : /^sub_/.test(action) ? 'sub' : action === 'engine' || action === 'engine_ver' ? 'pkgs' : 'rules';
 				follow();
 			}).catch(function() { if (done) done(false); zm.toast('Роутер не ответил', 'error'); });
+		}
+
+		// Выбор версии ядра steer: при установке и потом — «Сменить версию». 2.0.5 закрепляется без обновлений
+		function engineDlg(sw) {
+			var leg = String(data.legacy || '2.0.5'), cur = String(data.version || ''), pinned = !!data.pin;
+			var nv = data.newest && data.newest !== leg ? String(data.newest) : '';
+			var isLeg = sw && pinned, isNew = sw && !pinned;
+			return zm.dialog({
+				wide: true,
+				title: sw ? 'Сменить версию ядра steer' : 'Какое ядро steer поставить?',
+				intro: sw ? 'Сейчас стоит ' + (cur || '—') + (pinned ? ', версия закреплена.' : '.') : 'Выбор можно поменять потом — кнопкой «Сменить версию» в карточке Steer.',
+				blocks: [
+					{ type: 'cards', id: 'v', value: sw ? (pinned ? 'latest' : 'legacy') : 'latest', options: [
+						{ id: 'latest', label: 'Последняя', sub: isNew ? 'стоит сейчас · ' + cur : nv ? 'версия ' + nv : 'новая версия', badge: isNew ? 'Стоит сейчас' : 'Рекомендуем', disabled: isNew,
+							points: [ 'Все возможности панели и свежие исправления', 'Протоколы ставятся плагинами — меньше места', 'Панель сама находит обновления' ] },
+						{ id: 'legacy', label: 'Steer ' + leg, sub: isLeg ? 'стоит сейчас' : 'прежняя версия', badge: isLeg ? 'Стоит сейчас' : 'Без обновлений', tone: 'warn', disabled: isLeg,
+							points: [ 'Версия до перехода на плагины', 'Закрепляется — обновлений не будет', 'Нет «Торренты», «QUIC» и исправлений\u00a02.1' ] }
+					] },
+					sw ? { type: 'note', text: 'Ядро снимется и встанет начисто — минута-две без туннеля. Подписка, сервисы и настройки Steer сохранятся.' } : null
+				],
+				okText: sw ? 'Сменить' : 'Установить'
+			}).then(function(v) { return v && v.v ? v.v : null; });
 		}
 
 		function warpUsers() { return secIds().filter(function(id) { return id === 'main' ? data.exit !== 'vpn' && data.exit !== 'iface' : (secObj(id) || {}).kind === 'warp'; }); }
@@ -48946,7 +49464,7 @@ return view.extend({
 			setCard.appendChild(E('p', { 'class': 'zm-hint' }, ct
 				? 'Адрес сервиса остаётся в туннеле не меньше ' + (ct >= 3600 ? 'часа' : ct / 60 + ' минут') + ' после DNS-ответа. Помогает, если приложение (Instagram, YouTube) подвисает раз в минуту: оно держит адрес дольше, чем живёт DNS-ответ, и уходило мимо туннеля.'
 				: 'Адрес сервиса живёт в туннеле столько, сколько разрешает DNS-ответ (часто минуту). Если приложение подвисает — поставьте 5 или 15 минут.'));
-			var v21 = !data.version || !verLt(String(data.version), '2.1.0'), need = v21 ? '' : ' Нужно ядро steer 2.1 — обновите его в карточке ядра.';
+			var v21 = !data.version || !verLt(String(data.version), '2.1.0'), need = v21 ? '' : data.pin ? ' В закреплённом ядре steer ' + data.version + ' этого нет — есть в последней версии («Сменить версию» в карточке Steer).' : ' Нужно ядро steer 2.1 — обновите его в карточке ядра.';
 			var tor = data.torrent || 'allow';
 			setCard.appendChild(seg('Торренты', [
 				[ tor === 'allow', 'Как весь трафик', function() { if (v21) act('torrent', 'allow', 'Торренты идут так же, как остальной трафик'); } ],
@@ -49017,7 +49535,7 @@ return view.extend({
 					info('Исключения', nd ? nd + ' ' + plural(nd, 'адрес', 'адреса', 'адресов') : 'нет'),
 					info('Мимо Steer', nb ? nb + ' ' + plural(nb, 'устройство', 'устройства', 'устройств') : 'нет устройств'),
 					data.doh ? info('Шифрованный DNS', DOHN[data.doh] || data.doh) : E([]),
-					info('Ядро steer', (data.version || '—') + (!data.ext && data.version ? ' · нужно обновить' : ''))
+					info('Ядро steer', (data.version || '—') + (data.pin ? ' · закреплена' : '') + (!data.ext && data.version ? ' · ' + (data.pin ? 'нужны модули' : 'нужно обновить') : ''))
 				])
 			]);
 		}
@@ -49080,7 +49598,10 @@ return view.extend({
 					])));
 				}
 				var newer = data.latest && data.version && verLt(data.version, data.latest);
-				mainCard.appendChild(row('Версия Steer', E('span', {}, (data.version || '—') + (newer ? ' · доступна ' + data.latest : (!data.ext && data.version ? ' · ядро нужно обновить' : '')))));
+				mainCard.appendChild(row('Версия Steer', E('span', { 'style': 'display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap' }, [
+					E('span', {}, (data.version || '—') + (newer ? ' · доступна ' + data.latest : (!data.ext && data.version ? ' · ' + (data.pin ? 'нужны модули' : 'ядро нужно обновить') : ''))),
+					data.pin ? badge('zm-warn', 'закреплена · без обновлений') : E([])
+				])));
 			}
 
 			if (busy) {
@@ -49098,7 +49619,9 @@ return view.extend({
 			if (!data.installed) {
 				mainCard.appendChild(E('div', { 'class': 'zm-actions' }, [
 					E('button', { 'class': 'cbi-button cbi-button-positive', 'click': function() {
-						act('install', '', 'Устанавливаем Steer — это займёт пару минут');
+						engineDlg(false).then(function(v) {
+							if (v) act('install', v, v === 'legacy' ? 'Устанавливаем Steer ' + (data.legacy || '2.0.5') + ' — это займёт пару минут' : 'Устанавливаем Steer — это займёт пару минут');
+						});
 					} }, 'Установить')
 				]));
 				mainCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Ставится ядро steer — около минуты. Потом во вкладке «Подключение» выберите, через что пускать сервисы: VPN или WARP.'));
@@ -49115,7 +49638,12 @@ return view.extend({
 				});
 			}
 			if ((data.latest && data.version && verLt(data.version, data.latest)) || (data.version && !data.ext))
-				actions.push(E('button', { 'class': 'cbi-button cbi-button-action', 'click': function() { act('engine', '', 'Обновляем движок Steer'); } }, 'Обновить движок'));
+				actions.push(E('button', { 'class': 'cbi-button cbi-button-action', 'click': function() { act('engine', '', data.pin ? 'Ставим модули ядра steer' : 'Обновляем движок Steer'); } }, data.pin ? 'Поставить модули' : 'Обновить движок'));
+			actions.push(E('button', { 'class': 'cbi-button', 'title': 'Последняя версия с обновлениями или ' + (data.legacy || '2.0.5') + ' без обновлений', 'click': function() {
+				engineDlg(true).then(function(v) {
+					if (v) act('engine_ver', v, v === 'legacy' ? 'Меняем ядро на steer ' + (data.legacy || '2.0.5') : 'Ставим последнюю версию ядра steer');
+				});
+			} }, 'Сменить версию'));
 			actions.push(E('button', { 'class': 'cbi-button cbi-button-remove', 'click': function() {
 				zm.dialog({ title: 'Удалить Steer?', danger: true, okText: 'Удалить Steer',
 					blocks: [ { type: 'list', title: 'Что произойдёт', items: [
@@ -50564,9 +51092,49 @@ return view.extend({
 			});
 			return best;
 		}
+		// Что значит «не ответил на ClientHello»: по второй пробе только коротким Hello (sub_probe N:d)
+		// Почему узлов в списке меньше, чем в подписке: модуль протокола не стоит или не ответил, ядро пропустило
+		// узлы (с причиной, числом и примером), провайдер отдал Steer не все серверы, что есть в ответе для Happ
+		function subNotInList(sk) {
+			var L = subData.list || {}, out = [], PN = { hysteria2: 'Hysteria2', proxy: 'Trojan, Shadowsocks, VMess, SOCKS и HTTP', vless: 'VLESS' };
+			var warn = function(kids) { return E('div', { 'class': 'zm-dlg-note zm-dlg-note-warn', 'style': 'margin:10px 0 0' }, kids); };
+			var nomod = (L.nomod || []).map(function(m) { return PN[m] || m; });
+			if (nomod.length) out.push(warn([ E('b', {}, 'Не все узлы в списке. '), 'В подписке есть узлы ' + nomod.join(', ') + ', а модуля ядра steer для них нет. Нажмите «Обновить» у подписки — панель поставит модуль сама.' ]));
+			var fl = (L.fail || []).map(function(f) { return (PN[f.mod] || f.mod) + (f.error ? ' (' + f.error + ')' : ''); });
+			if (fl.length) out.push(warn([ E('b', {}, 'Не все узлы в списке. '), 'Ядро steer не прочитало узлы ' + fl.join(', ') + '. Панель повторит через 5 минут; если не пройдёт — переустановите Steer.' ]));
+			var miss = subData.miss || [];
+			if (miss.length && !subData.happ) out.push(warn([ E('b', {}, 'Провайдер отдал Steer не все серверы. '), 'В подписке для Happ есть ' + miss.map(function(x) { return '«' + x + '»'; }).join(', ') +
+				', а в ответе для Steer их нет — панель провайдера отдаёт разным приложениям разный набор серверов.',
+				E('div', { 'class': 'zm-actions', 'style': 'margin:8px 0 0' }, [ E('button', { 'class': 'cbi-button cbi-button-action', 'disabled': busy ? '' : null, 'click': function() {
+					act('sub_happ', 'on', 'Берём узлы как у Happ');
+				} }, 'Брать узлы как у Happ') ]) ]));
+			if (subData.happ) out.push(E('div', { 'class': 'zm-hint', 'style': 'display:flex; align-items:center; gap:10px; flex-wrap:wrap' }, [
+				E('span', {}, 'Узлы берутся как у Happ — подписка качается в том виде, в каком её получает приложение Happ.' + (miss.length ? ' Не нашлись: ' + miss.join(', ') + '.' : '')),
+				E('button', { 'class': 'cbi-button', 'disabled': busy ? '' : null, 'click': function() { act('sub_happ', 'off', 'Возвращаем обычную подписку'); } }, 'Как обычно') ]));
+			if (L.skipped > 0) {
+				var items = sk.map(function(r) {
+					return E('li', {}, [ String(r.reason || 'без причины'), r.count > 0 ? ' — ' + r.count + ' ' + plural(r.count, 'узел', 'узла', 'узлов') : '', r.example ? E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, ', например «' + r.example + '»') : '' ]);
+				});
+				out.push(E('div', { 'class': 'zm-hint' }, [ 'Пропущено узлов: ' + L.skipped + (items.length ? ':' : '.'),
+					items.length ? E('ul', { 'style': 'margin:4px 0 4px 18px; padding:0' }, items) : '',
+					'Steer умеет VLESS, Hysteria2, Trojan, Shadowsocks, VMess, SOCKS и HTTP; TUIC, AnyTLS и WireGuard из подписки он не берёт.' ]));
+			}
+			var st = (subData.stubs || []).length;
+			if (st && (subData.groups || []).length) out.push(E('p', { 'class': 'zm-hint' }, 'Не показаны ' + st + ' ' + plural(st, 'строка', 'строки', 'строк') + ' подписки с именами групп АВТО — это не серверы, а заглушки для приложений без групп. Группы — в режиме «Группа АВТО».'));
+			return out;
+		}
+		function helloDiag(l) {
+			var w = String((l && l.why) || ''), np = l && l.nopq;
+			if (!/ClientHello/.test(w)) return '';
+			if (np && np.ok) return 'Сервер отвечает только на короткий ClientHello: длинный — с постквантовым обменом, как у Chrome и Happ — провайдер роутера обрывает и после этого ненадолго закрывает сервер. Включите «ClientHello: Авто» в настройках подписки — Steer перейдёт на короткий сам.';
+			if (np && /не признал ключ/.test(np.why || '')) return 'Сервер доступен, но длинный ClientHello до него не доходит — его обрывает провайдер роутера, а короткий этот сервер не принимает (так настроены новые серверы REALITY).';
+			if (np) return 'Порт открыт, но с роутера сервер не ответил на TLS-рукопожатие — ни на длинный ClientHello, ни на короткий. Чаще всего так провайдер роутера закрывает сервер по имени (SNI). Если этот узел работает в Happ через этот же Wi-Fi, Happ обходит блокировку — например, фрагментацией.';
+			return 'Порт открыт, но с роутера сервер не ответил на TLS-рукопожатие (ClientHello). Чаще всего так провайдер закрывает сервер по имени (SNI); в Happ на телефоне узел может работать через мобильную сеть или с фрагментацией.';
+		}
 		function askDead(n, l) {
 			var b = bestNode([ n.name, subData.node || '' ]);
-			zm.deadNodeDialog({ noun: 'узел', app: 'Steer', name: n.name, blocked: !!(l && l.blocked), why: l && l.why, pol: subData.node_pol,
+			var np = l && l.nopq, why = l && l.why ? String(l.why) + (np && !np.ok && np.why ? '; коротким: ' + np.why : '') : '';
+			zm.deadNodeDialog({ noun: 'узел', app: 'Steer', name: n.name, blocked: !!(l && l.blocked), why: why, diag: helloDiag(l), pol: subData.node_pol,
 				failText: data.onfail === 'drop' ? 'выбранные сервисы будут остановлены' : 'выбранные сервисы пойдут напрямую, через провайдера',
 				best: b, autoText: subData.node ? 'Включить «Авто»' : '' }).then(function(v) {
 				if (v === 'best') { if (b) subAct('sub_node', b.name, 'Выбираем узел ' + b.name); else subAct('sub_node', '', 'Выбираем узел автоматически'); }
@@ -50590,11 +51158,11 @@ return view.extend({
 			var l = nodeLat(n);
 			if (l && !l.busy && !l.pend && !l.ok && !l.router) { askDead(n, l); return; }
 			picking = true;
-			var bt = zm.busyToast('Проверяем узел «' + n.name + '»', 'запрос через узел — до 10 секунд'), g = secGen;
+			var bt = zm.busyToast('Проверяем узел «' + n.name + '»', 'запрос через узел — обычно до 10 секунд'), g = secGen;
 			var go = function() { subAct('sub_node', n.name, 'Выбираем узел ' + n.name); };
 			Promise.all([
 				stA('sub_tcp', String(n.index)).catch(function() { return null; }),
-				stA('sub_probe', String(n.index)).catch(function() { return null; })
+				stA('sub_probe', String(n.index) + ':d').catch(function() { return null; })
 			]).then(function(rr) {
 				picking = false; bt.close();
 				if (g !== secGen) return;
@@ -50602,7 +51170,17 @@ return view.extend({
 				if (!r && rr[1] && rr[1].over && t && t.ok === false) { lat[n.index] = { ok: false, why: 'нет соединения с сервером через подложку' }; renderSub(); askDead(n, lat[n.index]); return; }
 				if (!r) { go(); return; }
 				if (r.ok) { lat[n.index] = { ok: true, ms: r.ttfb_ms > 0 ? r.ttfb_ms : r.handshake_ms, why: r.why, tcp: t && t.ok ? t.ms : 0 }; renderSub(); go(); return; }
-				lat[n.index] = t && t.ok ? { ok: false, blocked: true, tcp: t.ms, why: r.why || '' } : { ok: false, why: r.why || '' };
+				var np = rr[1].nopq || null;
+				if (np && np.ok && (subData.nopq || {}).mode !== 'off') {
+					lat[n.index] = { ok: true, ms: t && t.ok ? t.ms : 0, why: 'пускает только с коротким ClientHello', tcp: t && t.ok ? t.ms : 0 };
+					renderSub();
+					stA('nopq_auto', n.name).catch(function() { return null; }).then(function() {
+						zm.toast('Узел «' + n.name + '» пускает только с коротким ClientHello — Steer переключится на него', 'info');
+						go();
+					});
+					return;
+				}
+				lat[n.index] = t && t.ok ? { ok: false, blocked: true, tcp: t.ms, why: r.why || '', nopq: np } : { ok: false, why: r.why || '', nopq: np };
 				renderSub();
 				askDead(n, lat[n.index]);
 			});
@@ -50869,6 +51447,21 @@ return view.extend({
 						? 'Если выбранный вручную узел перестал отвечать, Steer переходит на рабочий и остаётся на нём. Вернуться — нажать на узел в списке.'
 						: 'Если выбранный вручную узел перестал отвечать, Steer переходит на рабочий, а выбранный проверяет раз в 10 минут и возвращается на него, как только он ответит. Перед выбором узел проверяется.'));
 			}
+			if (!hideMode && nodes.length) {
+				var nq = subData.nopq || {}, NQ = [ { id: 'auto', label: 'Авто' }, { id: 'on', label: 'Всегда короткий' }, { id: 'off', label: 'Обычный' } ];
+				subCard.appendChild(row('ClientHello', E('div', { 'class': 'zm-seg' }, NQ.map(function(o) {
+					return E('div', { 'class': 'zm-seg-item' + ((nq.mode || 'auto') === o.id ? ' zm-active' : ''), 'click': function() {
+						if ((nq.mode || 'auto') === o.id || busy) return;
+						subAct('nopq', o.id, o.id === 'on' ? 'Включаем короткий ClientHello' : o.id === 'off' ? 'Возвращаем обычный ClientHello' : 'ClientHello: Авто');
+					} }, o.label);
+				}))));
+				subCard.appendChild(E('p', { 'class': 'zm-hint' }, nq.mode === 'on'
+					? 'Steer шлёт короткий ClientHello, без постквантового обмена, — его реже обрывает провайдер. Новые серверы REALITY, которым нужен постквантовый обмен, с ним не работают.'
+					: nq.mode === 'off'
+						? 'Steer всегда шлёт обычный ClientHello, как Chrome, — с постквантовым обменом.'
+						: nq.auto ? 'Сейчас короткий: узел «' + nq.auto + '» пускает только с ним. Обычный — с постквантовым обменом, как у Chrome — провайдер к нему обрывает.'
+							: 'Steer шлёт обычный ClientHello, как Chrome. Если проверка узла покажет, что провайдер обрывает его, а короткий проходит, панель включит короткий сама.'));
+			}
 			var grid = E('div', { 'class': 'zm-nodes' });
 			if (subData.node) manualView = false;
 			var gmode = subData.node || (manualView && grps.length) ? 'manual' : curGrp ? 'group' : 'auto';
@@ -50895,7 +51488,9 @@ return view.extend({
 					})));
 					if (liveName) subCard.appendChild(row('Сейчас', E('span', { 'style': 'display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap' }, [
 						E('b', {}, [ liveName ]),
-						gmode === 'auto' && isPing && subData.order_head ? E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'первым по пингу — ' + subData.order_head) : E([])
+						gmode === 'group' ? E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'узел группы «' + curGrp.name + '» — его выбрала сама группа')
+							: gmode === 'manual' && subData.node ? E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, subData.node === liveName ? 'закреплён вручную' : 'закреплённый «' + subData.node + '» не отвечает — Steer временно на этом')
+							: gmode === 'auto' && isPing && subData.order_head ? E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, 'первым по пингу — ' + subData.order_head) : E([])
 					])));
 				}
 			} else {
@@ -50922,7 +51517,9 @@ return view.extend({
 				else if (l && l.inUse) { txt = 'в работе'; cls = 'zm-lat-good';
 					ttl = 'Через этот узел сейчас идёт трафик туннеля — узел работает. Разовая проверка с роутера не прошла' + (l.why ? ' (' + l.why + ')' : '') + ': так бывает, когда роутер занят или узел медленно отвечает на служебный запрос'; }
 				else if (l && l.blocked) { txt = 'порт открыт, не\u00a0пускает'; cls = 'zm-lat-blk'; dead = true;
-					ttl = 'Порт узла открыт' + (l.tcp > 0 ? ' (TCP ' + l.tcp + ' мс)' : '') + ', но запрос через узел не прошёл — скорее всего, узел блокирует провайдер' + (l.why ? ' (' + l.why + ')' : ''); }
+					ttl = 'Порт узла открыт' + (l.tcp > 0 ? ' (TCP ' + l.tcp + ' мс)' : '') + (/ClientHello/.test(l.why || '')
+						? ', но на TLS-рукопожатие с роутера узел не ответил — чаще всего так провайдер закрывает сервер по имени (SNI). Нажмите на узел — панель проверит подробнее'
+						: ', но запрос через узел не прошёл — скорее всего, узел блокирует провайдер' + (l.why ? ' (' + l.why + ')' : '')); }
 				else if (l && l.ok && l.tcpOnly && subData.lat_mode !== 'fast') { txt = 'TCP ' + l.ms + ' мс'; }
 				else if (l && l.ok) { txt = l.ms > 0 ? l.ms + ' мс' : '<1 мс'; cls = latClass(l.ms); if (l.tcp > 0) ttl = 'Запрос через узел: ' + l.ms + ' мс · TCP: ' + l.tcp + ' мс'; }
 				else if (l) { txt = 'нет ответа'; cls = 'zm-lat-bad'; dead = true; }
@@ -50932,7 +51529,11 @@ return view.extend({
 				grid.appendChild(nodeCard({
 					name: n.name || 'Узел ' + (ni + 1), foot: foot, lat: txt, latCls: cls, dead: dead, live: live,
 					active: subData.node === n.name, title: ttl, blk: !!(l && l.blocked),
-					click: function() { pickNode(n); }
+					click: function() {
+						if (gmode !== 'group' || busy) { pickNode(n); return; }
+						zm.ask('Закрепить узел «' + n.name + '»?\n\nСейчас узлы выбирает группа «' + curGrp.name + '». Если закрепить узел, Steer будет работать только через него — режим станет «Вручную». Вернуть группу можно кнопкой «Группа АВТО».', { okText: 'Закрепить' })
+							.then(function(ok) { if (ok) pickNode(n); });
+					}
 				}));
 			});
 			if (!hideMode) subCard.appendChild(grid);
@@ -50958,8 +51559,7 @@ return view.extend({
 
 			var sk = subData.list && subData.list.skipped_reasons || [];
 			var skIns = sk.some(function(r) { return /allowInsecure|insecure/i.test(r.reason || ''); });
-			if (subData.list && subData.list.skipped > 0) subCard.appendChild(E('p', { 'class': 'zm-hint' },
-				[ 'Пропущено узлов: ' + subData.list.skipped + (sk.length ? ' — ' + sk.map(function(r) { return r.reason; }).slice(0, 2).join('; ') : '') + '. Steer умеет VLESS, Hysteria2, Trojan, Shadowsocks, VMess, SOCKS или HTTP; TUIC, AnyTLS и WireGuard из подписки он не берёт.' ]));
+			if (!hideMode) subNotInList(sk).forEach(function(x) { subCard.appendChild(x); });
 			if (subData.insecure || skIns) subCard.appendChild(zm.swRow(!!subData.insecure, 'Узлы без проверки сертификата',
 				subData.insecure ? 'Включено: узлы, у которых в подписке стоит allowInsecure, работают. Сертификат таких серверов не проверяется — подменить сервер проще, поэтому включайте, только если доверяете своему VPN.'
 					: 'В подписке есть узлы с allowInsecure — сервер просит не проверять его сертификат. Steer их пропускает. Включите, если доверяете своему VPN: такие узлы появятся в списке.',
@@ -57157,13 +57757,14 @@ html.zm-theme-dark body:not(.zmw-body) .zm-meter-bar { background: rgba(255,255,
 .zm-kv-go:active { transform: none; }
 .zm-kv-go:focus-visible { outline: 2px solid #229ed9; outline-offset: 2px; }
 .zm-kv-go-i { flex: none; line-height: 0; }
-.zm-kv-go small { font-size: 13.5px; font-weight: 500; opacity: .7; }
+.zm-kv-go-out { flex: none; display: inline-flex; line-height: 0; opacity: .8; transition: transform .15s, opacity .15s; }
+.zm-kv-go:hover .zm-kv-go-out { transform: translate(2px, -2px); opacity: 1; }
 .zm-kv-tg { background: #229ed9; border-color: #229ed9; color: #ffffff !important; box-shadow: 0 8px 20px -10px rgba(34,158,217,.8); }
 .zm-kv-tg:hover { background: #1c8cc2; border-color: #1c8cc2; box-shadow: 0 10px 22px -10px rgba(34,158,217,.9); }
-.zm-kv-web { background: #f4f3ff; border-color: #dcd8fb; color: #1e1b4b !important; }
-.zm-kv-web:hover { background: #ebe8ff; border-color: #c9c3f6; }
+.zm-kv-web { background: linear-gradient(135deg, #7c5cff 0%, #5b4bff 55%, #4338ca 100%) border-box; border-color: transparent; color: #ffffff !important; box-shadow: 0 8px 20px -10px rgba(91,75,255,.85); }
+.zm-kv-web:hover { background: linear-gradient(135deg, #6f4dff 0%, #4f3ff0 55%, #3a30b5 100%) border-box; box-shadow: 0 10px 22px -10px rgba(91,75,255,.95); }
 .zm-kv-thx .zm-kv-i svg path { fill: #ef4444; stroke: #e11d48; }
-@media (prefers-reduced-motion: reduce) { .zm-kv-go, .zm-kv-go:hover { transition: none; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .zm-kv-go, .zm-kv-go:hover, .zm-kv-go-out, .zm-kv-go:hover .zm-kv-go-out { transition: none; transform: none; } }
 .zm-kv-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .zm-kv-it { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 14px; background: #f7f6ff; border: 1px solid #e6e3fb; color: #1e1b4b; font-size: 14px; line-height: 1.4; min-width: 0; }
 .zm-kv-i { flex: none; width: 34px; height: 34px; border-radius: 10px; background: #e8e5ff; color: #3C3489; display: flex; align-items: center; justify-content: center; }
@@ -57175,9 +57776,7 @@ html.zm-theme-dark .zm-kv-it { background: rgba(255,255,255,.05); border-color: 
 html.zm-theme-dark .zm-kv-i { background: rgba(155,140,255,.18); color: #b7abff; }
 html.zm-theme-dark .zm-kv-thx { background: rgba(225,29,72,.14); border-color: rgba(225,29,72,.28); color: #ffd6df; }
 html.zm-theme-dark .zm-kv-thx .zm-kv-i { background: rgba(225,29,72,.22); color: #fb7185; }
-html.zm-theme-dark .zm-kv-web { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.14); color: #ffffff !important; }
-html.zm-theme-dark .zm-kv-web:hover { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.22); }
-html.zm-theme-dark .zm-kv-tg { box-shadow: none; }
+html.zm-theme-dark .zm-kv-tg, html.zm-theme-dark .zm-kv-web { box-shadow: none; }
 @media (max-width: 1100px) { .zm-kv-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .zm-kv-grid { grid-template-columns: minmax(0, 1fr); } .zm-kv-h { font-size: 22px; } .zm-kv-cta { grid-template-columns: minmax(0, 1fr); } }
 .zm-sp-count p { margin: 0; font-size: 14.5px; opacity: .8; }
@@ -58763,6 +59362,27 @@ html.zm-theme-dark .zm-ts-steps li::before { color: #58a6ff; }
 .zm-dlg-opt:hover { border-color: rgba(26,163,255,.6); }
 .zm-dlg-opt.zm-active { border-color: #1aa3ff; background: rgba(26,163,255,.08); cursor: default; }
 .zm-dlg-opt.zm-dlg-opt-off { opacity: .5; cursor: not-allowed; }
+.zm-dlg.zm-dlg-wide { max-width: 640px; }
+.zm-dlg-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 4px 0 2px; }
+.zm-dlg-card { position: relative; box-sizing: border-box; display: flex; flex-direction: column; gap: 9px; padding: 15px 16px 14px; border: 1.5px solid rgba(110,118,129,.28); border-radius: 14px; cursor: pointer; outline: none; transition: border-color .15s, background .15s, box-shadow .15s; }
+.zm-dlg-card:hover { border-color: rgba(26,163,255,.55); }
+.zm-dlg-card:focus-visible { box-shadow: 0 0 0 3px rgba(26,163,255,.28); }
+.zm-dlg-card.zm-active { border-color: #1aa3ff; background: rgba(26,163,255,.07); box-shadow: 0 0 0 1px #1aa3ff inset; cursor: default; }
+.zm-dlg-card.zm-dlg-card-off { opacity: .55; cursor: not-allowed; }
+.zm-dlg-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.zm-dlg-card-title { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.zm-dlg-card-title b { font-size: 16px; line-height: 1.25; }
+.zm-dlg-card-title span { font-size: 12.5px; opacity: .7; font-variant-numeric: tabular-nums; }
+.zm-dlg-card-check { flex-shrink: 0; width: 20px; height: 20px; box-sizing: border-box; border-radius: 50%; border: 2px solid rgba(110,118,129,.55); transition: border-color .15s, background .15s; }
+.zm-dlg-card.zm-active .zm-dlg-card-check { border-color: #1aa3ff; background: #1aa3ff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8.3l2.6 2.6L12 5.5' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 14px no-repeat; }
+.zm-dlg-card-badge { align-self: flex-start; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 600; line-height: 1.6; background: rgba(26,163,255,.14); color: #0b7fd1; }
+.zm-dlg-card-warn .zm-dlg-card-badge { background: rgba(191,135,0,.15); color: #9a6700; }
+.zm-dlg-card-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.4; }
+.zm-dlg-card-list li { position: relative; padding-left: 16px; }
+.zm-dlg-card-list li::before { content: ""; position: absolute; left: 2px; top: .55em; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .35; }
+html.zm-theme-dark .zm-dlg-card-badge { color: #58b8ff; }
+html.zm-theme-dark .zm-dlg-card-warn .zm-dlg-card-badge { color: #e3b341; }
+@media (max-width: 560px) { .zm-dlg-cards { grid-template-columns: minmax(0, 1fr); } }
 .zm-dlg-opt .zm-hint { margin: 2px 0 0; }
 .zm-dlg-radio { width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; border: 2px solid rgba(110,118,129,.6); flex-shrink: 0; display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
 .zm-dlg-opt.zm-active .zm-dlg-radio { border-color: #1aa3ff; }
@@ -59498,6 +60118,7 @@ return view.extend({
 			});
 			if (si.strategy) out.push('', '== Стратегия ==', si.strategy);
 			if (si.fk_report) out.push('', '== Отчёт Forkozz ==', si.fk_report);
+			if (si.st_report) out.push('', '== Отчёт Steer ==', si.st_report);
 			if (si.hosts && si.hosts.length) out.push('', '== Домены в hosts ==', si.hosts.join(', '));
 			if (si.packages && si.packages.length) out.push('', '== Пакеты ==', si.packages.join(', '));
 			if (si.sites && si.sites.length) {
@@ -59569,6 +60190,17 @@ return view.extend({
 					E('div', { 'class': 'zm-actions', 'style': 'margin:0 0 8px' }, [ fkBtn ]),
 					fkPre
 				], E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, [ Math.max(1, Math.round(si.fk_report.length / 1024)) + ' КБ' ])));
+			}
+			if (si.st_report) {
+				var stOpen = false, stPre = E('pre', { 'class': 'zm-si-pre zm-si-fk' }, [ si.st_report ]), stBtn = E('button', { 'class': 'cbi-button', 'click': function() {
+					stOpen = !stOpen; stPre.style.display = stOpen ? '' : 'none'; stBtn.textContent = stOpen ? 'Свернуть' : 'Показать';
+				} }, 'Показать');
+				stPre.style.display = 'none';
+				siBody.appendChild(siBox('Отчёт Steer', [
+					E('p', { 'class': 'zm-hint', 'style': 'margin:0 0 8px' }, 'Версия ядра, узлы подписки и группы АВТО, что пропущено и почему, последний замер и журнал Steer — для поддержки. Адреса серверов и ссылки в отчёт не попадают.'),
+					E('div', { 'class': 'zm-actions', 'style': 'margin:0 0 8px' }, [ stBtn ]),
+					stPre
+				], E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, [ Math.max(1, Math.round(si.st_report.length / 1024)) + ' КБ' ])));
 			}
 			if (si.sites && si.sites.length) {
 				var ok = si.sites_ok, all = si.sites_total, cls = ok === all ? 'zm-ok' : ok * 2 >= all ? 'zm-warn' : 'zm-bad';
@@ -61056,10 +61688,12 @@ var SP_KVN_ICO = {
 };
 // Значок Telegram — залитый самолётик
 var SP_TG_ICO = '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M20.7 3.6 2.9 10.5c-1.2.5-1.2 1.2-.2 1.5l4.6 1.4 1.7 5.4c.2.6.1.8.7.8.5 0 .7-.2 1-.5l2.3-2.2 4.7 3.5c.9.5 1.5.2 1.7-.8l3.1-14.6c.3-1.3-.5-1.9-1.8-1.4zM9.4 13.5l9.1-5.7c.4-.3.8-.1.5.2l-7.6 6.9-.3 3.3z"/></svg>';
-function spGo(href, cls, ico, label, sub) {
-	var i = E('span', { 'class': 'zm-kv-go-i' });
+var SP_OUT_ICO = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg>';
+function spGo(href, cls, ico, label, out) {
+	var i = E('span', { 'class': 'zm-kv-go-i' }), a;
 	i.innerHTML = ico;
-	return E('a', { 'class': 'zm-kv-go ' + cls, 'href': href, 'target': '_blank', 'rel': 'noreferrer' }, [ i, E('span', {}, label), sub ? E('small', {}, sub) : E([]) ]);
+	if (out) { a = E('span', { 'class': 'zm-kv-go-out' }); a.innerHTML = SP_OUT_ICO; }
+	return E('a', { 'class': 'zm-kv-go ' + cls, 'href': href, 'target': '_blank', 'rel': 'noreferrer' }, [ i, E('span', {}, label), a || E([]) ]);
 }
 var SP_KVN_F = [
 	[ 'shield', 'Работает даже при жёсткой фильтрации' ],
@@ -61134,7 +61768,7 @@ return view.extend({
 			]),
 			E('div', { 'class': 'zm-kv-cta' }, [
 				spGo(SP_KVN_BOT, 'zm-kv-tg', SP_TG_ICO, 'Подключить в Telegram-боте'),
-				spGo(SP_KVN_SITE, 'zm-kv-web', '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + SP_KVN_ICO.web + '</svg>', 'Сайт', 'stresskvn.lol')
+				spGo(SP_KVN_SITE, 'zm-kv-web', '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + SP_KVN_ICO.web + '</svg>', 'Сайт StressKVN', true)
 			]),
 			E('div', { 'class': 'zm-kv-grid' }, SP_KVN_F.map(function(f) {
 				return E('div', { 'class': 'zm-kv-it' }, [ spIco(f[0], 'zm-kv-i'), E('span', {}, f[1]) ]);
