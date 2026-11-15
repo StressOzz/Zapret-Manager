@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.080
+# Version: 5.081
 ZM_VERSION_EOF
 set -e
 
@@ -5668,7 +5668,12 @@ _doh_provider_of() {
 		https://dns.zapret.moe/*) echo zapretmoe ;;
 		https://d.webshiftvpn.ru/*) echo webshift ;;
 		https://dns.dagami.ru/*) echo dagami ;;
-		https://api.magicdns.ru/*) echo magicdns ;;
+		https://dns.magicdns.ru/*|https://api.magicdns.ru/*) echo magicdns ;;
+		https://tamaev-gifts.xyz/*) echo tamaev ;;
+		https://dns.zombiez.ru/*) echo zombiez ;;
+		https://dns.wlrus.cfd/*) echo wlrus ;;
+		https://api.magicinfo.art/*) echo magicinfo ;;
+		https://w.quic.best/*) echo quicbest ;;
 		https://freedns.controld.com/p0) echo controld ;;
 		https://freedns.controld.com/p1) echo controld_sec ;;
 		https://freedns.controld.com/family) echo controld_fam ;;
@@ -5788,7 +5793,12 @@ _doh_url_of() {
 		zapretmoe)     echo "https://dns.zapret.moe/dns-query" ;;
 		webshift)      echo "https://d.webshiftvpn.ru/dns-query" ;;
 		dagami)        echo "https://dns.dagami.ru/dns-query" ;;
-		magicdns)      echo "https://api.magicdns.ru/sync" ;;
+		magicdns)      echo "https://dns.magicdns.ru/dns-query" ;;
+		tamaev)       echo "https://tamaev-gifts.xyz/dns-query" ;;
+		zombiez)      echo "https://dns.zombiez.ru/dns-query" ;;
+		wlrus)        echo "https://dns.wlrus.cfd/dns-query" ;;
+		magicinfo)    echo "https://api.magicinfo.art/dns-query" ;;
+		quicbest)     echo "https://w.quic.best/dns-query" ;;
 		controld)      echo "https://freedns.controld.com/p0" ;;
 		controld_sec)  echo "https://freedns.controld.com/p1" ;;
 		controld_fam)  echo "https://freedns.controld.com/family" ;;
@@ -5820,6 +5830,7 @@ _doh_name() {
 		controld_sec) echo "Control D · Защита от угроз" ;; controld_fam) echo "Control D · Семейный фильтр" ;; dns4eu_sec) echo "DNS4EU · Защита от угроз" ;; dns4eu_fam) echo "DNS4EU · Семейный фильтр" ;;
 		yandex) echo "Яндекс" ;; yandex_family) echo "Яндекс · Семейный фильтр" ;; yandex_safe) echo "Яндекс · Защита от угроз" ;; geohide_eu) echo "GeoHide EU" ;;
 		geohide_us) echo "GeoHide US" ;; malw) echo MALW ;; zapretmoe) echo zapret.moe ;; webshift) echo WebShift ;; dagami) echo Dagami ;; magicdns) echo MagicDNS ;;
+		tamaev) echo tamaev-gifts.xyz ;; zombiez) echo zombiez.ru ;; wlrus) echo wlrus.cfd ;; magicinfo) echo magicinfo.art ;; quicbest) echo quic.best ;;
 		controld) echo "Control D" ;; dns4eu) echo DNS4EU ;;
 		https://*) _doh_own_title "$1" | grep . || printf '%s' "$1" | sed 's#^https://\([^/]*\).*#\1#' ;; *) echo "$1" ;;
 	esac
@@ -5861,6 +5872,7 @@ _dns_preset_map() {
 		https://dns.bezmezhau.com/*) echo "https://sync.bezmezhau.com/dns-query" ;;
 		dns.bezmezhau.com) echo "sync.bezmezhau.com" ;;
 		https://geohide.ru/*|https://dns.geohide.ru/*) echo "https://dns.comss.one/dns-query" ;;
+		https://api.magicdns.ru/*) echo "https://dns.magicdns.ru/dns-query" ;;
 		*) echo "$1" ;;
 	esac
 }
@@ -13170,7 +13182,7 @@ _fk_dns_migrate() {
 	esac
 	[ -n "$ch" ] || return 1
 	uci -q commit netshift
-	logger -t zapret-manager "$(_fk_name): адреса DNS Comss, Bezmezhau и GeoHide RU обновлены"
+	logger -t zapret-manager "$(_fk_name): адреса DNS обновлены (Comss, Bezmezhau, GeoHide RU, MagicDNS)"
 	return 0
 }
 
@@ -26850,6 +26862,8 @@ doh_watch() {
 	if [ -z "$cur" ]; then rmdir "$lk" 2>/dev/null; return 0; fi
 	pref="$(_doh_fo_get pref "")"
 	[ -n "$pref" ] && _doh_url_of "$pref" >/dev/null || { pref="$cur"; _doh_fo_put pref "$pref"; }
+	# Основной записан ссылкой, а роутер узнаёт в ней встроенный сервер: это один сервер, а не «ушли на запасной»
+	case "$pref" in https://*) [ "$(_doh_provider_of "$pref")" = "$cur" ] && { pref="$cur"; _doh_fo_put pref "$pref"; } ;; esac
 	t="$(_doh_fo_get active "")"
 	if [ -n "$t" ] && [ "$t" != "$cur" ]; then pref="$cur"; _doh_fo_put pref "$cur"; rm -f "$DOH_FO_STATE"; mode=normal; fi
 	_doh_fo_put active "$cur"
@@ -27054,7 +27068,7 @@ _doh_preset_migrate() {
 	if [ "$ch" = 2 ]; then
 		uci -q commit https-dns-proxy
 		[ -f "$DOH_STOP" ] || /etc/init.d/https-dns-proxy restart >/dev/null 2>&1
-		logger -t zapret-manager "DoH: адреса Bezmezhau и GeoHide RU обновлены"
+		logger -t zapret-manager "DoH: адреса серверов обновлены (Bezmezhau, GeoHide RU, MagicDNS)"
 	fi
 	[ -n "$ch" ]
 }
@@ -27070,10 +27084,34 @@ dns_presets_migrate() {
 	printf '{"doh":%s,"forkozz":%s,"hosts":%s}\n' "$d" "$f" "$h"
 }
 
+# Свой сервер, который стал встроенным (новый адрес MagicDNS и т. п.): убираем его из «Своих», а в основном,
+# текущем и цепочке запасных ставим встроенный — иначе автопереключение видит два разных сервера
+_doh_own_dedup() {
+	local u id ch c=""
+	[ -s "$DOH_OWN_FILE" ] || return 1
+	set -f
+	for u in $(_doh_own_urls); do
+		id="$(_doh_provider_of "$u")"; [ -n "$id" ] && [ "$(_doh_url_of "$id")" = "$u" ] || continue
+		_doh_own_drop "$u"; c=1
+		[ -f "$DOH_FO_FILE" ] || continue
+		[ "$(_doh_fo_get pref "")" = "$u" ] && _doh_fo_put pref "$id"
+		[ "$(_doh_fo_get active "")" = "$u" ] && _doh_fo_put active "$id"
+		if grep -q '^chain=' "$DOH_FO_FILE"; then
+			ch="$(_doh_fo_get chain "" | tr ',' '\n' | ZM_U="$u" ZM_I="$id" ZM_P="$(_doh_fo_get pref "")" awk '
+				NF { if ($0 == ENVIRON["ZM_U"]) $0 = ENVIRON["ZM_I"]; if ($0 != ENVIRON["ZM_P"] && !s[$0]++) print }' | tr '\n' ',')"
+			_doh_fo_put chain "${ch%,}"
+		fi
+	done
+	set +f
+	[ -n "$c" ] && logger -t zapret-manager "DoH: серверы из «Своих», которые теперь есть в списке, перенесены во встроенные"
+	[ -n "$c" ]
+}
+
 _doh_legacy_fix() {
 	local id l u cur
+	_doh_own_dedup >/dev/null 2>&1
 	cur="$(uci -q get 'https-dns-proxy.@https-dns-proxy[0].resolver_url')"
-	case "$cur" in https://dns.bezmezhau.com/*|https://geohide.ru/*|https://dns.geohide.ru/*) _doh_preset_migrate >/dev/null 2>&1; cur="$(uci -q get 'https-dns-proxy.@https-dns-proxy[0].resolver_url')" ;; esac
+	case "$cur" in https://dns.bezmezhau.com/*|https://geohide.ru/*|https://dns.geohide.ru/*|https://api.magicdns.ru/*) _doh_preset_migrate >/dev/null 2>&1; cur="$(uci -q get 'https-dns-proxy.@https-dns-proxy[0].resolver_url')" ;; esac
 	case "$cur" in https://dns.comss.ru/*|https://dns.mafioznik.com/*|https://dns.astrakat.ru/*|https://unfiltered.adguard-dns.com/*) ;;
 		*) grep -qE '^(pref|active|chain)=(.*,)?(comss_ru|mafioznik|astracat|adguard)(,|$)' "$DOH_FO_FILE" 2>/dev/null || return 0 ;;
 	esac
@@ -36655,7 +36693,13 @@ dns.malw.link
 dns.zapret.moe
 d.webshiftvpn.ru
 dns.dagami.ru
+dns.magicdns.ru
 api.magicdns.ru
+tamaev-gifts.xyz
+dns.zombiez.ru
+dns.wlrus.cfd
+api.magicinfo.art
+w.quic.best
 freedns.controld.com
 unfiltered.joindns4.eu
 protective.joindns4.eu
@@ -46363,7 +46407,12 @@ var PROVIDERS = [
 	{ id: 'zapretmoe', label: 'zapret.moe', url: 'https://dns.zapret.moe/dns-query', k: 'geo' },
 	{ id: 'webshift', label: 'WebShift', url: 'https://d.webshiftvpn.ru/dns-query', k: 'geo' },
 	{ id: 'dagami', label: 'Dagami', url: 'https://dns.dagami.ru/dns-query', k: 'geo' },
-	{ id: 'magicdns', label: 'MagicDNS', url: 'https://api.magicdns.ru/sync', k: 'geo' }
+	{ id: 'magicdns', label: 'MagicDNS', url: 'https://dns.magicdns.ru/dns-query', k: 'geo' },
+	{ id: 'tamaev', label: 'tamaev-gifts.xyz', url: 'https://tamaev-gifts.xyz/dns-query', k: 'geo' },
+	{ id: 'zombiez', label: 'zombiez.ru', url: 'https://dns.zombiez.ru/dns-query', k: 'geo' },
+	{ id: 'wlrus', label: 'wlrus.cfd', url: 'https://dns.wlrus.cfd/dns-query', k: 'geo' },
+	{ id: 'magicinfo', label: 'magicinfo.art', url: 'https://api.magicinfo.art/dns-query', k: 'geo' },
+	{ id: 'quicbest', label: 'quic.best', url: 'https://w.quic.best/dns-query', k: 'geo' }
 ];
 function bootLuci(url) {
 	var out = '';
@@ -46401,7 +46450,7 @@ var VAR_TEXT = { plain: 'только шифрование', safe: 'блокир
 
 var GROUPS = [
 	{ title: 'Без подмены', hint: 'только шифрование; у Cloudflare, Quad9, Control D, DNS4EU и Яндекса есть варианты «Защита от угроз» и «Семейный фильтр»', ids: [ 'google', 'cloudflare', 'quad9', 'controld', 'dns4eu', 'yandex' ] },
-	{ title: 'С обходом геоблокировок', hint: 'открывают сервисы, закрытые для России', ids: [ 'xbox', 'comss', 'dnsai', 'bezmezhau', 'geohide', 'malw', 'zapretmoe', 'webshift', 'dagami', 'magicdns' ] }
+	{ title: 'С обходом геоблокировок', hint: 'открывают сервисы, закрытые для России', ids: [ 'xbox', 'comss', 'dnsai', 'bezmezhau', 'geohide', 'malw', 'zapretmoe', 'webshift', 'dagami', 'magicdns', 'tamaev', 'zombiez', 'wlrus', 'magicinfo', 'quicbest' ] }
 ];
 function famIds(key) { return FAMS[key] ? FAMS[key].ids : [ key ]; }
 function groupIds(g) { var out = []; g.ids.forEach(function(t) { out = out.concat(famIds(t)); }); return out; }
@@ -48793,7 +48842,7 @@ function plural(n, one, few, many) {
 	return many;
 }
 
-var DOHN = { cloudflare: 'Cloudflare', google: 'Google', quad9: 'Quad9 · Защита от угроз', xbox: 'XBOX', comss: 'Comss', dnsai: 'DNS-AI', bezmezhau: 'Bezmezhau', yandex: 'Яндекс', yandex_family: 'Яндекс · Семейный фильтр', yandex_safe: 'Яндекс · Защита от угроз', cloudflare_sec: 'Cloudflare · Защита от угроз', cloudflare_fam: 'Cloudflare · Семейный фильтр', quad9_open: 'Quad9 · Без фильтрации', controld_sec: 'Control D · Защита от угроз', controld_fam: 'Control D · Семейный фильтр', dns4eu_sec: 'DNS4EU · Защита от угроз', dns4eu_fam: 'DNS4EU · Семейный фильтр', geohide_eu: 'GeoHide EU', geohide_us: 'GeoHide US', malw: 'MALW', zapretmoe: 'zapret.moe', webshift: 'WebShift', dagami: 'Dagami', magicdns: 'MagicDNS', controld: 'Control D', dns4eu: 'DNS4EU', multi: 'несколько серверов', other: 'свой сервер' };
+var DOHN = { cloudflare: 'Cloudflare', google: 'Google', quad9: 'Quad9 · Защита от угроз', xbox: 'XBOX', comss: 'Comss', dnsai: 'DNS-AI', bezmezhau: 'Bezmezhau', yandex: 'Яндекс', yandex_family: 'Яндекс · Семейный фильтр', yandex_safe: 'Яндекс · Защита от угроз', cloudflare_sec: 'Cloudflare · Защита от угроз', cloudflare_fam: 'Cloudflare · Семейный фильтр', quad9_open: 'Quad9 · Без фильтрации', controld_sec: 'Control D · Защита от угроз', controld_fam: 'Control D · Семейный фильтр', dns4eu_sec: 'DNS4EU · Защита от угроз', dns4eu_fam: 'DNS4EU · Семейный фильтр', geohide_eu: 'GeoHide EU', geohide_us: 'GeoHide US', malw: 'MALW', zapretmoe: 'zapret.moe', webshift: 'WebShift', dagami: 'Dagami', magicdns: 'MagicDNS', tamaev: 'tamaev-gifts.xyz', zombiez: 'zombiez.ru', wlrus: 'wlrus.cfd', magicinfo: 'magicinfo.art', quicbest: 'quic.best', controld: 'Control D', dns4eu: 'DNS4EU', multi: 'несколько серверов', other: 'свой сервер' };
 
 function verLt(a, b) {
 	var x = String(a).split('.'), y = String(b).split('.');
@@ -61747,8 +61796,11 @@ var CREDITS = [
 	{ g: 'dns', product: 'WebShift DNS (DoH)', author: 'WebShift', url: 'https://dns.webshiftvpn.ru' },
 	{ g: 'dns', product: 'Dagami DNS (DoH)', author: 'Dagami', url: 'https://dns.dagami.ru' },
 	{ g: 'dns', product: 'MagicDNS (DoH, DoT)', author: 'MagicDNS', url: 'https://magicdns.ru' },
-	{ g: 'dns', product: 'AstraCat DNS (DoH)', author: 'AstraCat', url: 'https://dns.astrakat.ru' },
-	{ g: 'dns', product: 'Mafioznik DNS (DoH)', author: 'Mafioznik', url: 'https://dns.mafioznik.com' },
+	{ g: 'dns', product: 'tamaev-gifts.xyz (DoH)', author: 'tamaev-gifts.xyz', url: 'https://tamaev-gifts.xyz' },
+	{ g: 'dns', product: 'zombiez.ru (DoH)', author: 'zombiez.ru', url: 'https://dns.zombiez.ru' },
+	{ g: 'dns', product: 'wlrus.cfd (DoH)', author: 'WL RUS', url: 'https://dns.wlrus.cfd' },
+	{ g: 'dns', product: 'magicinfo.art (DoH)', author: 'magicinfo.art', url: 'https://api.magicinfo.art' },
+	{ g: 'dns', product: 'quic.best (DoH)', author: 'QUIC.BEST', url: 'https://w.quic.best' },
 	{ g: 'dns', product: 'dns-blocklists (блокировка рекламы, TIF)', author: 'hagezi', url: 'https://github.com/hagezi/dns-blocklists' },
 	{ g: 'dns', product: 'ad-filter (реклама для sing-box)', author: 'zxc-rv', url: 'https://github.com/zxc-rv/ad-filter' },
 	{ g: 'dns', product: 'domain-list-community', author: 'v2fly', url: 'https://github.com/v2fly/domain-list-community' },
@@ -64759,7 +64811,12 @@ var DNS_CAT = {
 		{ id: 'zapretmoe', name: 'zapret.moe', value: 'https://dns.zapret.moe/dns-query', boot: '77.88.8.8', alias: [ 'dns.zapret.moe' ], geo: true },
 		{ id: 'webshift', name: 'WebShift', value: 'https://d.webshiftvpn.ru/dns-query', boot: '77.88.8.8', alias: [ 'd.webshiftvpn.ru' ], geo: true },
 		{ id: 'dagami', name: 'Dagami', value: 'https://dns.dagami.ru/dns-query', boot: '77.88.8.8', alias: [ 'dns.dagami.ru' ], geo: true },
-		{ id: 'magicdns', name: 'MagicDNS', value: 'https://api.magicdns.ru/sync', boot: '77.88.8.8', alias: [ 'api.magicdns.ru' ], geo: true },
+		{ id: 'magicdns', name: 'MagicDNS', value: 'https://dns.magicdns.ru/dns-query', boot: '77.88.8.8', alias: [ 'dns.magicdns.ru', 'api.magicdns.ru' ], geo: true },
+		{ id: 'tamaev', name: 'tamaev-gifts.xyz', value: 'https://tamaev-gifts.xyz/dns-query', boot: '77.88.8.8', alias: [ 'tamaev-gifts.xyz' ], geo: true },
+		{ id: 'zombiez', name: 'zombiez.ru', value: 'https://dns.zombiez.ru/dns-query', boot: '77.88.8.8', alias: [ 'dns.zombiez.ru' ], geo: true },
+		{ id: 'wlrus', name: 'wlrus.cfd', value: 'https://dns.wlrus.cfd/dns-query', boot: '77.88.8.8', alias: [ 'dns.wlrus.cfd' ], geo: true },
+		{ id: 'magicinfo', name: 'magicinfo.art', value: 'https://api.magicinfo.art/dns-query', boot: '77.88.8.8', alias: [ 'api.magicinfo.art' ], geo: true },
+		{ id: 'quicbest', name: 'quic.best', value: 'https://w.quic.best/dns-query', boot: '77.88.8.8', alias: [ 'w.quic.best' ], geo: true },
 		{ id: 'controld', name: 'Control D', value: 'https://freedns.controld.com/p0', boot: '76.76.2.0', alias: [ 'freedns.controld.com' ] },
 		{ id: 'dns4eu', name: 'DNS4EU', value: 'https://unfiltered.joindns4.eu/dns-query', boot: '86.54.11.100', alias: [ 'unfiltered.joindns4.eu' ] }
 	],
