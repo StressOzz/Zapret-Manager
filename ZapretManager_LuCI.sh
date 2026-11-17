@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.085
+# Version: 5.087
 ZM_VERSION_EOF
 set -e
 
@@ -238,10 +238,10 @@ CONF="/etc/config/zapret"
 ZM_VERSION="@ZM_VERSION@"
 ZM_SCRIPT_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/ZapretManager_LuCI.sh"
 ZM_STATS_URL="http://89.191.225.101:8787"
-ZM_STATS_OFF="/etc/zapret-manager.nostats"
 ZM_STATS_IDF="/etc/zapret-manager.id"
+ZM_STATS_MARK="/etc/zm.counter"
 ZM_TERMS_FILE="/etc/zapret-manager.terms"
-ZM_TERMS_VER=1
+ZM_TERMS_VER=2
 GH_RAW="https://raw.githubusercontent.com"
 GH_MAIN="https://github.com"
 MT_URL_ITDOG="${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/MagiTrickle/configAD.yaml"
@@ -1245,6 +1245,7 @@ _zt_sync() { _zmL test && _zt_sync "$@"; }
 system_time_set() { _zmL system && system_time_set "$@"; }
 zm_stats_hit() { _zmL system && zm_stats_hit "$@"; }
 zm_stats_get() { _zmL system && zm_stats_get "$@"; }
+zm_stats_geo() { _zmL system && zm_stats_geo "$@"; }
 _zm_job_label() { _zmL system && _zm_job_label "$@"; }
 zm_update_action() { _zmL system && zm_update_action "$@"; }
 do_mixomo_install() { _zmL mixomo && do_mixomo_install "$@"; }
@@ -1385,6 +1386,7 @@ do_steer_dnsopt() { _zmL steer1 && do_steer_dnsopt "$@"; }
 do_steer_onfail() { _zmL steer2 && do_steer_onfail "$@"; }
 _st_lists_cron_sync() { _zmL steer2 && _st_lists_cron_sync "$@"; }
 do_steer_lists() { _zmL steer2 && do_steer_lists "$@"; }
+do_steer_rebuild() { _zmL steer2 && do_steer_rebuild "$@"; }
 do_steer_stop() { _zmL steer2 && do_steer_stop "$@"; }
 _st_need_warp() { _zmL steer2 && _st_need_warp "$@"; }
 do_steer_warp_restart() { _zmL steer2 && do_steer_warp_restart "$@"; }
@@ -5056,7 +5058,7 @@ _zm_panel_latest() {
 
 _zm_newer() { [ -n "$1" ] && _st_ver_lt "$ZM_VERSION" "$1"; }
 
-_zm_stats_on() { [ -n "$ZM_STATS_URL" ] && [ ! -e "$ZM_STATS_OFF" ] && [ -z "$ZM_NO_STATS" ]; }
+_zm_stats_on() { [ -n "$ZM_STATS_URL" ] && [ -z "$ZM_NO_STATS" ]; }
 _zm_stats_age() { local t; t="$(date -r "$1" +%s 2>/dev/null)" || { echo 999999; return; }; echo $(( $(date +%s) - t )); }
 _zm_stats_fetch() {
 	mkdir -p "$JOBS_DIR"
@@ -5074,7 +5076,11 @@ _zm_stats_cached() {
 	_zm_stats_on || { echo null; return 0; }
 	local f="$JOBS_DIR/stats.json" t
 	t="$(_zm_stats_total "$f")"
-	_zm_stats_due "$f" 60 && ( _zm_stats_fetch "$ZM_STATS_URL/count" "$f" ) >/dev/null 2>&1 </dev/null &
+	if [ ! -e "$ZM_STATS_MARK" ] && _zm_stats_due "$JOBS_DIR/stats.me.json" 0; then
+		( zm_stats_hit ) >/dev/null 2>&1 </dev/null &
+	elif _zm_stats_due "$f" 60; then
+		( _zm_stats_fetch "$ZM_STATS_URL/count" "$f" ) >/dev/null 2>&1 </dev/null &
+	fi
 	echo "${t:-null}"
 }
 
@@ -6150,15 +6156,10 @@ _rb_list_get() {
 
 _rb_say() { echo "==> $*"; }
 _rb_warn() { echo "!! $*"; }
-_rb_conf_plus() {
-	if [ -f "$ST_TCH_OFF" ] || [ ! -s "$ST_TCH_PLUS" ]; then grep -hv '^#' "$RB_SHARE/services.conf" 2>/dev/null; return 0; fi
-	awk -F'|' -v OFS='|' -v pf="$ST_TCH_PLUS" '
-		BEGIN { while ((getline l < pf) > 0) { i = index(l, "|"); if (i > 1) P[substr(l, 1, i - 1)] = substr(l, i + 1) } close(pf) }
-		/^#/ { next }
-		($1 in P) && P[$1] != "" && $8 != "" { n = split($8, c, ","); for (i = 1; i <= n; i++) h[c[i]] = 1; m = split(P[$1], a, ","); for (i = 1; i <= m; i++) if (a[i] != "" && !(a[i] in h)) $8 = $8 ($8 != "" ? "," : "") a[i]; delete h }
-		{ print }' "$RB_SHARE/services.conf" 2>/dev/null
-}
-_rb_svc_src() { _rb_conf_plus; cat "$ST_OWN_SVC" "$ST_OWN_CSVC" 2>/dev/null; [ -f "$ST_CAT_OFF" ] || awk -F'|' -v skip="$ST_CAT_SKIP" -v conf="$RB_SHARE/services.conf" 'BEGIN { while ((getline l < conf) > 0) { if (l ~ /^#/) continue; split(l, a, "|"); if (a[1] == "") continue; b[a[1]] = 1; m = split(a[8], c, ","); for (i = 1; i <= m; i++) if (c[i] != "") b[c[i]] = 1 } } $9 != "" && $9 != "Свои списки каталога" { k = $1; sub(/^c_/, "", k); if (index(skip, " " k " ")) next; if (k ~ /^itdoginfo_/ && (substr(k, 11) in b)) next; print }' "$ST_CAT_SVC" 2>/dev/null; [ -f "$ST_TCH_OFF" ] || cat "$ST_TCH_SVC" 2>/dev/null; }
+# Встроенные «Сервисы» и «Категории» — только свои списки: Tachyon Lists к ним больше не подмешивается,
+# его списки живут отдельными плитками в своём разделе
+_rb_conf_plus() { grep -hv '^#' "$RB_SHARE/services.conf" 2>/dev/null; }
+_rb_svc_src() { _rb_conf_plus; cat "$ST_OWN_SVC" "$ST_OWN_CSVC" 2>/dev/null; [ -f "$ST_CAT_OFF" ] || awk -F'|' -v skip="$ST_CAT_SKIP" -v conf="$RB_SHARE/services.conf" 'BEGIN { while ((getline l < conf) > 0) { if (l ~ /^#/) continue; split(l, a, "|"); if (a[1] == "") continue; b[a[1]] = 1; m = split(a[8], c, ","); for (i = 1; i <= m; i++) if (c[i] != "") b[c[i]] = 1 } } $9 != "" && $9 != "Свои списки каталога" { k = $1; sub(/^c_/, "", k); if (index(skip, " " k " ")) next; if (k ~ /^itdoginfo_/ && (substr(k, 11) in b)) next; print }' "$ST_CAT_SVC" 2>/dev/null; if _st_tch_on; then cat "$ST_TCH_SVC" 2>/dev/null; fi; }
 _rb_svc_field() { _rb_svc_src | awk -F'|' -v k="$1" -v n="$2" '$1 == k { print $n; exit }'; }
 _rb_svc_row() { _rb_svc_src | awk -F'|' -v k="$1" '$1 == k { print; exit }'; }
 _rb_svc_names() { local id; for id in $1; do printf '%s, ' "$(_rb_svc_field "$id" 2)"; done | sed 's/, $//'; }
@@ -6190,6 +6191,9 @@ ST_TCH_PLUS="$ST_DIR/tachyon.plus"
 ST_TCH_IDX="$ST_DIR/tachyon.idx"
 ST_TCH_META="$ST_DIR/tachyon.meta"
 ST_TCH_OFF="$ST_DIR/tachyon.off"
+ST_TCH_ON="$ST_DIR/tachyon.on"
+ST_RB_STEER="$ST_DIR/rebuild.steer"
+ST_RB_FK="$ST_DIR/rebuild.fk"
 ST_TCH_ERR="$ST_DIR/tachyon.err"
 ST_TCH_XSETS="$ST_DIR/user/exclude.sets"
 ST_TCH_REPO="https://github.com/Dushnilin/tachyon-lists"
@@ -7010,7 +7014,34 @@ _st_cat_refresh() {
 	return $rc
 }
 
-_st_tch_on() { [ ! -f "$ST_TCH_OFF" ]; }
+# Tachyon Lists по умолчанию выключен: работает, только если человек сам его включил (файл tachyon.on).
+# Со старых версий (там он был включён сам) — оставляем включённым, только если его списки уже кем-то выбраны
+_st_tch_on() {
+	[ -f "$ST_TCH_PLUS" ] && _st_tch_unplus
+	[ -f "$ST_TCH_ON" ] && return 0
+	[ -f "$ST_TCH_OFF" ] && return 1
+	_st_tch_mig
+	[ -f "$ST_TCH_ON" ]
+}
+_st_tch_steer_used() { grep -qsE '(^|[[:space:],])t_[a-z0-9_]+' "$ST_SEL" "$ST_SEC_DIR"/*/services "$ST_TCH_XSETS"; }
+_st_tch_fk_used() { grep -qsi 'Dushnilin/tachyon-lists' /etc/config/netshift; }
+_st_tch_mig() {
+	[ -d "$ST_DIR" ] || return 0
+	if _st_tch_steer_used || _st_tch_fk_used; then : > "$ST_TCH_ON"; else : > "$ST_TCH_OFF"; fi
+}
+# Раньше «добавки» Tachyon дописывались к встроенным плиткам (YouTube, TikTok…), а в Forkozz — прямо в секции.
+# Один раз убираем их: в Forkozz — из секций, Steer просим пересобрать списки
+_st_tch_unplus() {
+	local k r n
+	k="$(cut -d'|' -f1 "$ST_TCH_PLUS" 2>/dev/null | grep -E '^[a-z0-9_]+$' | tr '\n' '|')"
+	if [ -f "$FK_UC" ] && [ -f /etc/config/netshift ]; then
+		r="$(_fk_uc tchstrip plus 2>/dev/null)"
+		n="$(printf '%s' "$r" | sed -n 's/.*"dropped":\([0-9][0-9]*\).*/\1/p')"
+		[ "${n:-0}" -gt 0 ] && : > "$ST_RB_FK"
+	fi
+	if [ -n "$k" ] && _st_installed && cat "$ST_SEL" "$ST_SEC_DIR"/*/services 2>/dev/null | tr ' ,' '\n\n' | grep -qxE "(${k%|})"; then : > "$ST_RB_STEER"; fi
+	rm -f "$ST_TCH_PLUS"
+}
 
 _st_age() { echo $(( $(date +%s) - $(date -r "$1" +%s 2>/dev/null || echo 0) )); }
 
@@ -7062,9 +7093,10 @@ _st_tch_json() {
 	local d="" n=0 x=0 p=0 k=0 t=0 g=0
 	[ -s "$ST_TCH_META" ] && { d="$(sed -n 's/^version=//p' "$ST_TCH_META")"; n="$(sed -n 's/^lists=//p' "$ST_TCH_META")"; x="$(sed -n 's/^direct=//p' "$ST_TCH_META")"; p="$(sed -n 's/^plus=//p' "$ST_TCH_META")"
 		k="$(sed -n 's/^block=//p' "$ST_TCH_META")"; t="$(sed -n 's/^total=//p' "$ST_TCH_META")"; g="$(sed -n 's/^big=//p' "$ST_TCH_META")"; }
-	printf '{"on":%s,"version":"%s","lists":%s,"direct":%s,"plus":%s,"block":%s,"big":%s,"total":%s,"age":%s,"error":%s,"busy":%s,"url":"%s"}' \
+	printf '{"on":%s,"version":"%s","lists":%s,"direct":%s,"plus":%s,"block":%s,"big":%s,"total":%s,"age":%s,"error":%s,"busy":%s,"url":"%s","rb_steer":%s,"rb_fk":%s}' \
 		"$(_st_tch_on && echo true || echo false)" "$(esc "$d")" "${n:-0}" "${x:-0}" "${p:-0}" "${k:-0}" "${g:-0}" "${t:-0}" "$([ -s "$ST_TCH_META" ] && _st_age "$ST_TCH_META" || echo -1)" \
-		"$([ -f "$ST_TCH_ERR" ] && echo true || echo false)" "$(_st_tch_busy && echo true || echo false)" "$ST_TCH_REPO"
+		"$([ -f "$ST_TCH_ERR" ] && echo true || echo false)" "$(_st_tch_busy && echo true || echo false)" "$ST_TCH_REPO" \
+		"$([ -f "$ST_RB_STEER" ] && echo true || echo false)" "$([ -f "$ST_RB_FK" ] && echo true || echo false)"
 }
 
 _st_cat_bg() {
@@ -7348,8 +7380,7 @@ _st_lists_used() {
 		ids="$ids $(_st_sec_with "$s" _st_sel | tr '\n' ' ')"
 	done
 	[ -n "$(echo $ids)" ] || return 0
-	{ _rb_svc_src | awk -F'|' -v ids=" $(echo $ids) " 'index(ids, " " $1 " ") && !seen[$1]++ { print $8 }'
-	  [ -f "$ST_TCH_OFF" ] || awk -F'|' -v ids=" $(echo $ids) " 'index(ids, " " $1 " ") { print $2 }' "$ST_TCH_PLUS" 2>/dev/null; } |
+	_rb_svc_src | awk -F'|' -v ids=" $(echo $ids) " 'index(ids, " " $1 " ") && !seen[$1]++ { print $8 }' |
 		tr ',' '\n' | grep -E '^[A-Za-z0-9_-]+$' | awk '!s[$0]++'
 }
 
@@ -8114,11 +8145,23 @@ steer_action() {
 		tachyon)
 			mkdir -p "$ST_DIR"
 			case "$mode" in
-				off) touch "$ST_TCH_OFF"; _st_tch_idx_merge; printf '{"ok":true}\n' ;;
+				off)
+					touch "$ST_TCH_OFF"; rm -f "$ST_TCH_ON"; _st_tch_idx_merge
+					# выбранные списки Tachyon перестают работать после «Пересобрать списки»
+					rb=false
+					if _st_installed && _st_tch_steer_used; then : > "$ST_RB_STEER"; rb=true; fi
+					if _st_tch_fk_used; then : > "$ST_RB_FK"; rb=true; fi
+					printf '{"ok":true,"rebuild":%s}\n' "$rb" ;;
 				state) _st_tch_json; echo ;;
 				on|refresh)
 					[ "$mode" = refresh ] && ! _st_tch_on && { echo '{"error":"Tachyon Lists выключен"}'; return 1; }
 					rm -f "$ST_TCH_OFF" "$ST_TCH_ERR"
+					if [ "$mode" = on ]; then
+						: > "$ST_TCH_ON"
+						# списки, выбранные до выключения, снова в силе: Forkozz их и не убирал, Steer — пересобрать
+						rm -f "$ST_RB_FK"
+						_st_installed && _st_tch_steer_used && : > "$ST_RB_STEER"
+					fi
 					_st_tch_idx_merge
 					mkdir -p "$ST_RUN"; : > "$ST_RUN/tch.pending"
 					if [ "$mode" = on ] && [ -s "$ST_TCH_SVC" ]; then ( _st_tch_refresh; rm -f "$ST_RUN/tch.pending" ) >/dev/null 2>&1 &
@@ -8217,6 +8260,12 @@ steer_action() {
 		lists_cron)
 			_st_lists_cron_sync
 			printf '{"ok":true}\n' ;;
+		lists_rebuild)
+			_st_installed || { echo '{"error":"Steer ещё не установлен"}'; return 1; }
+			[ -z "$(_st_blocker)" ] || { echo '{"error":"ядро steer сейчас настраивает не Zapret Manager — панель его не трогает"}'; return 1; }
+			_st_running && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
+			_job_running steer_lists && { echo '{"error":"идёт обновление списков — дождитесь его окончания"}'; return 1; }
+			job_start steer do_steer_rebuild ;;
 		lists_refresh)
 			_st_installed || { echo '{"error":"Steer ещё не установлен"}'; return 1; }
 			[ -z "$(_st_blocker)" ] || { echo '{"error":"ядро steer сейчас настраивает не Zapret Manager — панель его не трогает"}'; return 1; }
@@ -9401,6 +9450,7 @@ case "$cmd" in
 	zm_update_action)                     zm_update_action ;;
 	zm_stats_get)                         zm_stats_get ;;
 	zm_stats_hit)                         zm_stats_hit ;;
+	zm_stats_geo)                         zm_stats_geo ;;
 	zm_changelog)                         case "$1" in local|remote|all) zm_changelog "$1" ;; *) echo '{"error":"неизвестный режим"}' ;; esac ;;
 	zm_changelog_seen)                    zm_changelog seen ;;
 	zm_changelog_sync)                    _zm_cl_sync ;;
@@ -11732,7 +11782,7 @@ _pg_inst() {
 }
 
 _pg_st_dir() {
-	if [ ! -s "$ST_OWNED" ] && _fk_installed && [ -z "$(ls -A "$ST_DIR" 2>/dev/null | grep -vxE 'services\.remote|catalog\.(idx|meta|url|off|err)|tachyon\.(svc|idx|meta|plus|direct|off|err)|own\.(svc|idx|cats|cat\.svc|cat\.idx)')" ]; then return 0; fi
+	if [ ! -s "$ST_OWNED" ] && _fk_installed && [ -z "$(ls -A "$ST_DIR" 2>/dev/null | grep -vxE 'services\.remote|catalog\.(idx|meta|url|off|err)|tachyon\.(svc|idx|meta|plus|direct|off|on|err)|rebuild\.(steer|fk)|own\.(svc|idx|cats|cat\.svc|cat\.idx)')" ]; then return 0; fi
 	echo "$ST_DIR"
 }
 
@@ -13121,18 +13171,49 @@ _zm_stats_id() {
 
 zm_stats_hit() {
 	_zm_stats_on || return 0
-	local id
-	id="$(_zm_stats_id)" || return 0
-	_zm_stats_fetch "$ZM_STATS_URL/hit?id=$id&v=$ZM_VERSION" "$JOBS_DIR/stats.json"
+	[ -e "$ZM_STATS_MARK" ] && return 0
+	local id me="$JOBS_DIR/stats.me.json" lk="$JOBS_DIR/stats.hit.lock"
+	mkdir -p "$JOBS_DIR"
+	[ -d "$lk" ] && [ "$(_zm_stats_age "$lk")" -ge 60 ] && rmdir "$lk" 2>/dev/null
+	mkdir "$lk" 2>/dev/null || return 0
+	if id="$(_zm_stats_id)" && _zm_stats_fetch "$ZM_STATS_URL/hit?id=$id&v=$ZM_VERSION" "$me"; then
+		if grep -q '"ok":true' "$me"; then
+			printf '%s %s %s\n' "$id" "$ZM_VERSION" "$(date +%s)" > "$ZM_STATS_MARK" 2>/dev/null && rm -f "$ZM_STATS_IDF"
+			cp -f "$me" "$JOBS_DIR/stats.json" 2>/dev/null
+		else
+			: > "$me.fail"
+		fi
+	fi
+	rmdir "$lk" 2>/dev/null
 	return 0
+}
+
+_zm_stats_n() {
+	local v
+	v="$(jsonfilter -i "$1" -e "@.$2" 2>/dev/null | head -n 1)"
+	case "$v" in ''|*[!0-9]*) echo null ;; *) echo "$v" ;; esac
 }
 
 zm_stats_get() {
 	_zm_stats_on || { echo '{"on":false}'; return 0; }
-	local f="$JOBS_DIR/stats.json" t
+	local f="$JOBS_DIR/stats.json" mt
+	[ ! -e "$ZM_STATS_MARK" ] && _zm_stats_due "$JOBS_DIR/stats.me.json" 0 && zm_stats_hit
 	_zm_stats_due "$f" 10 && _zm_stats_fetch "$ZM_STATS_URL/count" "$f"
-	t="$(_zm_stats_total "$f")"
-	printf '{"on":true,"total":%s}\n' "${t:-null}"
+	mt="$(_zm_stats_n "$f" map)"
+	[ "$mt" = null ] && mt="$(_zm_stats_n "$f" map_total)"
+	printf '{"on":true,"total":%s,"map_total":%s}\n' "$(_zm_stats_n "$f" total)" "$mt"
+}
+
+zm_stats_geo() {
+	local f="$JOBS_DIR/stats.geo.json"
+	_zm_stats_on || { echo '{"error":"счётчик выключен"}'; return 0; }
+	_zm_stats_due "$f" 300 && _zm_stats_fetch "$ZM_STATS_URL/geo" "$f"
+	if [ -s "$f" ] && jsonfilter -i "$f" -e '@.ru' >/dev/null 2>&1; then
+		tr -d '\n' < "$f"
+		echo
+	else
+		echo '{"error":"карта пока недоступна"}'
+	fi
 }
 
 _zm_update_fetch() {
@@ -16163,6 +16244,28 @@ _fk_rl_report() {
 	return 0
 }
 
+# «Пересобрать списки»: выключенный Tachyon Lists убираем из секций, затем Forkozz заново собирает
+# правила и скачивает списки (применение настроек). Встроенные сервисы, категории и каталоги не трогаем
+do_fk_rebuild() {
+	local r n
+	_fk_installed || { echo "ОШИБКА: Forkozz не установлен"; return 1; }
+	_fk_say "Пересобираем списки Forkozz — каждый источник отдельно"
+	if _st_tch_on; then
+		echo "   ✓ Tachyon Lists включён — его списки работают отдельными сервисами, к встроенным не добавляются"
+	else
+		r="$(_fk_ucj tchstrip all)" || { echo "ОШИБКА: $(printf '%s' "$r" | sed -n 's/.*"error":"\([^"]*\)".*/\1/p')"; return 1; }
+		n="$(printf '%s' "$r" | sed -n 's/.*"dropped":\([0-9][0-9]*\).*/\1/p')"
+		if [ "${n:-0}" -gt 0 ]; then echo "   ✓ Tachyon Lists выключен — его списки убраны из секций: $n"
+		else echo "   ✓ Tachyon Lists выключен — его списков в секциях нет"; fi
+	fi
+	rm -f "$ST_RB_FK"
+	if ! _fk_up; then
+		_fk_say "Forkozz сейчас выключен — списки соберутся так при следующем включении"
+		return 0
+	fi
+	do_fk_service apply
+}
+
 do_fk_lists() {
 	local rc=0 out="$JOBS_DIR/forkop-lists.out"
 	_fk_installed || { echo "ОШИБКА: Forkozz не установлен"; return 1; }
@@ -16903,6 +17006,7 @@ forkop_action() {
 		start|stop|restart|apply) job_start forkop do_fk_service "$a" ;;
 		route)         fk_route_check "$arg" ;;
 		lists)         job_start forkop do_fk_lists ;;
+		rebuild)       job_start forkop do_fk_rebuild ;;
 		subs)          job_start forkop do_fk_subs ;;
 		singbox|singbox_reinstall) job_start forkop do_fk_singbox "$arg" ;;
 		singbox_remove)
@@ -30008,7 +30112,7 @@ _st_tch_build() {
 	_json_flat "$1" > "$flat" 2>/dev/null
 	grep -q '^lists\.0\.id	' "$flat" || { rm -f "$flat"; return 1; }
 	bids=" $(grep -v '^#' "$RB_SHARE/services.conf" | cut -d'|' -f1,8 | tr ',|\n' '   ') "
-	awk -F'\t' -v b="$bids" -v raw="$ST_TCH_RAW" -v svc="$ST_TCH_SVC.tmp" -v dir="$ST_TCH_DIRECT.tmp" -v idx="$ST_TCH_IDX.tmp" -v meta="$ST_TCH_META.tmp" -v plus="$ST_TCH_PLUS.tmp" '
+	awk -F'\t' -v b="$bids" -v raw="$ST_TCH_RAW" -v svc="$ST_TCH_SVC.tmp" -v dir="$ST_TCH_DIRECT.tmp" -v idx="$ST_TCH_IDX.tmp" -v meta="$ST_TCH_META.tmp" '
 		function clean(x) { gsub(/[|\t\r\n]/, " ", x); gsub(/  +/, " ", x); sub(/^ /, "", x); sub(/ $/, "", x); return x }
 		function short(x,    m, a, i, o) {
 			m = split(x, a, ", "); o = a[1]
@@ -30028,12 +30132,8 @@ _st_tch_build() {
 			G["ai"] = "ИИ и нейросети"; G["media"] = "Видео, музыка и кино"; G["social"] = "Соцсети и мессенджеры"; G["gaming"] = "Игры"
 			G["tech"] = "Технологии и разработка"; G["infra"] = "Хостинги и CDN"; G["regional"] = "Регионы и блокировки"; G["other"] = "Разное"
 			split("ai media social gaming tech infra regional other", ord, " ")
-			EN["youtube"] = "youtube"; EN["discord"] = "discord"; EN["telegram"] = "telegram"; EN["twitter"] = "x"
-			EN["tiktok"] = "tiktok"; EN["roblox"] = "roblox"; EN["google_ai"] = "google_ai"; EN["google_play"] = "google_play"
-			EN["geoblock"] = "geoblock"; EN["porn"] = "porn"; EN["russia_outside"] = "russia_outside"; EN["ukraine_inside"] = "ukraine_inside"
-			EN["whatsapp"] = "whatsapp"; EN["github"] = "github"; EN["google_meet"] = "google_meet"; EN["hdrezka"] = "hdrezka"
-			EN["anime"] = "anime"; EN["block"] = "block"; EN["news"] = "news"; EN["hodca"] = "hodca"
-			EN["cloudflare"] = "cloudflare"; EN["cloudfront"] = "cloudfront"; EN["digitalocean"] = "digitalocean"; EN["hetzner"] = "hetzner"; EN["ovh"] = "ovh"
+			# одноимённые со встроенными сервисами списки — тоже отдельными плитками, с пометкой «(Tachyon)»
+			EN["twitter"] = "x"
 			SEP["meta"] = "Meta целиком"; SEP["russia_inside"] = "Россия внутри (сводный)"
 			NM["ru_blocked"] = "Заблокированные в РФ"
 			for (e = 0; e < cnt; e++) {
@@ -30059,8 +30159,7 @@ _st_tch_build() {
 				if (act == "direct") { print "t_" id "|" nm "|" ds "|" st > dir; nx++; keepset(st); continue }
 				if (grp == "internal") grp = "regional"
 				if (!(grp in G)) grp = "other"
-				if (index(b, " " id " ")) {
-					if ((id in EN) && index(b, " " EN[id] " ")) { pl[EN[id]] = pl[EN[id]] (pl[EN[id]] != "" ? "," : "") st; np++; keepset(st); continue }
+				if (index(b, " " id " ") || ((id in EN) && index(b, " " EN[id] " "))) {
 					if (id in SEP) nm = SEP[id]
 					else nm = nm " (Tachyon)"
 				}
@@ -30069,15 +30168,13 @@ _st_tch_build() {
 			}
 			for (i = 1; i <= 8; i++) if (body[ord[i]] != "") printf "%s", body[ord[i]] > svc
 			for (k in use) print line[k] > idx
-			for (k in pl) print k "|" pl[k] > plus
-			printf "version=%s\nlists=%d\ndirect=%d\nplus=%d\nblock=%d\nbig=%d\ntotal=%d\n", substr(gen, 1, 10), ns, nx, np, nb, nbig, cnt > meta
+			printf "version=%s\nlists=%d\ndirect=%d\nplus=0\nblock=%d\nbig=%d\ntotal=%d\n", substr(gen, 1, 10), ns, nx, nb, nbig, cnt > meta
 		}
 		function keepset(x,    m, c, i) { m = split(x, c, ","); for (i = 1; i <= m; i++) use[c[i]] = 1 }
-	' "$flat" || { rm -f "$flat" "$ST_TCH_SVC.tmp" "$ST_TCH_DIRECT.tmp" "$ST_TCH_IDX.tmp" "$ST_TCH_META.tmp" "$ST_TCH_PLUS.tmp"; return 1; }
+	' "$flat" || { rm -f "$flat" "$ST_TCH_SVC.tmp" "$ST_TCH_DIRECT.tmp" "$ST_TCH_IDX.tmp" "$ST_TCH_META.tmp"; return 1; }
 	rm -f "$flat"
-	[ -s "$ST_TCH_SVC.tmp" ] && [ -s "$ST_TCH_IDX.tmp" ] || { rm -f "$ST_TCH_SVC.tmp" "$ST_TCH_DIRECT.tmp" "$ST_TCH_IDX.tmp" "$ST_TCH_META.tmp" "$ST_TCH_PLUS.tmp"; return 1; }
-	touch "$ST_TCH_DIRECT.tmp" "$ST_TCH_PLUS.tmp"
-	if cmp -s "$ST_TCH_PLUS.tmp" "$ST_TCH_PLUS" 2>/dev/null; then rm -f "$ST_TCH_PLUS.tmp"; else mv -f "$ST_TCH_PLUS.tmp" "$ST_TCH_PLUS"; fi
+	[ -s "$ST_TCH_SVC.tmp" ] && [ -s "$ST_TCH_IDX.tmp" ] || { rm -f "$ST_TCH_SVC.tmp" "$ST_TCH_DIRECT.tmp" "$ST_TCH_IDX.tmp" "$ST_TCH_META.tmp"; return 1; }
+	touch "$ST_TCH_DIRECT.tmp"
 	mv -f "$ST_TCH_IDX.tmp" "$ST_TCH_IDX"
 	mv -f "$ST_TCH_SVC.tmp" "$ST_TCH_SVC"
 	mv -f "$ST_TCH_DIRECT.tmp" "$ST_TCH_DIRECT"
@@ -30217,7 +30314,8 @@ _st_srs_get() {
 	touch "$ST_RUN/srs.$set.done"
 }
 
-_st_tch_plus_of() { [ -f "$ST_TCH_OFF" ] || awk -F'|' -v k="$1" '$1 == k { gsub(/,/, " ", $2); print $2; exit }' "$ST_TCH_PLUS" 2>/dev/null; }
+# добавок Tachyon к встроенным сервисам больше нет — каждый список сам по себе
+_st_tch_plus_of() { :; }
 
 _st_svc_lists() {
 	local id="$1" name sets set dom="" pfx="" srs="" f fmt took="" plus pfail="" pkd pkp say="" mt="" f5 f6 x
@@ -30428,6 +30526,7 @@ _st_spec_apply() {
 	grep -v '^\(lan\|main\|mif\|warp\|wpick\|vpn\|tun\|so\|stun\|xdom\|xpfx\|over\)	' "$m" | grep -v '^dev	byp	' > "$ST_DIR/model.svc" 2>/dev/null
 	rm -f "$m"
 	_st_own "steer-spec"
+	rm -f "$ST_RB_STEER"
 	if [ -z "$ZM_ST_LISTS_BG" ]; then
 		[ "$(_st_set_count fail)" -gt 0 ] && _st_lists_retry_later
 		rm -f "$ST_RUN"/fail.* "$ST_RUN"/new.* "$ST_RUN"/chg.*
@@ -31542,6 +31641,42 @@ do_steer_lists_apply() {
 	fi
 	_st_sec_with main _st_lists_full || return 1
 	_rb_say "Готово: свежие списки работают"
+}
+
+# «Пересобрать списки»: заново собираем правила из того, что выбрано сейчас. Каждый источник — сам по себе:
+# встроенные сервисы и категории, дополнительные списки, «Мои списки» и Tachyon Lists (если он включён)
+_st_rb_note() {
+	local x a=0 b=0 t=0 tx=0
+	for x in $(cat "$ST_SEL" "$ST_SEC_DIR"/*/services 2>/dev/null | tr ' ,' '\n\n' | grep -E '^[A-Za-z0-9_-]+$' | awk '!s[$0]++'); do
+		case "$x" in
+			custom) ;;
+			t_*) if _st_tch_on; then t=$((t + 1)); else tx=$((tx + 1)); fi ;;
+			c_itdoginfo_*) a=$((a + 1)) ;;
+			c_*|zmu_*|zmc[0-9]*) b=$((b + 1)) ;;
+			*) a=$((a + 1)) ;;
+		esac
+	done
+	echo "   → Сервисы и категории: $a · Дополнительные списки: $b · Tachyon Lists: $(_st_tch_on && echo "$t" || echo выключен)"
+	[ "$tx" -gt 0 ] && echo "   → Tachyon Lists выключен — отмеченные в нём списки ($tx) не работают, пока его снова не включите"
+	return 0
+}
+
+do_steer_rebuild() {
+	_st_phase rules
+	rm -f "$ST_STOP_FLAG"
+	_st_installed || { echo "ОШИБКА: Steer ещё не установлен"; return 1; }
+	[ -n "$(_st_blocker)" ] && { echo "ОШИБКА: ядро steer сейчас настраивает не Zapret Manager"; return 1; }
+	_rb_say "Пересобираем списки Steer — каждый источник отдельно"
+	_st_tch_idx_merge
+	_st_rb_note
+	if [ -f "$ST_OFF" ] || ! _st_owns "steer-spec" || ! stl_enabled; then
+		rm -f "$ST_RB_STEER"
+		_rb_say "Steer сейчас выключен — списки соберутся так при следующем включении"
+		return 0
+	fi
+	_st_sec_with main _st_lists_full || return 1
+	rm -f "$ST_RB_STEER"
+	_rb_say "Готово: списки пересобраны"
 }
 
 do_steer_lists() {
@@ -38781,18 +38916,14 @@ function idx_tokens(e, known) {
 function catalog_items(known_list) {
 	let known = {}, items = [], seen = {}, idx = {}, plus = {};
 	for (let k in known_list) known[k] = true;
-	let cat_off = !!fs.access(ST_DIR + "/catalog.off"), tch_off = !!fs.access(ST_DIR + "/tachyon.off");
+	let cat_off = !!fs.access(ST_DIR + "/catalog.off"), tch_off = !fs.access(ST_DIR + "/tachyon.on");
 	// own.idx — «Мои списки»: читаем и напрямую, на случай если общий индекс ещё не пересобран
 	for (let fn in [ "/catalog.idx", "/own.idx", "/own.cat.idx" ]) for (let l in split(s(fs.readfile(ST_DIR + fn)), "\n")) {
 		let f = split(l, "|");
 		if (length(f) >= 3 && f[0] != "" && match(f[2], /^https:\/\//))
 			idx[f[0]] = { fmt: f[1], url: f[2], kind: s(f[3]) };
 	}
-	// Tachyon Lists: более полные списки того же сервиса добавляются к встроенной плитке (как в Steer)
-	if (!tch_off) for (let l in split(s(fs.readfile(ST_DIR + "/tachyon.plus")), "\n")) {
-		let i = index(l, "|");
-		if (i > 0) plus[substr(l, 0, i)] = filter(split(substr(l, i + 1), ","), (x) => x != "" && idx[x]);
-	}
+	// Tachyon Lists к встроенным плиткам не подмешивается: его списки — отдельные сервисы в своём разделе
 	for (let l in split(s(fs.readfile(RB_CONF)), "\n")) {
 		if (l == "" || substr(l, 0, 1) == "#") continue;
 		let f = split(l, "|"), id = f[0], t = [];
@@ -42437,8 +42568,40 @@ function cmd_rllearn() {
 	out({ ok: true, alts: length(keys(alts)), tested: length(pairs), works, dead, changed: length(list), list });
 }
 
+// Убрать из всех секций списки Tachyon Lists: all — все (каталог выключен), plus — бывшие «добавки» к встроенным сервисам
+function cmd_tchstrip(how) {
+	let drop = {}, n = 0, ch = false, c = cursor();
+	if (how == "plus") {
+		let ids = {};
+		for (let l in split(s(fs.readfile(ST_DIR + "/tachyon.plus")), "\n")) {
+			let i = index(l, "|");
+			if (i > 0) for (let x in split(substr(l, i + 1), ",")) if (x != "") ids[x] = true;
+		}
+		for (let l in split(s(fs.readfile(ST_DIR + "/tachyon.idx")), "\n")) {
+			let f = split(l, "|");
+			if (length(f) >= 3 && ids[f[0]] && f[2] != "") drop[f[2]] = true;
+		}
+		if (!length(keys(drop))) { out({ ok: true, dropped: 0 }); return; }
+	}
+	else if (how != "all") fail("неизвестный режим");
+	let hit = (u) => how == "plus" ? !!drop[u] : index(lc(u), "/dushnilin/tachyon-lists") >= 0;
+	for (let x in sections(c, "section")) {
+		let sec = x[".name"];
+		for (let o in [ "zm_refs", "remote_domain_lists", "remote_subnet_lists" ]) {
+			let v = rawlist(x[o]), k = filter(v, (e) => !hit(o == "zm_refs" ? substr(e, 2) : e));
+			if (length(k) == length(v)) continue;
+			if (o == "zm_refs") n += length(v) - length(k);
+			set_list(c, sec, o, k);
+			ch = true;
+		}
+	}
+	if (ch) { c.save(CFG); c.commit(CFG); }
+	out({ ok: true, dropped: n });
+}
+
 let mode = ARGV[0] || "";
 let sec = ARGV[1] || "";
+if (mode == "tchstrip") { cmd_tchstrip(ARGV[1] || ""); exit(0); }
 if (mode == "reality") { cmd_reality(ARGV[1], ARGV[2]); exit(1); }
 if (mode == "rs_initial") cmd_rs_initial(ARGV[1], ARGV[2]);
 if (mode == "rs_cap") cmd_rs_cap(ARGV[1], ARGV[2]);
@@ -42744,6 +42907,7 @@ list_methods() {
 	json_add_object "zm_update_action";        json_close_object
 	json_add_object "zm_changelog";            json_add_string "mode" "string"; json_close_object
 	json_add_object "zm_stats_get";            json_close_object
+	json_add_object "zm_stats_geo";            json_close_object
 	json_add_object "zm_changelog_seen";       json_close_object
 	json_add_object "mixomo_status";           json_close_object
 	json_add_object "mixomo_action";           json_add_string "action" "string"; json_close_object
@@ -42936,6 +43100,7 @@ call_method() {
 		zm_update_action)        "$BACKEND" zm_update_action ;;
 		zm_changelog)            json_get_var mode mode;       "$BACKEND" zm_changelog "$mode" ;;
 		zm_stats_get)            "$BACKEND" zm_stats_get ;;
+		zm_stats_geo)            "$BACKEND" zm_stats_geo ;;
 		zm_changelog_seen)       "$BACKEND" zm_changelog_seen ;;
 		mixomo_status)           "$BACKEND" mixomo_status ;;
 		mixomo_action)           json_get_var action action; "$BACKEND" mixomo_action "$action" ;;
@@ -43062,6 +43227,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"zm_update_status",
 					"zm_changelog",
 					"zm_stats_get",
+					"zm_stats_geo",
 					"purge_scan",
 					"backup_list",
 					"mixomo_status",
@@ -43471,6 +43637,7 @@ var callBackupDown = zmDeclare({ object: 'zapret-manager', method: 'backup_down'
 var callSysinfoRun = zmDeclare({ object: 'zapret-manager', method: 'sysinfo_run', expect: {} });
 var callSysinfoGet = zmDeclare({ object: 'zapret-manager', method: 'sysinfo_get', expect: {} });
 var callStatsGet = zmDeclare({ object: 'zapret-manager', method: 'zm_stats_get', expect: {} });
+var callStatsGeo = zmDeclare({ object: 'zapret-manager', method: 'zm_stats_geo', expect: {} });
 var callZmPages = zmDeclare({ object: 'zapret-manager', method: 'zm_pages', params: ['action', 'value'], expect: {} });
 var callMirrorStatus = zmDeclare({ object: 'zapret-manager', method: 'mirror_status', expect: {} });
 var callMirrorSet = zmDeclare({ object: 'zapret-manager', method: 'mirror_set', params: ['id'], expect: {} });
@@ -43934,7 +44101,7 @@ function termsScreen(view) {
 					point(1, 'Решаете вы — отвечаете вы', 'За то, что вы настраиваете и как используете, отвечаете вы сами.'),
 					point(2, 'Без претензий к автору', 'Автор не отвечает за сбои, потерю данных и последствия.')
 				]),
-				E('div', { 'class': 'zm-tm-ed' }, 'Редакция 1.0 от 05.11.2026 · © StressOzz')
+				E('div', { 'class': 'zm-tm-ed' }, 'Редакция 1.1 от 16.11.2026 · © StressOzz')
 			]),
 			E('div', { 'class': 'zm-tm-main' }, [
 				E('div', { 'class': 'zm-tm-doc', 'tabindex': '0' }, [
@@ -43944,7 +44111,7 @@ function termsScreen(view) {
 					sec('3. Ограничение ответственности', 'Автор и участники проекта не отвечают за прямой или косвенный ущерб: неработоспособность роутера, потерю настроек и данных, перерывы в работе интернета, блокировку сервисов, требования третьих лиц, штрафы и упущенную выгоду.'),
 					sec('4. Отказ от претензий', 'Принимая условия, вы отказываетесь от претензий к автору и участникам проекта, связанных с программой, в той мере, в какой это допускает закон.'),
 					sec('5. Программы других авторов', 'Zapret, sing-box, Mihomo, WARP и другие компоненты принадлежат своим авторам и распространяются по своим лицензиям. Панель только скачивает их из официальных источников и настраивает.'),
-					E('div', { 'class': 'zm-tm-sec' }, [ E('h3', {}, '6. Данные'), E('p', {}, [ 'Личные данные не собираются. Для счётчика установок панель отправляет автору случайный номер роутера и версию. Отключить: файл ', E('code', {}, '/etc/zapret-manager.nostats'), '.' ]) ]),
+					E('div', { 'class': 'zm-tm-sec' }, [ E('h3', {}, '6. Данные'), E('p', {}, 'Личные данные не собираются. Для счётчика установок панель один раз — при первом запуске на роутере — отправляет автору случайный номер роутера и версию панели. По IP-адресу сервер определяет регион для карты на странице «Спасибо» и хранит только его, сам адрес не сохраняется. После этого на роутере остаётся файл /etc/zm.counter, и больше панель ничего не отправляет.') ]),
 					sec('7. Изменение условий', 'Новая редакция условий покажется при следующем входе в панель.')
 				]),
 				E('div', { 'class': 'zm-tm-foot' }, foot)
@@ -44870,15 +45037,15 @@ function tachyonBlock(t, o) {
 		if (sec < 86400) return 'обновлён ' + Math.round(sec / 3600) + ' ч назад';
 		return 'обновлён ' + Math.round(sec / 86400) + ' дн. назад';
 	}
-	var on = t.on !== false, have = (+t.lists || 0) > 0, busy = on && (!!t.busy || !!(tchPoll && tchPoll.user));
-	var state = !on ? 'выключен — его списков нет в «Дополнительных списках»'
+	var on = t.on === true, have = (+t.lists || 0) > 0, busy = on && (!!t.busy || !!(tchPoll && tchPoll.user));
+	var state = !on ? 'выключен — включите, и его списки появятся выше своими группами'
 		: busy ? (have ? 'обновляется — Steer и Forkozz тем временем работают со списками, что уже есть' : 'скачиваем каталог — это может занять до пары минут')
-		: have ? [ 'списков: ' + ((+t.lists || 0) + (+t.direct || 0) + (+t.plus || 0) + (+t.block || 0)), ago(+t.age), t.error ? 'последнее обновление не удалось' : '' ].filter(Boolean).join(' · ')
+		: have ? [ 'списков: ' + ((+t.lists || 0) + (+t.direct || 0) + (+t.block || 0)), ago(+t.age), t.error ? 'последнее обновление не удалось' : '' ].filter(Boolean).join(' · ')
 		: t.error ? 'не скачался — проверьте доступ к GitHub' : 'скачиваем каталог…';
 	var cls = !on ? 'zm-off' : busy ? 'zm-warn zm-busy' : t.error && !have ? 'zm-warn' : have ? 'zm-ok' : 'zm-off';
 	box.appendChild(E('div', { 'class': 'zm-cat-src-info' }, [
 		E('div', { 'class': 'zm-cat-src-title' }, [ 'Tachyon Lists ', E('span', { 'class': 'zm-badge ' + cls }, [ busy ? E('span', { 'class': 'zm-dot' }) : E([]), !on ? 'выключен' : busy ? 'обновляется' : have ? 'работает' : t.error ? 'ошибка' : 'скачивается' ]) ]),
-		E('div', { 'class': 'zm-cat-src-state', 'title': on && have && !busy ? (+t.lists || 0) + ' — отдельными сервисами в «Дополнительных списках», ' + (+t.plus || 0) + ' — добавлены к встроенным (YouTube, TikTok, Telegram и другим), ' + (+t.direct || 0) + ' — для «Мимо Steer»' + (+t.block ? ', ' + t.block + ' — в «Блокировке рекламы»' : '') + (+t.big ? '. Огромные (больше 100 тыс. записей) не используются: ' + t.big : '') : '' }, state),
+		E('div', { 'class': 'zm-cat-src-state', 'title': on && have && !busy ? (+t.lists || 0) + ' — отдельными сервисами в разделе «Tachyon Lists» (к встроенным сервисам не добавляются), ' + (+t.direct || 0) + ' — для «Мимо Steer»' + (+t.block ? ', ' + t.block + ' — в «Блокировке рекламы»' : '') + (+t.big ? '. Огромные (больше 100 тыс. записей) не используются: ' + t.big : '') : '' }, state),
 		E('div', { 'class': 'zm-cat-src-url' }, [ E('a', { 'href': t.url || 'https://github.com/Dushnilin/tachyon-lists', 'target': '_blank', 'rel': 'noopener' }, 'github.com/Dushnilin/tachyon-lists') ])
 	]));
 	function start(m) {
@@ -44897,7 +45064,7 @@ function tachyonBlock(t, o) {
 		if (!on) { start('on'); return; }
 		callSteerAction('tachyon', 'off').then(function(res) {
 			if (!res || res.error) { toast((res && res.error) || 'Роутер не ответил', 'error'); o.reload(); return; }
-			toast('Tachyon Lists выключен', 'info');
+			toast(res.rebuild ? 'Tachyon Lists выключен — нажмите «Пересобрать списки», чтобы его отмеченные списки перестали работать' : 'Tachyon Lists выключен', res.rebuild ? 'warning' : 'info');
 			o.reload();
 		}).catch(function() { toast('Роутер не ответил', 'error'); });
 	} }, on ? 'Выключить каталог' : 'Включить каталог'));
@@ -44905,6 +45072,39 @@ function tachyonBlock(t, o) {
 	if (busy && !tchPoll) { tchPoll = { user: false, t0: Date.now(), o: o, box: box }; setTimeout(tchTick, 2500); }
 	else if (tchPoll) { tchPoll.box = box; tchPoll.o = o; }
 	return box;
+}
+
+// Группа из каталога Tachyon Lists: у неё в названии «(Tachyon Lists)»
+function isTchGroup(g) { return /\(Tachyon Lists\)\s*$/.test(String(g || '')); }
+
+// Раздел «Tachyon Lists» — отдельно от сервисов, категорий и других каталогов: заголовок, свои группы и управление каталогом
+function tachyonSection(t, o) {
+	t = t || {};
+	var on = t.on === true, groups = o.groups || [], n = +o.picked || 0;
+	var wrap = E('div', { 'class': 'zm-tch-sec' });
+	wrap.appendChild(E('h4', { 'style': 'margin:0 0 4px' }, [ 'Tachyon Lists ', on
+		? E('span', { 'class': 'zm-badge ' + (n ? 'zm-ok' : 'zm-off') }, n ? 'выбрано ' + n : 'включён')
+		: E('span', { 'class': 'zm-badge zm-off' }, 'выключен') ]));
+	wrap.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin:0 0 10px' }, on
+		? 'Отдельный каталог: его списки не смешиваются с сервисами, категориями и другими списками — работают только те, что отмечены здесь.'
+		: 'Отдельный каталог готовых списков. По умолчанию выключен: к сервисам и категориям выше ничего не добавляет.'));
+	groups.forEach(function(g) { wrap.appendChild(g); });
+	wrap.appendChild(tachyonBlock(t, o));
+	return wrap;
+}
+
+// Строка «Списки сервисов»: «Обновить списки сейчас» и «Пересобрать списки». need — после включения/выключения
+// Tachyon Lists отмеченное ещё не пересобрано
+function listsNowRow(o) {
+	var tip = 'Заново собрать правила из того, что отмечено сейчас: сервисы, категории, дополнительные списки и Tachyon Lists — каждый отдельно';
+	return E('div', { 'class': 'zm-lists-now' + (o.need ? ' zm-lists-need' : '') }, [
+		E('div', { 'class': 'zm-lists-now-text' }, [
+			E('b', {}, o.need ? 'Списки нужно пересобрать' : 'Списки сервисов'),
+			E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, o.need ? 'Tachyon Lists включили или выключили — нажмите «Пересобрать списки», и правила соберутся заново, каждый источник отдельно.' : o.text)
+		]),
+		E('button', { 'class': 'cbi-button cbi-button-action', 'disabled': o.refreshOff ? '' : null, 'title': o.refreshTitle || '', 'click': o.refresh }, o.refreshLabel || 'Обновить списки сейчас'),
+		E('button', { 'class': 'cbi-button ' + (o.need ? 'cbi-button-positive' : 'cbi-button-neutral'), 'disabled': o.rebuildOff ? '' : null, 'title': o.rebuildTitle || tip, 'click': o.rebuild }, 'Пересобрать списки')
+	]);
 }
 
 function tchTick() {
@@ -46302,6 +46502,9 @@ return baseclass.extend({
 	svcGrid: svcGrid,
 	svcGroup: svcGroup,
 	tachyonBlock: tachyonBlock,
+	tachyonSection: tachyonSection,
+	isTchGroup: isTchGroup,
+	listsNowRow: listsNowRow,
 	catalogBlock: catalogBlock,
 	ownBlock: ownBlock,
 	OWN_GROUP: OWN_GROUP,
@@ -46350,6 +46553,7 @@ return baseclass.extend({
 	sysinfoGet: callSysinfoGet,
 	rebootRouter: rebootRouter,
 	statsGet: callStatsGet,
+	statsGeo: callStatsGeo,
 	zmPages: callZmPages,
 	mirrorStatus: callMirrorStatus,
 	mirrorSet: callMirrorSet,
@@ -50803,6 +51007,10 @@ return view.extend({
 				}).catch(function() { renderLists(); });
 			});
 		}
+		function listsRebuild() {
+			if (busy || listsBusy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
+			act('lists_rebuild', '', 'Пересобираем списки — ход работы виден в окне вывода', null, true);
+		}
 		function listsRefresh() {
 			if (busy || listsBusy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
 			zm.steerAction('lists_refresh', '').then(function(res) {
@@ -50853,37 +51061,44 @@ return view.extend({
 				if (sel.russia_inside) listCard.appendChild(zm.riNote(list, sel));
 				else listCard.appendChild(E('p', { 'class': 'zm-hint' }, '«Всё сразу» — полный список Russia inside: все категории и сервисы одним набором. Он большой, на слабых роутерах лучше включать отдельные пункты.'));
 			}
-			var groups = [];
-			remote.forEach(function(s) { if (groups.indexOf(s.group) < 0) groups.push(s.group); });
-			if (groups.length) {
-				listCard.appendChild(E('h4', { 'style': 'margin:20px 0 4px' }, 'Дополнительные списки'));
-				listCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin:0 0 10px' }, 'Готовые наборы доменов и подсетей из каталогов и ваши «Мои списки». Разверните источник и отметьте нужное.'));
-			}
-			groups.forEach(function(g) {
+			// Источники не смешиваются: каталоги и «Мои списки» — в «Дополнительных списках», Tachyon Lists — своим разделом
+			var groups = [], tGroups = [];
+			remote.forEach(function(s) { var to = zm.isTchGroup(s.group) ? tGroups : groups; if (to.indexOf(s.group) < 0) to.push(s.group); });
+			function groupEl(g) {
 				var items = remote.filter(function(s) { return s.group === g; });
 				var on = items.filter(function(s) { return sel[s.id]; }).length;
 				var m = /^(.*?)\s*\((.*)\)\s*$/.exec(g);
-				var gTitle = m ? m[1] : g, gSub = m ? m[2] : '';
-				listCard.appendChild(zm.svcGroup({
+				var tch = zm.isTchGroup(g), gTitle = m ? m[1] : g, gSub = m && !tch ? m[2] : '';
+				return zm.svcGroup({
 					name: gTitle, sub: gSub, key: g,
 					open: g in openGroups ? openGroups[g] : on > 0,
 					badge: E('span', { 'class': 'zm-badge ' + (on ? 'zm-ok' : 'zm-off') }, on ? 'выбрано ' + on + ' из ' + items.length : String(items.length)),
 					body: zm.svcGrid(items.map(tile)),
 					toggle: function(o) { openGroups[g] = o; }
-				}));
-			});
+				});
+			}
+			listCard.appendChild(E('h4', { 'style': 'margin:20px 0 4px' }, 'Дополнительные списки'));
+			listCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin:0 0 10px' }, 'Готовые наборы доменов и подсетей из каталога списков и ваши «Мои списки». Разверните источник и отметьте нужное.'));
+			groups.forEach(function(g) { listCard.appendChild(groupEl(g)); });
 			listCard.appendChild(zm.catalogBlock(data.catalog, { reload: function() { refresh(); } }));
-			listCard.appendChild(zm.tachyonBlock((data.catalog || {}).tachyon, { reload: function() { refresh(); } }));
 			listCard.appendChild(zm.ownBlock(data.catalog, { reload: function() { refresh(); }, added: function(g) { openGroups[g] = true; } }));
+			var tchT = (data.catalog || {}).tachyon || {};
+			listCard.appendChild(zm.tachyonSection(tchT, {
+				groups: tGroups.map(groupEl),
+				picked: remote.filter(function(s) { return zm.isTchGroup(s.group) && sel[s.id]; }).length,
+				reload: function() { refresh(); }
+			}));
 			var canRun = data.installed && !data.stopped && secIds().some(function(id) { return secWork(id) && secExit(id) !== 'none'; });
 			var li = data.lists || {}, lBusy = !!li.busy || listsBusy;
-			listCard.appendChild(E('div', { 'class': 'zm-lists-now' }, [
-				E('div', { 'class': 'zm-lists-now-text' }, [
-					E('b', {}, 'Списки сервисов'),
-					E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, !canRun ? 'Скачаются, когда Steer включён, выбраны сервисы и подключён WARP или VPN.' : lBusy ? 'Обновляются в фоне — Steer тем временем работает как обычно.' : listsText(li))
-				]),
-				E('button', { 'class': 'cbi-button cbi-button-action', 'disabled': !canRun || busy || lBusy || changed ? '' : null, 'title': changed ? 'Сначала сохраните изменения' : '', 'click': listsRefresh }, lBusy ? 'Обновляются…' : 'Обновить списки сейчас')
-			]));
+			listCard.appendChild(zm.listsNowRow({
+				need: !!tchT.rb_steer && data.installed && !data.stopped,
+				text: !canRun ? 'Скачаются, когда Steer включён, выбраны сервисы и подключён WARP или VPN.' : lBusy ? 'Обновляются в фоне — Steer тем временем работает как обычно.' : listsText(li),
+				refresh: listsRefresh, refreshLabel: lBusy ? 'Обновляются…' : 'Обновить списки сейчас',
+				refreshOff: !canRun || busy || lBusy || changed, refreshTitle: changed ? 'Сначала сохраните изменения' : '',
+				rebuild: listsRebuild,
+				rebuildOff: !data.installed || data.stopped || busy || lBusy || changed,
+				rebuildTitle: changed ? 'Сначала сохраните изменения' : !data.installed ? 'Steer ещё не установлен' : data.stopped ? 'Steer выключен — списки соберутся при включении' : ''
+			}));
 			listCard.appendChild(listsLog);
 			var bar = zm.saveBar({
 				saveLabel: data.installed && !data.stopped ? 'Сохранить и применить' : 'Сохранить',
@@ -51037,7 +51252,7 @@ return view.extend({
 		function renderXsets() {
 			xsetCard.innerHTML = '';
 			var list = data.xsets || [], t = (data.catalog || {}).tachyon || {};
-			var show = !data.blocker && list.length > 0 && t.on !== false;
+			var show = !data.blocker && list.length > 0 && t.on === true;
 			xsetCard.style.display = show ? '' : 'none';
 			if (!show) return;
 			var cur = {};
@@ -58592,6 +58807,58 @@ html.zm-theme-dark .zm-kv-tg, html.zm-theme-dark .zm-kv-web { box-shadow: none; 
 .zm-sp-count p { margin: 0; font-size: 14.5px; opacity: .8; }
 .zm-sp-count b { font-variant-numeric: tabular-nums; }
 .zm-sp-count[hidden] { display: none; }
+.zm-mp { --zm-mp-0: #e8ecf2; --zm-mp-line: #ffffff; --zm-mp-b1: #cfe0f7; --zm-mp-b2: #9cc2f0; --zm-mp-b3: #5c9be3; --zm-mp-b4: #2f73cf; --zm-mp-b5: #1b4c99; --zm-mp-few-bg: #e8ecf2; --zm-mp-few-ln: #b3c8e8; --zm-mp-hl: #0f172a; display: flex; flex-direction: column; gap: 14px; }
+html.zm-theme-dark .zm-mp { --zm-mp-0: rgba(255,255,255,.07); --zm-mp-line: rgba(0,0,0,.5); --zm-mp-b1: #1f3554; --zm-mp-b2: #1f5c9c; --zm-mp-b3: #2f7fe0; --zm-mp-b4: #5aa6ff; --zm-mp-b5: #a9d1ff; --zm-mp-few-bg: rgba(255,255,255,.07); --zm-mp-few-ln: rgba(90,166,255,.42); --zm-mp-hl: #ffffff; }
+.zm-mp-head { display: flex; flex-direction: column; gap: 4px; }
+.zm-mp-big { display: flex; align-items: baseline; flex-wrap: wrap; gap: 0 10px; }
+.zm-mp-big b { font-size: 34px; line-height: 1.15; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.zm-mp-t { font-size: 17px; font-weight: 600; }
+.zm-mp-lead { margin: 0; font-size: 13px; opacity: .7; line-height: 1.5; }
+.zm-mp-tabs[hidden] { display: none; }
+.zm-mp-grid { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 18px; align-items: start; }
+.zm-mp-mapcol { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.zm-mp-map { position: relative; }
+.zm-mp-svg { display: block; width: 100%; height: auto; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.zm-mp-svg path, .zm-mp-svg circle { fill: var(--zm-mp-0); stroke: var(--zm-mp-line); stroke-width: .6; stroke-linejoin: round; vector-effect: non-scaling-stroke; cursor: pointer; transition: fill .25s; }
+.zm-mp-svg .zm-mp-dots circle { stroke-width: 1.4; }
+.zm-mp-svg .zm-mp-b1, .zm-mp-leg i.zm-mp-b1 { fill: var(--zm-mp-b1); background: var(--zm-mp-b1); }
+.zm-mp-svg .zm-mp-b2, .zm-mp-leg i.zm-mp-b2 { fill: var(--zm-mp-b2); background: var(--zm-mp-b2); }
+.zm-mp-svg .zm-mp-b3, .zm-mp-leg i.zm-mp-b3 { fill: var(--zm-mp-b3); background: var(--zm-mp-b3); }
+.zm-mp-svg .zm-mp-b4, .zm-mp-leg i.zm-mp-b4 { fill: var(--zm-mp-b4); background: var(--zm-mp-b4); }
+.zm-mp-svg .zm-mp-b5, .zm-mp-leg i.zm-mp-b5 { fill: var(--zm-mp-b5); background: var(--zm-mp-b5); }
+.zm-mp-svg .zm-mp-few { fill: url(#zm-mp-hatch); }
+.zm-mp-svg .zm-mp-few-bg { fill: var(--zm-mp-few-bg); stroke: none; }
+.zm-mp-svg .zm-mp-few-ln { fill: var(--zm-mp-few-ln); stroke: none; }
+.zm-mp-svg .zm-mp-hl { fill: none; pointer-events: none; transition: none; }
+.zm-mp-svg .zm-mp-hl { stroke: var(--zm-mp-hl); stroke-width: 1.8; }
+.zm-mp-tip { position: absolute; z-index: 3; transform: translate(-50%, calc(-100% - 12px)); pointer-events: none; display: flex; flex-direction: column; gap: 2px; padding: 7px 11px; border-radius: 10px; background: rgba(15,23,42,.94); color: #f8fafc; font-size: 12.5px; line-height: 1.35; white-space: nowrap; box-shadow: 0 8px 24px -8px rgba(0,0,0,.45); }
+.zm-mp-tip.zm-mp-tip-down { transform: translate(-50%, 14px); }
+.zm-mp-tip[hidden] { display: none; }
+.zm-mp-tip span { opacity: .8; font-variant-numeric: tabular-nums; }
+.zm-mp-leg { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; opacity: .85; font-variant-numeric: tabular-nums; }
+.zm-mp-leg span { display: inline-flex; align-items: center; gap: 6px; }
+.zm-mp-leg i { width: 14px; height: 10px; border-radius: 3px; border: 1px solid rgba(127,127,127,.25); }
+.zm-mp-leg i.zm-mp-few { background: repeating-linear-gradient(45deg, var(--zm-mp-few-ln) 0 2px, var(--zm-mp-few-bg) 2px 5px); }
+.zm-mp-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.zm-mp-side-h { font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; opacity: .6; margin-top: 2px; }
+.zm-mp-list { display: flex; flex-direction: column; gap: 2px; }
+.zm-mp-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 8px; font-size: 13px; }
+.zm-mp-row[data-k]:hover { background: rgba(127,127,127,.09); }
+.zm-mp-side .zm-mp-row { cursor: pointer; }
+.zm-mp-row-i { font-size: 12px; opacity: .55; text-align: center; font-variant-numeric: tabular-nums; }
+.zm-mp-cc .zm-mp-row-i { font-size: 17px; opacity: 1; }
+.zm-mp-row-n { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.zm-mp-row-n span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zm-mp-row-n i { display: block; height: 4px; border-radius: 3px; background: var(--zm-mp-b3); opacity: .85; }
+.zm-mp-row b { font-variant-numeric: tabular-nums; font-size: 13px; }
+.zm-mp-cc { max-width: 560px; }
+.zm-mp-more, .zm-mp-empty { margin: 4px 0 0; font-size: 12.5px; opacity: .65; line-height: 1.5; }
+.zm-mp-note { margin: 0; font-size: 12px; opacity: .6; line-height: 1.5; }
+.zm-mp-note:empty { display: none; }
+.zm-mp-note a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
+@media (max-width: 900px) { .zm-mp-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 640px) { .zm-mp-big b { font-size: 28px; } .zm-mp-t { font-size: 15px; } }
+@media (prefers-reduced-motion: reduce) { .zm-mp-svg path, .zm-mp-svg circle { transition: none; } }
 @media (max-width: 640px) { .zm-sp-pay { flex: 1 1 100%; padding: 12px 16px 12px 12px; gap: 14px; } .zm-sp-qr svg { width: 104px; height: 104px; } .zm-sp-pay-t b { font-size: 18px; } }
 .zm-th-group { margin-top: 16px; }
 .zm-th-ghead { margin: 0 0 6px; font-size: 12px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; opacity: .65; }
@@ -59620,6 +59887,8 @@ html.zm-theme-dark .zm-stopbar { background: #2a1416; color: #fecaca; border-col
 .zm-sb-left { border-color: rgba(207,34,46,.3); background: rgba(207,34,46,.05); }
 .zm-sb-left-text, .zm-lists-now-text { display: flex; flex-direction: column; gap: 4px; flex: 1 1 260px; min-width: 0; }
 .zm-sb-left .cbi-button, .zm-lists-now .cbi-button { margin: 0; flex-shrink: 0; }
+.zm-lists-now.zm-lists-need { border-color: rgba(210,153,34,.55); background: rgba(210,153,34,.08); }
+.zm-tch-sec { margin-top: 22px; padding-top: 16px; border-top: 1px dashed rgba(110,118,129,.35); }
 .zm-dock { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 9999; width: min(860px, calc(100vw - 32px)); display: none; flex-direction: column; gap: 10px; pointer-events: none; }
 .zm-dock.zm-dock-on { display: flex; }
 .zm-dock > * { pointer-events: auto; }
@@ -62580,6 +62849,218 @@ function spLink(href, label, cls) {
 	return E('a', { 'class': 'cbi-button' + (cls ? ' ' + cls : ''), 'href': href, 'target': '_blank', 'rel': 'noreferrer' }, label);
 }
 
+var SP_MAP = {"w":1000,"h":547,"r":[["RU-SA","Якутия","M808 126l1 1-1-1-2 0-4-2-1-2zM802 121l1 2-2-2 0-1zM596 184l4 2 2-2-1-2 2 1 2 3-1 3 2 1 0 3 0 4 1 2 3 0-3-1-1-1 1-3-1-3 2-2-3-1 2-2 2-1 3-2 12-1 2 1-2 0 1 3 6 2 3 1-3-1 5-1 3-1 3 0-1-1 2 0-2-1 3 1 0-4 1 0-3-4 0-3 1 1 1 0-1-2 1 1 0-2 3 1 1-1 1 2 1 0 1 1 2-3 0 3 1-1 1 2 0-4 4-1 1 1 1-1 0 2 3-1 0 2 1-1 2 1-4 3 0 2 5-1-3 1-2 2 4 1 2-1 3 2-1 2 1-1-2 2-6-3-1 1 1 1 3 1 5 4 1-1-2-3 4 3-2 0-1 2 2 0 4 3 1 3 1-1 4 1 0-1 2 2 1-3-1-4 2-1-2 0 0-3-1-7 1-1 2 1-2 0 0 2 3 2 4 0 3-1 1 1-1-3 2-3 3-1 1 1 1-1 4 0 1 1 0-1 0 1 2 1 0-1-1 0 1-3-2 1-1-3 1-1 1 1 0-2 3 1 1-1 2-2-3-1-1-2-2 0 1-1-1-3 1-1-2 1 0 2-2-1 0-4 3-2 1-2-4-3 7-1 7-5 11-3-5 4-2 0 0 3-2 1 3 0 1-3 5-5 1 7-1-2 0-2-1 1 0 1-1-1-1 0 3 3-1 2-2 0 2 0 0 3 2-1 1-4-1-8 4-3 5-2 4 2 0 2-3-1 1 2-1 1 1 0 0 1 3-3 2 0 0 2 2-3 1 2 0 3 0-4 1 2 0-3 3-1 4 2-1 1 5-1 6-12 1 1 0-2 6-7 6-2 4 0 4 1 1 2 0 1 1 0 3 3 4-3 6 4 3-1 3 4 0 2 0-1-2-5-5-3-1-6 3 2 3 0 1 2 3 1 0 1 3 1 2 4-4 3 0 2-3 5 0 1-3 7 1 3 2-1-1 3 2 2 3 1 5-1 3 1 2 6 2 0 2 2-3 3 1 3-1 1-4 0 0 2-3 1-1 3-2 0 0 1-2 1 0 1 3 4-1 1-1-1-1 1 0 2 4 4-1 5 2 3 3 2 0 3 2 1-1 1-2-1-1 3 0 2-1 0-2 2 1 2-2 1-3-2-2 0-1 4-2 2-3 0 0 3 3 1 1 4-2 0-1-1-1 1 0 1-5 2 1 4-1 3 1 2 3 6 6 6-1 2 2 2 0 9-2 1-2-2 0 2-1-1-3 0 0 3-2 1 0 2-3-2-1 2-6-2-1 1-3-1 1 2-2 2 3 4-1 1 1 8-2 2 0 2-1 0 1 2-2 2 1 3 3 2 1 2 5 10-1 0-1-1-1 2 0 3-2 5-7 1-1 3 0 4-2 1-1 0-1 1-4 0-2 2-1 0-3 4 2 3-2 0 2 6-2 1 2 3-1 2 2 0-5 1 7 4-2 2 1 5-2 0-1 1 4 1 4 3 0 1 1 3-2-1 0 2-1 0-1 1 2 7 2 3-11 4-2 2 1 2-1 1-3 1-3-1-4 1 0 2-3 0-3 2-1 0-1 1-2 1-1-1-2-1-2 2-2-1-2 1-4 1-6-5-5 1-3-1-2 2-4-2-4 1-2-2-6 1-4 3-3-1 0-2-3-3 0-2-1 0-1 2-1-3-3-10-3-1 0-3-2-3 0-3-1-1-4-2-2 3-1-1 0 1-3 0-1-1 0-3-2-1 2-2-2 0-4-3-6-1-3 2-2 4-1 0-2 7-3 3 0 4-1 2-5 2 1 3-1-4 0-2-2 0-1-2-1 3-2 1-7 1 0 2-2 2-3 0-3-4-1 0 2-10-1-2 2-6-1-1 2 0 0-6-2 0-3-2 0-3-2-4 2-6-1-2-3 0-1-1 1-4-1-2-1-5-3-3-5 1 1-4 2 1 0-2-2-5-1 0-2 2-2-2-2 1-4-3-3 2 0-2-2 1-1-2 1-1 1-3 1 1-1-3 4-7-3-2 0-4-2-2 0-3 1-1-2-5 0 1 0-2-3-1 2-1 4-4-2-21-4-7 1-2 2 0 5-2 1-3 5 1 1-4-2-2 1-3 3-1-1-2 2-3 3-1 3-3 1 0 1-3-3-2-2-9-5-3 1-2-3-1 0-2 0-4-3-4 1 0 2-3-1-2zM707 174l0 2-3 0zM667 179l0 1 0 1-3 0zM664 178l2-3 2 1zM632 186l-1 2-1-2 1-1zM712 141l1 1-1 2-9 3-2 2-2 0 2-3-1-5 3-3 7 1zM684 150l0 1-5-2zM698 138l1 2-1 2-3-3 2-2zM602 176l-1 5-5-2 1-1 0-3zM717 105l2 3-3 5-3 2-9 1-2-5 3 2 4-5 2 2 4-4 2 1zM673 133l1 1-2 2-2-6 3 2zM699 114l0 3 1 1 1 2-1 2-4 2-3-2-1-4-2 1 0 2 4 3 2 1 3-2 1 1-3 4-2 0 1-1-1 0-1 0-4 6-2-1 0 5-4 0-7-3 0-1 1-1-1 0-2-3 0-1 1 0-2-2 1-4 1 1 0-2 1-1 0 1 4 0 0 1 3 0 1 1 2-1-3-4 2-1-3-1 6 1 4-3zM700 94l0 1-2 2z"],["RU-KYA","Красноярский край","M466 194l4 1 4 5-1 1 3 5 5 0 2 2-2 3-4 1-1 7-2 2 0 5 0-5 2 0 1-4 1 1 1-1 0 1-1 5-3 4 2 2 0-4 2 1 2-2 0-7-1-2 4-6-1-3-2-1-1-3 0-3-3-2-2-3 2-5 0-2-1-1 1-1 0-1 2-2 0-1 11 2 5 0 2 1 3-1 4 0-6 4 0 2 3 5-1-2-2-3 0-2 6 0 2-4-1 1-1-3 1 0-1 0-1-3-2-1 0-1 1 1 0-2 1 0 2 2-1 0 1 0 0 1 0-1 1 0-2-2 1-1-4-2 2-2 2 4 0-2 1 0 2-2-1-1 1 1 1-1-3-1 1-1 3 1 6-4 1 1 1-2 4-1 2 1 0-1 9-1-2-1 0 1-1-2-1 1 1-2 1 0 0 1 2 0-1-1 2 0 0 1 1-1 4 0 1 1-2 2 3-1 0 2 3-2-1 1 3-1-1-1 2 0-1-1 3-1 0 1 1 0 2 0 0 2 0 3 1-4-4-5 5 0 2-1 0 2 5 0-5-2 1-2-1-1 0-2 7-9 3-1 4 2 1 0 2 2-2 0-1 2-4 2 6-1-1 2 4-1 2 1-2 3 0 2-1 0 0 1 5-1 0-3 7 0 3-1 4 3-1 2 1-2 2 1 0 1 1 1-1 2 2-1 0-1 1 0-2-1 1 0 2 5 1-2 0 1 0 5 0-2-5-2 2 2 1 2 1-2 2 2-2 7-2 2-1 3-1 0-4 3 0 2-2 1 1 0 0 1-3 3-3 5-3 1-1 4-3 1-1 4-2 3 1 0 2-3 3 1 2 0-4-1 0-3 2 0 6-1-1-1 4-2 0-1 1 0-1-1 2 1 4-4 1 1-2 3-1 0 3 4 0 3 0 2 3 2-1 2 5 3 2 9 3 2-1 3-1 0-3 3-3 1-2 3 1 2-3 1-1 3 2 2-1 4-5-1-1 3-5 2-2 0-1 2 4 7 2 21-4 4-2 1 3 1 0 2 0-1 2 5-1 1 0 3 2 2 0 4 3 2-4 7 1 3-1-1-1 5 0 1 2 0 0 1 3-1 0-1 4 3 2-1 2 2 1-1 1 2-3 1-1 2-5-1 1 2-1 5 1 1 0 1-2 0 0 3-1 1 3 5 2 1-3 5 1 3-3 3 0 3-6 4 1 2-2 2 0 2-1 1 2 6 1 1 4 0 1 6-3 0-2 2 2 3 1 1 2 4-4 4 1 2-3 1-2-2-2 1 0-2-2-1-2-1 0-3-3-1-3 2-1 2 1 4-2 3-3 2-1 2-3 2-1 3-1 0 1 5-2 2-2-2-3-8-2 0-2 4-3 1-8-1-4 10 2 1-1 2 2 1 0 5-2 0 0 3-2 2-1-1-3 4 1 6-2 1-1 3 1 2-2 5-3-1-4 4 8 9-1 1-1 1-2-2-1 2-3-1-3 2-1-1-4 0-1 1 1 1-2 5-3 0-5 8-7 5-3 0-14-3-2-4 2-4 7-5 0-2 2-1 2-3-3-2 0-4 1-3-1-6-3-3 1-2-1-2-2 1 0-2-2-2-4 1 0-1-3 1-2-5-2-2 7-5-2-6-3-3 0-2 2-1-1-2 2-3-2-1 6-6 2 0 0-3-8-4 0-6 4-5 3-1-1-4-5 0-1-6-2-1-1-2-2-2-13-2-1-1 3-5-2-7 10-4 0-1 3-1-1-2-6-4-1-6 9-8 1-3 1-3-1 0 0-2-2-1 2-1 2-3 3-1 1-3 0-7-1-1-2 0-1-2-4-1 3-5 0-2-1-2 1-1-1-2-3-1 0-3 1-2-1-4 2-3-4-9 1 0 1-3-2-6 4 1 1-3 1-2 0-3 3-1-1-3-1-3 1-1-2-1 1-2-1-2-1 2-3 0-1-1-4-2 0-4-2-2 0-2 3-2 0-1 1 1 4-3 3 0-1-1 1-2 1-5-2-2-2-4 1-3 4 1 0-2 1-1-2-3-2-2zM595 186l-4 2-2-2 2-3 4 1 0-2 2 0zM472 190l-1 1-3-3 4-3zM507 169l-1 1-1 0 1 1-2-1 1-1zM491 160l-1 2 0-1-1 0 0-1 1-1 0 1 0-2 1 0zM542 157l0 1-1-1-1 0 1 2-4-2 0-1zM592 149l2 0 1 2zM542 145l-1 2-3 0zM521 142l0 1-2 0 0-2zM576 132l-1 1-3 0zM569 127l-2 3-5 2-1 1 0-1-4 1-4 3-2 0 3-10 2 0-1-1 1-2 2 0-2-2 2-3 1 2 0-3 3 2-2 6 3-5 3 3 0 2 1-1 1 1zM493 106l-3 0-1-3zM536 111l0 1-2 1-3 0 1-1-3-1 1-1-1-2zM553 122l-2 3-5 0-2-2-3-1-1-1-2 0-1-2 0-3-1 0 0-1-2 2 0-2 5-3-1-1 2-2 0 1 1-1 6 0 1 1-2 4 2-2 1 0 0-2 2 0 2 3-1 6 0 1-2-1zM504 92l1 1-1 1-3-1 1-1zM532 96l-1 1-3-2zM547 102l0 1-1 0 0 5-7 1-3 1-4-2 2 0-1-2 3 0-5 0 3-1-2-1 3 0 1-3-2 0 1-1 7-4-1 0 2 0zM480 220l0 1-3 4z"],["RU-KHA","Хабаровский край","M850 454l-1 0 1-1 3-2-1-3-3 2-2-1-3 4-2-1-4 1-3-3-4 0-1-1-2 3-1-2-3 0 1 4-2 0-2 2-2-5-2 0 1-1-1-2-2 0 0-3-2-2-3 1-1 0 0-2-1-1-1 2-1-1 0-3-1-1 1-1-1-3 2-3 1 0-3-4 6-5 1-4 5-6-3-1-1-3 11-2 0-4-2 0-1-3 0-4-2-1 0-1-4-1-2 4-4 1-2 2 1 2-7 5-1 2-1-1-3 2 0-2-3-5-4 2-4 0 0-6 2-1-1-4 4-6-1-3 2-1-1-1 2-1-1-3 2-1-6-2-3 3-6 3-2-3-2-7 1-1 1 0 0-2 2 1-1-3 0-1-4-3-4-1 1-1 2 0-1-5 2-2-7-4 1-1 4 0-2 0 1-2-2-3 2-1-2-6 2 0-2-3 1-2 2-2 1 0 2-2 4 0 1-1 1 0 2-1 0-4 1-3 7-1 2-5 0-3 1-2 1 1 2-1-6-9-1-2-3-2-1-3 2-2-1-2 1 0 0-2 2-2-1-8 1-1-3-4 2-2-1-2 3 1 1-1 6 2 1-2 3 2 0-2 2-1 0-3 3 0 1 1 0-2 2 2 2-1 0-5 3-1 3-3 6 1 2 2 1 0 4 4-1 2 2 3-2 1 0 5 3 1 2-3 6 2 0-1 1 0 5 5-1 1-3 1 2 3-1 2-3 0 0-2-1 1-1 0-3 3-6 4-2 3-2 1-3 6 1 9-2 7 2 6-2 3 0 4-3 10 1 2-1 0 0 4 2 2-1 0-1 9-3 8 0 4-3 6 0 3 1 2 3-2 1 1 7-5 3 6 1 3 2 1 2-3-1-2-2 0 1-4 2-1 0 4-1 0 3 1 1-2 0 5-1 2 1 1 4-6 1-5 1 2 0 5 2-1-2-7-3-3 5-1 2-4 5 1 2 2 4 1 8 0 1 1 0 3-4 1 5 0 2 2 1 4 5 1-1 1 2 2-1 6 0 2 1 1-1 1 3 3 0 3 2 4 3 4 2 0 0 3 3 3 1 3 0 1 1 3 0 1 1-1 1 3 2 4-2 12 1 6-4 1-1-2-1 0 2-3-1-1-3 0 0-3-2 1-2-2-1 1-2 4-3 3 0 1 3 1 0 2 5-2 0 2 2 0-3 7-3 0 1 4-2 4-2 2-2 0-1 2-3-1-2 2-1-2-3 0-1 1-2 2-1 3 2 3-3 3-2-5 0-2-2-2 2-4 1-3-4-3 0-4zM823 364l0 3-2 2zM829 361l1 0 0 6-4-2-1 3 0-6 2-1 1 1z"],["RU-IRK","Иркутская область","M565 396l3-1 2-3 0-5 3-3 3 1-1 1 3 3 2 1 0 2 2-1 2 2 3-1-1-2 4-4-2-4-1-1-2-3 2-2 3 0-1-6-4 0-1-1-2-6 1-1 0-2 2-2-1-2 6-4 0-3 3-3-1-3 3-5-2-1-3-5 1-1 0-3 2 0 0-1-1-1 1-5-1-2 5 1 1-2 3 0-1-3-1 0 2-1 3 5 0 2-2-1-1 4 5-1 3 3 1 5 1 2-1 4 1 1 3 0 1 2-2 6 2 4 0 3 5 2 0 6-2 0 1 1-2 6 0 8-2 2 1 2 1 0 2 3 1 1 3 0 2-2 0-2 7-1 2-1 1-3 1 2 2 0 0 2 1 4-1-3 5-2 1-2 0-4 3-3 2-7 1 0 2-4 3-2 6 1 4 3 2 0-2 2 2 1 0 3 1 1 3 0 0-1 1 1 2-3 4 2 1 1 0 3 2 3 0 3 3 1 1 3-3 2-4-2-3 1-1 1 1 2-1 1 1 3-2 2 4 6 3-1-1 2 1 2 0 2-1 1-1-1-3 3-4 0-1 0-4-1 3-3-2-1-3 3-3 0-1 6-4 1-1 3-4-2-1 1-3 0-2-3-2 1-2 0-2 1-3-3-2 5-4 0-5-1-1 4-2 0-5 3-1 4 2 0 2 3 2 0-2 1-2 5 2 9-1 5 4 0-5 19-14 11-6 9-6 3 0 5-3 0-4 2 0-3-2-1-2 1-1-3 0-2-4-3-2-3-3 0-2 0-4-5-5-2-4-4-1-4-3 1 0 1-1 1-3 1-1 2-2-1 1-1-1-1-5 1-1-2-2 0 0-2-3 0-2-3-4-2-2 1-4-5 0-1-3-3 1-2 1 0 2-2 3 1 2-5-1-2 1-3 2-1-1-6 3-4 1 1 2-2 0-3 2 0 0-5-2-1 1-2-2-1 4-10 8 1 3-1 2-4 2 0 3 8 2 2 2-2-1-5 1 0 1-3 3-2z"],["RU-CHU","Чукотский АО","M917 27l1-1 0 3-2-1zM851 48l1-1 0-1 2 0 2-2 2-1-1 1 2 0 2-2 2 1 0-2-4 2 5-3 0 1 1 0 0-2 1 0 3-2 0 1 1-1 1-2-2 2 3-3 1 2 0 1 1 0 2-2-3 0-1-1 3-2 3 0 1 2 0-2-1 0 3-1 3 2 4 0 1 1 2-2 3 1-2-2 1-1 3 1-3-2-2 2-1-2-4-1-2 3 1-5 1-1 0-2 0 1 1 0 2 1 0-1-1 1-1-1 2-2 0-2-2 3 2-6 4-1 6-4 1 1 0-2 1 0 0 1 1 0 1-3 1 0-1 2 2 4 4 0-5 4 4-2 2 1-1 1-1 4 0-1-1 2-1 0-2 3 3-2 1 0 0-1 3 1-1 3 2-3 2 0 2 7 0-2 1 0 1 2 0-2 1 1 1-2 2-1 0 2-2 1 0 1 1-1 2 0 0 2-1 2-2-2-2 1 3 0 0 2-1 2-4 0-2 2-2-1 1 1-1 1 1 1 0 2-1 0-3 2-2-2-3 0-5 5 1 3-2 5-3-1 0 1-5 0 1-1-4-3 2 3-2 1-2 0 1 0-1 1 3 0 0 2-1 0 4 2 5-1 4 4 0 2zM819 88l2 3 0 1-6 3-1-3zM819 36l0-4 2-2 6-3 1 3-1 7-1 2zM803 117l4-5-1-2 5-2 2-3 4-4-1-6 4 0 3 2 5-3 4 1 1-4 2 0-2 0 0-2 1 1-2-1 0-3-7-1-2 2 0-3-5-2 7-8 3-1 0-1-1 1-1-1 3-2 3-8 0 1 2-1-1-1-1 1 0-2 2 1 2-2 7-7 2-1-2 1 2 1 1-3 5-2-3 2 2-1 1-1 49 19 2 4 1 6-1-1 0 3-2 2-3 0-3 2-1 3 1-1 0-2 4-1 0 1-2 3 0 1-3 1 1 3-1 7 2-7-1-3 3 0 2 2-2-2 3-1-2-4 1-1 3 2 3-1 2-2-2-1 6 0-1 0 1 1 1-1-1 0 5 1-1 1 1-1-1 1 1 2 1-2 2 1 0-1-3-1 4 0-1 1 1 0 3-2 2 2 4-1 2 2 0 2 3 1-6 4-2 5-3-3 1 2-3 1 3 1 2-1-1 3 2 4 0 7-1-1 1 1 1 4-2 0 2 0 0 2-4-1 0 1-5-2-2 2 0 6-4 3 1 4-2 1 0 3-2 3-4 0-1-1 0 1-6 1-1 2-3 1-3-10-4 0-2 2-5-1-3 4-4 0-1 3-2 3-1 1-2 0-2 1-1 0-1 1 2 2-5 2 0 1-2 2 0 2 1 2-1 1-5 3-2-1-3 1-3 3-5-1-7 3-4-5-5 2-2-6-2-1-6 1-4-1-1-2 1-3-2 0-1-3 3-6 0-1 3-5 0-2 4-4-2-3-3-1 0-1-2 0-2-3-3 0zM826 39l1 2-1 4-3-1-2-2-2-6z"],["RU-YAN","Ямало-Ненецкий АО","M400 251l-2 0 0-4-1-1 1 1 0 1 1-1 2 2zM395 207l6 9-1 2 2 6-1 3 3-1 5-5 0-1 1 0-2-1-1-1 0-5 2-3-1 0-2-4-2 2 0-1 3-5 1 0 0 1 1-1 0-2 5-6-1-1-2 0 3-3-1 0 0-1 2-2 8-1 9-11 3-3 1 1-1 1 7 3 2 1-1 1 1 0 2 2-2 5-5 7-4 1 2 6-1 4-2 5-3 1-1 6-2 2-3 9 2 7-4 3-2 6-3 0-3 4-2-1 0 2-1 0-2 2-2-1 0 1-1 3-1-1-2 1-2 0-1-2 3-1-2 0-1-3-2 0-3-2 0 4 2 3 2 2 5 3 3 2 1 0 1-2 2-1 2 0 6-2 2-4 6-3 2-6 0-4 3-4 10 1-1 3 2 4-2 2 1 1-2 5-1 1 1 4 7 2 0-2-2 1 0-2-1 1-2-2 0-1-2 0 2-5 4-1-1-3 1-6-5-6-3-2-4 1-1-1-2 0-1-2 2-2 0-5 3-5 4-3 1-2 0-9-1-3 4-4 7-1 3-6 0-3 1-1 1 2 0 1-1 0 1 2-1 4-4 3 0 6-2 2 2 3 3 1 0 2 1-1 2 0 2 5 3 1 1-1-3 0 1-1-1-2 0-2-1 0 1-1-3 0-3-5 0-5 4-1 2 4 2 0 1-1 0-2-3-1 1-1 1 1 3-2 1 0 1 4 4 4-1 4-4-1-1 3 2 4 2 2-1 8-3 0-4 3-1-1 0 1-3 2 0 2 2 2 0 4 4 2 1 1 3 0 1-2 1 2-1 2 2 1-1 1 1 3 1 3-3 1 0 3-1 2-1 3-4-1 2 6-1 3-1 0 4 9-2 3 1 4-1 2 0 3 3 1 1 2-1 1 1 2 0 2-3 5 4 1 1 2 2 0 1 1 0 7-1 3-3 1-2 3-2 1 2 1 0 2 1 0-1 3-1 3-9 8-2-6-4 1-2-5-3-1-3 1-2-3 0-4-3-1-5 3-1 2-6-2-5 1-4-6 0-3-1-1-3 0-2-3-8-2 0-2-5-3 0-3-4 1-2-2-2 1-2-1 2-5 0-1-3-2 0-5 2-1-1-3-2-1-4-4-1 0-1 2-2-2-5 2-4-5 3-3-1-1-7-4-2 1-2-2-2 1-5-2 0-4-2-1-1-2 3-1 0-2 4-4-1-2 0-5 5 0 2-2 2-1 1 0 2-2 11 0 2-3 6-2 1-1-2 0 1-1 2 0 1-3-3-2 0-1 2-3 3-2 1-4-3-3 1-2zM466 191l0 1-3 2-4-2 5-3zM455 179l1 1-1 0-1 2-2-3 1-1zM445 173l-1 2-1-2-6-1 2-4 3 0 2 1-2 2 1 1 1-1zM461 176l-2 1 1-2 2 0z"],["RU-KHM","Ханты-Мансийский АО — Югра","M316 275l0-3 5-4 0-3 2-2 0-2 8-9 3-1 0-2 1-3 4-3 3-2 2 1 0 3 12-5 0 5 1 2-4 4 0 2-3 2 2 2 1 0 1 1-1 3 9 3 2-1 7 4 1 1-3 3 4 5 5-2 2 2 1-2 1 0 4 4 2 1 1 3-2 1 0 5 3 2 0 1-2 5 2 1 2-1 2 2 4-1 0 3 5 3 0 2 8 2 2 3 3 0 1 1 0 3 4 6 5-1 6 2 1-2 5-3 3 1 0 4 2 3 3-1 3 1 2 5 4-1 1 3 1 1 1 8 6 4 1 2-3 1 0 1-10 4-2 0-2-4-2 0-8 5-2-3-4-1 0-1-2-2-4 1-5-1 0-3-9-1-4-4-2 4-3 2 1 1-2 2-3 7-3-1-2 1-3 2-1 3-5 3-2-2-4-2-3-3-3-1 0-4-2-1-1-7-3-6-2 0-3-2-6-5-2 1 1 2-6 0-3 3-4-1-6 1-2-1-1 3-3 0-4-4 1-10-6-5 3-9-1-2 2-9 1-1 0-4-4-10-5-4 1-3z"],["RU-MAG","Магаданская область","M879 250l-1 1 1 2-4 1 0 3-3 4-4-1 5-5 0-2-3 2-5-2-2 3 1 1 0 1-2 1 1-2-9 4-1 3 3 1-2 1-1 0 0 1 1 1 2-1 1 1-3 2-2-1-1 1-1 2 1 1-2 1 0 1-4 1 1-1-4-5-2 0 0 1-6-2-2 3-4-1 1-5 2-2-2-2 1-2-4-4-1 0-4-3-4 0-1 0-1 2-1 1-4 1 1-4-2-2 1-2-6-6-3-6-2-2 2-3-1-4 5-2 0-1 1-1 1 1 2 0-1-4-3-1 0-3 3 0 2-2 1-4 2 0 3 2 2-1-1-2 2-2 1 0 0-2 1-3 2 1-1-5-3-2-2-3 1-5-4-4 0-2 1-1 1 1 1-1-3-4 0-1 2-1 0-1 2 0 1-3 3-1 0-2 4 0 1-1-1-3 3-3-2-1 0-2 4-1 3 5 7-3 5 1 3-3 3-1 2 1 5-3 1-1-1-1 1-1 2 2 3 0 1 3-1 2 3 1 1 2 4 2 0 2 2 1 0 3 2 1 4-1 4 4-1 4 3-1 1 1 0 1 3 1 3 15 1 2-2 1 1 3-3-2-1-3-1 4-1-2-2-1-1 1 1-2-2-1 0-2-4-4 0 6-2-1 1 1-3 0-1 1 1 1-3 3 0 2-3 2 1 2-1 4 3 3 0 6 2 2-1 8 2 6-1-1 0 1 2 1-1 1 3 2-1 0 2 3 0-1 0-1 2 0-2-1 3-2 3 0 1 2-2 2 1 0-3 1 1 2-1 2-3 0 0-1 0 1-2 1 1 2z"],["RU-KAM","Камчатский край","M985 209l1 1-3 0-6 0-2 1 0-2 2-2 2 2zM930 190l0 1-1 3 0 3 2 4-2-1 0-1-3-5-1 1 1-7zM928 115l-1 2 1 3-2 0 2 2 1 3-1 1 0 1 2 0-1 1 1 1-1 2 1-1 0 2 2-1-1 1-1 1 2 0 1 1-2 0 2 1-1 3 1 0 0 1-1 0 2 2-1 3 1 1-1 1 2 0 3 5-3 1-1-1 0-1-7 2 0 1-4 8 0 1-1 2 1 1-2 1 2 0 3 8-1 1-1 0-6-6 0 2 0 1 0-2 1 5-1 1 1 2-1 0 0 1 2 0 1 4-5-1 0 3 2 1-1 0-1-1-3 2 2 0 0 3 2 2 0 2 4 1-1 2 3 0 0 1-2-1 0 2 2 0 0 1-1 0 2 5 5 7 2 1 3-1 0 1 0-1-2-2 1-1 5-2 2 6 6 5 3-3 6 4 1 3-5 2 0-6-1 0 1 2-2 1 0 2 2 0 0 5 4 6 4 2 5 1 1 1 1 4-1 3-2 0-2 3 1 7 4 6 1 0 2 1-1 1 5 1-2 1-1-1-1 6 0 5-3-1 0 1 1 1 1-1 1 2 2 1-1 0 2 1 0 2 1-1 3 5 2 6-1 3 1 2 1 9-2-2-4-1-9-7-4-2 1 0 0-1-2 0-4-2-27-18-11-14-2-8 1 0-2-4-5-3 0-2 2 0 1-2-2-3 3-3 1 0-1 0-1-9 1 0-1 0-2-6-2-2 0-5-2-3 1-2-2-11-2-2 0-8 1-2 1 1-1-2 1-2-3 1-2-6-2 1-2-2 1-2-7-5 0-3 4-3-2 0 2-3-3 3-4 2-3 6 1 2 2 0 0 2 2 1 3 3 2-1 1 3-3-1 0 2 1 0-2 0-3-1 0-1-1-1-3 1 1-4-4-4-5 1-1-1 0-3-2-1 0-2-4-2-1-2-3-1 1-2-1-3-3 0-2-2-1 0 0-2 2-2 0-1 5-2-2-2 1-1 1 0 2-1 2 0 1-1 2-3 1-3 4 0 3-4 5 1 2-2 4 0 3 10 3-1 1-2 6-1 0-1 1 1 4 0 2-3 0-3 2-1-1-4 4-3 0-6 2-2 5 2 0-1z"],["RU-ZAB","Забайкальский край","M677 494l-2 0-5 4-3 4 0 3-2 1-3 0-4 3-6 1-5 4-3-1-1 2-8-1-7 1-6-4 0-4-2 0 0-2 2-3 5-3-5-3 1-1 0-3 2-1-2-2 2-3 3 0 1-1 3 2 5-5 5 1 3-4 4-3 3-5 3 0 0-2 8-3 4-4 1-4 0-1-2 0 0-2-2 0-1-1-1-4 8-7 4-7 7-3 1-4-1-2-5-5-3 1-3-10-2-1 0-2-3-3 1-4 4 1 1 0 4 0 3-3 1 1 1-1 0-2-1-2 1-2-3 1-4-6 2-2-1-3 1-1-1-2 1-1 3-1 4 2 3-1 3 8 2-1 0 2 3 3 0 2 3 1-1 2 1 1 0 1 2 1 2 0 3 2-3 2 1 3 3 0 2-3 3-1 3 7 2-3 2 1 2 7-1 4 2-2 1 3 2 1-1 2-2 0 2 3-1 1 3 3 3 4-9 5-4 9 1 2 3-1 3 0 0 3 2 2 0 3-4 5-1 13-2 6 3 0-1 4-4 2-6 8-6 0-9-3-3 3-3 0-7-3z"],["RU-KO","Коми","M316 273l-3 3-3 1-12-9-2 0-3 2-2-2-2 1-2-2-3 2-5-6-1 1-2-2 1-2-2-3-1 2-2-2-1 1-2-3-3 3 1 4-2 2-1-2-6 1-1-3-3 1-5-3-6 5-1-1 1-2-1-3 2-2-2-3 4-5 3 0-1-2 4-5 2-1 5 2 5-3-1-3 12-8-2-4-2 0-1-1-5 4-2-3-2 1-1-1 5-8 3 1 2-2 0-4 2-2 1-2-2-6 1-4 2 0 4 3 6 6-1 2 1 1 2-1 1 1 2-1 2 2 1 0 3 3 3-2-1-2 2-6-3-2 8-8 16 2 2-1 4 0 5 7 25 19 8 5 8-1 3-3 5 0 1-2 4 0 1-2 5 2-4 4 0 1 3 2-1 3-2 0-1 1 2 0-1 1-6 2-2 3-11 0-2 2-1 0-2 1-2 2-5-1-6 3-1 1-5 2 0-3-1-1-5 2-3 3-1 3 0 2-3 1-8 9 0 2-2 2 0 3-5 4z"],["RU-ARK","Архангельская область","M237 157l1 6 5 1 3-3 0-2-2-1 1-6 2-2 2 1 2-2 1 2 0 6 1 2-1 1-1-2-1 1 2 1 1 0 1 7 2 1-1-1 1 0 1 4 2-2 4-8 2-2 8 1 5 2 6-1 0 3-1 0 3 3 0 3-3 0 0 1 1-1 2 1-2 4 6-5 4 17 3 3 4-2 3 4-8 8 3 2-2 6 1 2-3 2-3-3-1 0-2-2-2 1-1-1-2 1-1-1 1-2-6-6-4-3-2 0-1 4 2 6-1 2-2 2 0 4-2 2-3-1-5 8 1 1 2-1 2 3 5-4 1 1 2 0 2 4-12 8 1 3-5 3-5-2-2 1-2-2 1-1-1-2-2-2-3 1 0-4-2-1-1-2 1-2-1-2-4 2-4-5 1-2-2-1-4 1-1-2-1 0 0-3-2 0-2-3 1-1-1 0-2-2-2 1-1-1 0-3-2 0 1-2-4-1 0-2-2-2-1 0 1-2-2-1 1-3-1-1 2-2 0-1 1-2 4-3 4-2 2-3-1-1 3-1 2-2-2-5 1-4 3-1 3-6 2 2zM365 143l3-2 2 0 1 2 2-2 0 1 1-1 1 1 0-2 2 0-1-1 1 0 1 1-2-3 2-1 3 2 0-1 1 0 0-2 1-1 4 2 3 0 3 6 0 1-3-1 2 2-1 0-3-1 2 1-1 2-2-2 0 3-1-1-1 1-1-1 0 2-1-1 1 1-2 3-3 2 0 1-3 8 1 10-1-1-1 1-1-2 1 3-2-3 0-2-1 0 0 3-2-4 0 2-1-4 0 2-1-1-1 1 0-5-1 3 0-3-3-2 0-2 1 2 2-4 1 2 0-1 2 1-1-1 1 0-2 0 0-2 3-1-3 0 1-2 1 0-3 0 1-4-1 2 0-2-1 1-2-1zM406 128l-1-1 1-1-2-2 4 1-1-1 1-1-2 0 0-2 2 0 0 2 4-2 2 2 0-2 3 0 0-1 6 0 3 1 0-1 1 0 1 1-2 0 1 1 2 0 0-1 1-1 4 2-1 1 2 0 0 1 3 0 3 1 3-1 2 1 1-2 6 0 2 1 1 2-2 4-3 2-13 0-5-1 0-1-1 1-7 0-1 1 0-2-4 2 0-1-1 1-2-1 2 2-2 0 0 1-2-2 0 2-1 1-1-3-2 3-2-3-1 5-1 0 0-1 0 1-1 0 0-1-2 2 0-4-1 2-1-1 1 3-2 2 0-2-2-3 2 3-1 2-1 1-1-3 0 3-3 1 0-1-1 2-1-2 0-2-1 1-2-4-3 0 0-1 2 0 0-1 5 0-3-1-1 0-1-3 5 0 0-1 3 0 1 3-1-4 2 1 0-1 1-1 3 2-2-2 1-2zM366 154l-3 2 1-6 2 1zM435 66l-3-3 3 1zM449 67l0-1 1 0 1 1 0 2zM431 53l-2-1 1-1-1-1-1-2 7 3 1 3-1 2 0-3-2 0zM463 75l-1 2-4 0-1-2-2 0 0-1 3-3 1 2 3 0zM454 70l0-1 1 0 2 1-1 1zM450 66l-2-1-1-2 2 1zM441 60l-2 0-3-2-1 1-2-1-1 0 0 2-1-1-1 0-1-1 2-1-3-1 0-1 2 0 2 2-1-2 1 1 1 0-2-2 3 1 1 2 3-1-1 0 0-1 3 1-1 0 2 1 0 1-2 0 2 1zM454 67l-1-4 3 5zM449 62l1-1 1 2 1 1 2 5-2 0zM457 62l-1-1 1 0 2 1 1 2zM469 67l-1 0 2 0 1 2-1 0zM461 61l-1 0 1-1 3 2-1 0zM451 78l0-1 2 2-1 1zM445 72l2-2 2 2-2 2zM439 66l0-1 2 0 1 2-1 1zM449 75l1-5 4 5-3-1 0 2-1-1-1 1zM460 70l4 2-3 0-1-2zM465 75l3 1 2-2 1 3 0 1-4 1-3-1 0-3zM452 62l1-1 2 2 0-2 2 3-3 0zM257 170l-1-3 2 1z"],["RU-AMU","Амурская область","M736 430l-1 0-9 5-3-4-3-3 1-1-2-3 2 0 1-2-2-1-1-3-2 2 1-4-2-7-2-1-2 3-3-7-7 5-2-4 3-2-3-2-2 0-2-1 0-1-1-1 3-4 2-1 6-1 2 2 4-1 4 2 2-2 3 1 5-1 6 5 4-1 2-1 2 1 2-2 2 1 1 1 2-1 1-1 1 0 3-2 3 0 0-2 4-1 3 1 3-1 1-1-1-2 4-3 7-3 3 0 9-6 2 2 3 0-2 1 1 3-2 1 1 1-2 1 1 3-4 6 1 4-2 1 0 6 4 0 4-2 3 5 0 2 3-2 1 1 1-2 7-5-1-2 2-2 4-1 2-4 4 1 0 1 2 1 0 4 1 3 2 0 0 4-6 2-5 0 1 3 2 1 0 1-3 3-1 4-1 0 1 1-1 1-6 5 3 4-1 0-2 3 1 3-1 1 1 1 0 3 1 1 1-2 1 1 0 2 1 0 3-1 2 2 0 3 2 0 1 2-1 1 2 0 1 3 0 2-2 1 1 4-3 3-3 1-3 0-6-3-1 1-2 1-3 0 0-2-2 0-4 3-3 0-3-1-1-5-3-1-3-5-4-2-1-4-1 1 0-1-7-6 0-2-2 0 1-2-2-1-3-1-1-3-2-1-1 1 0-1-1-1-5 0-1 0 0 2-10-2-2-1z"],["RU-BU","Бурятия","M553 487l-8-4-2-3-1 0 0-2 2-3 0-4 3 1 1-3 3-1 1-1 0-1 3-1 1 4 4 4 5 2 4 5 2 0 3 0 2 3 4 3 0 2 1 3 2-1 2 1 0 3 4-2 3 0 0-5 6-3 6-9 14-11 5-19-4 0 1-5-2-9 2-5 2-1-2 0-2-3-2 0 1-4 5-3 2 0 1-4 5 1 4 0 2-5 3 3 2-1 2 0 2-1 2 3 3 0 1-1 4 2 1-3 4-1 1-6 4-1 1-2 2 0 1 1-3 4-1 4 2 0 1 2 0 2 2 1 3 10 3-1 5 5 1 2-1 4-7 3-4 7-8 7 1 4 1 1 2 0 0 2 2 0 0 1-1 4-4 4-8 3 0 2-3 0-3 5-4 3-3 4-5-1-5 5-3-2-1 1-3 0-2 3 2 2-2 1 0 3-1 1 5 3-5 3-2 3 0 2-5 0-5-4-3 1-3-1-5-1-8 3-2 2-7 0-1-1-3 0-5-3-2-11-3-1-4 0-7-4z"],["RU-TOM","Томская область","M448 348l2 4 2 0 2 6 0 1-3 5 1 1 13 2 2 2 1 2 2 1 1 6 5 0 1 4-3 1-4 5 0 4 0 2 5 2 3 1 0 4-2 0-5 6 1 1-2 3-1 0-5 3-1-1-3-2-1 2-3-2-2 1-1-1-2 1-4 2 1 1-4-1-1 1-1 0-5 1 0-1-2 0-4 4-1-1-2-1 2-1 0-3-1-1 1-1-1 0 2-3-1-2-2 0-1 2-9-1-2-4-6-1-3-8-7-5-15-7-2-6 1-4-2-4 1-1 0-1 2-1-1-2 6-4 1-3 5-3 3 1 3-7 2-2-1-1 3-2 2-4 4 4 9 1 0 3 5 1 4-1 2 2 0 1 4 1 2 3 8-5z"],["RU-SVE","Свердловская область","M259 331l-1-1 1-3 3-3 0-3 4 1 2 0 1 1 3-6 3-1 1 1 0 2 3-1 1-1 0-3 1-1 7-1 2-2-2-2 4-4-2-7 5-3 2 1 7-6 4-4 1-4 2-2 3-4 2-2 2 3-1 3 5 4 4 10 0 4-1 1-2 9 1 2-3 8 0 2 6 4-1 10 1 2-2 8-6 0 0-1-5 1 1 1-3 2 0 2-2 4 2 0-1 1-1 1-2-2-3-1-3 3-4-5-1 1-2-2-3-1 0-1-5 2-1 1-1-3-3-3-1 2-2-1-6-5-3-4-4 2-1-3-2 1-1-2z"],["RU-NVS","Новосибирская область","M374 423l3-4-4 1-2-1 0 1-4 1 3-7-1-3 0-1-1-1 1-1-1-5 3-1-1-2 1 0-1-2 2 1 0-2 5-2 4 1-1-2 1-2-2-1 4-2 2-7 15 7 7 5 3 8 6 1 2 4 9 1 1-2 2 0 1 2-2 3 1 0-1 1 1 1 0 3-2 1 3 2 4-4 4 1-1 4 1 3-1 1 1 1-1 5 1 2-1 2 0 3-3 1-2 2-2-1-3 1-3-1-1 2-1-2-1 0-4 3-3 4-2-3 1-1-3-1-1-2 2-1-3 0 0-2-2-2-1-4-1 2-3 1-3-1-5 4-7-2-1 2-2 0-1-1 0-1-2 0 0 1-3 1-6-11 0-3z"],["RU-NEN","Ненецкий АО","M290 170l3-1 1-1 2-1 1-2-1-3 1-1 5-2 3-3 2 0-1-1 3-2 0-6 1 3 5 6 0 7-3 4-5-4-5 1 0 5-2 4 3 2-2 1 5 2 0 1 7-4 1-2 4 2 1 2 0-2 1-3 1 3 5 1 6 0 1 1 6 1-1 1 1 1-2 0 1 1 2 0 0-2 1 0-1 0 0-1 10 2 1 1-4-2 1 2-3 1-1 4-3-2-1 1 3 3 1-1 0 1 1 0 1 3 2-2 3-1 3 1 4 5 5-1 2 0-1 2 1-2 4 2-1 0 0 3-2 1-2 2 2 2 2 0 1-3 3 1 4 0 1-3-1-1 1-6 1-1 2 1 3-1 8 8 3 5 1 3-2 2 2-1-4 1-1 2 3 3-1 4-1 1-5-2-1 2-4 0-1 2-6 1-2 2-9 0-7-4-25-19-5-7-4 0-2 1-16-2-3-4-5 1-2-2zM338 166l-2 1 1-1-4 1-3-1-2-1 0-3 4-3 4-1 1 1zM381 189l-2 1-3-2 1-2-1-2-1 1 0-3 1-3 1 1 0-2 3 0 0 4 1 5z"],["RU-ALT","Алтайский край","M382 457l-4-21 3-1 0-1 2 0 0 1 1 1 2 0 1-2 6 2 6-4 3 1 3-1 1-2 1 4 2 2 0 2 3 0-2 1 1 2 3 1-1 1 2 3 3-4 4-3 1 0 1 2 1-2 3 1 3-1 1 2 3-3 4-1 1 5 1-1 4 5 2 6 3 1-1 3-2 0 3 3-2 3 1 3-2-1-2 2-1 2 1 1 0 2-3 0-1 1-3-2-3 5-2 0-1 1-10 2-2 2-1-1 0 1 4 2 0 2-1 2-4 0-1-4-4-3-2 0-1 1-2-1-3 2-6-2-2 0 0-3-3-1 2-3-3-2-3 0-1 3-3 1-1 0 0 1z"],["RU-KR","Карелия","M245 107l1-2 6 9-2 4 1 2 3 0 2 2-1 0 1 3 0 1-3-1 2 4 0 3-3 5 0-2-4 2-2-1-3 5-1 0 0 2-2 0 1 1-1 0-1 1-1-1-1 5 1 1 1-1 0 2-2 5 0 1-4 2-2-2-3 6-2 0-2 3 0 5 2 2-3 2-2 1 1 1-2 3-6 3-4-6-2 0-6-3 1-2-2-3-3-1 0-1-2-4-2 1 1 2-2 0 0-2-4 0-3-1-4-21 1-3 20 3 6-1 2-4 3-10 6 0 1-1 1-3 4-3 0-1 2-3 2 1 1-1-1-1 5-1 0-1 2 1zM247 146l-2 0 2-2 1 1z"],["RU-TY","Тыва","M544 482l-2 4-3 1-1 4-1 0-3 6 2 5 2 1 0 4-2 3-4 1-3 3-2-3-4 1-4-3-1 1-1-1-3 2-4-1-1-2-3 0-2-3 0-4-10-2-1-2-1 0-2 1-2-3-2 2-3 0-3 3-4 0-3 2-2 0-4 1-1 1-3 1 0-4-2-1 1 0 1-3 1 1 2-1-5-8 0-5-2-2 4-1 1 1 4 1 2-2 1 0 0-3 1-2 2-1 3 2 0 3 6 1 5 2 6 0 7-5 5-8 3 0 2-5-1-1 5-1 1 1 3-2 3 1 1-2 2 2 3-3 4 2 2 3 3 0 0 2 2 0 0 2 6-1 1 1-1 1 2 1 0 1-3-1 0 4-2 3 0 2 1 0z"],["RU-PRI","Приморский край","M859 480l-2-4 4-3-2-3 2-4 4-2 1 0 1 2 2-2 3 1 1-2 3 0 2-3 1-3-1-4 3 0 3-7-2 0 0-2-5 2 0-2-3-1 0-1 3-3 2-5 1 0 2 2 2-1 0 3 3 0 1 1-2 3 1 0 1 2 4-1-1 6 2 12-4 24 1 5-2 3-1 6 1 3-1 1 1 3-7 13-5 6-2 1-1-2-1 2-1-2-2 2-2 0 0 1-2-5-3 4-1 0 1-3-2 1-1 5-1 1 1 1-1 2 1 3-2-1-1 2-1 0 1-1-2 1 1-1-2 1 3 1 0 3-3-2 0-1-3 0 2-2 4-4-1-6-2-1-3-7-7-8 3-3 2-7 1 1 10-2 1-2-2-4 2-3-2-3 1-2-1-2z"],["RU-PER","Пермский край","M245 317l-1-5-2 2 0-5 1 0-2-1 2-2 0 2 3-2 2 0 0-1 2-2-1-1 2-1-1-2 2-1 2-3 1-4 1 0 2-4 2-1 1-2 2-2-2-2 0-3 9-5 0-3-5-5 2-2-1-4 3-3 2 3 1-1 2 2 1-2 2 3-1 2 2 2 1-1 5 6 3-2 2 2 2-1 2 2 3-2 2 0 11 8 4 0-9 13-7 6-2-1-5 3 2 7-4 4 2 2-2 2-8 2-1 4-3 1 0-2-1-1-5 3-1 4-1-1-2 0-4-1 0 3-3 3-3 1-2-1 0-4-3-1 1-3-4-1z"],["RU-TYU","Тюменская область","M327 385l-1-2-1 2-2-3-1-3 1-2-2 0-3-3 0-3-3-2 0-1-2 0-1-2-2 0 0-4-3-3 1 0-1-3 2-2 1 0 2-2-2 0 2-4 0-2 3-2-1-1 5-1 0 1 6 0 2-8 3 2 2 0 2-3 2 1 6-1 4 1 3-3 6 0 0-3 2 1 0 1 4 2 1 1 3 2 2-1 3 7 1 7 2 1 0 4 11 7 1 1-9 4-7-3-2 1-5-2 0-2-5-2 2-3-2-3-6 6-1 5-2 2 1 3 1-2 2 1-1 1 2 5 0 2-3 1-2-1-1 2-2 0 0 1-1 1-2 4-3 0 2 1-2 1 0 2-2 1-2 3-2 0-2-4-2-2z"],["RU-VLG","Вологодская область","M214 183l-5 7 1 1-1 3 2 1-1 2 1 0 2 2 0 2 4 2 2 5 2-1 2 2 1 0-1 1 2 3 2 1 0 2 1 0 1 2 4-1 2 1-1 2 4 5 4-2 1 2-1 2 1 2 2 1 1 5-3 2-1-1-3 2-3-2-1 2 1 1 2 2-3 2 0 2-1 1-3-3-3 2-2-1-2 0-4-4-1 0-3-3-1-4-2-1 1-1-1 0-1-2-2 0 0-3-2-1 1-2-3 2-5-3-3 2-3 0-3-4 1-6-1-3-1-1-3 2-3-5-2 0-1-1-2 1 2-6-1-2-5 1-1-2 2-2-1-2 1-1-2-2-1 0 0-1 2-1-1-3 3-1 3 3 1-1 0-1 1 1 2-1 1 0-1-1 3-2 0-3 5-2 3-3 3 1 3-1 1-1 5 3 2 0 2 1 0 3z"],["RU-BA","Башкортостан","M259 327l-1 4 4 2 1 2 2-1 1 3 2-1 1 2-3 3 0 1-2 2 2 0 1 2-4-1-3 1 0-1-1 0-1 1-1 0 0 2-1 0-2-2 1-2-4 2 2-3 2 0-4-5-3 2-3 3 2 3 0 5 4 0 1 2 4 0 1 1 5-1 1 3-4 2-3 4-2-2-3 1-2-1-6 8 0 3-1-1-4 4-1 5-3-1-1 2-3 2-3-1-2-4-1 1-5 0-1-4 0 2-1-1 1-1-1-2 2 0 1-3 0-2-3 0 3-1 3-3-2 0 0-2-4 2-2-2 2-2-1-2 0-1 1 1 1-2-2-1 2-5-3-6 0-6 4-8 6-4-1-1 0-4 3 2 7-2 1 0-1-3 1 0-1-2 7-1 3-2 1 5 3 1 4 1-1 3 3 1 0 5z"],["RU-MUR","Мурманская область","M271 86l4 2 3-1 3 2 3-1 0 4 3-2 1 2-2 1 2 0 0 1 2-1 0 2 2-2 0 6-2 0-1-3 1-1-3 1 2 1-1 1-2 0 2 0 1 2-2 0 2 1-3 0 2 0 2 2-3 0 1 1-1 0 0 1-3-1-1 0 1 0 3 1 2-1 2 3 0 4 1 0 1 0 0 14-2 6 0 2 1-2 0 7 0 1 1-1-2 6 1 0 0 2-4 4-1 3-4 2-9-1-7-4-6-16 0-5-2-1 1-1 1 1-1-2 1-1-2 0 1-3-1 1 0-1 1-4 1 0 0-4-2-2 1 2-1 2-2 1 0 5-3-3-3 1-1-2 2-4-6-10 4-3 11-1 2-5 0-4 4-3 4 0z"],["RU-OMS","Омская область","M337 399l-1-1 2-7-2-1 1-2 2-1 0-2 2-1-2-1 3 0 2-2 0-2 1-1 0-1 2 0 1-2 2 1 3-1-2-7 1-1-2-1-1 2-1-3 2-2 1-5 6-6 2 3-2 3 5 2 0 2 5 2 2-1 7 3 8-3 1 2-2 1 0 1-1 1 2 4-1 3 2 7-2 7-4 2 2 1-1 2 1 2-4-1-5 2 0 2-2-1 1 2-1 0 1 2-3 1 1 5-1 1 1 1 1 5-2 0-1 6-3-1 0 1-4 2-2-1-2 1-1-1-1 3-1-2-2-2-2 0-3 1 0-3 3-2 2 1 1-2-3 0-2-1 0-3-3-1-1 1 1 2-3-1 1-2 1 0-1-5-1 4-2-3-2 1-2-2-1 1 0-3 1 0 1-3 2-1z"],["RU-ORE","Оренбургская область","M242 387l-1 2 2 2-1 1 3 4 0 1 3 3 0 3-2 0-4 4-6-2-2-2-1-3-4 2-2-1 0-1 1 0-1-1-3-3-1-2 1-3 0-3-2 0-2-2-2 2-3-1 0-4-3-2-1 1-1-2-2 1-1-1-2 1-4 0-3-11-2 1 1 1-2 3-2 0 0-2 2-2-1-1 1-5-2-2 1-2 0-2-6-4 1-5-2 0-1-1-3 1 0-2-3-1 1-1 1 0-2-4 7 0 6-5 1 1 2-2 4 0 0-1 3-2 0-2 8-3-1-2 1-1 0-1 3 1 1 3 2 0-1 1-1 0-1 2 1 1 0 1 1 0-1 4 0 6 3 6-2 5 2 1-1 2-1-1 0 1 1 2-2 2 2 2 4-2 0 2 2 0-3 3-2 0 0 2 2-1 0 2-1 3-2 0 1 2-1 2 1 0 0-2 1 1 0 3 5 0 1-1 2 4 3 1 3-2 1-2 3 1-1-2 2-1 0 4 3-2 5 5-1 1-3 1z"],["RU-KIR","Кировская область","M222 292l0-2-2 0 2-2-1-3 2-2-3-1 2-4-1 0-2 2 0-2-3-2-2 0-2-2-3 0-2-1 1-2-2-2 3-2 1-2 2-1 3 4 4-2 1 0 0-4-5-4 0-2 6-2 3 1 2-1 1 1 1-1 1 1 2-1 0-3 1-2-1-1 4-3 0-2 3-2-2-2-1-1 1-2 3 2 3-2 1 1 0-2 5-2 3 4-1 1 2 2-4 5 1 2-3 0-4 5 2 3-2 2 1 3-1 2 1 1 6-5 5 3 3-1 1 3 6-1 1 3 5 4 0 3-3 3-1-1-4 3-1 3 2 2-2 1-1 3-2 1-1 2-3-2 0-2-1-1-2 1-3-4-3 0-2 1-1 3-3 3-3 1-2-2-2 1-2 5 1 1-3 2-1-1-2 1-1 5-2 0-1-4 1-1-1-1z"],["RU-VGG","Волгоградская область","M147 335l-2 0-2 3-5-1-5 4 0 3-2 1-3 0-3 1 0-3-1-2-6-1-3-2 0 2 0-1-4 0 1 4-2-4-2 1-1-2 1-1-1-2-2 2 1 1-2 1-2-3-2 1-2-1-3 1-3-3 1-1-2-1 3-8-3-3 3-2 1 1 0-2 5 3 3-2 1-2 0-2 1-1-2-2 6-4 0-6 1-4 5-2 0-4 5 1 3 0 1 3 5 3 0 5 5 3 0 1 2 0 3 4 1 3-1 2-3 1 0 2 2 2 2-1 1 1 0 2-1 2 2 2 3-1 0 1 0 3 1 2-1 1z"],["RU-SAR","Саратовская область","M180 342l-2 1-1-1-4 2-5-2-2-2-3 3-6-1-1-2-4 8-5-1 0-2 1-9-3-2 1-1-1-2 0-3 0-1-3 1-2-2 1-2 0-2-1-1-2 1-2-2 0-2 3 0 1-4-3-3 0-2-1-1-2 0-1 0 1-1-5-3 0-5 1-1 1-5 5-1 2-2 3-1 2 1 5 9 2 0 1-1 1 5 1-1 2 2 2 1 1 3 3-1 3 1 0 2 1 3 4 3 2 0 1 1 1-1 2 1 0 1-1 1 1 2-1 4 2-1 2 2-1 1 0 2 1 0 0 3 2 3-2 1 2 0 1 4z"],["RU-ROS","Ростовская область","M90 298l3 0 2-3 2 0 5 4 4-1 3 1 1-1-1 4 0 6-6 4 2 2-1 1 0 2-1 2-3 2-5-3 0 2-1-1-3 2 3 3-3 8 2 0-1 2 4 4-2 2 1 1 4-1 1 0 0 2-7 4-6 0-1 3-1 0 0-2-3 1-2-2 0-5-2-2-1-5-1 0-1 3-2-2-2 1-1-2-1 2-4-4 1-3 1-1-2-1-2-5 2 0-1-3 3-1 0-1-3-4-2-2-2 1-2-2 3-1-1-2 4 1 1 2 2 0-1-1 1-1 0-2-5-2 1-1 2 1-5-3 2 0 0-2 4-1 3 2 2 0 5 7 2-2 4 0 0-2 1 0 1-2-1-1 4-1 2 1-1-3z"],["RU-KEM","Кемеровская область","M470 412l0-1 1 2-2 1 0 2 3 3 2 6-6 4-3 3 2 6-3 5-1 1 1 1 3-1 1 2 1-1 0 3-2 1 2 3-4 3-1 3 1 0 1 2-2 3 2 3-2 1 1 1-5 3 0 1-2 1 1-4-2 1-2-3-3 1-2-1 0-1-1 0 0-2-1-2 2-3-3-3 2 0 1-3-3-1-2-6-4-5-1 1-2-5-1-2 2-3-1-2 1-5-1-1 1-1-1-3 1-4-1-1 5 0 2-1 3 1-1-1 4-2 2-1 1 1 2-1 3 2 1-2 3 2 1 1 5-3z"],["RU-AL","Республика Алтай","M446 512l-4 0-1-2-2-1-1-3-2-2 2-1 0-1-1-1-5 4-4-3-3 0-2-5 1-2-6-4 0-5 4 0 1-2 0-2-4-2 0-1 1 1 2-2 10-2 1-1 2 0 3-5 3 2 1-1 3 0 0-2-1-2 3-3 2 1 3 3 3-1 2 3 2-1-2 4-1 1-1 0-3 3 3 1-3 2 4 4 1 0 2-2 1 0 1 2 0 5 5 8-2 1-1-1-2 3 2 1 0 1 0 5-3 2-1-1 0 1-2 1-1-2 0 2-6-1-1 2z"],["RU-CHE","Челябинская область","M280 377l-6-2-1 2 0-2-3-2 0 1-1-2-2 0-1-2-1 0-1 1-1-1 0 2-3 1 2 2 2 1-1 1-1 0-1-1-2 2 5 5-1 2-1 0-3-3-3-2 0 1-5 1 0 6-4 0-5-1 0-2 3-1 1-1-5-5-3 2 0-3-1-1 1-2 4-4 1 1 0-3 6-8 2 1 3-1 2 2 3-4 2-1 2-2-1-2-5 1-1-1-4 0-1-2-4 0 0-5-2-3 2-1 1-2 2-2 2 1 3 4-2 0-2 3 4-2-1 2 2 2 1 0 0-2 1 0 1-1 1 0 0 1 3-1 4 1-1-2-2 0 1-1 1-1 0-1 1-2 2-1-1-2 1 0 0-1 10 9 2 1 1-2 2 1 2 6 0 2 0 1-1 0 1 3-2 1 1 2-2 0-1-1-1 1-1 0 0 3-1 1-2-1 0 3-2 0 1 2 3 0-1 2 5 1-1 3-1 0-1 1 1 2z"],["RU-TVE","Тверская область","M180 207l-3 0-1 3-2-1-1 2 0-1-1 5-2 1 1 3-6 3-1 2-1-1 1-4-3 0-2-1-3 1 0-2-6-3-1-4-2 2-1-1-4 1-3-3 1-4-2-2-2 1 0-2-3 1-3-2-2-5-2-2 1-1-2-3 2-2 2 0 2-2 1-4 2-1-1-1 1-2 3 0 2 4 3 0 0 1 8 3 1 3 3-1 4 0 1-2 2 0 2 2 1 5 2-1 2 2 3 0 2 3 3 3 5-1 2 2z"],["RU-SAK","Сахалинская область","M863 350l1 0-1-2 4 1 1 4 4 2 0 1 1-1 1 2 1 0 5 4 3 5 0 2-2-3 2 3 3 4 3 2 1 2 1 0-1-2 2 1 1 2-1 0 2 1 0-1 10 9 12 9 2 1 4 0 2 2-10-2-6 3 1 0 2-2-3 4 0 2 5 14 2 3 4 2 4 1 4 3 0 1 3 0-2-1 2-1 5 4 1 4-5-5-4 3-2-1-1 1 0 1 3 10-2 0-5-5-2-7-6-5-1-5-3-4-5-3-4-9-5-7-4-4-3-8-4-2-5-2 1 0-3-1-3-5-1-3-3-6-3-3 1-4 2 2 1-1 0-3-1 1-1-1 2-2-2-1 0 2-1-3-6-2zM980 435l1 0-2 3-1-1zM972 431l1 0 0 1-2 3-1 8 2 2-2 0-1-1 1-4-1-7zM980 407l1 0-3 5 0 5-2 1 0 7 0 3-1 1-1-3 1 1-1-1 1-2-2-1 1 0 0-5 1 0 1-4-2-2 3 1 1-2 1-5 1 0zM984 389l1-2 1 6-1 6-2 2 0-4zM988 368l1 4-1 2zM978 311l1 1 1 4-1 3 1 2-1 1-3-2 2-4-2-6zM977 306l2 1 1 2-1 1-2-1zM980 328l3 3 0 1-1 0z"],["RU-KDA","Краснодарский край","M36 348l-2-4-3 0 2-16-2-5 1-6-1 0-1-2 2-5-2-6 3 2 0-2 1 0-2-1 2 1 1 3-1 0 1 2 0-2 2 3 1 2 3-3-2 1 2-2 0 1 2 0 4-1 1 1-3 1 4-1 1 3 1 0 1-6-1-2 2-3 0 2 3 2 1 2 1-1-1 0 2-1 2 4-3 1 2 2 2-1 2 2 3 4 0 1-3 1 1 2-2 3 3 4 1 0-1 1-2 6-2-1-2-2-1 2-1 2-2 2 2 1-1 4 1 1-2 1-3 0 0 4-2 0 0 2-4 0-3-6-1 2-1-1-5 3z"],["RU-LEN","Ленинградская область","M171 136l12 3-1 3 4 21 3 1 4 0 0 2 2 0-1-2 2-1 2 4 0 1 3 1 2 3-1 1 0 2-4 1-2-1-3 3-5 2 0 3-3 2 1 1-3 1-1-1 0 1-1 1-3-3-2 1-1-2 0-2-1-1 0-5-1-1 0-2-5 0 0-2 2-3-2-1-1-2-5 1 0-2-5 0-2-3-2 2-2 0-1-3 2-6-2-5 1-2-1-2 4-1 2 1 1-1 3-2 1 0-1 3 3-1 0 2 4 1 1 3-1 1-1 5 3 2 1-2 2-3 0-5-2-1-1-2 2-6 0 2 3-2-4-1-1-2z"],["RU-NIZ","Нижегородская область","M181 282l2-1 0-1-4 2-3-1-2 2-3-2 1-1-2-1 0-8-2-2-2 0-2-3 1-2-2-2 0-3 5-1 1-2 7 0 2-1 2 1-1-1 1-3 2 1 4-3 4 3 2-1 0-1 2-1 2 0 1-1 1 2 6 1 4-3 3 4-1 1 3 1 7 8 1 3-2 0-4 2-3-4-6 5-5-3-2 2-2-1-1 1 1 2-2 1 0 4-5 2 0 5-6 2z"],["RU-KL","Калмыкия","M101 381l-4 2-4 1-2 1 1-2-2 1-1-1-1-4-4-5 1-3-5-14 1-5-2-4-1-5-5-1-1-1 2-2-2 0-2 1-1-4 1-2 1 2 2-1 2 2 1-3 1 0 1 5 2 2 0 5 2 2 3-1 0 2 1 0 1-3 6 0 6-4 1-2-1 0-4 1-1-1 2-4 6 0 2 3 2-1-1-1 2-2 1 2-1 1 1 2 3-1 1 6 1 1-2 4 0 5 5 1 0 1-4 0-2 6 1 5-4 0-1 1-2-2-2 0 2 3-2 2 2 2-7 2 5 3z"],["RU-KGN","Курганская область","M324 384l-2 1-3-1 1 1-2 1-2-1-2 1-13-4 0-1-2 1-2-2 0 1-2-1-1 3-2-2-1 0-1-1-4-2-2 1-1-1-3-1 1-1-1-2 1-1 1 0 1-3-5-1 1-2-3 0-1-2 2 0 0-3 2 1 1-1 0-3 1 0 1-1 1 1 2 0-1-2 2-1-1-3 1 0 0-3 1-2 5-2 0 1 3 1 2 2 1-1 4 5 3-3 3 1 1 1-2 3 1 3-1 0 3 3 0 4 2 0 1 2 2 0 0 1 3 2 0 3 3 3 2 0-1 2z"],["RU-TA","Татарстан","M234 315l1 2-1 0 1 3-8 2-3-2 0 4 1 1-6 4-3 4-1 0 0-4 1 0 1-1-2 0-1-5-3 0 1-3-2-3-1 0 1-1-4-1-2 2 0-2-2 0 0-2-1-1-3-5 2-4-5 0-2-2-1-4-2 0 0-1-2 1-2-1 1-2 3-1 1 2 1-1-1 2 1-2 2 1 0-1 2 0 0-3-2 0 1-1 5 0 0-1 4 0 1-1 2 1 1-1 3 1 0-1 1-1 2 2 2-1 0 1 1 0 1 1 1 0-1 1 3-1 2 2-2 3 1 1-1 1 0 3 1 1 3 1-3 1 1 2 0 1 2 0 0 1 2-1 2 3 1-1 1 1 1-1-1-2 4 0 0-2 1 2-2 0-2 3 2 2 1-2 1 2-5 1 0 1z"],["RU-STA","Ставропольский край","M68 336l2 4 2-1 2 0-2 2 1 1 5 1 1 5 2 4-1 6 3 4 2 9-1 3-2 1-6 0 0 2-4-1 3 3-3 3-2-4-2 2-2 0 0-2-3-4 3-1-2 0-2-4-2 1-3-3 0-2-4-3 1-3-2-1 1-2 4 1-2-2-1-4 1-1-2-1 0-2 1-2 2 0 2-1-1-1 1-4-2-1 2-2 1-2 1-2 3 3 2-3z"],["RU-KOS","Костромская область","M183 231l4-3 7-1 1-3 3 0 2-2 6 3 3-2-1 2 2 1 0 3 2 0 1 2 1 0-1 1 2 1 1 4 3 3 1 0 4 4 2 0 2 1 3-2 3 3-3 2 1 1-1 2 0 3-2 1-1-1-1 1-1-1-2 1-3-1-6 3-3-2-2-1 1-1-3-4-4 3-6-2-1-1 1-3-4 1 2-3-3 2-1-1 3-3-5-2 0-5-4 2-7-5 3-2 1 0z"],["RU-KK","Хакасия","M466 436l-1-4 2-2 2 2 2 5 3-1 0 1 4-1 2 2 0 2 2-1 1 2-1 2 3 3 1 6-1 3 0 4 2 1 1 2-4 3 0 2-7 5-2 4-3 0-1 2 0 3-1 0-4 2-1-1-2 0 0-1-4 1-2 2-5-3 0-1 3-2-3-1 3-3 1 0 4-2 0-1 5-3-1-1 2-1-2-3 2-3-1-2-1 0 1-3 4-3-2-3 2-1 0-2-1 0-1-2-3 1-1-1 1-1 3-4z"],["RU-PSK","Псковская область","M130 155l2-4 3 0 2 1 3-4 8-4 3 2 0 1-1 2 2 5-2 5 1 3-3 0-2 1 0 2-1 0 1 4-1 0-1 3-4 0 0 3-1 0-3 1 1 2-3 0-1 2 1 1-2 1-1 4-2 2-2 0-2 2-1-3-3 0-1-1 1-5-4-4 0-1 2-1 0-3-2-1 1-3-1-1 8-7-1-2 5-1z"],["RU-NGR","Новгородская область","M176 185l-1 2 1 2-2 1 0 1 1 0 2 2-1 1 1 2-2 2-2-1-2-3-3 0-2-2-2 1-1-5-2-2-2 0-1 2-4 0-3 1-1-3-8-3 0-1-3 0-3-6 3-1 1 0 0-3 4 0 1-3 1 0-1-4 1 0 0-2 2-1 5 1 2-2 2 3 5 0 0 2 5-1 1 2 2 1-2 3 0 2 5 0 0 2 1 1 0 5 1 1z"],["RU-SAM","Самарская область","M210 316l-1 1 1 0 2 3-1 3 3 1-1 1-2-1 0 1-1 1 1 2-8 3 0 2-3 2 0 1-4 0-2 2-1-1-6 5-7 0 1-2-1-4-2 0 2-1-2-3 0-3-1 0 0-3-3-1 1-4-1-2 4-1-1-2 1-1-2 0 2-5 2 0 1 1 2-2 2 2 0-2 1 3 3-1 3 4 2 0 0 2 1-1 2 0 3-2 1-3 1 2 0 2 2 0 0 2 2-2z"],["RU-VOR","Воронежская область","M94 288l0-2 3-1 0-2 3-3 2-1 0-4 1 0 1 0 1-1 0-1-1 0-1-2 1-1 1 1 0-3 1 0 2-3 1 0 2 1 1-3 4 2 0 3 3 0 0 5 3 2 3 4 0 2-2 1 1 1 3 2 2 6 1-1-1 2 1 1 0 5-1 1-3-1-3-5-3 0-5-1 0 4-2 0 0 1-4 1 0 1-3-1-4 1-7-6 0-3z"],["RU-DA","Дагестан","M57 402l0-4 3-2 5 1 2-1 3 2 3-6 6-1-1-2 1-1-4-1 1-1-3-5 2-2-3-3 3 1 2-1-1-1 1-1 2 1 3 0 1-1 2 1 3 4 2 5-2 0-3 2 2 6-2 5-3 1-1 1 5-2 1 1-5 2-2 2 1 0-4 2 1 3-2 2-2 12 0 2-4 1-3-1-3 1-3-3-1-3 1-3-1-1 1-5-2 0 1-1z"],["RU-SMO","Смоленская область","M115 192l2-3 7-2 2 5 1 1-1 1 2 2 2 5 3 2 3-1 0 2 2-1 1 2 0 4 3 2-1 3-6 4-4 1-2-1-2 1-2-2-1 0-2 1 0-2-2-3-7 3-2-2-1 1-7 0 0-3 2-1 0-3-2-3 4-1 0-5 2-3 2 0 0-4z"],["RU-AST","Астраханская область","M125 346l-3 2 2 5-1 2-2 0-1 3 0 2 2-1 4 5-1 6-2 9-3 0 0-2-2 0 2 9 0-1-2 0 0 1 0-1-2 0 0-1-1 1 0-1-1-1 0 2-1 0 1 0-2 2 0-3-3 0-1 0-3-2-1 1 0-4-2 3 0-4-1 3 1-2-5-3 7-2-2-2 2-2-2-3 2 0 2 2 1-1 4 0-1-5 2-6 4 0-1-1-3 0-1-2 1-6 1-2-1-1-1-6 4 0 0 1 0-2 3 2 5 0 2 3z"],["RU-MOS","Московская область","M141 226l-1-2-2 0-1-4-2-1 0-1 3-3 1 1 3-4 4-1 1 1 2-2 1 4 6 3 0 2 3-1 2 1 3 0-1 4 1 2-2 1-5 7 2 2-1 4 3 2-4 7-4-2 1 1-2 1-2-2-4 1-3-2-1 1 0 1-3 0 1-4 2 0-1-4 1-1-1-1-2 0 0-4 1-2 11-1 1-1-1-3-3 2-1-1-2 1 0-2-2 2-2 0z"],["RU-PNZ","Пензенская область","M148 274l3-2 1 1 0 2 2-1-1 1 1 0 0 1 1 0 2 2 1-1 3 2 0 2-1 3 2 4 2 0 1-2 2 1 2 1 0 2 4 3 1 2-3 5 1 4-5 6-2 1-1-3-2-1-4 1-1-3-2-1-2-2-1 1-1-5-1 1-2 0-2-5-3-2 0-2-1 0 0-1 3-1 2-4-1-4 1 0 0-4 1 0z"],["RU-UD","Удмуртия","M242 313l-5 2-6-2 0-1 5-1-1-2-2 2-1-2 2-3 2 0-1-1-1-1 1 2-4 0 0 2-2 1-2-3-2 1 0-1-2 0 0-1-2-2 4-1-2-1 2-5 2-1 1 1 3-2-1-1 2-5 2-1 2 2 3-1 3-3 1-3 4-2 4 5 2-1 1 1 0 2 3 2-4 8-2 2-1 0 1 2-2 1 1 1-2 2 0 1-2 0-3 2 0-2-2 2 2 1z"],["RU-RYA","Рязанская область","M136 263l1-4-3 0-2-2 1-2 0-1 5-6 2-1 2 0 0-1 1-1 3 2 4-1 2 2 2-1-1-1 5 2 1 1-1 2 3 1-1 2 1 0 0 2 3 4-1 1 0 1 2 2-2 1 0 2-1 2-2 0 0 1-4-2 0 2 1 0 0 1-1 1-1-2-1 3-2 0-5-5-2 1-3 0-1-4-2-1-1 1z"],["RU-ULY","Ульяновская область","M200 303l-2 4 3 3 0 2-3 4-3 0-1 1-5-6-3 1-1-3 0 2-2-2-2 2-1-1-2 0-2 5 2 0-1 1 1 2-2 1-2-3-2 1-1-1-2 0-4-5 2-1 5-6-1-4 3-5-2-3 3-1 6 3 0-2 2-4 1 4 3 2-1 2 2 1 2-1 0 1 2 0 1 4 2 2z"],["RU-YEV","Еврейская АО","M819 468l-2-1-1-4 3-2-1-4 3-1 2-2 2 0-1-4 3 0 1 2 2-3 1 1 4 0 3 3 4-1 2 1 3-4 2 1 3-2 0 4-2 1-3 3-2 2-1 3-3 1-2 4-1 0 1 4-5 3-8 3-2-2-2-1-1-3-1-2z"],["RU-YAR","Ярославская область","M195 224l-1 3-7 1-3 3-2-1-3 2-1-1-1 0-1-1-3-1-7 3-1-4-2 0 2-6 6-3-1-3 2-1 0-5 2 0 0-1 2 1 0-3 2-1 2 1 2-1 1 1 2 0 3 5 3-2 2 4-1 6z"],["RU-BRY","Брянская область","M102 215l8 0 1-1 3 2-1 3 2 2-2 4-2 1 2 4-3 3 0 2-4-2-1 3-4 0-2 2-1-1-2 1-2-2-2 1 0-2 3-2 1-4-2-1 0-1-1-2-3-1-1-4-3 1-2-2 0-2 1-3 6-3 1-4 3 0 2 6 4 1z"],["RU-TAM","Тамбовская область","M132 266l4-2 2 1 1-1 2 1 1 4 3 0 2-1 4 4-3 2 0 2-1 0-2 13-7 1-2 2-5 1-2-1 1-2-1 1-1-2-1-4-3-2-1-1 2-1-2-3 5-2 0-8z"],["RU-KRS","Курская область","M91 238l3-2 2 2 2-1 1 1 2-1 3 4-1 2 4 4 0 2 1 6 0 2 1 0 1 2 0 2 2 2-1 3-2-1-1 0-2 3-1 0 0-2-3-5-7-2-3-5-1 1-2-1-2-2 0-2 1 0-1-1 2-2-3-3 1-1-2-3 2 0 0-1 1 0 1-2z"],["RU-KLU","Калужская область","M120 235l-3-2-4 0-1-2 1-1-2-4 2-1 2-4-2-2 1-2-1-2 3 0 4-2 2 3 0 2 2-1 1 0 2 2 2-1 2 1 4-1 2 2 1 4 3 1 0 5-4 4-2 1-1-3-3 4-5-5 0 2-4 0z"],["RU-VLA","Владимирская область","M166 232l3-2 2 2 1 1-3 3 0 2 4 0 1 5 4 4-1 2 3 1 0 2-1 3 1 1-2-1-2 1-7 0-1 2-4 1-3-3 0-2-1 0 1-2-3-1 1-2-2-1 4-7-3-2 1-4-2-2 7-8 0 1-1 2 2 0z"],["RU-BEL","Белгородская область","M82 258l0-3 2-2 0 1 3-4 2 4 2 1 1-1 3 5 4 2 1-1 5 6 1 4-3 1 1 2 1 0 0 1-1 1-1 0-1 0 0 4-2 1-3 5-3 1-1-1-1-7-3-1 2-8-6-4 0-2-1-1 1-2z"],["RU-CR","Республика Крым","M25 273l1 0 1 1 1 5-1 2 2 2-2 2 1 2-3 7 2 2 2 0 0 2 3 1 0 4-2-1-2 1-4-4 0-3-6-1-2-3-2-2-6-1-2-3 1 1 2-3 1 0 0-2 3-2-1-3 0-4-2-3 1-1 8 3 3 4 1 0 0-2z"],["RU-MO","Мордовия","M159.75 278.25l-0.5-1-0.75-0.75-1.25 0.5 0.25 0.25-0.75 0.75-0.25-0.75-0.5 0.25-1-0.75-0.25-1-1 0.25 0.5-0.5-0.5-0.5-0.75 0 0.75-0.5-0.75-0.25-0.5 0.75 0.25-1.25-0.25-1 2-0.25 0.25-0.5 0-1.5 0.5-0.25 0.75 1.75 0.75-0.5 0.75 0 0-1.75-2-0.25 0.75-1.25 0 0.75 1.75 0.75 1-0.25 0.5 0.5 0.5-0.75-0.25-0.25 0.75-0.5 0.5 0.5 0.25-0.5 0.75 0 0.25-1 0.75-0.5-0.5-0.25 0-0.5-0.25-0.75 0.5-0.75 1 0 0 1.5 0.75 0.25 0 0.5 1.25 1.25 0.25 0.75 1.5-0.5 1.75 1 0.75 1.5-0.25 1.5 1 1.5-0.75 0.5 0.75 1-1 0.75 1 2-0.25 0.75 0.5 0.75 1 0.25-0.25 0.5-1 0.25 1.25 0.5 0.5 1.25 1 1 0.5-0.25 0-1.25 1-0.25 0.25-0.75 0.75-0.25 0.75 0-0.25 0.75 1.5-0.75 1 0.75 2.25-1.5 0.5 0.5 1-0.5 0.75 0.5-0.25 1-0.5 0-0.25 0.5-1 0 0 0.5 1.5 1 1 0.25-0.25 1.25 1.25-0.75 0 0.75-0.5 0.75 0 1.25-2 2.25 0 0.75-1 0 0.5 0.75-1.25 0.5 0.75 0.5-1 0-0.25 0.75 0.75 0.5 0 0.75-0.5 0.25-1.75-0.75-1-0.25-2.5-1.5-2.25 0.5-1.25-0.25-0.75 0.5-2.25-2 0-1.75-0.5-0.25-1.25-1.5-1.25 0-0.75-0.75-0.75 0.5-0.5 2-1.5-0.75 0-1.5-0.75-0.25 0-1.25-1-0.5-0.25-0.75 0-1 0.25-0.5 0.5 0.25 0.25-1.25-0.75-1.75 0-0.5z"],["RU-TUL","Тульская область","M133 254l-2-1-1 2-2-2-2 3-3-1 0-2-1-1 0-3 1-1-3-5 0-6-1-2 3-2 4 0 0-2 5 5 3-4 1 3 4-2 0 4 2 0 1 1-1 1 1 4-2 0-2 5z"],["RU-ORL","Орловская область","M122 252l-3 2-2 0-2 4-5 1-1-2-1 0 0-2-1-3 0-5-4-4 1-2-3-2 0-3 4 0 1-3 4 2 0-2 2-2 1 2 2 0 5 1 0 3-1 2 1 2 0 2 3 5-1 1z"],["RU-LIP","Липецкая область","M136 264l-8 4 0 8-5 2-1-3-3-2 0-2 0-1-1-2-2 0 0-3-5-2-1-3 2-2 3 0 2-4 2 0 1-2 2 0 1 3 3 1 2-3 2 2 1-2 2 1 0 1-1 2 2 2 3 0z"],["RU-IVA","Ивановская область","M190 235l0 5 5 2-3 2 0 1 1 1 3-2-2 2 4 0-1 1-1 3-2 0-2 1 0 1-2 1-4-3-4 3-2-1 0-2-3-1 1-2-4-4-1-3 0-2-4 0 0-2 3-3-2-3 3-1 3 1 1 1 1 0 5 4 1 0 2 2z"],["RU-ME","Марий Эл","M220.25 289.75l0.5 1-2.5 0.25 0.5-0.5-1 0-0.5-0.75 0.75 0 0-0.75-1.25-0.5-1 0.5-0.5-0.5 0.25-0.75-1 1-0.75 0 0-1-0.75 0 0-0.75-2 0.5 0 1.25-0.25-0.5-2.25 0.5-0.5-0.25 0-0.5-1.25 1.25-1.75-1-1 0.75-0.25-0.25-0.75-3.25 1-2.25-1.5-2-0.25-0.75 1.25-2-2.25-1-3.25-0.25-0.75-1.25-2.5-0.75-0.75-0.75 1.25-1.25-0.25-1.75 0.5-0.5 0.5 0.25 1-1-0.75-1 0.25-0.25-0.5-0.75 0.25-0.75 1-0.5 1.75 1 1.25-1.25 1.25-0.5 2 1.5 0.75-0.25 1 1.5 0.75 0 0 0.5 1 1 0.75 1.5-0.75 1 2 0.75 0 0.75 1.75-0.75 1.25 0.5 0.25-0.5 0.25 1.5 0.25 0 0 0.5 0.5-0.25 0.5 0.75 0.5 0 0.5-0.5 0.5 0 0-0.25 1 0 0.25 1 1.25 0.25 0 0.5 0.75 0.5 0.25 0.5-0.5 0.75 0.5 0.5 1.75-0.75 0.5-0.75 1.25 0.25-0.25 0.75-1.5 0.75 0 0.75-0.5 1 0.5 1 1.25 0 0.75 1-1.25 1.75 1 1.75-0.25 1.25z"],["RU-CU","Чувашия","M204 289l-2.25 0.25-1-0.25 0-0.25-0.75 0.25-0.5 1-1-0.25-2.25 0.75-0.75-0.5-1 1 0.5 0.5 0.5-0.5 0.25 0.75 0.25-0.5 0.5 0 0.25 0.75-1 1.75-0.5 0.5-1.25-0.5 0.25 1-0.75 0.25-1.25-0.75-1 1.5 0.5-1.5-0.75 0.75-1.25-1.75 0-0.5-1.5 1-2 0-0.25-1.25-1.75-0.5-0.75-4 1-1 0-1.25 0.75-1-0.25-0.5-1.25 0.75 0.25-1.25 1.75-1.25 1.25 0 1-0.75 1.75 0 0-1.5-0.75-0.75 0.5-1-0.25-0.75 0.25-0.75 0.75-0.25 0.25 0.25 0.25-0.5 1 0.25 1-0.5 0.25-0.75 1.75-0.25 1.5 0.25 1 0.5 0.75 1.25 3.25 0.25 2.25 1-1.25 2 0.25 0.75 1.5 2-1 2.25 0.5 2.75z"],["RU-CE","Чеченская Республика","M57.75 393.25l0.25-2.75-0.5-1 1.75-0.25 0-0.5 1.25-0.75 1-1.25 1-0.5 0.25-1 2.25-2.75-0.5-2.5 0.75-0.75 1 0.75 1-0.5 0.75 0.5 1.25-1.5 0.5 0 0.75 0.75-0.5 0.75 1.25 1.5 1.5-0.75 0.5 0.25 0.75 2 1 0.5 1 2-0.75 0.25-0.25 1 0.75-0.25 0.75 1 1-0.5 1.25 0.25 0.5 0.5-1 1.25 1 1-0.25 0.75 0.25 0.5-2.75-0.25-1.5 1-1.75 0-0.5 1 0 1-1 0.75 0 0.5-1 0.25-0.25 0.75 0.75 0.5-1 0.5-0.25 0.75-1.75-0.25 0-0.75-0.75 0-0.25-1-1 0-0.75 1.25-1.25-0.5-1.25 0.75 0-0.75-2.25 0.25-0.75-0.5 0-0.75-0.75-1.5z"],["RU-KC","Карачаево-Черкесия","M37.75 353l-0.75-4 3-2 1.75-0.75 1.5 1 0.75-2 0.25 0.25 2 3.5-0.5 0.75 0.5 0-0.5 0.5 0.5 0 0.25 0.75 1.75-0.25 0.75 0.5 1.75-0.25 0.75-1-0.25-1 0.75-0.25 2.25 1 0.25 0.5-0.75 1.25 1.5 3 0.25 0.5-0.5 0.5 1.5 1.25-0.25 0.5-2.75-1-0.5 0.25-0.75 1.75 0.75 0.75 0.5-0.5 0.75 0.75-0.75 0.25 0.5 0.75-0.75 0 0.25 0.75-2.25 1.75-2-1-1 1.25-1.5 0.25-1 0.75-1 0.25-1.25-1.25-1.25-0.75-2.75-3.75-0.25-2 0.25-0.5-0.75-0.75-0.25-1.5z"],["RU-KGD","Калининградская область","M85 124l-1 6 2 4-2 3-4 0-2 2-8-23 3 1 4-1 2 4 5 1-5-1 1 4 1 1 3-2z"],["RU-KB","Кабардино-Балкария","M45.5 367l-0.75-2.75 1-0.25 1-0.75 1.5-0.25 1-1.25 2 1 1.5-0.75 1 1 1.25 0.25 1.25 1 1 0.25 0 1-0.5 1.25 1.5 0.5 1.5 2.25 1.25-0.5 1.25 0.5 1.75 3 1.75 0.75-0.5 0.25-1.25-0.25-1.5 1-0.5 1.25 0.5 0.75-2 1-0.5 0.75-0.5 0 0-0.5-1.5-0.5 0.25-0.75 0-0.5-1.25 0-0.5 1.25-1 0.25 0.25-0.5-0.75-1 0.25-0.75-2.75 0.75-2.75 0.25-0.5-1-1.25 0-0.75-1.75-0.25-2.5 0.5-0.5-0.25-1.75-1.25-1.25z"],["RU-AD","Адыгея","M48 327.25l0.25 2.75 2 1.75 0.25 1-0.25 3.5-1.5 2.5-0.25 1.5-1.25 1.5-1-0.75 1-0.5 1.25-2.75-0.75-1-1 0.5-0.75 0-0.5 0.5-0.25 1-1.75 2-1.25 0-2 1.75 0 1-3.25 0.5-0.75-3 0-1.25-0.75-0.5-0.25-1 0.75-0.25 1-0.75 0.25-0.75 0.75-0.25 0.5 0.5-0.75 1.75 0.25 0.5 2.5-0.5-0.5-1.25 0.5-1-0.5-1 1.75-0.25 1-0.75 0.5 0 1.25-0.75 1 0.5 1-1.75 0.5-0.25-0.25-0.5 0.75-0.75-1.75-0.5 0.25-1-0.75 0 0-0.25 1 0 0-0.5-0.75-1-1 0.5 0.25 0.75-0.25 1-1 0-0.75-0.5-2.25-3.25-0.5-3.25-0.25-1 1-0.5 0.25 1.25 1 0.25-0.25 1.25 0.5 0.75 1.75 1.75 3.25 0.25z"],["RU-SE","Северная Осетия","M48.5 382.25l-0.75-2.25 1.5-0.25 0.25-0.25-1.25-4.5 1 0 0.5 1 2.75-0.25 2.75-0.75-0.25 0.75 0.75 1-0.25 0.5 1-0.25 0.5-1.25 1.25 0 0 0.5-0.25 0.75 1.5 0.5 0 0.5 0.5 0 0.5-0.75 2-1-0.5-1 1.25-1.5 0.5 1 2.25 1.75 0.5 1.25-0.75 1.25-1.25 1-0.5-1.25-0.75 0.25-0.5-0.5 0.5-0.5-0.5-0.5-2.25 1.5 0.5 0.5-1.5 1.75 0.25 0.75 0-0.5 0.5 0.25-0.25 3.25-1.25 1.5-1.25 0-1.25-2-1.25 1.25-0.75-1-2-1.25-1.25 0-1.25-1z"],["RU-IN","Ингушетия","M57.25 389.5l-0.5-2.25-2 0.75 0.5-2.75 1-0.75 1.25 2 1.75-0.25 0.75-1 0.25-2 0-1.75-0.5 0 0 0.5-0.25-1 1.5-1.5-0.5-0.5 2.25-1.25 0.5 0.25-0.5 0.5 0.5 0.5 0.75-0.25 0.5 0.25-0.25 0.5 0.75 1.5 0 1.5-2.25 2.75-0.5 1.25-0.75 0.25-1 1.25-1.25 0.75 0 0.5z"],["RU-MOW","Москва","M139.75 231.25l1-1 0.75-2.25 1.25 0.25 1-1.5 1-0.75 0.5 0.5-0.75 0.75 0.5 0.75 2-1 1.5 0.75 0.5-1 2-0.5 0.25-0.75 0.25 0.25-0.5 0.5 1 0.75 0.25 1-0.75 2-2 0.5-1-0.5-2.75 1.25 0-0.75-1 0-0.25 0.75-1.25 0.5-1 0 0-0.75-1.75 0.75zM152 223.5l0 0.75-1 0.25 0-0.75zM148 225.25l0.25 0.5-0.5 0.25-1-1 0.75-0.25z"],["RU-SPE","Санкт-Петербург","M168 150.5l0.5 3.25 1.5-0.25 0.25-0.5-0.5-1.75 1.25-1.5 0-1-0.5-1-0.75-0.5 1.5 0.25 1 5.25 0 0.5-1 0.5-0.25 1.25-1.25 0.75-0.25 2-0.75 0.25-1-0.75-1 0-1-1.25 1.25-3.75 0-1.5zM168.75 150.75l-0.25 0 0.25-1z"],["RU-SEV","Севастополь","M6.25 286.5l-0.25-1 0.5-1-0.5-0.5 0.25-1.75 1.5 1.25 0-0.5 0.75-0.25 0.75-0.75 1 0-0.25 1.5-1-0.25-0.5 0.5 0.5 0.5-0.25 0.75-1 0.25 0.25 1-0.75 1z"]]};
+
+var SP_DBIP = 'https://db-ip.com';
+var SP_SMALL = { 'RU-MOW': 1, 'RU-SPE': 1, 'RU-SEV': 1 };
+function spNum(n) { return (+n || 0).toLocaleString('ru-RU'); }
+var spCc = (function() {
+	var dn = null;
+	try { dn = new Intl.DisplayNames([ 'ru' ], { type: 'region' }); } catch (e) {}
+	return function(cc) {
+		if (cc === 'RU') return 'Россия';
+		try { return (dn && dn.of(cc)) || cc; } catch (e) { return cc; }
+	};
+})();
+function spFlag(cc) { return /^[A-Z]{2}$/.test(cc) ? String.fromCodePoint(127397 + cc.charCodeAt(0), 127397 + cc.charCodeAt(1)) : ''; }
+function spRouters(n) { return n > 0 ? spPl(n, 'роутер', 'роутера', 'роутеров').replace(/^\d+/, spNum(n)) : n === 0 ? 'меньше 5 роутеров' : 'пока нет роутеров на карте'; }
+function spNice(v) {
+	var p = Math.pow(10, Math.floor(Math.log(v) / Math.LN10)), m = v / p;
+	return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p;
+}
+function spSteps(max, min) {
+	var out = [ min ], i, v;
+	for (i = 1; i < 5 && max > min; i++) {
+		v = spNice(min * Math.pow(max / min, i / 5));
+		if (v > out[out.length - 1] && v < max) out.push(v);
+	}
+	return out;
+}
+function spCenter(d) {
+	var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+	String(d).split('M').forEach(function(part) {
+		var v = part.match(/-?\d+(?:\.\d+)?/g), x, y, i;
+		if (!v || v.length < 2) return;
+		x = +v[0]; y = +v[1];
+		for (i = 0; i + 1 < v.length; i += 2) {
+			if (i) { x += +v[i]; y += +v[i + 1]; }
+			x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+		}
+	});
+	return x0 < Infinity ? [ (x0 + x1) / 2, (y0 + y1) / 2 ] : [ 0, 0 ];
+}
+
+function spMapCard(sysData) {
+	var card = E('div', { 'class': 'zm-card zm-mp' });
+	var st = null, geo = null, tab = 'ru', busy = false, pinned = null;
+	var head = E('div', { 'class': 'zm-mp-head' });
+	var tabs = E('div', { 'class': 'zm-seg zm-mp-tabs' });
+	var body = E('div', { 'class': 'zm-mp-body' });
+	var note = E('p', { 'class': 'zm-mp-note' });
+	card.appendChild(head);
+	card.appendChild(tabs);
+	card.appendChild(body);
+	card.appendChild(note);
+
+	var names = {}, centers = {};
+	SP_MAP.r.forEach(function(r) { names[r[0]] = r[1]; if (SP_SMALL[r[0]]) centers[r[0]] = spCenter(r[2]); });
+
+	function regVal(k) {
+		var ru = geo && geo.ru || {};
+		return Object.prototype.hasOwnProperty.call(ru, k) ? +ru[k] || 0 : -1;
+	}
+
+	function drawHead() {
+		head.innerHTML = '';
+		if (!st) { head.appendChild(E('p', { 'class': 'zm-mp-lead' }, 'Загружаем счётчик…')); return; }
+		var t = +st.total;
+		if (!st.on || !(t > 0)) {
+			head.appendChild(E('div', { 'class': 'zm-mp-big' }, [ E('span', { 'class': 'zm-mp-t' }, st.on ? 'Сервер счётчика не отвечает' : 'Счётчик недоступен') ]));
+			if (st.on) head.appendChild(E('p', { 'class': 'zm-mp-lead' }, 'Загляните на эту страницу позже.'));
+			return;
+		}
+		var a = t % 10, b = t % 100;
+		head.appendChild(E('div', { 'class': 'zm-mp-big' }, [
+			E('span', { 'class': 'zm-mp-t' }, 'Zapret Manager установлен на'),
+			E('b', {}, spNum(t)),
+			E('span', { 'class': 'zm-mp-t' }, a === 1 && b !== 11 ? 'роутере' : 'роутерах')
+		]));
+		if (+st.map_total > 0) head.appendChild(E('p', { 'class': 'zm-mp-lead' }, 'На карте — ' + spNum(+st.map_total)));
+	}
+
+	function drawTabs() {
+		tabs.innerHTML = '';
+		if (!st || !st.on || st.pre) { tabs.hidden = true; return; }
+		tabs.hidden = false;
+		[ [ 'ru', 'Регионы России' ], [ 'cc', 'Страны' ] ].forEach(function(t) {
+			tabs.appendChild(E('button', { 'type': 'button', 'class': 'zm-seg-item' + (tab === t[0] ? ' zm-active' : ''), 'click': function() { if (tab !== t[0]) { tab = t[0]; pinned = null; drawTabs(); drawBody(); } } }, t[1]));
+		});
+	}
+
+	function drawNote() {
+		note.innerHTML = '';
+		if (!st || !st.on) return;
+		if (geo && geo.src) note.appendChild(E('a', { 'href': SP_DBIP, 'target': '_blank', 'rel': 'noreferrer' }, 'IP Geolocation by DB-IP'));
+	}
+
+	function bars(rows, max, onPick) {
+		return E('div', { 'class': 'zm-mp-list' }, rows.map(function(r, i) {
+			var w = max > 0 && r.n > 0 ? Math.max(3, Math.round(r.n / max * 100)) : 3;
+			var at = { 'class': 'zm-mp-row', 'data-k': r.k };
+			if (onPick) at.click = function() { onPick(r.k); };
+			return E('div', at, [
+				E('span', { 'class': 'zm-mp-row-i' }, r.icon || String(i + 1)),
+				E('span', { 'class': 'zm-mp-row-n' }, [ E('span', {}, r.name), E('i', { 'style': 'width:' + w + '%' }) ]),
+				E('b', {}, r.n > 0 ? spNum(r.n) : r.n === 0 ? '< 5' : '—')
+			]);
+		}));
+	}
+
+	function drawBody() {
+		body.innerHTML = '';
+		if (!st || !st.on || st.pre) return;
+		if (!geo) { body.appendChild(E('p', { 'class': 'zm-mp-empty' }, 'Загружаем карту…')); return; }
+		if (geo.error) { body.appendChild(E('p', { 'class': 'zm-mp-empty' }, 'Карта появится, когда сервер счётчика начнёт её отдавать.')); return; }
+		if (tab === 'cc') {
+			var cc = (geo.cc || []).filter(function(x) { return x && /^[A-Z]{2}$/.test(x[0]) && +x[1] > 0; }).map(function(x) { return { k: x[0], n: +x[1], name: spCc(x[0]), icon: spFlag(x[0]) }; });
+			if (!cc.length) { body.appendChild(E('p', { 'class': 'zm-mp-empty' }, 'Пока ни в одной стране не набралось 5 роутеров на карте.')); return; }
+			var box = E('div', { 'class': 'zm-mp-cc' }, [ bars(cc, cc[0].n, null) ]);
+			if (+geo.cc_other > 0) box.appendChild(E('p', { 'class': 'zm-mp-more' }, 'И ещё ' + spPl(+geo.cc_other, 'страна', 'страны', 'стран') + ', где пока меньше 5 роутеров на карте.'));
+			body.appendChild(box);
+			return;
+		}
+		var vals = [], max = 0;
+		SP_MAP.r.forEach(function(r) { var v = regVal(r[0]); if (v > 0) { vals.push(v); if (v > max) max = v; } });
+		var steps = spSteps(max, +geo.min || 5);
+		function bucket(v) {
+			if (v < 0) return '';
+			if (v === 0) return 'zm-mp-few';
+			var i = 0;
+			while (i < steps.length && v >= steps[i]) i++;
+			return 'zm-mp-b' + (steps.length < 2 ? 5 : Math.round(1 + (i - 1) * 4 / (steps.length - 1)));
+		}
+		var html = '<svg class="zm-mp-svg" viewBox="0 0 ' + SP_MAP.w + ' ' + SP_MAP.h + '" role="img" aria-label="Карта России: Zapret Manager по регионам"><defs><pattern id="zm-mp-hatch" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" class="zm-mp-few-bg"></rect><rect width="2" height="5" class="zm-mp-few-ln"></rect></pattern></defs><g class="zm-mp-regs">';
+		SP_MAP.r.forEach(function(r) { html += '<path data-k="' + r[0] + '" class="' + bucket(regVal(r[0])) + '" d="' + r[2] + '"></path>'; });
+		html += '</g><g class="zm-mp-dots">';
+		Object.keys(centers).forEach(function(k) { html += '<circle data-k="' + k + '" class="' + bucket(regVal(k)) + '" cx="' + centers[k][0].toFixed(1) + '" cy="' + centers[k][1].toFixed(1) + '" r="5.5"></circle>'; });
+		html += '</g><path class="zm-mp-hl" d=""></path></svg>';
+		var map = E('div', { 'class': 'zm-mp-map' });
+		map.innerHTML = html;
+		var tip = E('div', { 'class': 'zm-mp-tip', 'hidden': '' });
+		map.appendChild(tip);
+		var svg = map.firstChild, hl = svg.querySelector('.zm-mp-hl');
+		var pathOf = {};
+		Array.prototype.forEach.call(svg.querySelectorAll('.zm-mp-regs path'), function(p) { pathOf[p.getAttribute('data-k')] = p; });
+		function show(k, x, y) {
+			if (!k || !pathOf[k]) { tip.hidden = true; hl.setAttribute('d', ''); return; }
+			hl.setAttribute('d', pathOf[k].getAttribute('d'));
+			tip.innerHTML = '';
+			tip.appendChild(E('b', {}, names[k] || k));
+			tip.appendChild(E('span', {}, spRouters(regVal(k))));
+			tip.hidden = false;
+			var rc = map.getBoundingClientRect(), w = tip.offsetWidth || 160;
+			var left = Math.max(w / 2 + 4, Math.min(rc.width - w / 2 - 4, x));
+			tip.style.left = left + 'px';
+			tip.style.top = Math.max(0, y) + 'px';
+			tip.classList.toggle('zm-mp-tip-down', y < (tip.offsetHeight || 44) + 12);
+		}
+		function at(k) {
+			var rc = map.getBoundingClientRect(), c = centers[k] || null;
+			if (!c && pathOf[k] && pathOf[k].getBBox) { try { var bb = pathOf[k].getBBox(); c = [ bb.x + bb.width / 2, bb.y + bb.height / 2 ]; } catch (e) {} }
+			if (!c) return;
+			show(k, c[0] / SP_MAP.w * rc.width, c[1] / SP_MAP.h * rc.height);
+		}
+		function keyAt(ev) { var t = ev.target; return t && t.getAttribute ? t.getAttribute('data-k') : null; }
+		svg.addEventListener('pointermove', function(ev) {
+			if (pinned) return;
+			var k = keyAt(ev), rc = map.getBoundingClientRect();
+			show(k, ev.clientX - rc.left, ev.clientY - rc.top);
+		});
+		svg.addEventListener('pointerleave', function() { if (!pinned) show(null); });
+		svg.addEventListener('click', function(ev) {
+			var k = keyAt(ev), rc = map.getBoundingClientRect();
+			if (!k || pinned === k) { pinned = null; show(null); return; }
+			pinned = k;
+			show(k, ev.clientX - rc.left, ev.clientY - rc.top);
+		});
+		var top = SP_MAP.r.map(function(r) { return { k: r[0], n: regVal(r[0]), name: r[1] }; }).filter(function(r) { return r.n > 0; }).sort(function(a, b) { return b.n - a.n; });
+		var side = E('div', { 'class': 'zm-mp-side' });
+		if (top.length) {
+			side.appendChild(E('div', { 'class': 'zm-mp-side-h' }, 'Больше всего роутеров'));
+			side.appendChild(bars(top.slice(0, 8), top[0].n, function(k) { pinned = k; at(k); }));
+		} else side.appendChild(E('p', { 'class': 'zm-mp-empty' }, 'Пока ни в одном регионе не набралось 5 роутеров на карте.'));
+		var leg = E('div', { 'class': 'zm-mp-leg' });
+		leg.appendChild(E('span', {}, [ E('i', { 'class': 'zm-mp-few' }), '1–4' ]));
+		steps.forEach(function(v, i) {
+			var hi = steps[i + 1];
+			leg.appendChild(E('span', {}, [ E('i', { 'class': bucket(v) }), hi ? spNum(v) + '–' + spNum(hi - 1) : spNum(v) + '+' ]));
+		});
+		if (+geo.ru_total > 0) side.appendChild(E('p', { 'class': 'zm-mp-more' }, 'Всего в России на карте: ' + spNum(+geo.ru_total) + (+geo.ru_unknown > 0 ? ', из них без региона — ' + spNum(+geo.ru_unknown) : '') + '.'));
+		body.appendChild(E('div', { 'class': 'zm-mp-grid' }, [ E('div', { 'class': 'zm-mp-mapcol' }, [ map, leg ]), side ]));
+	}
+
+	function drawAll() { drawHead(); drawTabs(); drawBody(); drawNote(); }
+
+	function loadGeo() {
+		if (!st || !st.on) { drawBody(); drawNote(); return; }
+		zm.statsGeo().then(function(g) {
+			geo = g && typeof g === 'object' ? g : { error: 'bad' };
+			if (geo.ru && typeof geo.ru !== 'object') geo.ru = {};
+			drawBody();
+			drawNote();
+		}).catch(function() { geo = { error: 'bad' }; drawBody(); drawNote(); });
+	}
+
+	if (sysData && +sysData.zm_total > 0) st = { on: true, total: +sysData.zm_total, pre: true };
+	drawAll();
+	zm.statsGet().then(function(r) {
+		st = r && typeof r === 'object' && !r.error ? r : { on: false };
+		drawAll();
+		loadGeo();
+	}).catch(function() { st = { on: true, total: st && st.total || null }; drawAll(); loadGeo(); });
+	return card;
+}
+
 return view.extend({
 	load: function() {
 		zm.injectCss();
@@ -62632,17 +63113,7 @@ return view.extend({
 			}).concat([ E('div', { 'class': 'zm-kv-it zm-kv-thx' }, [ spIco('heart', 'zm-kv-i'), E('span', {}, 'Спасибо всем, кто пользуется StressKVN и советует его друзьям!') ]) ]))
 		]));
 
-		var count = E('div', { 'class': 'zm-card zm-sp-count', 'hidden': '' });
-		function showCount(n) {
-			if (!(n > 0)) return;
-			var a = n % 10, b = n % 100;
-			count.innerHTML = '';
-			count.appendChild(E('p', {}, [ 'Zapret Manager установлен на ', E('b', {}, n.toLocaleString('ru-RU')), a === 1 && b !== 11 ? ' роутере' : ' роутерах' ]));
-			count.hidden = false;
-		}
-		wrap.appendChild(count);
-		if (sysData && +sysData.zm_total > 0) showCount(+sysData.zm_total);
-		zm.statsGet().then(function(r) { if (r && r.on) showCount(+r.total); }).catch(function() {});
+		wrap.appendChild(spMapCard(sysData));
 
 		wrap.appendChild(E('div', { 'class': 'zm-card' }, [
 			E('h3', {}, [ 'Спасибо авторам и пользователям ', E('span', { 'class': 'zm-badge zm-off' }, spPl(CREDITS.length - 1, 'проект', 'проекта', 'проектов')) ]),
@@ -65461,7 +65932,7 @@ function refNorm(t) {
 function refLabel(t) {
 	if (t.indexOf('c:') === 0) return OLD_NAMES[t.slice(2)] || t.slice(2);
 	var b = t.slice(2).replace(/[?#].*$/, '').replace(/^.*\//, '').replace(/\.(srs|json|lst)$/i, '');
-	return /b4geoip/i.test(t) ? b + ' (b4geoip)' : (b || t.slice(2));
+	return /b4geoip/i.test(t) ? b + ' (b4geoip)' : /\/dushnilin\/tachyon-lists\//i.test(t) ? b + ' (Tachyon Lists)' : (b || t.slice(2));
 }
 
 function pickFromCfg(c) {
@@ -65718,13 +66189,13 @@ var WARN = {
 
 var ACT_TEXT = {
 	install: 'Устанавливаем Forkozz', update: 'Обновляем Forkozz', reinstall: 'Переустанавливаем Forkozz', remove: 'Удаляем Forkozz', stop: 'Выключаем Forkozz',
-	start: 'Включаем Forkozz', restart: 'Перезапускаем Forkozz', apply: 'Применяем настройки', lists: 'Обновляем списки сервисов',
+	start: 'Включаем Forkozz', restart: 'Перезапускаем Forkozz', apply: 'Применяем настройки', lists: 'Обновляем списки сервисов', rebuild: 'Пересобираем списки',
 	subs: 'Обновляем серверы подписки', tsc_clean: 'Убираем остатки удалённого доступа', src_fix: 'Исправляем источники трафика', dns_fix: 'Чиним DNS роутера', singbox: 'Меняем sing-box', singbox_reinstall: 'Переустанавливаем sing-box', singbox_remove: 'Удаляем sing-box'
 };
 
 var DONE_TEXT = {
 	install: 'Forkozz установлен', update: 'Forkozz обновлён', reinstall: 'Forkozz переустановлен', remove: 'Forkozz удалён', stop: 'Forkozz выключен',
-	start: 'Forkozz включён', restart: 'Forkozz перезапущен', apply: 'Настройки применены', lists: 'Списки сервисов обновлены',
+	start: 'Forkozz включён', restart: 'Forkozz перезапущен', apply: 'Настройки применены', lists: 'Списки сервисов обновлены', rebuild: 'Списки пересобраны',
 	subs: 'Серверы подписки обновлены', tsc_clean: 'Остатки удалённого доступа убраны', src_fix: 'Источники трафика исправлены', dns_fix: 'DNS роутера починен', singbox: 'sing-box заменён', singbox_reinstall: 'sing-box переустановлен', singbox_remove: 'sing-box удалён'
 };
 
@@ -67373,14 +67844,14 @@ return view.extend({
 		}
 
 		function listsNow() {
-			var ok = configured() && st.running;
-			return E('div', { 'class': 'zm-lists-now' }, [
-				E('div', { 'class': 'zm-lists-now-text' }, [
-					E('b', {}, 'Списки сервисов'),
-					E('span', { 'class': 'zm-hint', 'style': 'margin:0' }, ok ? 'Обновляются сами раз в ' + ((LIST_IV.filter(function(x) { return x.id === ((cfg && cfg.list_interval) || '1d'); })[0] || {}).label || '24 ч') + '. Можно скачать заново сейчас — в окне вывода будет видно, что скачалось, применилось и работает.' : 'Скачиваются, когда Forkozz включён.')
-				]),
-				E('button', { 'class': 'cbi-button cbi-button-action', 'disabled': !ok || busy || dirty ? '' : null, 'title': dirty ? 'Сначала сохраните изменения' : '', 'click': function() { act('lists'); } }, 'Обновить списки сейчас')
-			]);
+			var ok = configured() && st.running, t = (((cfg && cfg.catalog && cfg.catalog.meta) || {}).tachyon) || {};
+			return zm.listsNowRow({
+				need: !!t.rb_fk && configured(),
+				text: ok ? 'Обновляются сами раз в ' + ((LIST_IV.filter(function(x) { return x.id === ((cfg && cfg.list_interval) || '1d'); })[0] || {}).label || '24 ч') + '. Можно скачать заново сейчас — в окне вывода будет видно, что скачалось, применилось и работает.' : 'Скачиваются, когда Forkozz включён.',
+				refresh: function() { act('lists'); }, refreshOff: !ok || busy || dirty, refreshTitle: dirty ? 'Сначала сохраните изменения' : '',
+				rebuild: function() { act('rebuild'); }, rebuildOff: !configured() || busy || dirty,
+				rebuildTitle: dirty ? 'Сначала сохраните изменения' : ''
+			});
 		}
 
 		var takenMemo = null;
@@ -67775,33 +68246,37 @@ return view.extend({
 				if (sel.russia_inside && takenMemo && takenMemo.shadow.length) svcCard.appendChild(E('p', { 'class': 'zm-hint' }, '⚠ «Всё сразу» здесь перекроет: ' + takenMemo.shadow.join(', ') + '. Эта секция выше, поэтому такие сервисы пойдут через неё.'));
 				else svcCard.appendChild(E('p', { 'class': 'zm-hint' }, '«Всё сразу» — полный список Russia inside: все категории и сервисы одним набором. Он большой, на слабых роутерах лучше включать отдельные пункты.'));
 			}
-			var groups = [];
-			remote.forEach(function(s) { if (groups.indexOf(s.group) < 0) groups.push(s.group); });
+			if (sel.discord && (sel.cloudflare || sel.c_itdoginfo_cloudflare))
+				svcCard.appendChild(E('p', { 'class': 'zm-hint' }, '⚠ Discord вместе с Cloudflare уводят в Forkozz много лишнего, даже торренты.'));
+			// Источники не смешиваются: каталоги и «Мои списки» — в «Дополнительных списках», Tachyon Lists — своим разделом
+			var groups = [], tGroups = [];
+			remote.forEach(function(s) { var to = zm.isTchGroup(s.group) ? tGroups : groups; if (to.indexOf(s.group) < 0) to.push(s.group); });
 			groups.sort(function(a, b) { return (a === OLD_GROUP) - (b === OLD_GROUP); });
-			if (groups.length) {
-				svcCard.appendChild(E('h4', { 'style': 'margin:20px 0 4px' }, 'Дополнительные списки'));
-				svcCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin:0 0 10px' }, 'Готовые наборы доменов и подсетей из каталогов и ваши «Мои списки». Разверните источник и отметьте нужное.'));
-			}
-			groups.forEach(function(g) {
+			function groupEl(g) {
 				var items = remote.filter(function(s) { return s.group === g; });
 				var on = items.filter(function(s) { return sel[s.id]; }).length;
-				var m = /^(.*?)\s*\((.*)\)\s*$/.exec(g);
-				svcCard.appendChild(zm.svcGroup({
-					name: m ? m[1] : g, sub: m ? m[2] : '', key: g,
+				var m = /^(.*?)\s*\((.*)\)\s*$/.exec(g), tch = zm.isTchGroup(g);
+				return zm.svcGroup({
+					name: m ? m[1] : g, sub: m && !tch ? m[2] : '', key: g,
 					open: g in openGroups ? openGroups[g] : on > 0,
 					badge: E('span', { 'class': 'zm-badge ' + (on ? 'zm-ok' : 'zm-off') }, on ? 'выбрано ' + on + ' из ' + items.length : String(items.length)),
 					body: zm.svcGrid(items.map(svcTile)),
 					toggle: function(o) { openGroups[g] = o; }
-				}));
-			});
+				});
+			}
+			svcCard.appendChild(E('h4', { 'style': 'margin:20px 0 4px' }, 'Дополнительные списки'));
+			svcCard.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin:0 0 10px' }, 'Готовые наборы доменов и подсетей из каталога списков и ваши «Мои списки». Разверните источник и отметьте нужное.'));
+			groups.forEach(function(g) { svcCard.appendChild(groupEl(g)); });
 			if (groups.indexOf(OLD_GROUP) >= 0)
 				svcCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Эти списки были выбраны раньше, но их нет в каталоге. Они продолжают работать; выключите ненужные и сохраните.'));
-			if (sel.discord && (sel.cloudflare || sel.c_itdoginfo_cloudflare))
-				svcCard.appendChild(E('p', { 'class': 'zm-hint' }, '⚠ Discord вместе с Cloudflare уводят в Forkozz много лишнего, даже торренты.'));
 			var catMeta = (cfg && cfg.catalog && cfg.catalog.meta) || {};
 			svcCard.appendChild(zm.catalogBlock(catMeta, { reload: function() { reload(); } }));
-			svcCard.appendChild(zm.tachyonBlock(catMeta.tachyon, { reload: function() { reload(); } }));
 			svcCard.appendChild(zm.ownBlock(catMeta, { reload: function() { reload(); }, added: function(g) { openGroups[g] = true; } }));
+			svcCard.appendChild(zm.tachyonSection(catMeta.tachyon, {
+				groups: tGroups.map(groupEl),
+				picked: remote.filter(function(s) { return zm.isTchGroup(s.group) && sel[s.id]; }).length,
+				reload: function() { reload(); }
+			}));
 			svcCard.appendChild(listsNow());
 			if (domOpen && !domCards[domOpen]) domOpen = null;
 			domPlace();
@@ -75965,6 +76440,8 @@ html.zm-theme-dark .zm-find { background: var(--surface-solid, #1c2128); color: 
 .zmw-modal.zm-find .zm-find-input, .zmw-modal.zm-find .zm-find-input:focus { width: auto; height: 44px; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; font-size: 19px; }
 @media (max-width: 600px) { .zmw-modal.zm-find { max-height: calc(100vh - 24px); border-radius: 18px; } .zmw-modal.zm-find .zm-find-input { font-size: 16px; } }
 #zmw-view .zm-sb-left, #zmw-view .zm-lists-now { background: var(--surface-2); border-color: var(--border); border-radius: var(--radius-sm); color: var(--text); }
+#zmw-view .zm-lists-now.zm-lists-need { border-color: rgba(210,153,34,.55) !important; background: rgba(210,153,34,.08) !important; }
+#zmw-view .zm-tch-sec { border-top-color: var(--border); }
 #zmw-view .zm-sb-left { background: var(--bad-bg); border-color: rgba(239,68,68,.3); }
 .zm-stopbar .cbi-button.zm-stopbar-btn { padding: 10px 18px; border-radius: 12px; font-size: 14px; line-height: 1.2; box-shadow: 0 8px 20px -10px rgba(220,38,38,.8); }
 @media (min-width: 961px) {
@@ -76957,6 +77434,7 @@ else
 	case "$_zm_wl" in *' # zm-rpcd-watch') ;; *) _zm_wl='*/2 * * * * /opt/zapret-manager-luci/backend.sh zm_watch >/dev/null 2>&1 # zm-rpcd-watch' ;; esac
 	echo "$_zm_wl" >> /etc/crontabs/root 2>/dev/null || true
 fi
+grep -q ' # zm-stats$' /etc/crontabs/root 2>/dev/null && sed -i '/ # zm-stats$/d' /etc/crontabs/root 2>/dev/null
 ZM_NO_CRON_RESTART=1 /opt/zapret-manager-luci/backend.sh versions_cron_sync >/dev/null 2>&1 || true
 ZM_NO_CRON_RESTART=1 /opt/zapret-manager-luci/backend.sh steer_action lists_cron x >/dev/null 2>&1 || true
 case "$(uci -q get system.@system[0].cronloglevel)" in
