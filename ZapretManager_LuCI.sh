@@ -19481,8 +19481,40 @@ _tsc_fw_replace() {
 	return 1
 }
 
+_tsc_fw_stage_port_rule() {
+	local rule="firewall.$TSC_FW_RULE" wan="$1" kind spec option port old_port=""
+	kind="$(stage_uci -q get "$rule")"
+	case "$kind" in
+		rule)
+			spec="$(stage_uci -q show "$rule")" || return 1
+			# Only manage the original router input rule. A dest option makes it a forwarding rule.
+			while IFS= read -r option; do
+				case "$option" in
+					"$rule=rule"|"$rule".name=*|"$rule".src=*|"$rule".proto=*|"$rule".target=*|"$rule".dest_port=*|"$rule".enabled=*) ;;
+					*) return 1 ;;
+				esac
+			done <<EOF
+$spec
+EOF
+			case "$(stage_uci -q get "$rule.enabled" || echo 1)" in 1|true|yes|on) ;; *) return 1 ;; esac
+			old_port="$(stage_uci -q get "$rule.dest_port")"
+			case "$old_port" in ''|*[!0-9]*) return 1 ;; esac ;;
+		'') stage_uci set "$rule=rule" || return 1 ;;
+		*) return 1 ;;
+	esac
+	for option in name=Allow-Tailscale "src=$wan" proto=udp target=ACCEPT; do
+		if [ "$kind" = rule ]; then
+			[ "$(stage_uci -q get "$rule.${option%%=*}")" = "${option#*=}" ] || return 1
+		else
+			stage_uci set "$rule.$option" || return 1
+		fi
+	done
+	port="$(_tsc_port)"
+	[ "$old_port" = "$port" ] || stage_uci set "$rule.dest_port=$port"
+}
+
 _tsc_firewall() (
-	local home lan wan legacy iface dev tmp pending p option changes="" written="" name dest
+	local home lan wan legacy iface dev tmp pending option changes="" written="" name dest
 	local need_net="$JOBS_DIR/tsc.net-reload" need_fw="$JOBS_DIR/tsc.fw-reload"
 	pending="$(uci changes network && uci changes firewall)" || return 1
 	[ -z "$pending" ] || { echo "ОШИБКА: сохраните или отмените изменения сети и firewall в LuCI"; return 1; }
@@ -19525,19 +19557,10 @@ _tsc_firewall() (
 		done
 	fi
 	if [ "$wan" != "$lan" ] && _zm_zone_sec "$wan" >/dev/null; then
-		case "$(stage_uci -q get "firewall.$TSC_FW_RULE")" in
-			rule) ;;
-			'') stage_uci set "firewall.$TSC_FW_RULE=rule" || return 1 ;;
-			*) echo "ОШИБКА: имя правила «$TSC_FW_RULE» уже занято в firewall"; return 1 ;;
-		esac
-		p="$(_tsc_port)"
-		for option in name=Allow-Tailscale "src=$wan" proto=udp "dest_port=$p" target=ACCEPT; do
-			[ "$(stage_uci -q get "firewall.$TSC_FW_RULE.${option%%=*}")" = "${option#*=}" ] ||
-				stage_uci set "firewall.$TSC_FW_RULE.$option" || return 1
-		done
-		if [ "$(stage_uci -q get "firewall.$TSC_FW_RULE.enabled")" = 0 ]; then
-			stage_uci set "firewall.$TSC_FW_RULE.enabled=1" || return 1
-		fi
+		_tsc_fw_stage_port_rule "$wan" || {
+			echo "ОШИБКА: не удалось подготовить правило «Allow-Tailscale» ($TSC_FW_RULE). Проверьте в LuCI, не изменено ли оно вручную."
+			return 1
+		}
 	else
 		echo "   · Зона WAN отсутствует — пропускаем правило входящего UDP-порта"
 	fi
