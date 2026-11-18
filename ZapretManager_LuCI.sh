@@ -8541,6 +8541,7 @@ TSC_DEV="tailscale0"
 TSC_NET="tailscale"
 TSC_FW_RULE="zm_tailscale"
 TSC_NFT="/usr/share/nftables.d/chain-pre/forward/30-zm-tailscale.nft"
+TSC_NFT_SNAT="/usr/share/nftables.d/chain-pre/srcnat/40-zm-tailscale-lan-snat.nft"
 TSC_HOOK="/usr/libexec/zm-tailscale-tgws"
 TSC_SYSCTL="/etc/sysctl.d/90-zm-tailscale.conf"
 TSC_UPLOG="$JOBS_DIR/tsc.up.log"
@@ -11801,7 +11802,7 @@ _pg_trace() {
 		awg) echo "pkg:luci-i18n-amneziawg-ru pkg:luci-app-amneziawg pkg:luci-proto-amneziawg pkg:amneziawg-tools pkg:kmod-amneziawg $AWG_DIR /usr/bin/awg /usr/bin/awg-quick /lib/netifd/proto/amneziawg.sh /lib/modules/*/amneziawg.ko /etc/modules.d/*amneziawg* $AWG_KMOD_MANUAL $(_zm_luci_files amneziawg) $AWF_MODE $AWF_SKIP $AWF_STATE $AWF_LOG cron:zm-awgfix" ;;
 		tgproxy) echo "pkg:tg-ws-proxy /usr/bin/tg-ws-proxy /etc/init.d/tg-ws-proxy /etc/tg-ws-proxy /etc/tg-ws-proxy.conf /etc/config/tg-ws-proxy $TG_BIN_GO $TG_BIN_GO.new $TG_INIT_GO $TG_BIN_RS $TG_INIT_RS $TG_SECRET_RS_FILE $TG_VER_GO_FILE $TG_VER_RS_FILE /etc/config/tg-ws-proxy-rs $TG_WATCH_FLAG $TG_EXT_FILE uci:firewall.zm_tg_mtproto uci:firewall.zm_tg_rust /tmp/tg-ws-proxy.ipk /tmp/tg-ws-proxy.apk /etc/rc.d/*tg-ws-proxy* cron:zm-tg-auto cronrx:tg-ws-proxy" ;;
 		stgws) echo "pkg:tgws /etc/init.d/tgws /usr/sbin/tgws /usr/sbin/stgws /etc/config/tgws /etc/rc.d/*tgws* /var/lib/tgws /var/lib/stgws nft:tgws nft:stgws cronrx:tgws" ;;
-		tailscale) echo "cron:zm-tailscale $ZM_STATE_DIR/latest.tsc pkg:luci-i18n-tailscale-community-ru pkg:luci-app-tailscale-community /etc/init.d/tailscale-settings /etc/rc.d/*tailscale-settings /www/luci-static/resources/view/tailscale.js /usr/share/luci/menu.d/luci-app-tailscale-community.json /usr/share/rpcd/acl.d/luci-app-tailscale-community.json /usr/share/rpcd/ucode/tailscale.uc pkg:tailscale /usr/sbin/tailscale /usr/sbin/tailscaled /etc/init.d/tailscale /etc/rc.d/*tailscale /etc/config/tailscale /etc/config/tailscale-opkg /etc/config/tailscale.apk-new /etc/tailscale /var/lib/tailscale $TSC_NFT $TSC_HOOK $TSC_SYSCTL $TSC_DIR $TSC_UPLOG uci:network.$TSC_NET uci:firewall.$TSC_FW_RULE" ;;
+		tailscale) echo "cron:zm-tailscale $ZM_STATE_DIR/latest.tsc pkg:luci-i18n-tailscale-community-ru pkg:luci-app-tailscale-community /etc/init.d/tailscale-settings /etc/rc.d/*tailscale-settings /www/luci-static/resources/view/tailscale.js /usr/share/luci/menu.d/luci-app-tailscale-community.json /usr/share/rpcd/acl.d/luci-app-tailscale-community.json /usr/share/rpcd/ucode/tailscale.uc pkg:tailscale /usr/sbin/tailscale /usr/sbin/tailscaled /etc/init.d/tailscale /etc/rc.d/*tailscale /etc/config/tailscale /etc/config/tailscale-opkg /etc/config/tailscale.apk-new /etc/tailscale /var/lib/tailscale $TSC_NFT $TSC_NFT_SNAT $TSC_HOOK $TSC_SYSCTL $TSC_DIR $TSC_UPLOG uci:network.$TSC_NET uci:firewall.$TSC_FW_RULE" ;;
 		terminal) echo "pkg:luci-i18n-ttyd-ru pkg:luci-app-ttyd pkg:ttyd /usr/bin/ttyd /etc/config/ttyd /etc/config/ttyd-opkg /etc/config/ttyd.apk-new /etc/init.d/ttyd /etc/rc.d/*ttyd $(_zm_luci_files ttyd)" ;;
 		htop) echo "pkg:htop /usr/bin/htop /etc/htoprc /root/.config/htop $MON_TTYD_OWN" ;;
 		adblock) echo "$AB_DIR $AB_STATS_DIR $AB_STATS_LOG dnsconf:zm-adblock.conf dnsconf:zm-adblock-stats.conf nft:zm_adblock_free nft:zm_adblock_ip /var/run/zm-adblock-free.pid /var/etc/zm-adblock-free.conf /var/etc/zm-adblock-free.conf.macs cron:zm-adblock cron:zm-abstats" ;;
@@ -19489,6 +19490,10 @@ _tsc_firewall() (
 	home="$(_zm_zone_sec "$lan")" || { echo "ОШИБКА: не найдена зона домашней сети в firewall"; return 1; }
 	wan="$(_zm_wan_zone)"
 	legacy="$(_tsc_fw_luci_zone "$home" "$lan")" || return 1
+	if [ -n "$legacy" ] && ! command -v fw4 >/dev/null 2>&1; then
+		echo "ОШИБКА: для переноса зоны с сохранением masquerading требуется firewall4"
+		return 1
+	fi
 	iface="$(uci -q get "network.$TSC_NET")"
 	if [ -n "$iface" ]; then
 		dev="$(uci -q get "network.$TSC_NET.device" || uci -q get "network.$TSC_NET.ifname")"
@@ -19544,6 +19549,13 @@ _tsc_firewall() (
 		changes="$changes $name"
 	done
 	if command -v fw4 >/dev/null 2>&1; then
+		if [ -n "$legacy" ] && [ ! -e "$TSC_NFT_SNAT" ]; then
+			# Preserve the old LuCI zone's IPv4 masquerading on egress through tailscale0.
+			mkdir -p "${TSC_NFT_SNAT%/*}" || return 1
+			printf 'oifname "%s" meta nfproto ipv4 masquerade comment "zm-tailscale: preserve LuCI masquerading"\n' "$TSC_DEV" > "$tmp/new/snat" || return 1
+			chmod 0644 "$tmp/new/snat" || return 1
+			changes="snat$changes"
+		fi
 		_tsc_nft_text > "$tmp/new/nft" || return 1
 		if ! cmp -s "$tmp/new/nft" "$TSC_NFT"; then
 			[ ! -e "$TSC_NFT" ] || cp -p "$TSC_NFT" "$tmp/old/nft" || return 1
@@ -19568,7 +19580,13 @@ _tsc_firewall() (
 		case " $changes " in *" network "*) : > "$need_net" || return 1 ;; esac
 		: > "$need_fw" || return 1
 	fi
-	fw_path() { if [ "$1" = nft ]; then printf '%s' "$TSC_NFT"; else printf '/etc/config/%s' "$1"; fi; }
+	fw_path() {
+		case "$1" in
+			nft) printf '%s' "$TSC_NFT" ;;
+			snat) printf '%s' "$TSC_NFT_SNAT" ;;
+			*) printf '/etc/config/%s' "$1" ;;
+		esac
+	}
 	fw_restore() {
 		local file dest
 		for file in $written; do
@@ -19659,6 +19677,7 @@ _tsc_unsetup() {
 	uci -q get "firewall.$TSC_FW_RULE" >/dev/null && { uci delete "firewall.$TSC_FW_RULE"; ch=1; }
 	[ "$ch" = 1 ] && uci commit firewall
 	[ -f "$TSC_NFT" ] && { rm -f "$TSC_NFT"; ch=1; }
+	[ -f "$TSC_NFT_SNAT" ] && { rm -f "$TSC_NFT_SNAT"; ch=1; }
 	[ "$ch" = 1 ] && /etc/init.d/firewall reload >/dev/null 2>&1
 	if uci -q get "network.$TSC_NET" >/dev/null; then
 		uci delete "network.$TSC_NET"; uci commit network
