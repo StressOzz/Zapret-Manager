@@ -6,9 +6,6 @@ set -e
 
 ZM_INST_MODE="${1:-}"
 GREEN="\033[1;32m"; CYAN="\033[1;36m"; YELLOW="\033[1;33m"; MAGENTA="\033[1;35m"; NC="\033[0m"
-# Где держать панель: flash — на флеше; light — страницы в памяти, на флеше сжатый архив; ram — всё в памяти до перезагрузки.
-# Без слова — как стояла (после «ram» — снова на флеш). Проверяем заранее, пока на роутере ничего не тронуто.
-# pc — для программы ZapretManager_PC: основа панели в памяти до перезагрузки, а страницы открываются с компьютера
 case "$ZM_INST_MODE" in
 	''|flash) ;;
 	ram|light|pc)
@@ -5099,7 +5096,7 @@ _zm_cl_get() {
 	local out="$1" u
 	for u in $ZM_CL_URLS; do
 		rm -f "$out"
-		_zm_gh_get "$u" "$out" "" 12 && _zm_dl_sane "$out" && [ "$(wc -c < "$out")" -le 262144 ] && return 0
+		_zm_gh_get "$u" "$out" "" 12 && _zm_dl_sane "$out" && [ "$(wc -c < "$out")" -le 1048576 ] && return 0
 	done
 	rm -f "$out"
 	return 1
