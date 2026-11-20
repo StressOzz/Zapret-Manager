@@ -15586,7 +15586,7 @@ _fk_lists_progress() {
 		/^Download failed, using the saved copy of the list downloaded / { m = $0; sub(/^.*downloaded /, "", m); sub(/ h ago.*$/, "", m); m += 0
 			print "     ! не скачался — берём прошлую копию (" (m < 1 ? "меньше часа" : m " ч") " назад)"; next }
 		/Lists update completed successfully/ { print "   ✓ Все списки загружены"; next }
-		/Lists update failed/ { print "   ✗ Часть списков не загрузилась — работают остальные"; next }'
+		/Lists update failed/ { print "   ✗ Часть списков не загрузилась — работают остальные"; next }' | awk '!s[$0]++'
 	FK_LOGSEEN="$tot"
 	return 0
 }
@@ -16333,7 +16333,7 @@ _fk_rl_learn_run() {
 	j="$(printf '%s' "$req" | _fk_ucj rllearn)"
 	case "$j" in *'"error"'*) [ -n "$quiet" ] || echo "!! Проверка ключа не удалась: $(printf '%s' "$j" | jq -r '.error // empty' 2>/dev/null)"; return 1 ;; esac
 	n="$(printf '%s' "$j" | jq -r '.tested // 0' 2>/dev/null)"
-	[ "${n:-0}" -gt 0 ] 2>/dev/null || { [ -n "$quiet" ] || echo "   · все серверы REALITY уже проверены — ключ подобран"; return 0; }
+	[ "${n:-0}" -gt 0 ] 2>/dev/null || { [ -n "$quiet" ] || echo "   · новых проверок не потребовалось — серверы REALITY проверены за последние 7 дней"; return 0; }
 	printf '%s' "$j" | jq -r '
 		"   · проверено серверов REALITY: \(.tested) — работают как есть: \(.works)\(if .dead > 0 then ", не отвечают ни с ключом, ни без: \(.dead)" else "" end)",
 		(.list[] | "   ✓ «\(.name)»: работает только \(if .key then "с ключом X25519MLKEM768" else "без ключа X25519MLKEM768" end) — запомнили")' 2>/dev/null
@@ -16575,7 +16575,7 @@ _fk_sub_fmt_auto() {
 			lost=""; [ "$miss" = 0 ] || lost="$(grep -vxF -f "$d/xr.k" "$d/sb.k" | cut -d'|' -f1 | sort -u | tr '\n' ' ' | sed 's/ $//')"
 			uci set "netshift.$sec.subscription_format_preference=xray"; uci set "netshift.$sec.zm_subfmt_chk=$key"; sw=1
 			FK_FMT_SW="${FK_FMT_SW:+$FK_FMT_SW }$sec"
-			echo "   ✓ в формате Happ серверов больше ($n_xr против $n_sb${extra:+, в том числе $extra}) — подписке поставлен формат Happ"
+			echo "   ✓ в формате Happ уникальных серверов больше ($n_xr против $n_sb${extra:+, в том числе $extra}) — подписке поставлен формат Happ"
 			[ -n "$lost" ] && echo "   ! в формате Happ нет $miss серверов из формата sing-box ($lost)"
 			logger -t zapret-manager "Forkozz: новой подписке секции $sec поставлен формат Happ ($n_xr серверов против $n_sb)"
 		elif [ "$n_xr" = 0 ]; then echo "   ✓ формат «Авто» ($lbl): в формате Happ сервер подписку не отдал"
@@ -16612,7 +16612,7 @@ _fk_sub_update() {
 			/Trying subscription User-Agent/ { u = $0; sub(/^.*: /, "", u); f = (u ~ /^[Hh]app|^v2ray/) ? "Happ" : (u ~ /^sing-?box/) ? "sing-box" : u; print "   → Просим подписку в формате " f; next }
 			/Downloaded subscription body/ { b = $0; sub(/^.*bytes=/, "", b); sub(/[^0-9].*$/, "", b); if (b + 0 > 0) printf "   ✓ Скачано %d КБ\n", (b + 1023) / 1024; next }
 			/Detected Xray JSON subscription/ { print (fast ? "   → Формат Happ: разбираем серверы" : "   → Формат Happ: движок Forkozz разбирает серверы по одному — на роутере это минута-две, дождитесь"); next }
-			/produced [0-9]+ outbound/ { n = $0; sub(/^.*produced /, "", n); sub(/ .*$/, "", n); print "   ✓ Разобрано серверов: " n; next }
+			/produced [0-9]+ outbound/ { n = $0; sub(/^.*produced /, "", n); sub(/ .*$/, "", n); print "   ✓ Собрано исходящих подключений sing-box: " n; next }
 			/needs cookies, downloaded with curl/ { print "   ✓ Сервер подписки проверяет cookie — подписка скачана через curl"; next }
 			/Subscription download failed/ { print "   ! Подписка не скачалась — пробуем другой формат"; next }
 			/Applying updated subscriptions/ { print "   → Применяем новые серверы в sing-box"; next }
