@@ -26,6 +26,7 @@ avito.st
 habr.com
 vibio.tv
 vivo.com
+gogdb.org
 ali.click
 nexon.com
 tenor.com
@@ -729,13 +730,18 @@ kaspersky-labs.com
 nvidia.com
 geforce.com
 #################################### Oppo
+h2os.com
 oplus.com
 myoppo.com
 coloros.com
+oneplus.net
 allawnos.com
+allawnofs.com
+edgesuite.net
 oppomobile.com
 heytapmobi.com
 heytapmobile.com
+elb.amazonaws.com
 heytapdownload.com
 #################################### imgbb
 ibb.co
@@ -768,4 +774,14 @@ playhearthstone.com
 worldofwarcraft.com
 heroesofthestorm.com
 blizzardgearstore.com
+#################################### 360 Total Security
+360.cn
+qh-lb.com
+qihoo.com
+360safe.com
+360totalsecurity.com
+#################################### Test DNS
+dnscheck.tools
+dnsleaktest.com
+browserleaks.com
 ####################################
