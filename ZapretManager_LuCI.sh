@@ -19618,7 +19618,7 @@ _tsc_fw_plan() (
 _tsc_firewall() (
 	local home lan wan legacy iface plan port tmp pending option changes="" written="" name dest
 	local need_net="$JOBS_DIR/tsc.net-reload" need_fw="$JOBS_DIR/tsc.fw-reload"
-	local had_net=0 had_fw=0
+	local had_net=0 had_fw=0 reloaded_net=0
 	if command -v flock >/dev/null 2>&1; then
 		exec 8>"$JOBS_DIR/tsc.firewall.lock" || return 1
 		flock -n 8 || { echo "ОШИБКА: автонастройка firewall уже выполняется"; return 1; }
@@ -19731,6 +19731,13 @@ EOF
 			echo "ОШИБКА: не удалось полностью восстановить файлы. Проверьте настройки в LuCI."
 		fi
 	}
+	fw_matches_staged() {
+		local delta
+		delta="$(uci changes network && uci changes firewall)" &&
+			[ -z "$delta" ] &&
+			cmp -s "$tmp/new/network" /etc/config/network &&
+			cmp -s "$tmp/new/firewall" /etc/config/firewall
+	}
 	for name in $changes; do
 		dest="$(fw_path "$name")"
 		if [ -L "$dest" ] ||
@@ -19752,14 +19759,24 @@ EOF
 		echo "ОШИБКА: конфигурация firewall не прошла проверку (fw4 check)"
 		return 1
 	fi
+	if ! fw_matches_staged; then
+		fw_restore
+		echo "ОШИБКА: настройки сети и firewall изменились перед применением. Сохраните изменения и повторите автонастройку."
+		return 1
+	fi
 	if [ -f "$need_net" ]; then
 		ubus call network reload >/dev/null 2>&1 || {
 			echo "ОШИБКА: не удалось применить настройки сети. Повторите автонастройку."
 			return 1
 		}
 		rm -f "$need_net"
+		reloaded_net=1
 	fi
 	if [ -f "$need_fw" ]; then
+		if [ "$reloaded_net" = 1 ] && ! fw_matches_staged; then
+			echo "ОШИБКА: настройки изменились во время перезагрузки сети. Сохраните изменения и повторите автонастройку."
+			return 1
+		fi
 		/etc/init.d/firewall reload >/dev/null 2>&1 || {
 			echo "ОШИБКА: не удалось применить настройки firewall. Повторите автонастройку."
 			return 1
@@ -19811,13 +19828,26 @@ _tsc_setup() {
 }
 
 _tsc_unsetup() {
-	local z lz ch=0 v iface="network.$TSC_NET" spec
+	local z lz ch=0 v iface="network.$TSC_NET" kind spec drop_iface=0
 	_tsc_say "Убираем настройки сети и firewall"
 	_tsc_tg_drop
 	_tsc_nft_clean
-	lz="$(_zm_lan_zone)"
-	if z="$(_zm_zone_sec "$lz")"; then
-		case " $(uci -q get "firewall.$z.network") " in *" $TSC_NET "*) uci del_list "firewall.$z.network=$TSC_NET"; ch=1 ;; esac
+	kind="$(uci -q get "$iface")"
+	if [ -z "$kind" ] ||
+	   { [ "$kind" = interface ] &&
+	     [ "$(uci -q get "$iface.proto")" = none ] &&
+	     [ "$(uci -q get "$iface.device" || uci -q get "$iface.ifname")" = "$TSC_DEV" ] &&
+	     spec="$(uci -q show "$iface")" &&
+	     ! printf '%s\n' "$spec" | sed '1d' | cut -d. -f3- | grep -qEv '^(proto|device|ifname)='; }; then
+		drop_iface=1
+		lz="$(_zm_lan_zone)"
+		if z="$(_zm_zone_sec "$lz")"; then
+			case " $(uci -q get "firewall.$z.network") " in
+				*" $TSC_NET "*) uci del_list "firewall.$z.network=$TSC_NET" && ch=1 ;;
+			esac
+		fi
+	else
+		echo "   · Изменённый вручную интерфейс $TSC_NET и его привязка оставлены"
 	fi
 	if _tsc_fw_port_rule_ok uci "$(_zm_wan_zone)"; then
 		uci delete "firewall.$TSC_FW_RULE" && ch=1
@@ -19828,16 +19858,8 @@ _tsc_unsetup() {
 	[ -f "$TSC_NFT" ] && { rm -f "$TSC_NFT"; ch=1; }
 	[ -f "$TSC_NFT_SNAT" ] && { rm -f "$TSC_NFT_SNAT"; ch=1; }
 	[ "$ch" = 1 ] && /etc/init.d/firewall reload >/dev/null 2>&1
-	if uci -q get "$iface" >/dev/null; then
-		if [ "$(uci -q get "$iface")" = interface ] &&
-		   [ "$(uci -q get "$iface.proto")" = none ] &&
-		   [ "$(uci -q get "$iface.device" || uci -q get "$iface.ifname")" = "$TSC_DEV" ] &&
-		   spec="$(uci -q show "$iface")" &&
-		   ! printf '%s\n' "$spec" | sed '1d' | cut -d. -f3- | grep -qEv '^(proto|device|ifname)='; then
-			uci delete "$iface" && uci commit network && ubus call network reload >/dev/null 2>&1
-		else
-			echo "   · Изменённый вручную интерфейс $TSC_NET оставлен в сети"
-		fi
+	if [ "$drop_iface" = 1 ] && [ -n "$kind" ]; then
+		uci delete "$iface" && uci commit network && ubus call network reload >/dev/null 2>&1
 	fi
 	rm -f "$TSC_SYSCTL"
 	rm -f "$JOBS_DIR/tsc.net-reload" "$JOBS_DIR/tsc.fw-reload"
