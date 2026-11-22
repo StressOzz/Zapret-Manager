@@ -19036,7 +19036,11 @@ _tsc_json() { _tsc_api status || _zm_tmo 8 tailscale status --json 2>/dev/null; 
 
 _tsc_free_kb() { df -k /overlay 2>/dev/null | awk 'NR == 2 { print $4; exit }'; }
 
-_tsc_port() { local p; p="$(uci -q get tailscale.settings.port)"; case "$p" in ''|*[!0-9]*) echo 41641 ;; *) echo "$p" ;; esac; }
+_tsc_port() {
+	local port
+	port="$(uci -q get tailscale.settings.port)"
+	printf '%s\n' "${port:-41641}"
+}
 
 _tsc_lan_cidr() {
 	local d a="" ip
@@ -19419,29 +19423,89 @@ _tsc_fw_dynamic_ok() {
 	' >/dev/null 2>&1
 }
 
+_tsc_fw_runtime_aliases() {
+	command -v fw4 >/dev/null 2>&1 || return 0
+	ZM_TSC_LAN_ZONE="$1" ZM_TSC_DEVICE="$TSC_DEV" ucode -e '
+		import { connect } from "ubus";
+		let bus = connect(), dev = getenv("ZM_TSC_DEVICE"), lan = getenv("ZM_TSC_LAN_ZONE");
+		let interfaces = bus?.call("network.interface", "dump")?.interface;
+		if (type(interfaces) != "array") exit(1);
+		for (let iface in interfaces) {
+			if ((iface.l3_device ?? iface.device) != dev) continue;
+			if (iface.data?.zone && iface.data.zone != lan) exit(1);
+			print(iface.interface, "\n");
+		}
+	'
+}
+
+_tsc_fw_network_aliases() {
+	local runtime network
+	runtime="$(_tsc_fw_runtime_aliases "$1")" || return 1
+	network="$(uci -q -X show network)" || return 1
+	printf '%s\n' "$network" | awk -v dev="$TSC_DEV" -v net="$TSC_NET" -v runtime="$runtime" '
+		BEGIN {
+			known[net] = 1
+			count = split(runtime, entries, /[[:space:]]+/)
+			for (i = 1; i <= count; i++) if (entries[i] != "") known[entries[i]] = 1
+		}
+		/^network\.[^.]+\.(device|ifname)=/ {
+			split($0, key, /[.=]/)
+			value = substr($0, index($0, "=") + 1)
+			gsub(/\047/, "", value)
+			count = split(value, entries, /[[:space:]]+/)
+			for (i = 1; i <= count; i++) {
+				if (entries[i] == dev) known[key[2]] = 1
+				else if (entries[i] ~ /^@/) references[key[2] SUBSEP substr(entries[i], 2)] = 1
+			}
+		}
+		END {
+			do {
+				changed = 0
+				for (ref in references) {
+					split(ref, pair, SUBSEP)
+					if (known[pair[2]] && !known[pair[1]]) { known[pair[1]] = 1; changed = 1 }
+				}
+			} while (changed)
+			for (name in known) if (known[name]) print name
+		}'
+}
+
 _tsc_fw_luci_zone() (
-	local home="$1" lan="$2" fw z nets devs dev matches legacy="" ref src dst
+	local home="$1" lan="$2" wan="$3" fw z zone nets devs dev net aliases matches legacy="" ref src dst
 	set -f
 	zone_options() {
 		printf '%s\n' "$fw" | awk -v prefix="firewall.$1." 'index($0, prefix) == 1 { print substr($0, length(prefix) + 1) }'
 	}
 	fw="$(uci -q -X show firewall)" || return 1
+	aliases="$(_tsc_fw_network_aliases "$lan")" || {
+		echo "ОШИБКА: не удалось проверить привязки Tailscale к зонам firewall" >&2
+		return 1
+	}
 	for z in $(printf '%s\n' "$fw" | sed -n 's/^firewall\.\([^.=]*\)=zone$/\1/p'); do
 		[ "$z" = "$home" ] && continue
+		zone="$(uci -q get "firewall.$z.name")"
+		if [ "$zone" = "$lan" ] || { [ -n "$wan" ] && [ "$zone" = "$wan" ] && [ "$z" != "$(_zm_zone_sec "$wan")" ]; }; then
+			echo "ОШИБКА: имя зоны «$zone» встречается несколько раз в firewall" >&2
+			return 1
+		fi
 		nets="$(uci -q get "firewall.$z.network")"
 		devs="$(uci -q get "firewall.$z.device")"
-		case " $nets " in
-			*" $TSC_NET "*) ;;
-			*) matches=
-			   for dev in $devs; do
-				case "$dev" in
-					"$TSC_DEV"|+|'*') matches=1 ;;
-					*+) case "$TSC_DEV" in "${dev%+}"*) matches=1 ;; esac ;;
-				esac
-			   done
-			   [ -n "$matches" ] || continue ;;
-		esac
-		if [ -n "$legacy" ] || [ "$(uci -q get "firewall.$z.name")" != tailscale ] ||
+		matches=
+		for net in $nets; do
+			case "$net" in
+				lan) echo "ОШИБКА: интерфейс lan привязан к нескольким зонам firewall" >&2; return 1 ;;
+				'!'*) matches=1 ;;
+				*) printf '%s\n' "$aliases" | grep -Fxq -- "$net" && matches=1 ;;
+			esac
+		done
+		for dev in $devs; do
+			case "$dev" in
+				"$TSC_DEV"|+|'*'|'!'*) matches=1 ;;
+				*+) case "$TSC_DEV" in "${dev%+}"*) matches=1 ;; esac ;;
+			esac
+		done
+		[ -n "$matches" ] || continue
+		if [ -n "$legacy" ] || [ "$zone" != tailscale ] ||
 		   { [ -n "$nets" ] && [ "$nets" != "$TSC_NET" ]; } ||
 		   { [ -n "$devs" ] && [ "$devs" != "$TSC_DEV" ]; } ||
 		   [ "$(uci -q get "firewall.$z.input")" != ACCEPT ] ||
@@ -19481,66 +19545,96 @@ _tsc_fw_replace() {
 	return 1
 }
 
-_tsc_fw_stage_port_rule() {
-	local rule="firewall.$TSC_FW_RULE" wan="$1" kind spec option port old_port=""
-	kind="$(stage_uci -q get "$rule")"
-	case "$kind" in
-		rule)
-			spec="$(stage_uci -q show "$rule")" || return 1
-			# Only manage the original router input rule. A dest option makes it a forwarding rule.
-			while IFS= read -r option; do
-				case "$option" in
-					"$rule=rule"|"$rule".name=*|"$rule".src=*|"$rule".proto=*|"$rule".target=*|"$rule".dest_port=*|"$rule".enabled=*) ;;
-					*) return 1 ;;
-				esac
-			done <<EOF
-$spec
-EOF
-			case "$(stage_uci -q get "$rule.enabled" || echo 1)" in 1|true|yes|on) ;; *) return 1 ;; esac
-			old_port="$(stage_uci -q get "$rule.dest_port")"
-			case "$old_port" in ''|*[!0-9]*) return 1 ;; esac ;;
-		'') stage_uci set "$rule=rule" || return 1 ;;
-		*) return 1 ;;
-	esac
-	for option in name=Allow-Tailscale "src=$wan" proto=udp target=ACCEPT; do
-		if [ "$kind" = rule ]; then
-			[ "$(stage_uci -q get "$rule.${option%%=*}")" = "${option#*=}" ] || return 1
-		else
-			stage_uci set "$rule.$option" || return 1
-		fi
-	done
-	port="$(_tsc_port)"
-	[ "$old_port" = "$port" ] || stage_uci set "$rule.dest_port=$port"
+_tsc_fw_port_valid() {
+	case "$1" in ''|*[!0-9]*|??????*) return 1 ;; esac
+	[ "$1" -ge 1 ] && [ "$1" -le 65535 ]
 }
 
-_tsc_firewall() (
-	local home lan wan legacy iface dev tmp pending option changes="" written="" name dest
-	local need_net="$JOBS_DIR/tsc.net-reload" need_fw="$JOBS_DIR/tsc.fw-reload"
-	pending="$(uci changes network && uci changes firewall)" || return 1
-	[ -z "$pending" ] || { echo "ОШИБКА: сохраните или отмените изменения сети и firewall в LuCI"; return 1; }
-	lan="$(_zm_lan_zone)"
-	home="$(_zm_zone_sec "$lan")" || { echo "ОШИБКА: не найдена зона домашней сети в firewall"; return 1; }
+_tsc_fw_port_rule_ok() {
+	local reader="$1" wan="$2" rule="firewall.$TSC_FW_RULE" spec option
+	[ "$("$reader" -q get "$rule")" = rule ] || return 1
+	spec="$("$reader" -q show "$rule")" || return 1
+	# Only manage the original router input rule. A dest option makes it a forwarding rule.
+	while IFS= read -r option; do
+		case "$option" in
+			"$rule=rule"|"$rule".name=*|"$rule".src=*|"$rule".proto=*|"$rule".target=*|"$rule".dest_port=*|"$rule".enabled=*) ;;
+			*) return 1 ;;
+		esac
+	done <<EOF
+$spec
+EOF
+	case "$("$reader" -q get "$rule.enabled" || echo 1)" in 1|true|yes|on) ;; *) return 1 ;; esac
+	_tsc_fw_port_valid "$("$reader" -q get "$rule.dest_port")" || return 1
+	for option in name=Allow-Tailscale "src=$wan" proto=udp target=ACCEPT; do
+		[ "$("$reader" -q get "$rule.${option%%=*}")" = "${option#*=}" ] || return 1
+	done
+}
+
+_tsc_fw_stage_port_rule() {
+	local rule="firewall.$TSC_FW_RULE" wan="$1" port="$2" option
+	if stage_uci -q get "$rule" >/dev/null; then
+		_tsc_fw_port_rule_ok stage_uci "$wan" || return 1
+	else
+		stage_uci set "$rule=rule" || return 1
+		for option in name=Allow-Tailscale "src=$wan" proto=udp target=ACCEPT; do
+			stage_uci set "$rule.$option" || return 1
+		done
+	fi
+	[ "$(stage_uci -q get "$rule.dest_port")" = "$port" ] || stage_uci set "$rule.dest_port=$port"
+}
+
+_tsc_fw_plan() (
+	# All topology checks use the same UCI snapshot that will be edited.
+	uci() { stage_uci "$@"; }
+	local lan home wan legacy iface dev
+	lan="$(_zm_zone_of_net lan || echo lan)"
+	home="$(_zm_zone_sec "$lan")" || { echo "ОШИБКА: не найдена зона домашней сети в firewall" >&2; return 1; }
 	wan="$(_zm_wan_zone)"
-	legacy="$(_tsc_fw_luci_zone "$home" "$lan")" || return 1
+	case "$lan:$wan" in *[!A-Za-z0-9_:-]*) return 1 ;; esac
+	case " $(uci -q get "firewall.$home.network") " in
+		*" wan "*|*" wan6 "*) echo "ОШИБКА: домашняя зона содержит интерфейс WAN. Проверьте зоны firewall в LuCI." >&2; return 1 ;;
+	esac
+	if [ "$lan" = "$wan" ]; then
+		echo "ОШИБКА: домашняя и внешняя сети находятся в одной зоне firewall" >&2
+		return 1
+	fi
+	_zm_zone_sec "$wan" >/dev/null || wan=""
+	legacy="$(_tsc_fw_luci_zone "$home" "$lan" "$wan")" || return 1
 	if [ -n "$legacy" ] && ! command -v fw4 >/dev/null 2>&1; then
-		echo "ОШИБКА: для переноса зоны с сохранением masquerading требуется firewall4"
+		echo "ОШИБКА: для переноса зоны с сохранением masquerading требуется firewall4" >&2
 		return 1
 	fi
 	iface="$(uci -q get "network.$TSC_NET")"
 	if [ -n "$iface" ]; then
 		dev="$(uci -q get "network.$TSC_NET.device" || uci -q get "network.$TSC_NET.ifname")"
 		if [ "$iface" != interface ] || [ "$dev" != "$TSC_DEV" ] || [ "$(uci -q get "network.$TSC_NET.proto")" != none ]; then
-			echo "ОШИБКА: имя «$TSC_NET» уже занято другим интерфейсом. Проверьте настройки сети в LuCI."
+			echo "ОШИБКА: имя «$TSC_NET» уже занято другим интерфейсом. Проверьте настройки сети в LuCI." >&2
 			return 1
 		fi
 	fi
+	printf '%s|%s|%s|%s|%s\n' "$home" "$lan" "$wan" "$legacy" "$iface"
+)
 
+_tsc_firewall() (
+	local home lan wan legacy iface plan port tmp pending option changes="" written="" name dest
+	local need_net="$JOBS_DIR/tsc.net-reload" need_fw="$JOBS_DIR/tsc.fw-reload"
+	local had_net=0 had_fw=0
+	if command -v flock >/dev/null 2>&1; then
+		exec 8>"$JOBS_DIR/tsc.firewall.lock" || return 1
+		flock -n 8 || { echo "ОШИБКА: автонастройка firewall уже выполняется"; return 1; }
+	fi
+	pending="$(uci changes network && uci changes firewall)" || return 1
+	[ -z "$pending" ] || { echo "ОШИБКА: сохраните или отмените изменения сети и firewall в LuCI"; return 1; }
 	tmp="$(mktemp -d "$JOBS_DIR/tsc-fw.XXXXXX")" || return 1
 	trap 'rm -rf "$tmp"' EXIT
 	mkdir "$tmp/old" "$tmp/new" "$tmp/delta" "$tmp/override" || return 1
 	cp -p /etc/config/network /etc/config/firewall "$tmp/old/" &&
 		cp -p "$tmp/old/network" "$tmp/old/firewall" "$tmp/new/" || return 1
 	stage_uci() { command uci -c "$tmp/new" -C "$tmp/override" -t "$tmp/delta" "$@"; }
+	plan="$(_tsc_fw_plan)" || return 1
+	IFS='|' read -r home lan wan legacy iface <<EOF
+$plan
+EOF
 	if [ -z "$iface" ]; then
 		stage_uci set "network.$TSC_NET=interface" &&
 			stage_uci set "network.$TSC_NET.proto=none" &&
@@ -19556,8 +19650,10 @@ _tsc_firewall() (
 			stage_uci delete "firewall.$legacy.$option" || return 1
 		done
 	fi
-	if [ "$wan" != "$lan" ] && _zm_zone_sec "$wan" >/dev/null; then
-		_tsc_fw_stage_port_rule "$wan" || {
+	if [ -n "$wan" ]; then
+		port="$(_tsc_port)"
+		_tsc_fw_port_valid "$port" || { echo "ОШИБКА: UDP-порт Tailscale должен быть от 1 до 65535"; return 1; }
+		_tsc_fw_stage_port_rule "$wan" "$port" || {
 			echo "ОШИБКА: не удалось подготовить правило «Allow-Tailscale» ($TSC_FW_RULE). Проверьте в LuCI, не изменено ли оно вручную."
 			return 1
 		}
@@ -19572,12 +19668,18 @@ _tsc_firewall() (
 		changes="$changes $name"
 	done
 	if command -v fw4 >/dev/null 2>&1; then
-		if [ -n "$legacy" ] && [ ! -e "$TSC_NFT_SNAT" ]; then
+		if [ -n "$legacy" ]; then
 			# Preserve the old LuCI zone's IPv4 masquerading on egress through tailscale0.
-			mkdir -p "${TSC_NFT_SNAT%/*}" || return 1
-			printf 'oifname "%s" meta nfproto ipv4 masquerade comment "zm-tailscale: preserve LuCI masquerading"\n' "$TSC_DEV" > "$tmp/new/snat" || return 1
-			chmod 0644 "$tmp/new/snat" || return 1
-			changes="snat$changes"
+			_tsc_fw_snat_text > "$tmp/new/snat" || return 1
+			if [ -e "$TSC_NFT_SNAT" ]; then
+				cmp -s "$tmp/new/snat" "$TSC_NFT_SNAT" || {
+					echo "ОШИБКА: правило masquerading Tailscale изменено вручную. Проверьте его перед переносом."
+					return 1
+				}
+			else
+				mkdir -p "${TSC_NFT_SNAT%/*}" && chmod 0644 "$tmp/new/snat" || return 1
+				changes="snat$changes"
+			fi
 		fi
 		_tsc_nft_text > "$tmp/new/nft" || return 1
 		if ! cmp -s "$tmp/new/nft" "$TSC_NFT"; then
@@ -19587,16 +19689,17 @@ _tsc_firewall() (
 			changes="$changes nft"
 		fi
 	fi
-	if [ -z "$changes" ] && [ ! -f "$need_net" ] && [ ! -f "$need_fw" ]; then
-		_tsc_say "Сеть и firewall уже настроены для Tailscale"
-		return 0
-	fi
-
 	pending="$(uci changes network && uci changes firewall)" || return 1
 	if [ -n "$pending" ] || ! cmp -s /etc/config/network "$tmp/old/network" ||
 	   ! cmp -s /etc/config/firewall "$tmp/old/firewall"; then
 		echo "ОШИБКА: конфигурация изменилась во время операции. Повторите автонастройку."
 		return 1
+	fi
+	[ ! -f "$need_net" ] || had_net=1
+	[ ! -f "$need_fw" ] || had_fw=1
+	if [ -z "$changes" ] && [ "$had_net:$had_fw" = 0:0 ]; then
+		_tsc_say "Сеть и firewall уже настроены для Tailscale"
+		return 0
 	fi
 	if [ -n "$changes" ]; then
 		# Метки остаются после сбоя reload, чтобы повторный запуск применил сохранённые настройки.
@@ -19611,17 +19714,32 @@ _tsc_firewall() (
 		esac
 	}
 	fw_restore() {
-		local file dest
+		local file dest failed=0
 		for file in $written; do
 			dest="$(fw_path "$file")"
 			if cmp -s "$tmp/new/$file" "$dest"; then
-				if [ -f "$tmp/old/$file" ]; then _tsc_fw_replace "$dest" "$tmp/old/$file"
-				else rm -f "$dest"; fi
+				if [ -f "$tmp/old/$file" ]; then _tsc_fw_replace "$dest" "$tmp/old/$file" || failed=1
+				else rm -f "$dest" || failed=1; fi
+			else
+				failed=1
 			fi
 		done
+		if [ "$failed" = 0 ]; then
+			[ "$had_net" = 1 ] || rm -f "$need_net"
+			[ "$had_fw" = 1 ] || rm -f "$need_fw"
+		else
+			echo "ОШИБКА: не удалось полностью восстановить файлы. Проверьте настройки в LuCI."
+		fi
 	}
 	for name in $changes; do
 		dest="$(fw_path "$name")"
+		if [ -L "$dest" ] ||
+		   { [ -f "$tmp/old/$name" ] && ! cmp -s "$tmp/old/$name" "$dest"; } ||
+		   { [ ! -f "$tmp/old/$name" ] && [ -e "$dest" ]; }; then
+			fw_restore
+			echo "ОШИБКА: конфигурация изменилась во время операции. Повторите автонастройку."
+			return 1
+		fi
 		if ! _tsc_fw_replace "$dest" "$tmp/new/$name"; then
 			fw_restore
 			echo "ОШИБКА: не удалось сохранить настройки сети и firewall"
@@ -19651,6 +19769,10 @@ _tsc_firewall() (
 	[ -z "$legacy" ] || echo "   ✓ Привязка Tailscale перенесена из отдельной зоны «tailscale» в «$lan»"
 	_tsc_say "Сеть и firewall настроены для Tailscale"
 )
+
+_tsc_fw_snat_text() {
+	printf 'oifname "%s" meta nfproto ipv4 masquerade comment "zm-tailscale: preserve LuCI masquerading"\n' "$TSC_DEV"
+}
 
 _tsc_setup() {
 	_tsc_firewall || return 1
@@ -19689,7 +19811,7 @@ _tsc_setup() {
 }
 
 _tsc_unsetup() {
-	local z lz ch=0 v
+	local z lz ch=0 v iface="network.$TSC_NET" spec
 	_tsc_say "Убираем настройки сети и firewall"
 	_tsc_tg_drop
 	_tsc_nft_clean
@@ -19697,14 +19819,25 @@ _tsc_unsetup() {
 	if z="$(_zm_zone_sec "$lz")"; then
 		case " $(uci -q get "firewall.$z.network") " in *" $TSC_NET "*) uci del_list "firewall.$z.network=$TSC_NET"; ch=1 ;; esac
 	fi
-	uci -q get "firewall.$TSC_FW_RULE" >/dev/null && { uci delete "firewall.$TSC_FW_RULE"; ch=1; }
+	if _tsc_fw_port_rule_ok uci "$(_zm_wan_zone)"; then
+		uci delete "firewall.$TSC_FW_RULE" && ch=1
+	elif uci -q get "firewall.$TSC_FW_RULE" >/dev/null; then
+		echo "   · Изменённое вручную правило «Allow-Tailscale» оставлено в firewall"
+	fi
 	[ "$ch" = 1 ] && uci commit firewall
 	[ -f "$TSC_NFT" ] && { rm -f "$TSC_NFT"; ch=1; }
 	[ -f "$TSC_NFT_SNAT" ] && { rm -f "$TSC_NFT_SNAT"; ch=1; }
 	[ "$ch" = 1 ] && /etc/init.d/firewall reload >/dev/null 2>&1
-	if uci -q get "network.$TSC_NET" >/dev/null; then
-		uci delete "network.$TSC_NET"; uci commit network
-		ubus call network reload >/dev/null 2>&1
+	if uci -q get "$iface" >/dev/null; then
+		if [ "$(uci -q get "$iface")" = interface ] &&
+		   [ "$(uci -q get "$iface.proto")" = none ] &&
+		   [ "$(uci -q get "$iface.device" || uci -q get "$iface.ifname")" = "$TSC_DEV" ] &&
+		   spec="$(uci -q show "$iface")" &&
+		   ! printf '%s\n' "$spec" | sed '1d' | cut -d. -f3- | grep -qEv '^(proto|device|ifname)='; then
+			uci delete "$iface" && uci commit network && ubus call network reload >/dev/null 2>&1
+		else
+			echo "   · Изменённый вручную интерфейс $TSC_NET оставлен в сети"
+		fi
 	fi
 	rm -f "$TSC_SYSCTL"
 	rm -f "$JOBS_DIR/tsc.net-reload" "$JOBS_DIR/tsc.fw-reload"
