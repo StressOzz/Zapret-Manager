@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.093
+# Version: 5.094
 ZM_VERSION_EOF
 set -e
 
@@ -59610,8 +59610,9 @@ function z2StratCard(view) {
 				String(text || '').split('\n').forEach(function(l) {
 					var m = /^(\s*)✓(.*)$/.exec(l);
 					var err = /^\s*!|Есть проблемы|Ошибка|не найден/.test(l);
-					var row = m ? [m[1], E('span', { 'style': 'color:#166534' }, '✓'), m[2]] : [l];
-					outBox.appendChild(E('div', { 'style': 'color:' + (err ? '#b91c1c' : '#000000') }, row));
+					var arr = /^\s*==>/.exec(l);
+					var row = m ? [m[1], E('span', { 'style': 'color:#3fb950' }, '✓'), m[2]] : (arr ? [E('span', { 'style': 'color:#56d4dd;font-weight:700' }, '==>'), l.replace(/^\s*==>/, '')] : [l]);
+					outBox.appendChild(E('div', { 'style': 'color:' + (err ? '#ff7b72' : '#e6edf3') }, row));
 				});
 			}
 			view.z2BlobShowLog = function(text) { outWrap.style.display = ''; showOut(text); };
@@ -60570,23 +60571,20 @@ html.zm-theme-dark .zm-z2-file-get { background: rgba(74,222,128,.16); color: #8
 .zm-z2-blockta { width: 100%; min-height: 220px; box-sizing: border-box; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(15,23,42,.12); background: #ffffff; color: #0f172a; resize: vertical; white-space: pre; overflow: auto; tab-size: 4; }
 .zm-z2-blockta:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.18); }
 .zm-z2-sum { margin: 6px 0 0; font-size: 12px; }
-.zm-z2-out { margin: 8px 0 0; padding: 10px 12px; border-radius: 8px; background: rgba(15,23,42,.04); border: 1px solid rgba(15,23,42,.07); font-size: 12px; line-height: 1.5; white-space: pre-wrap; max-height: 220px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.zm-z2-out { margin: 8px 0 0; padding: 10px 12px; border-radius: 8px; background: #0d1117; color: #e6edf3; border: 1px solid rgba(255,255,255,.10); font-size: 12px; line-height: 1.5; white-space: pre-wrap; max-height: 220px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 html.zm-theme-dark .zm-z2-edit { background: rgba(96,165,250,.06); border-color: rgba(96,165,250,.4); }
 html.zm-theme-dark .zm-z2-blockta { background: #0f172a; color: #e2e8f0; border-color: rgba(255,255,255,.12); }
-html.zm-theme-dark .zm-z2-out { background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.08); }
+html.zm-theme-dark .zm-z2-out { background: #0d1117; color: #e6edf3; border-color: rgba(255,255,255,.10); }
 html.zm-theme-dark .zm-z2-edit-state { color: #94a3b8; }
 .zm-z2-file-off { background: rgba(245,158,11,.18); color: #b45309; }
 html.zm-theme-dark .zm-z2-file-off { background: rgba(251,191,36,.16); color: #fcd34d; }
 .zm-z2-save.zm-z2-dirty { background: #dc2626 !important; border-color: #b91c1c !important; color: #fff !important; }
 .zm-z2-save.zm-z2-dirty:hover { background: #b91c1c !important; }
-.zm-z2-outwrap { margin: 8px 0 0; border-radius: 8px; border: 1px solid rgba(15,23,42,.07); background: rgba(15,23,42,.04); }
-.zm-z2-outwrap .zm-z2-out { margin: 0; border: 0; border-radius: 0; background: transparent; }
-.zm-z2-outhead { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; font-size: 12px; font-weight: 600; border-bottom: 1px solid rgba(15,23,42,.07); }
-.zm-z2-x { border: 0; background: transparent; cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: 6px; color: inherit; opacity: .7; }
-.zm-z2-x:hover { opacity: 1; background: rgba(15,23,42,.08); }
-html.zm-theme-dark .zm-z2-outwrap { background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.08); }
-html.zm-theme-dark .zm-z2-outhead { border-bottom-color: rgba(255,255,255,.08); }
-html.zm-theme-dark .zm-z2-x:hover { background: rgba(255,255,255,.1); }
+.zm-z2-outwrap { margin: 8px 0 0; border-radius: 10px; border: 1px solid rgba(255,255,255,.10); background: #0d1117; color: #e6edf3; overflow: hidden; }
+.zm-z2-outwrap .zm-z2-out { margin: 0; border: 0; border-radius: 0; background: #0d1117; color: #e6edf3; padding: 12px 16px; font-size: 13px; line-height: 1.7; }
+.zm-z2-outhead { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; font-size: 13px; font-weight: 600; color: #ffffff; background: #0d1117; border-bottom: 1px solid rgba(255,255,255,.10); }
+.zm-z2-x { border: 0; background: transparent; cursor: pointer; font-size: 18px; line-height: 1; padding: 2px 8px; border-radius: 6px; color: #e6edf3; opacity: .7; }
+.zm-z2-x:hover { opacity: 1; background: rgba(255,255,255,.12); }
 .zm-z2-ta { display: block; width: 100%; box-sizing: border-box; min-height: 440px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.5; resize: vertical; }
 .zm-z2-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .zm-z2-head h3 { margin: 0 0 12px 0; }
