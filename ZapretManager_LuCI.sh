@@ -25035,11 +25035,13 @@ _mx_apply_config() {
 }
 
 # Stage configuration changes in copies and publish only unchanged UCI packages.
-_mx_tx_uci() { uci -c "$dir/uci-config" -P "$dir/uci-delta" "$@"; }
+# Use -t for a private save path. The superficially similar -P disables commit.
+_mx_tx_uci() { uci -c "$dir/uci-config" -t "$dir/uci-delta" "$@"; }
 
 _mx_tx_commit() {
 	local package="$1"
 	_mx_tx_uci commit "$package" &&
+		[ ! -s "$dir/uci-delta/$package" ] &&
 		cmp -s "$dir/$package.original" "/etc/config/$package" &&
 		[ -z "$(uci changes "$package")" ] &&
 		cp -p "$dir/uci-config/$package" "$dir/$package.applied" &&
@@ -25109,22 +25111,27 @@ _mx_dual_devices() {
 _mx_dual_activate() {
 	local primary="$1" secondary="$2" dir="$3" zone="$4" was="$5" i=0
 	_mx_tx_uci add_list "$zone.device=Mihomo$primary" && _mx_tx_uci add_list "$zone.device=Mihomo$secondary" &&
-		_mx_tx_commit firewall && fw4 check >/dev/null 2>&1 && /etc/init.d/firewall reload >/dev/null 2>&1 || return 1
+		_mx_tx_commit firewall && fw4 check >/dev/null 2>&1 && /etc/init.d/firewall reload >/dev/null 2>&1 ||
+		{ echo "   · не удалось применить firewall для интерфейсов Mixomo" >&2; return 1; }
 	cp "$dir/main.yml" /etc/hev-socks5-tunnel/main.yml && cp "$dir/parallel.yml" /etc/hev-socks5-tunnel/zm-parallel.yml &&
 		_mx_tx_uci set "hev-socks5-tunnel.zm_parallel=instance" && _mx_tx_uci set "hev-socks5-tunnel.zm_parallel.enabled=1" &&
 		_mx_tx_uci set "hev-socks5-tunnel.zm_parallel.conffile=/etc/hev-socks5-tunnel/zm-parallel.yml" &&
-		_mx_tx_commit hev-socks5-tunnel && /etc/init.d/hev-socks5-tunnel start >/dev/null 2>&1 || return 1
+		_mx_tx_commit hev-socks5-tunnel && /etc/init.d/hev-socks5-tunnel start >/dev/null 2>&1 ||
+		{ echo "   · не удалось сохранить или запустить конфигурацию HEV" >&2; return 1; }
 	while [ "$i" -lt 10 ] && { [ ! -e /sys/class/net/MihomoWARP ] || [ ! -e /sys/class/net/MihomoVPN ]; }; do
 		sleep 1; i=$((i + 1))
 	done
-	[ -e /sys/class/net/MihomoWARP ] && [ -e /sys/class/net/MihomoVPN ] || return 1
-	_mx_tx_uci set "network.Mihomo.device=Mihomo$primary" && _mx_tx_commit network || return 1
+	[ -e /sys/class/net/MihomoWARP ] && [ -e /sys/class/net/MihomoVPN ] ||
+		{ echo "   · HEV не поднял оба интерфейса Mixomo" >&2; return 1; }
+	_mx_tx_uci set "network.Mihomo.device=Mihomo$primary" && _mx_tx_commit network ||
+		{ echo "   · не удалось сохранить привязку интерфейса Mixomo в UCI" >&2; return 1; }
 	if [ -s "$dir/magi.next" ] && ! cmp -s "$dir/magi" "$dir/magi.next"; then
 		cmp -s "$dir/magi" "$MAGITRICKLE_CONF" || return 1
 		touch "$dir/magi.changed" || return 1
 		[ "$was" = 0 ] || /etc/init.d/magitrickle stop >/dev/null 2>&1 || return 1
 		mv -f "$dir/magi.next" "$MAGITRICKLE_CONF" || return 1
-		[ "$was" = 0 ] || { /etc/init.d/magitrickle start >/dev/null 2>&1 && _mt_wait_running; } || return 1
+		[ "$was" = 0 ] || { /etc/init.d/magitrickle start >/dev/null 2>&1 && _mt_wait_running; } ||
+			{ echo "   · MagiTrickle не запустился с обновлёнными интерфейсами" >&2; return 1; }
 	fi
 	return 0
 }
