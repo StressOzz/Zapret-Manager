@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.089
+# Version: 5.093
 ZM_VERSION_EOF
 set -e
 
@@ -643,8 +643,9 @@ else
 	RAZ="apk"
 fi
 
+_ZM_CTL="$(printf '[\001-\037]')"
 esc() {
-	case "$1" in *[!A-Za-z0-9\ ._:/@+=,%-]*) ;; *) printf '%s' "$1"; return 0 ;; esac
+	case "$1" in *[\"\\]*|*$_ZM_CTL*) ;; *) printf '%s' "$1"; return 0 ;; esac
 	printf '%s' "$1" | tr -d '\000-\010\013\014\016-\037' | sed 's/\\/\\\\/g; s/"/\\"/g; s/\t/\\t/g; s/\r/\\r/g' | tr '\n' ' '
 }
 
@@ -1111,6 +1112,17 @@ do_remove_zapret() { _zmL zapret && do_remove_zapret "$@"; }
 zapret_action() { _zmL zapret && zapret_action "$@"; }
 do_remove_zapret2() { _zmL zapret && do_remove_zapret2 "$@"; }
 zapret2_action() { _zmL zapret && zapret2_action "$@"; }
+z2_conf_get() { _zmL zapret && z2_conf_get "$@"; }
+z2_conf_set() { _zmL zapret && z2_conf_set "$@"; }
+z2_conf_restore() { _zmL zapret && z2_conf_restore "$@"; }
+z2_strat_get() { _zmL zapret && z2_strat_get "$@"; }
+z2_blob_get() { _zmL zapret && z2_blob_get "$@"; }
+z2_blob_check() { _zmL zapret && z2_blob_check "$@"; }
+z2_blob_check_result() { _zmL zapret && z2_blob_check_result "$@"; }
+z2_strat_set() { _zmL zapret && z2_strat_set "$@"; }
+z2_strat_block_get() { _zmL zapret && z2_strat_block_get "$@"; }
+z2_strat_block_set() { _zmL zapret && z2_strat_block_set "$@"; }
+z2_blob_set() { _zmL zapret && z2_blob_set "$@"; }
 do_str_refresh() { _zmL zapret && do_str_refresh "$@"; }
 str_refresh() { _zmL zapret && str_refresh "$@"; }
 _v_ok() { _zmL zapret && _v_ok "$@"; }
@@ -1645,6 +1657,10 @@ ZM_JESC_AWK='function jesc(s,    o, i, c, n) {
 
 _zm_zone_sec() {
 	local z
+	case "$1" in ''|*[!A-Za-z0-9_-]*) ;; *)
+		uci -q -X show firewall | awk -v n="'$1'" '/^firewall\.[^.=]*=zone$/ { s = substr($0, 10); sub(/=zone$/, "", s); z[s] = 1; next } /^firewall\.[^.=]*\.name=/ { p = index($0, ".name="); s = substr($0, 10, p - 10); if ((s in z) && substr($0, p + 6) == n) { print s; f = 1; exit } } END { exit !f }'
+		return ;;
+	esac
 	for z in $(uci -q -X show firewall | sed -n "s/^firewall\.\([^.=]*\)=zone\$/\1/p"); do
 		[ "$(uci -q get "firewall.$z.name")" = "$1" ] && { echo "$z"; return 0; }
 	done
@@ -3328,7 +3344,7 @@ HOSTS_AUTO="$ZM_STATE_DIR/hosts.auto"
 HOSTS_BASE="$ZM_STATE_DIR/hosts.base.gz"
 HOSTS_ON="$ZM_STATE_DIR/hosts.on"
 HOSTS_AUTO_TAG="# zm-hosts-auto"
-_hosts_auto_get() { [ -s "$HOSTS_AUTO" ] && sed -n "s/^$1=//p" "$HOSTS_AUTO" | head -n 1; }
+_hosts_auto_get() { [ -s "$HOSTS_AUTO" ] && sed -n "/^$1=/{s/^$1=//p;q}" "$HOSTS_AUTO"; }
 hosts_status() {
 	local blocks="$HOSTS_BLOCKS" b
 	local geohide
@@ -4062,7 +4078,7 @@ _zs2_opt_check() {
 	return 0
 }
 ZS2_FAKES="stun.bin stun2.bin quic_initial_4pda_to.bin quic_initial_tencent_com.bin tls_clienthello_sochi_park.bin quic_initial_www_google_com.bin quic_initial_steamcommunity_com.bin quic_initial_5ka_ru.bin quic_initial_rutube_ru.bin"
-_zs2_kv() { sed -n "s/^$2=//p" "$1/sel" 2>/dev/null | head -n1; }
+_zs2_kv() { sed -n "/^$2=/{s/^$2=//p;q}" "$1/sel" 2>/dev/null; :; }
 _zs2_kset() {
 	{ grep -v "^$2=" "$1/sel" 2>/dev/null; [ -z "$3" ] || printf '%s=%s\n' "$2" "$3"; } > "$1/sel.t" && mv -f "$1/sel.t" "$1/sel"
 }
@@ -6475,6 +6491,8 @@ stl_leftovers() {
 	local t m n=0
 	for t in "inet steer" "ip steer" "ip6 steer" "inet steer_obfs"; do nft delete table $t >/dev/null 2>&1 && n=$((n + 1)); done
 	for t in $(awk '{print $3}' "$STL_STATE/registry" 2>/dev/null); do ip route flush table "$t" >/dev/null 2>&1; done
+	while ip rule del pref "$ST_SUB_RT_PREF" >/dev/null 2>&1; do :; done
+	ip route flush table "$ST_SUB_RT" >/dev/null 2>&1
 	for m in $(awk '{print $2}' "$STL_STATE/registry" 2>/dev/null); do
 		while ip rule del fwmark "0x$m/0x0ff00000" >/dev/null 2>&1; do n=$((n + 1)); done
 		while ip rule del fwmark "0x$m" >/dev/null 2>&1; do n=$((n + 1)); done
@@ -6965,7 +6983,7 @@ _st_ext_zoneless() {
 	z="$(_zm_zone_of_net "$ST_WIF1")"
 	[ -z "$z" ] || [ "$z" = "$ST_WARP_ZONE" ]
 }
-_st_zone_sec() { local z; for z in $(uci -q -X show firewall | sed -n "s/^firewall\.\([^.=]*\)=zone\$/\1/p"); do [ "$(uci -q get "firewall.$z.name")" = "$1" ] && { echo "$z"; return 0; }; done; return 1; }
+_st_zone_sec() { _zm_zone_sec "$@"; }
 
 _zm_fwd_fix() {
 	local lz
@@ -7909,6 +7927,9 @@ _st_diag_node() {
 }
 
 ST_SUB_TAG="# zm-subupd"
+ST_SUB_RT=3099
+ST_SUB_RT_PREF=4099
+ST_SUB_RT_LOCK="$JOBS_DIR/steer-subroute.lock"
 ST_SUB_AUTO_OFF="$ZM_STATE_DIR/st.subauto.off"
 
 ST_SUB_PICK="$ST_DIR/sub.pick"
@@ -8743,7 +8764,7 @@ MON_TTYD_OWN="$ZM_STATE_DIR/ttyd.htop"
 WATCH_OFF="$ZM_STATE_DIR/watch.off"
 WATCH_EVERY="$ZM_STATE_DIR/watch.every"
 
-_watch_kv() { sed -n "s/^$1=//p" "$WATCH_EVERY" 2>/dev/null | head -n1; }
+_watch_kv() { sed -n "/^$1=/{s/^$1=//p;q}" "$WATCH_EVERY" 2>/dev/null; :; }
 _watch_every() {
 	local v
 	v="$(_watch_kv every)"
@@ -9481,6 +9502,17 @@ case "$cmd" in
 	log_tail)                  log_tail "$1" ;;
 	zapret_action)              zapret_action "$1" ;;
 	zapret2_action)              zapret2_action "$1" ;;
+	z2_conf_get)                                    z2_conf_get ;;
+	z2_conf_set)                                    z2_conf_set "$1" ;;
+	z2_conf_restore)                                z2_conf_restore ;;
+	z2_strat_get)                                    z2_strat_get ;;
+	z2_blob_get)                                    z2_blob_get ;;
+	z2_blob_check)                                    z2_blob_check ;;
+	z2_blob_check_result)                             z2_blob_check_result ;;
+	z2_strat_set)                                    z2_strat_set "$1" ;;
+	z2_strat_block_get)                              z2_strat_block_get "$1" ;;
+	z2_strat_block_set)                              z2_strat_block_set "$1" "$2" ;;
+	z2_blob_set)                                    z2_blob_set "$1" ;;
 	strategy_list_v)            strategy_list_v ;;
 	strategy_set_v)              strategy_set_v "$1" ;;
 	strategy_list_flowseal)       strategy_list_flowseal "$1" ;;
@@ -12273,7 +12305,7 @@ _bk_lock() {
 
 _bk_unlock() { rmdir "$BK_RUN.lock" 2>/dev/null; return 0; }
 
-_bk_meta() { sed -n "s/^$2=//p" "$BK_DIR/$1.meta" 2>/dev/null | head -n 1; }
+_bk_meta() { sed -n "/^$2=/{s/^$2=//p;q}" "$BK_DIR/$1.meta" 2>/dev/null; :; }
 
 _bk_ids() { ls "$BK_DIR" 2>/dev/null | sed -n 's/^\([0-9]\{8\}-[0-9]\{6\}[0-9a-z-]*\)\.zmb$/\1/p' | sort; }
 
@@ -17321,7 +17353,7 @@ cat > "$_zmi_st/mod/openwrt.sh" << 'ZM_INSTALLER_EOF'
 _zram_has() { _pkg_is_installed zram-swap || [ -x /etc/init.d/zram ]; }
 
 _zram_ram() { awk '$1 == "MemTotal:" { print int($2 / 1024); exit }' /proc/meminfo 2>/dev/null; }
-_zram_algos() { tr -d '[]' < /sys/block/zram0/comp_algorithm 2>/dev/null | tr -s ' \t' '\n\n' | grep -E '^[a-z0-9-]+$'; }
+_zram_algos() { tr -d '[]' 2>/dev/null < /sys/block/zram0/comp_algorithm | tr -s ' \t' '\n\n' | grep -E '^[a-z0-9-]+$'; }
 _zram_tune_on() { [ -f "$ZRAM_TUNE" ]; }
 
 _zram_tune_set() {
@@ -20469,8 +20501,33 @@ _zp_boot_set() {
 	status
 }
 
+_z2_keep_files() { printf '%s\n' /etc/config/zapret2 /opt/zapret2/ipset/zapret_hosts_user_exclude.txt /opt/zapret2/ipset/zapret_hosts_discord.txt /opt/zapret2/init.d/openwrt/custom.d/50-discord_media.sh; }
+_z2_keep_save() {
+	local k="$ZM_STATE_DIR/z2.keep" f
+	rm -rf "$k"; mkdir -p "$k" || return 1
+	_z2_keep_files | while read -r f; do [ -f "$f" ] && cp -p "$f" "$k/$(echo "$f" | sed 's#/#%#g')"; done
+	return 0
+}
+_z2_keep_restore() {
+	local k="$ZM_STATE_DIR/z2.keep" f b
+	[ -d "$k" ] || return 0
+	_z2_keep_files | while read -r f; do
+		b="$k/$(echo "$f" | sed 's#/#%#g')"
+		[ -f "$b" ] || continue
+		mkdir -p "$(dirname "$f")"
+		cp -p "$b" "$f.zm-keep" && mv -f "$f.zm-keep" "$f"
+	done
+	rm -rf "$k"
+	echo "   · Ваши настройки Zapret2 сохранены без изменений"
+}
+_z2_fetch_missing() {
+	[ -s "$1" ] && return 0
+	_nochange_fetch "$@"
+}
+
 _do_install_zapret2_core() {
-	local arch boot=1
+	local arch boot=1 upd=0
+	[ -f /etc/init.d/zapret2 ] && upd=1
 	[ -x /etc/init.d/zapret2 ] && ! _zm_boot zapret2 && boot=0
 	arch="$(_z2_arch)"
 	if ! _z2_arch_ok; then
@@ -20514,29 +20571,34 @@ _do_install_zapret2_core() {
 		_zm_get "${base_url}${luci_file}" "$luci_file" "" 60
 	fi
 
+	[ "$upd" = 1 ] && _z2_keep_save
+
 	echo "==> Обновляем список пакетов"
 	$UPDATE
 
 	echo "==> Устанавливаем"
 	_zm_arch_accept aarch64_cortex-a53
-	$INSTALL ./*."$raz" || { echo "ОШИБКА установки"; return 1; }
+	$INSTALL ./*."$raz" || { _z2_keep_restore >/dev/null; echo "ОШИБКА установки"; return 1; }
 	_nochange_restore zapret2
+	[ "$upd" = 1 ] && _z2_keep_restore
 
 	echo "==> Добавляем домены в исключения"
 	mkdir -p /opt/zapret2/ipset
-	_nochange_fetch /opt/zapret2/ipset/zapret_hosts_user_exclude.txt "$EXCLUDE_URL"
+	_z2_fetch_missing /opt/zapret2/ipset/zapret_hosts_user_exclude.txt "$EXCLUDE_URL"
 
 	echo "==> Настраиваем стратегии"
 	mkdir -p /opt/zapret2/init.d/openwrt/custom.d
-	_nochange_fetch /opt/zapret2/init.d/openwrt/custom.d/50-discord_media.sh \
+	_z2_fetch_missing /opt/zapret2/init.d/openwrt/custom.d/50-discord_media.sh \
 		"${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/50-discord_media.sh" \
 		|| echo "!! Не удалось загрузить 50-discord_media.sh"
 	if _nochange_in /etc/config/zapret2; then echo "   · Стратегия Zapret2 помечена #nochange — оставляем как есть"
 	else
-		_nochange_fetch /etc/config/zapret2 "${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/zapret2" || echo "!! Не удалось загрузить zapret2"
+		_z2_fetch_missing /etc/config/zapret2 "${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/zapret2" || echo "!! Не удалось загрузить zapret2"
 	fi
-	_nochange_fetch /opt/zapret2/ipset/zapret_hosts_discord.txt "${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/zapret_hosts_discord.txt" \
+	_z2_fetch_missing /opt/zapret2/ipset/zapret_hosts_discord.txt "${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/zapret_hosts_discord.txt" \
 		|| echo "!! Не удалось загрузить zapret_hosts_discord.txt"
+
+	_z2_blob_install
 
 	echo "==> Запускаем Zapret2"
 	if [ "$boot" = 0 ]; then /etc/init.d/zapret2 disable >/dev/null 2>&1; echo "   · Автозапуск оставлен выключенным, как было"
@@ -20566,6 +20628,382 @@ do_remove_zapret2() {
 	/etc/init.d/firewall reload >/dev/null 2>&1
 	_ft_zapret_gone
 	_zm_rm_done "$rc" "Zapret2"
+}
+
+Z2_CONF=/etc/config/zapret2
+Z2_DEF_URL="https://raw.githubusercontent.com/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/zapret2"
+
+_z2c_valid() {
+	local f="$1" d rc=0 q
+	grep -q "^config zapret2 'main'" "$f" 2>/dev/null || return 1
+	q="$(grep -v '^[[:space:]]*#' "$f" | tr -cd "'" | wc -c | tr -d ' ')"
+	[ $((q % 2)) -eq 0 ] || return 1
+	command -v uci >/dev/null 2>&1 || return 0
+	d="/tmp/zm-z2c.$$"
+	mkdir -p "$d" && cp "$f" "$d/zapret2" || { rm -rf "$d"; return 1; }
+	uci -q -c "$d" show zapret2 >/dev/null 2>&1 || rc=1
+	[ "$rc" = 0 ] && [ "$(uci -q -c "$d" get zapret2.main 2>/dev/null)" = zapret2 ] || rc=1
+	rm -rf "$d"
+	return $rc
+}
+
+_z2c_up() { /etc/init.d/zapret2 status >/dev/null 2>&1; }
+
+_z2c_apply() {
+	local i=0
+	/etc/init.d/zapret2 restart >/dev/null 2>&1
+	while [ "$i" -lt 8 ]; do _z2c_up && return 0; sleep 1; i=$((i + 1)); done
+	return 1
+}
+
+_z2c_put() {
+	local src="$1" prev="$ZM_STATE_DIR/zapret2.prev" run=false
+	mkdir -p "$ZM_STATE_DIR"
+	_z2c_up && run=true
+	cp "$Z2_CONF" "$prev" 2>/dev/null || { echo '{"error":"не удалось сохранить резервную копию"}'; return 1; }
+	cp "$src" "$Z2_CONF.zm-new" && mv -f "$Z2_CONF.zm-new" "$Z2_CONF" || { rm -f "$Z2_CONF.zm-new"; echo '{"error":"не удалось записать /etc/config/zapret2"}'; return 1; }
+	mkdir -p "$JOBS_DIR"; rm -f "$JOBS_DIR/z2_blobs.json"; _z2_blob_verify "$JOBS_DIR/z2_blobs.json" >"$JOBS_DIR/z2_blobs.log" 2>&1
+	if [ "$run" = true ] && ! _z2c_apply; then
+		cat "$prev" > "$Z2_CONF"
+		_z2c_apply >/dev/null 2>&1
+		echo '{"error":"Zapret2 не запустился с новым файлом — вернул предыдущую версию"}'
+		return 1
+	fi
+	printf '{"ok":true,"running":%s,"blobs":%s}\n' "$run" "$(cat "$JOBS_DIR/z2_blobs.json" 2>/dev/null || echo '{}')"
+}
+
+z2_conf_get() {
+	local c
+	[ -f "$Z2_CONF" ] || { echo '{"error":"Zapret2 не установлен — нет /etc/config/zapret2"}'; return 1; }
+	c="$(tr -d '\r' < "$Z2_CONF"; echo x)"
+	c="${c%x}"
+	printf '{"content":"%s"}\n' "$(esc_ml "$c")"
+}
+
+z2_conf_set() {
+	local new="$ZM_STATE_DIR/zapret2.new" rc=0
+	[ -f "$Z2_CONF" ] || { echo '{"error":"Zapret2 не установлен — нет /etc/config/zapret2"}'; return 1; }
+	[ -n "$1" ] || { echo '{"error":"файл пустой — сохранять нечего"}'; return 1; }
+	mkdir -p "$ZM_STATE_DIR"
+	printf '%s' "$1" > "$new"
+	_z2c_valid "$new" || { rm -f "$new"; echo '{"error":"это не похоже на конфиг Zapret2: нет секции zapret2 main или не закрыты кавычки"}'; return 1; }
+	_z2c_put "$new" || rc=1
+	rm -f "$new"
+	return $rc
+}
+
+z2_conf_restore() {
+	local tmp="$ZM_STATE_DIR/zapret2.default" rc
+	[ -f "$Z2_CONF" ] || { echo '{"error":"Zapret2 не установлен — нет /etc/config/zapret2"}'; return 1; }
+	mkdir -p "$ZM_STATE_DIR"
+	rm -f "$tmp"
+	_zm_fetch "$Z2_DEF_URL" "$tmp" 60 || { rm -f "$tmp"; echo '{"error":"не удалось скачать стандартный конфиг с GitHub"}'; return 1; }
+	_z2c_valid "$tmp" || { rm -f "$tmp"; echo '{"error":"скачанный файл не похож на конфиг Zapret2"}'; return 1; }
+	_z2c_put "$tmp"; rc=$?
+	rm -f "$tmp"
+	return $rc
+}
+
+z2_strat_block_get() {
+	[ -f "$Z2_CONF" ] || { echo '{"error":"Zapret2 не установлен — нет /etc/config/zapret2"}'; return 1; }
+	case "$1" in ''|*[!A-Za-z0-9_.-]*) echo '{"error":"неверное имя стратегии"}'; return 1 ;; esac
+	[ "$(tr -d '\r' < "$Z2_CONF" | grep -cxF "config strategy '$1'")" = 1 ] || { echo '{"error":"стратегия не найдена в конфиге"}'; return 1; }
+	local text
+	text="$(tr -d '\r' < "$Z2_CONF" | awk -v H="config strategy '$1'" '
+		$0 == H { f = 1; next }
+		f && /^config / { exit }
+		f && /^[ \t]*option enabled / { next }
+		f && /^[ \t]*$/ { pend = pend "\n"; next }
+		f { printf "%s%s\n", pend, $0; pend = "" }')"
+	printf '{"name":"%s","text":"%s"}\n' "$1" "$(esc_ml "$text")"
+}
+
+z2_strat_block_set() {
+	local name="$1" bf="$ZM_STATE_DIR/zapret2.block.body" new="$ZM_STATE_DIR/zapret2.block.new" en rc=0
+	[ -f "$Z2_CONF" ] || { echo '{"error":"Zapret2 не установлен — нет /etc/config/zapret2"}'; return 1; }
+	case "$name" in ''|*[!A-Za-z0-9_.-]*) echo '{"error":"неверное имя стратегии"}'; return 1 ;; esac
+	[ "$(tr -d '\r' < "$Z2_CONF" | grep -cxF "config strategy '$name'")" = 1 ] || { echo '{"error":"стратегия не найдена в конфиге"}'; return 1; }
+	mkdir -p "$ZM_STATE_DIR"
+	printf '%s\n' "$2" | awk '{ l[NR] = $0 } END { n = NR; while (n > 0 && l[n] ~ /^[ \t]*$/) n--; for (i = 1; i <= n; i++) print l[i] }' > "$bf"
+	[ -s "$bf" ] || { rm -f "$bf"; echo '{"error":"блок стратегии пустой"}'; return 1; }
+	if grep -q '^config ' "$bf"; then rm -f "$bf"; echo '{"error":"в блоке нельзя начинать строку с config"}'; return 1; fi
+	en="$(tr -d '\r' < "$Z2_CONF" | awk -v H="config strategy '$name'" '$0 == H { f = 1; next } f && /^config / { exit } f && /^[ \t]*option enabled / { v = $3; gsub(/["'"'"']/, "", v); print "'"'"'" v "'"'"'"; exit }')"
+	case "$en" in "'0'"|"'1'") ;; *) en="'0'" ;; esac
+	tr -d '\r' < "$Z2_CONF" | awk -v H="config strategy '$name'" -v E="$en" -v B="$bf" '
+		BEGIN { while ((getline l < B) > 0) { if (l ~ /^[ \t]*option enabled /) continue; body = body l "\n" } close(B) }
+		skip { if ($0 ~ /^config /) skip = 0; else next }
+		$0 == H { printf "%s\n\toption enabled %s\n%s\n", H, E, body; skip = 1; next }
+		{ print }' > "$new" || { rm -f "$bf" "$new"; echo '{"error":"не удалось собрать конфиг"}'; return 1; }
+	_z2c_valid "$new" || { rm -f "$bf" "$new"; echo '{"error":"полученный конфиг не прошёл проверку — проверьте кавычки в тексте блока"}'; return 1; }
+	_z2c_put "$new" || rc=1
+	rm -f "$bf" "$new"
+	return $rc
+}
+
+z2_strat_get() {
+	[ -f "$Z2_CONF" ] || { echo '{"error":"Zapret2 не установлен — нет /etc/config/zapret2"}'; return 1; }
+	printf '{"items":['
+	tr -d '\r' < "$Z2_CONF" | awk -F"'" '
+		function flush() { if (name != "") { printf "%s{\"name\":\"%s\",\"on\":%s}", sep, name, (en ? "true" : "false"); sep = ","; name = "" } }
+		/^config / { flush(); if ($0 ~ /^config strategy /) { name = $2; en = 0 } next }
+		/^[ \t]*option enabled / { if (name != "") en = ($2 == "1") }
+		END { flush() }'
+	printf ']}\n'
+}
+
+z2_strat_set() {
+	local in="$ZM_STATE_DIR/zapret2.strat.in" names="$ZM_STATE_DIR/zapret2.strat.names" cur="$ZM_STATE_DIR/zapret2.strat.cur" new="$ZM_STATE_DIR/zapret2.strat.new" rc=0
+	[ -f "$Z2_CONF" ] || { echo '{"error":"Zapret2 не установлен — нет /etc/config/zapret2"}'; return 1; }
+	mkdir -p "$ZM_STATE_DIR"
+	printf '%s\n' "$1" | sed '/^[[:space:]]*$/d' > "$in"
+	[ -s "$in" ] || { rm -f "$in"; echo '{"error":"список стратегий пустой"}'; return 1; }
+	if grep -qvE '^[A-Za-z0-9_.-]+ [01]$' "$in"; then rm -f "$in"; echo '{"error":"неверный формат списка стратегий"}'; return 1; fi
+	cut -d' ' -f1 "$in" | LC_ALL=C sort > "$names"
+	if [ -n "$(uniq -d "$names")" ]; then rm -f "$in" "$names"; echo '{"error":"стратегия указана дважды"}'; return 1; fi
+	tr -d '\r' < "$Z2_CONF" | awk -F"'" '/^config strategy /{ print $2 }' | LC_ALL=C sort > "$cur"
+	if ! cmp -s "$names" "$cur"; then rm -f "$in" "$names" "$cur"; echo '{"error":"список не совпадает с файлом — перечитайте его"}'; return 1; fi
+	tr -d '\r' < "$Z2_CONF" | awk -F"'" -v ORD="$in" -v Q="'" '
+		BEGIN { mode = "h"; while ((getline l < ORD) > 0) { split(l, a, " "); n++; want[n] = a[1]; on[a[1]] = a[2] } }
+		/^config / {
+			if ($0 ~ /^config strategy /) { mode = "s"; cur = $2; seen = 1; next }
+			mode = seen ? "p" : "h"
+		}
+		mode == "h" { pre = pre $0 "\n"; next }
+		mode == "p" { post = post $0 "\n"; next }
+		mode == "s" { if ($0 ~ /^[ \t]*option enabled /) next; blk[cur] = blk[cur] $0 "\n"; next }
+		END {
+			printf "%s", pre
+			for (i = 1; i <= n; i++) printf "config strategy %s%s%s\n\toption enabled %s%s%s\n%s", Q, want[i], Q, Q, on[want[i]], Q, blk[want[i]]
+			printf "%s", post
+		}' > "$new" || { rm -f "$in" "$names" "$cur" "$new"; echo '{"error":"не удалось собрать конфиг"}'; return 1; }
+	if [ "$(grep -c '^config strategy ' "$new")" != "$(wc -l < "$in" | tr -d ' ')" ]; then rm -f "$in" "$names" "$cur" "$new"; echo '{"error":"сборка конфига нарушена"}'; return 1; fi
+	_z2c_valid "$new" || { rm -f "$in" "$names" "$cur" "$new"; echo '{"error":"полученный конфиг не прошёл проверку"}'; return 1; }
+	_z2c_put "$new" || rc=1
+	rm -f "$in" "$names" "$cur" "$new"
+	return $rc
+}
+
+Z2_FAKE_DIR=/opt/zapret2/files/fake
+Z2_FAKE_SOURCES="Flowseal zapret zapret2 ZM"
+
+_z2_blob_scan() {
+	tr -d '\r' < "$Z2_CONF" | awk -F"'" '
+		function endblk() {
+			if (kind == "blob") { n++; nm[n] = name; np[n] = pth; ne[n] = en }
+			if (kind == "strategy") { s++; sn[s] = name; se[s] = en }
+		}
+		/^config / {
+			endblk(); kind = ""; en = 0; pth = ""
+			if ($0 ~ /^config blob /) { kind = "blob"; name = $2 }
+			else if ($0 ~ /^config strategy /) { kind = "strategy"; name = $2 }
+			next
+		}
+		kind == "blob" && /^[ \t]*option enabled / { en = ($2 == "1") }
+		kind == "blob" && /^[ \t]*option path / { pth = $2 }
+		kind == "strategy" && /^[ \t]*option enabled / { en = ($2 == "1") }
+		kind == "strategy" {
+			k = split($0, t, /[^A-Za-z0-9_]+/)
+			for (i = 1; i <= k; i++) if (t[i] != "") ref[name SUBSEP t[i]] = 1
+		}
+		END {
+			endblk()
+			for (j = 1; j <= n; j++) {
+				u = 0; on = 0; lst = ""
+				for (i = 1; i <= s; i++) if ((sn[i] SUBSEP nm[j]) in ref) {
+					u = 1; lst = lst (lst == "" ? "" : ",") sn[i]
+					if (se[i]) on = 1
+				}
+				printf "%s %s %d %d %d %s\n", nm[j], (np[j] == "" ? "-" : np[j]), ne[j], u, on, (lst == "" ? "-" : lst)
+			}
+		}'
+}
+
+_z2_blob_json_list() {
+	[ "$1" = - ] && return 0
+	printf '%s' "$1" | sed 's/[^,][^,]*/"&"/g'
+}
+
+_z2_blob_url() {
+	case "$1" in
+		Flowseal) echo "https://github.com/Flowseal/zapret-discord-youtube/raw/refs/heads/main/bin" ;;
+		zapret) echo "https://github.com/bol-van/zapret/raw/refs/heads/master/files/fake" ;;
+		zapret2) echo "https://github.com/bol-van/zapret2/raw/refs/heads/master/files/fake" ;;
+		ZM) echo "https://github.com/StressOzz/Zapret-Manager/raw/refs/heads/main/files" ;;
+	esac
+}
+
+_z2_blob_fetch() {
+	local f="$1" base dst s u
+	base="${f##*/}"
+	dst="$Z2_FAKE_DIR/$base"
+	mkdir -p "$Z2_FAKE_DIR"
+	Z2_BLOB_SRC=""
+	for s in $Z2_FAKE_SOURCES; do
+		u="$(_z2_blob_url "$s")"
+		rm -f "$dst.zmdl"
+		if _zm_fetch "$u/$base" "$dst.zmdl" 30 && [ -s "$dst.zmdl" ]; then
+			mv -f "$dst.zmdl" "$dst" && chmod a+r "$dst" 2>/dev/null
+			case "$s" in ZM) Z2_BLOB_SRC="Zapret Manager" ;; *) Z2_BLOB_SRC="$s" ;; esac
+			return 0
+		fi
+	done
+	rm -f "$dst.zmdl"
+	return 1
+}
+
+z2_blob_get() {
+	[ -f "$Z2_CONF" ] || { echo '{"error":"Zapret2 не установлен — нет /etc/config/zapret2"}'; return 1; }
+	local name pth en used onu lst sep=""
+	printf '{"items":['
+	while read -r name pth en used onu lst; do
+		[ -n "$name" ] || continue
+		[ "$pth" = - ] && pth=""
+		printf '%s{"name":"%s","on":%s,"path":"%s","used":[%s],"usedOn":%s,"have":%s}' "$sep" "$name" \
+			"$([ "$en" = 1 ] && echo true || echo false)" "$pth" \
+			"$(_z2_blob_json_list "$lst")" \
+			"$([ "$onu" = 1 ] && echo true || echo false)" \
+			"$([ -s "$Z2_FAKE_DIR/${pth##*/}" ] && echo true || echo false)"
+		sep=","
+	done <<-EOF
+	$(_z2_blob_scan)
+	EOF
+	printf ']}\n'
+}
+
+_z2_blob_short() {
+	echo "$1" | awk -F, '{ if (NF > 3) print $1", "$2", "$3" и ещё "(NF - 3); else print $0 }'
+}
+
+_z2_blob_autoadd() {
+	[ -f "$Z2_CONF" ] || return 0
+	local miss n
+	miss="$(tr -d '\r' < "$Z2_CONF" | awk -F"'" '
+		/^config blob / { d[$2] = 1; next }
+		/^config strategy / { s = 1; next }
+		/^config / { s = 0; next }
+		s {
+			line = $0
+			while (match(line, /blob_[A-Za-z0-9_]+/)) {
+				t = substr(line, RSTART, RLENGTH)
+				if (!(t in seen)) { seen[t] = 1; order[++k] = t }
+				line = substr(line, RSTART + RLENGTH)
+			}
+		}
+		END { for (i = 1; i <= k; i++) if (!(order[i] in d)) print order[i] }')"
+	[ -n "$miss" ] || return 0
+	for n in $miss; do
+		printf "\nconfig blob '%s'\n\toption path '%s/%s.bin'\n\toption enabled '1'\n" "$n" "$Z2_FAKE_DIR" "${n#blob_}" >> "$Z2_CONF"
+		echo "   + $n — блок добавлен в /etc/config/zapret2"
+	done
+}
+
+_z2_blob_verify() {
+	local jout="$1" scan="$JOBS_DIR/z2_blobs.$$.scan" name pth en used onu lst st undef u
+	local need=0 present=0 got=0 miss=0 off=0 nop=0 unk=0 json="" sep="" missn="" offn="" unkn=""
+	mkdir -p "$Z2_FAKE_DIR" "$JOBS_DIR"
+	_z2_blob_autoadd
+	_z2_blob_scan > "$scan" 2>/dev/null
+	echo "==> Проверка блобов Zapret2"
+	while read -r name pth en used onu lst; do
+		[ "$used" = 1 ] || continue
+		need=$((need + 1)); Z2_BLOB_SRC=""; st=ok
+		if [ "$pth" = - ]; then
+			st=nopath; nop=$((nop + 1))
+			echo "   !! $name — в конфиге не указан файл"
+		elif [ -s "$Z2_FAKE_DIR/${pth##*/}" ]; then
+			present=$((present + 1)); echo "   ✓ ${pth##*/}"
+		elif _z2_blob_fetch "$pth"; then
+			st=get; got=$((got + 1)); present=$((present + 1))
+			echo "   ↓ ${pth##*/} — скачан из $Z2_BLOB_SRC"
+		else
+			st=miss; miss=$((miss + 1)); missn="$missn$([ -n "$missn" ] && echo ',')$name"
+			echo "   !! ${pth##*/} — не найден ни в одном источнике"
+		fi
+		if [ "$en" != 1 ] && [ "$onu" = 1 ]; then
+			off=$((off + 1)); offn="$offn$([ -n "$offn" ] && echo ',')$name"
+			echo "   ! $name выключен, но нужен стратегиям: $(_z2_blob_short "$lst") — включите его в карточке «Блобы»"
+		fi
+		json="$json$sep{\"name\":\"$name\",\"file\":\"${pth##*/}\",\"state\":\"$st\",\"src\":\"$Z2_BLOB_SRC\",\"on\":$([ "$en" = 1 ] && echo true || echo false)}"
+		sep=","
+	done < "$scan"
+	rm -f "$scan"
+	undef="$(tr -d '\r' 2>/dev/null < "$Z2_CONF" | awk -F"'" '
+		/^config blob / { d[$2] = 1; next }
+		/^config strategy / { s = 1; next }
+		/^config / { s = 0; next }
+		s {
+			line = $0
+			while (match(line, /blob_[A-Za-z0-9_]+/)) {
+				t = substr(line, RSTART, RLENGTH)
+				if (!(t in seen)) { seen[t] = 1; order[++k] = t }
+				line = substr(line, RSTART + RLENGTH)
+			}
+		}
+		END {
+			for (i = 1; i <= k; i++) if (!(order[i] in d)) out = out (out == "" ? "" : ",") order[i]
+			print out
+		}')"
+	for u in $(echo "$undef" | tr ',' ' '); do
+		unk=$((unk + 1)); unkn="$unkn$([ -n "$unkn" ] && echo ',')$u"
+		echo "   ! $u используется в стратегии, но такого блоба в конфиге нет"
+	done
+	if [ "$need" = 0 ]; then
+		echo "==> Стратегии блобы не используют — проверять нечего"
+	elif [ $((miss + off + unk + nop)) = 0 ]; then
+		echo "==> Всё совпадает: блобов нужно $need, все на месте и включены"
+	else
+		echo "==> Есть проблемы: не найдено файлов $miss, выключено $off, неизвестных блобов $unk, без пути к файлу $nop (нужно всего $need)"
+	fi
+	if [ -n "$jout" ]; then
+		printf '{"items":[%s],"used":%d,"present":%d,"downloaded":%d,"missing":%d,"off":%d,"unknown":%d,"nopath":%d,"missingNames":"%s","offNames":"%s","unknownNames":"%s"}\n' \
+			"$json" "$need" "$present" "$got" "$miss" "$off" "$unk" "$nop" "$missn" "$offn" "$unkn" > "$jout.tmp" && mv -f "$jout.tmp" "$jout"
+	fi
+	return 0
+}
+
+z2_blob_check() {
+	[ -f "$Z2_CONF" ] || { echo '{"error":"Zapret2 не установлен — нет /etc/config/zapret2"}'; return 1; }
+	mkdir -p "$JOBS_DIR"
+	if _job_running z2_blobs; then printf '{"started":true,"already_running":true}\n'; return 0; fi
+	rm -f "$JOBS_DIR/z2_blobs.json"
+	: > "$JOBS_DIR/z2_blobs.log"
+	( _z2_blob_verify "$JOBS_DIR/z2_blobs.json" >>"$JOBS_DIR/z2_blobs.log" 2>&1; echo "__DONE__ $?" >>"$JOBS_DIR/z2_blobs.log" ) </dev/null >/dev/null 2>&1 &
+	echo $! > "$JOBS_DIR/z2_blobs.pid"
+	printf '{"started":true}\n'
+}
+z2_blob_check_result() {
+	if [ -s "$JOBS_DIR/z2_blobs.json" ]; then cat "$JOBS_DIR/z2_blobs.json"; else echo '{"error":"результат проверки пока не готов"}'; fi
+}
+
+_z2_blob_install() {
+	[ -f "$Z2_CONF" ] || return 0
+	_z2_blob_verify ""
+	return 0
+}
+
+z2_blob_set() {
+	local in="$ZM_STATE_DIR/zapret2.blob.in" names="$ZM_STATE_DIR/zapret2.blob.names" cur="$ZM_STATE_DIR/zapret2.blob.cur" new="$ZM_STATE_DIR/zapret2.blob.new" rc=0
+	[ -f "$Z2_CONF" ] || { echo '{"error":"Zapret2 не установлен — нет /etc/config/zapret2"}'; return 1; }
+	mkdir -p "$ZM_STATE_DIR"
+	printf '%s\n' "$1" | sed '/^[[:space:]]*$/d' > "$in"
+	[ -s "$in" ] || { rm -f "$in"; echo '{"error":"список блобов пустой"}'; return 1; }
+	if grep -qvE '^[A-Za-z0-9_.-]+ [01]$' "$in"; then rm -f "$in"; echo '{"error":"неверный формат списка блобов"}'; return 1; fi
+	cut -d' ' -f1 "$in" | LC_ALL=C sort > "$names"
+	if [ -n "$(uniq -d "$names")" ]; then rm -f "$in" "$names"; echo '{"error":"блоб указан дважды"}'; return 1; fi
+	tr -d '\r' < "$Z2_CONF" | awk -F"'" '/^config blob /{ print $2 }' | LC_ALL=C sort > "$cur"
+	if ! cmp -s "$names" "$cur"; then rm -f "$in" "$names" "$cur"; echo '{"error":"список не совпадает с файлом — перечитайте его"}'; return 1; fi
+	tr -d '\r' < "$Z2_CONF" | awk -v ORD="$in" -v Q="'" '
+		BEGIN { while ((getline l < ORD) > 0) { split(l, a, " "); on[a[1]] = a[2] } }
+		function close_blk() { if (inb && !done) print "\toption enabled " Q on[cur] Q; inb = 0 }
+		/^config / { close_blk(); if ($0 ~ /^config blob /) { split($0, q, Q); cur = q[2]; inb = 1; done = 0 } print; next }
+		inb && /^[ \t]*option enabled / { print "\toption enabled " Q on[cur] Q; done = 1; next }
+		{ print }
+		END { close_blk() }' > "$new" || { rm -f "$in" "$names" "$cur" "$new"; echo '{"error":"не удалось собрать конфиг"}'; return 1; }
+	if [ "$(grep -c '^config blob ' "$new")" != "$(wc -l < "$in" | tr -d ' ')" ]; then rm -f "$in" "$names" "$cur" "$new"; echo '{"error":"сборка конфига нарушена"}'; return 1; fi
+	_z2c_valid "$new" || { rm -f "$in" "$names" "$cur" "$new"; echo '{"error":"полученный конфиг не прошёл проверку"}'; return 1; }
+	_z2c_put "$new" || rc=1
+	rm -f "$in" "$names" "$cur" "$new"
+	return $rc
 }
 
 zapret2_action() {
@@ -27468,8 +27906,7 @@ _doh_wait_local() {
 	done
 }
 # Bootstrap DNS — обычный DNS, через который https-dns-proxy узнаёт IP самого DoH-сервера.
-# Если адреса не заданы, https-dns-proxy берёт встроенные (список из его документации).
-DOH_BOOT_BUILTIN="8.8.8.8,1.1.1.1,8.8.4.4,1.0.0.1,145.100.185.15,145.100.185.16,185.49.141.37"
+# Если адреса не заданы, список не угадываем: проверять нечего.
 doh_boot_check() {
 	local url host boots src=set live b x out="" sep="" n=0 ok=0 run=false
 	url="$(uci -q get 'https-dns-proxy.@https-dns-proxy[0].resolver_url')"
@@ -27481,7 +27918,7 @@ doh_boot_check() {
 		*) printf '{"need":false,"host":"%s","running":%s}\n' "$(esc "$host")" "$run"; return 0 ;;
 	esac
 	boots="$(uci -q get 'https-dns-proxy.@https-dns-proxy[0].bootstrap_dns' | tr ' ;' ',,' | sed 's/,,*/,/g; s/^,//; s/,$//')"
-	[ -n "$boots" ] || { boots="$DOH_BOOT_BUILTIN"; src=builtin; }
+	[ -n "$boots" ] || { printf '{"need":true,"host":"%s","none":true,"running":%s}\n' "$(esc "$host")" "$run"; return 0; }
 	command -v nslookup >/dev/null 2>&1 || { printf '{"need":true,"host":"%s","src":"%s","running":%s,"error":"%s"}\n' "$(esc "$host")" "$src" "$run" "на роутере нет nslookup — проверить адреса нечем"; return 0; }
 	live=",$(_doh_boot_live "$url" "$boots"),"
 	for b in $(printf '%s' "$boots" | tr ',' ' '); do
@@ -32994,10 +33431,14 @@ _st_autogrp_sync() {
 	mkdir -p "$ST_RUN" "$ST_VDIR"
 	: > "$ST_SUB_GRPS.chk"; : > "$ST_SUB_GRPS.v2"
 	[ -f "$ST_SUB_GRPS.all" ] || : > "$ST_SUB_GRPS.all"
-	dv=""; [ -f "$ST_SUB_VIA" ] && dv="$(_st_sub_via_pick 2>/dev/null)" && dv="${dv%%|*}"
+	dv=""; vm=""
+	if [ -f "$ST_SUB_VIA" ]; then
+		dv="$(_st_sub_vpn_dev 2>/dev/null)" && _st_sub_route_on "$dv" "$u" && vm=1 || { [ -n "$quiet" ] || echo "   ! Не удалось направить группы АВТО через VPN (VPN не поднят или маршрут занят) — остались прежними"; return 1; }
+	fi
 	rm -f "$t"
-	[ -n "$dv" ] && { curl -fsSL --compressed -m 25 --connect-timeout 10 --max-redirs 10 -b "" -A "Happ/1.0.0" --interface "$dv" -o "$t" "$u" 2>/dev/null || rm -f "$t"; }
-	if [ ! -s "$t" ] && { ! curl -fsSL --compressed -m 25 --connect-timeout 10 --max-redirs 10 -b "" -A "Happ/1.0.0" -o "$t" "$u" 2>/dev/null || [ ! -s "$t" ]; }; then
+	curl -fsSL --compressed -m 25 --connect-timeout 10 --max-redirs 10 -b "" -A "Happ/1.0.0" ${ST_SUB_RESOLVE:+--resolve $ST_SUB_RESOLVE} -o "$t" "$u" 2>/dev/null || rm -f "$t"
+	[ -n "$vm" ] && _st_sub_route_off
+	if [ ! -s "$t" ]; then
 		rm -f "$t"
 		[ -n "$quiet" ] || [ ! -s "$ST_SUB_GRPS" ] || echo "   ! Подписку в формате Happ скачать не удалось — группы АВТО остались прежними"
 		return 1
@@ -33300,39 +33741,94 @@ _st_sub_check() {
 	return 1
 }
 
-_st_sub_via_pick() {
+_st_sub_vpn_dev() {
 	local d
-	d="$(_st_vpn_dev 2>/dev/null)" && _st_via_ok "$d" && { echo "$d|VPN"; return 0; }
-	_st_via_pick
+	d="$(_st_vpn_dev 2>/dev/null)" || return 1
+	[ -n "$d" ] && [ -d "/sys/class/net/$d" ] && ip -o link show dev "$d" 2>/dev/null | grep -q '[<,]UP[,>]' && ip -4 -o addr show dev "$d" 2>/dev/null | grep -q 'inet ' || return 1
+	echo "$d"
+}
+
+_st_sub_route_clean() {
+	while ip rule del pref "$ST_SUB_RT_PREF" >/dev/null 2>&1; do :; done
+	ip route flush table "$ST_SUB_RT" >/dev/null 2>&1
+}
+
+_st_sub_route_lock() {
+	local i=0
+	mkdir -p "$JOBS_DIR"
+	while ! mkdir "$ST_SUB_RT_LOCK" 2>/dev/null; do
+		if [ -n "$(find "$ST_SUB_RT_LOCK" -maxdepth 0 -mmin +15 2>/dev/null)" ]; then rmdir "$ST_SUB_RT_LOCK" 2>/dev/null; continue; fi
+		i=$((i + 1)); [ "$i" -le 900 ] || return 1
+		sleep 1
+	done
+	return 0
+}
+
+_st_sub_route_off() {
+	_st_sub_route_clean
+	ST_SUB_RESOLVE=""
+	rmdir "$ST_SUB_RT_LOCK" 2>/dev/null
+	return 0
+}
+
+_st_sub_route_on() {
+	local d="$1" u="$2" auth h port ip ips src peer first
+	auth="${u#*://}"; auth="${auth%%/*}"
+	case "$u" in https://*) port=443 ;; *) port=80 ;; esac
+	case "$auth" in *:*) port="${auth##*:}"; h="${auth%%:*}" ;; *) h="$auth" ;; esac
+	case "$h" in ''|*[!0-9.]*) ips="$(nslookup "$h" 2>/dev/null | awk '/^Name:/ { f = 1; next } f && /^Address/ { a = $0; sub(/^Address[ 0-9]*:[ \t]*/, "", a); sub(/[ \t#].*$/, "", a); if (a ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/) print a }' | awk '!s[$0]++')" ;; *) ips="$h" ;; esac
+	[ -n "$ips" ] || return 1
+	src="$(ip -4 -o addr show dev "$d" 2>/dev/null | awk '{ sub(/\/.*/, "", $4); print $4; exit }')"
+	peer="$(ip -4 -o addr show dev "$d" 2>/dev/null | awk '{ for (i = 1; i < NF; i++) if ($i == "peer") { p = $(i + 1); sub(/\/.*/, "", p); print p; exit } }')"
+	[ -n "$src" ] || return 1
+	_st_sub_route_lock || return 1
+	_st_sub_route_clean
+	for ip in $ips; do
+		if [ -n "$peer" ]; then
+			ip route replace "$ip/32" via "$peer" dev "$d" src "$src" onlink table "$ST_SUB_RT" || { _st_sub_route_off; return 1; }
+		else
+			ip route replace "$ip/32" dev "$d" src "$src" table "$ST_SUB_RT" || { _st_sub_route_off; return 1; }
+		fi
+		ip rule add pref "$ST_SUB_RT_PREF" to "$ip/32" lookup "$ST_SUB_RT" || { _st_sub_route_off; return 1; }
+	done
+	[ -w "/proc/sys/net/ipv4/conf/$d/rp_filter" ] && echo 2 > "/proc/sys/net/ipv4/conf/$d/rp_filter" 2>/dev/null
+	first="$(printf '%s\n' "$ips" | head -n1)"
+	ST_SUB_RESOLVE="$h:$port:$first"
+	return 0
+}
+
+_st_sub_happ_prep() {
+	command -v jq >/dev/null 2>&1 && return 0
+	[ -n "$(find "$JOBS_DIR/jq.try" -mmin -360 2>/dev/null)" ] && return 0
+	mkdir -p "$JOBS_DIR"; : > "$JOBS_DIR/jq.try"; _zm_pkg_add jq >/dev/null 2>&1
+}
+
+_st_sub_get_via() {
+	local c dv rc=1 u="$1"
+	c="$(_zm_bin curl)" || { echo "   · Через VPN подписку качать нечем (нет curl) — список не обновлён"; return 1; }
+	dv="$(_st_sub_vpn_dev)" || { echo "   ! VPN сейчас не поднят — подписку не обновили, остаётся прежний список"; return 1; }
+	_st_sub_route_on "$dv" "$u" || { echo "   ! Не удалось направить запрос подписки в VPN (маршрут занят или адрес сервера не узнан) — список не обновлён"; return 1; }
+	if [ -f "$ST_SUB_URL.happ" ]; then
+		_st_sub_happ_prep
+		echo "   · Подписку качаем как для Happ через VPN"
+		_st_sub_curl "$c" "" "$@" happ && rc=0
+		[ "$rc" = 0 ] || echo "   · Как для Happ подписка через VPN не скачалась${STL_SUB_ERR:+ ($STL_SUB_ERR)} — пробуем как обычно"
+	fi
+	[ "$rc" = 0 ] || { _st_sub_curl "$c" "" "$@" && rc=0; }
+	_st_sub_route_off
+	[ "$rc" = 0 ] || echo "   ! Через VPN подписка не скачалась${STL_SUB_ERR:+ ($STL_SUB_ERR)} — прежний список остаётся"
+	return $rc
 }
 
 _st_sub_get() {
-	local c dv lb
+	local c
+	[ -f "$ST_SUB_VIA" ] && { _st_sub_get_via "$@"; return; }
 	if [ -f "$ST_SUB_URL.happ" ] && c="$(_zm_bin curl)"; then
-		if ! command -v jq >/dev/null 2>&1 && [ -z "$(find "$JOBS_DIR/jq.try" -mmin -360 2>/dev/null)" ]; then
-			mkdir -p "$JOBS_DIR"; : > "$JOBS_DIR/jq.try"; _zm_pkg_add jq >/dev/null 2>&1
-		fi
-		dv=""; lb=""
-		[ -f "$ST_SUB_VIA" ] && dv="$(_st_sub_via_pick 2>/dev/null)" && { lb="${dv#*|}"; dv="${dv%%|*}"; }
-		echo "   · Подписку качаем как для Happ${lb:+ через $lb}"
-		_st_sub_curl "$c" "$dv" "$@" happ && return 0
-		[ -n "$dv" ] && _st_sub_curl "$c" "" "$@" happ && return 0
+		_st_sub_happ_prep
+		echo "   · Подписку качаем как для Happ"
+		_st_sub_curl "$c" "" "$@" happ && return 0
 		echo "   · Как для Happ подписка не скачалась${STL_SUB_ERR:+ ($STL_SUB_ERR)} — качаем как обычно"
 	fi
-	[ -f "$ST_SUB_VIA" ] || { stl_sub_fetch "$@"; return; }
-	if ! c="$(_zm_bin curl)"; then
-		echo "   · Через VPN подписку качать нечем (нет curl) — качаем напрямую"
-		stl_sub_fetch "$@"; return
-	fi
-	if ! dv="$(_st_sub_via_pick)"; then
-		echo "   · Подключение Steer сейчас не работает — подписку качаем напрямую"
-		stl_sub_fetch "$@"; return
-	fi
-	lb="${dv#*|}"; dv="${dv%%|*}"
-	[ -w "/proc/sys/net/ipv4/conf/$dv/rp_filter" ] && echo 2 > "/proc/sys/net/ipv4/conf/$dv/rp_filter" 2>/dev/null
-	echo "   · Подписку качаем через $lb"
-	_st_sub_curl "$c" "$dv" "$@" && return 0
-	echo "   · Через $lb подписка не скачалась${STL_SUB_ERR:+ ($STL_SUB_ERR)} — качаем напрямую"
 	stl_sub_fetch "$@"
 }
 
@@ -33348,10 +33844,10 @@ _st_sub_curl() {
 	for try in "$u" "${u%/}/json"; do
 		rm -f "$t" "$h"
 		if [ -n "$id" ]; then
-			"$c" -fsSL --compressed -m 60 --connect-timeout 10 --max-redirs 10 --max-filesize 67108864 -b "" $ifa -A "$ua" \
+			"$c" -fsSL --compressed -m 60 --connect-timeout 10 --max-redirs 10 --max-filesize 67108864 -b "" $ifa ${ST_SUB_RESOLVE:+--resolve $ST_SUB_RESOLVE} -A "$ua" \
 				-H "x-hwid: $id" -H "x-device-os: $os" -H "x-ver-os: $os" -H "x-device-model: $md" -D "$h" -o "$t" "$try" 2>/dev/null || rm -f "$t"
 		fi
-		[ -s "$t" ] || "$c" -fsSL --compressed -m 60 --connect-timeout 10 --max-redirs 10 --max-filesize 67108864 -b "" $ifa -A "$ua" \
+		[ -s "$t" ] || "$c" -fsSL --compressed -m 60 --connect-timeout 10 --max-redirs 10 --max-filesize 67108864 -b "" $ifa ${ST_SUB_RESOLVE:+--resolve $ST_SUB_RESOLVE} -A "$ua" \
 			-D "$h" -o "$t" "$try" 2>/dev/null || rm -f "$t"
 		[ -s "$t" ] || { STL_SUB_ERR="панель не ответила"; continue; }
 		if [ "$(head -c 2 "$t" | od -An -tx1 | tr -d ' \n')" = 1f8b ]; then
@@ -43136,6 +43632,17 @@ list_methods() {
 	json_add_object "zapret_list_set";             json_add_string "id" "string"; json_add_string "content" "string"; json_close_object
 	json_add_object "zapret_list_restore";         json_add_string "id" "string"; json_close_object
 	json_add_object "nfqws_opt_set";               json_add_string "content" "string"; json_close_object
+	json_add_object "z2_conf_get";                   json_close_object
+	json_add_object "z2_conf_set";                   json_add_string "content" "string"; json_close_object
+	json_add_object "z2_conf_restore";               json_close_object
+	json_add_object "z2_strat_get";                   json_close_object
+	json_add_object "z2_blob_get";                   json_close_object
+	json_add_object "z2_blob_check";                 json_close_object
+	json_add_object "z2_blob_check_result";          json_close_object
+	json_add_object "z2_strat_set";                   json_add_string "content" "string"; json_close_object
+	json_add_object "z2_strat_block_get";           json_add_string "name" "string"; json_close_object
+	json_add_object "z2_strat_block_set";           json_add_string "name" "string"; json_add_string "content" "string"; json_close_object
+	json_add_object "z2_blob_set";                   json_add_string "content" "string"; json_close_object
 	json_add_object "tg_status";                   json_close_object
 	json_add_object "tg_action";                   json_add_string "variant" "string"; json_add_string "action" "string"; json_close_object
 	json_add_object "tg_restart_all";              json_close_object
@@ -43330,6 +43837,17 @@ call_method() {
 		zapret_list_set)               json_get_var id id; json_get_var content content; printf '%s' "$content" | "$BACKEND" zapret_list_set "$id" @stdin ;;
 		zapret_list_restore)           json_get_var id id; "$BACKEND" zapret_list_restore "$id" ;;
 		nfqws_opt_set)                 json_get_var content content; printf '%s' "$content" | "$BACKEND" nfqws_opt_set @stdin ;;
+		z2_conf_get)                   "$BACKEND" z2_conf_get ;;
+		z2_conf_set)                   json_get_var content content; printf '%s' "$content" | "$BACKEND" z2_conf_set @stdin ;;
+		z2_conf_restore)               "$BACKEND" z2_conf_restore ;;
+		z2_strat_get)                  "$BACKEND" z2_strat_get ;;
+		z2_blob_get)                  "$BACKEND" z2_blob_get ;;
+		z2_blob_check)                  "$BACKEND" z2_blob_check ;;
+		z2_blob_check_result)                  "$BACKEND" z2_blob_check_result ;;
+		z2_strat_set)                  json_get_var content content; printf '%s' "$content" | "$BACKEND" z2_strat_set @stdin ;;
+		z2_strat_block_get)             json_get_var name name; "$BACKEND" z2_strat_block_get "$name" ;;
+		z2_strat_block_set)             json_get_var name name; json_get_var content content; printf '%s' "$content" | "$BACKEND" z2_strat_block_set "$name" @stdin ;;
+		z2_blob_set)                  json_get_var content content; printf '%s' "$content" | "$BACKEND" z2_blob_set @stdin ;;
 		tg_status)                     "$BACKEND" tg_status ;;
 		tg_action)                     json_get_var variant variant; json_get_var action action; "$BACKEND" tg_action "$variant" "$action" ;;
 		tg_restart_all)                "$BACKEND" tg_restart_all ;;
@@ -43468,6 +43986,8 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"status",
 					"multi",
 					"job_status",
+					"z2_blob_check_result",
+					"z2_strat_block_get",
 					"log_tail",
 					"system_info",
 					"strategy_list_v",
@@ -43485,6 +44005,9 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"mirror_status",
 					"exclusions_status",
 					"nfqws_opt_get",
+					"z2_conf_get",
+					"z2_strat_get",
+					"z2_blob_get",
 					"zapret_ports_get",
 					"zapret_lists_status",
 					"zapret_list_get",
@@ -43589,6 +44112,12 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"exclusions_set",
 					"zapret_pending",
 					"nfqws_opt_set",
+					"z2_conf_set",
+					"z2_conf_restore",
+					"z2_strat_set",
+					"z2_strat_block_set",
+					"z2_blob_set",
+					"z2_blob_check",
 					"zapret_list_set",
 					"zapret_list_restore",
 					"tg_action",
@@ -43918,6 +44447,17 @@ var callZapretListSet = zmDeclare({ object: 'zapret-manager', method: 'zapret_li
 var callZapretListRestore = zmDeclare({ object: 'zapret-manager', method: 'zapret_list_restore', params: ['id'], expect: {} });
 var callNfqwsOptGet = zmDeclare({ object: 'zapret-manager', method: 'nfqws_opt_get', expect: {} });
 var callNfqwsOptSet = zmDeclare({ object: 'zapret-manager', method: 'nfqws_opt_set', params: ['content'], expect: {} });
+var callZ2ConfGet = zmDeclare({ object: 'zapret-manager', method: 'z2_conf_get', expect: {} });
+var callZ2ConfSet = zmDeclare({ object: 'zapret-manager', method: 'z2_conf_set', params: ['content'], expect: {} });
+var callZ2ConfRestore = zmDeclare({ object: 'zapret-manager', method: 'z2_conf_restore', expect: {} });
+var callZ2StratGet = zmDeclare({ object: 'zapret-manager', method: 'z2_strat_get', expect: {} });
+var callZ2BlobGet = zmDeclare({ object: 'zapret-manager', method: 'z2_blob_get', expect: {} });
+var callZ2BlobCheck = zmDeclare({ object: 'zapret-manager', method: 'z2_blob_check', expect: {} });
+var callZ2BlobCheckResult = zmDeclare({ object: 'zapret-manager', method: 'z2_blob_check_result', expect: {} });
+var callZ2StratSet = zmDeclare({ object: 'zapret-manager', method: 'z2_strat_set', params: ['content'], expect: {} });
+var callZ2StratBlockGet = zmDeclare({ object: 'zapret-manager', method: 'z2_strat_block_get', params: ['name'], expect: {} });
+var callZ2StratBlockSet = zmDeclare({ object: 'zapret-manager', method: 'z2_strat_block_set', params: ['name', 'content'], expect: {} });
+var callZ2BlobSet = zmDeclare({ object: 'zapret-manager', method: 'z2_blob_set', params: ['content'], expect: {} });
 var callTgStatus = zmDeclare({ object: 'zapret-manager', method: 'tg_status', expect: {} });
 var callTgAction = zmDeclare({ object: 'zapret-manager', method: 'tg_action', params: ['variant', 'action'], expect: {} });
 var callTgRestartAll = zmDeclare({ object: 'zapret-manager', method: 'tg_restart_all', expect: {} });
@@ -46835,6 +47375,19 @@ return baseclass.extend({
 	zapretListSet: bigArg2(callZapretListSet),
 	zapretListRestore: callZapretListRestore,
 	nfqwsOptSet: bigText(callNfqwsOptSet),
+	z2ConfGet: callZ2ConfGet,
+	z2ConfSet: bigText(callZ2ConfSet),
+	z2ConfRestore: callZ2ConfRestore,
+	z2StratGet: callZ2StratGet,
+	z2BlobGet: callZ2BlobGet,
+	z2BlobCheck: callZ2BlobCheck,
+	z2BlobCheckResult: callZ2BlobCheckResult,
+	jobStatus: callJobStatus,
+	z2StratSet: bigText(callZ2StratSet),
+	z2StratBlockGet: callZ2StratBlockGet,
+	z2StratBlockSet: bigArg2(callZ2StratBlockSet),
+	logTail: callLogTail,
+	z2BlobSet: bigText(callZ2BlobSet),
 	tgStatus: callTgStatus,
 	tgAction: callTgAction,
 	tgRestartAll: callTgRestartAll,
@@ -47767,6 +48320,12 @@ return view.extend({
 				bootNote.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin:0' }, String(boot.error).charAt(0).toUpperCase() + String(boot.error).slice(1) + '.'));
 				return;
 			}
+			if (boot.none) {
+				bootBox.appendChild(badge('zm-warn', 'не задан'));
+				bootBox.appendChild(again);
+				bootNote.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin:0' }, 'Свои адреса Bootstrap DNS не заданы — проверять нечего. Адреса https-dns-proxy не подставляем, чтобы не выдавать непроверенные.'));
+				return;
+			}
 			if (boot.need === false) {
 				bootBox.appendChild(badge('zm-ok', 'не нужен'));
 				bootNote.appendChild(E('p', { 'class': 'zm-hint', 'style': 'margin:0' }, 'Адрес DoH-сервера задан IP-адресом (' + boot.host + ') — узнавать его через Bootstrap DNS не нужно.'));
@@ -47778,7 +48337,7 @@ return view.extend({
 				bootBox.appendChild(E('span', { 'class': 'zm-doh-bip' + (x.ok ? '' : ' zm-doh-bip-bad'), 'title': x.ok ? 'Отвечает: ' + boot.host + ' через него находится' : 'Не отвечает — через этот адрес ' + boot.host + ' не найти' }, [ E('i'), String(x.ip) ]));
 			});
 			bootBox.appendChild(again);
-			var src = boot.src === 'builtin' ? 'Свои адреса не заданы — https-dns-proxy берёт встроенные. ' : '';
+			var src = '';
 			if (!ok) {
 				bootNote.appendChild(E('div', { 'class': 'zm-dlg-note ' + (boot.running ? 'zm-dlg-note-warn' : 'zm-dlg-note-bad'), 'style': 'margin:2px 0 6px' }, [
 					E('b', {}, boot.running ? 'DoH может перестать работать. ' : 'Поэтому DoH и не работает. '),
@@ -50771,7 +51330,7 @@ return view.extend({
 					refresh();
 				}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
 			}));
-			setCard.appendChild(zm.swRow(!!data.sub_via, 'Обновлять подписку через VPN', 'Подписка будет скачиваться через сам VPN, а если он сейчас не поднят — через WARP или туннель Steer. Помогает, если сайт подписки у провайдера не открывается. Не скачается через подключение — обновится напрямую.', function() {
+			setCard.appendChild(zm.swRow(!!data.sub_via, 'Обновлять подписку через VPN', 'Подписка будет скачиваться только через VPN. Если VPN сейчас не поднят — подписка не обновится, останется прежний список. Помогает, если сайт подписки у провайдера не открывается.', function() {
 				if (busy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
 				var on = !data.sub_via;
 				zm.steerAction('sub_via', on ? 'on' : 'off').then(function(res) {
@@ -58794,11 +59353,528 @@ return view.extend({
 		var view = this;
 		var wrap = E('div', { 'class': 'zm-wrap' });
 		var cards = E('div', { 'class': 'zm-cards' });
+		var z2PanelBox = E('div', { 'class': 'zm-z2-panel', 'style': 'display:none' });
 		var logEl = E('pre', { 'class': 'zm-log' });
 		var bannerEl = E('div', {});
 
+function z2StratCard(view) {
+			var items = [], orig = [], busy = false, settling = false, query = '', drag = null, landed = '', editName = null, editText = '', editOrig = '', editLoading = false, editHint = null, editApply = null;
+			var sumLine = E('p', { 'class': 'zm-hint zm-z2-sum' });
+			var count = E('span', { 'class': 'zm-z2-count' });
+			var note = E('p', { 'class': 'zm-hint', 'style': 'margin:8px 0 0' });
+			var list = E('div', { 'class': 'zm-z2-list' });
+			var search = E('input', { 'type': 'search', 'class': 'zm-z2-search', 'placeholder': 'Поиск по названию', 'input': function() { query = search.value.trim().toLowerCase(); draw(); } });
+			var saveB = E('button', { 'class': 'cbi-button cbi-button-action zm-z2-save', 'click': function() { save(); } }, 'Сохранить и применить');
+			var resetB = E('button', { 'class': 'cbi-button', 'click': function() { guard(function() { return load(false); }); } }, 'Отменить изменения');
+			function isDirty() { return JSON.stringify(items) !== JSON.stringify(orig); }
+			function say(t, bad) { note.textContent = t || ''; note.style.color = bad ? '#b00020' : ''; }
+			function sync() {
+				saveB.disabled = busy || settling || !isDirty();
+        saveB.classList.toggle('zm-z2-dirty', !saveB.disabled);
+				resetB.disabled = busy || settling || !isDirty();
+				search.disabled = busy || settling;
+				count.textContent = 'Включено ' + items.filter(function(x) { return x.on; }).length + ' из ' + items.length;
+			}
+			function move(i, d) {
+				var j = i + d;
+				if (busy || settling || j < 0 || j >= items.length) return;
+				var t = items[i]; items[i] = items[j]; items[j] = t;
+				landed = t.name;
+				draw();
+			}
+			function draw() {
+				list.classList.remove('zm-z2-sorting');
+				list.innerHTML = '';
+				var shown = 0;
+				items.forEach(function(it, i) {
+					if (query && it.name.toLowerCase().indexOf(query) < 0) return;
+					shown++;
+					var cb = E('input', { 'type': 'checkbox', 'class': 'zm-z2-cb', 'change': function() { it.on = cb.checked; draw(); } });
+					cb.checked = !!it.on;
+					cb.disabled = busy || settling;
+					var up = E('button', { 'class': 'cbi-button zm-z2-mv', 'title': 'Выше', 'click': function() { move(i, -1); } }, '▲');
+					var dn = E('button', { 'class': 'cbi-button zm-z2-mv', 'title': 'Ниже', 'click': function() { move(i, 1); } }, '▼');
+					up.disabled = busy || settling || i === 0;
+					dn.disabled = busy || settling || i === items.length - 1;
+					var ed = E('button', { 'class': 'cbi-button zm-z2-ed', 'title': 'Редактировать блок стратегии', 'click': function() { toggleEdit(it.name); } }, 'Изменить');
+					ed.disabled = busy || settling;
+					var row = E('div', {
+						'class': 'zm-z2-row' + (it.on ? '' : ' zm-z2-off') + (landed === it.name ? ' zm-z2-landed' : '') + (editName === it.name ? ' zm-z2-editing' : ''),
+						'pointerdown': function(ev) { rowDown(ev, row); },
+						'pointermove': rowMove,
+						'pointerup': rowUp,
+						'pointercancel': rowCancel
+					}, [
+						E('span', { 'class': 'zm-z2-grip', 'title': 'Перетащить' }, '⋮⋮'),
+						cb,
+						E('span', { 'class': 'zm-z2-num' }, String(i + 1)),
+						E('span', { 'class': 'zm-z2-name', 'title': it.name }, it.name),
+						E('span', { 'class': 'zm-z2-mv-box' }, [ up, dn, ed ])
+					]);
+					list.appendChild(row);
+					if (editName === it.name) list.appendChild(editorBox());
+				});
+				if (!shown) list.appendChild(E('p', { 'class': 'zm-hint' }, items.length ? 'Ничего не найдено' : 'Стратегий в файле нет'));
+				if (landed) { var l = landed; setTimeout(function() { if (landed === l) landed = ''; }, 800); }
+				sync();
+			}
+			function canDrag() { return !busy && !settling && !query && !editName && items.length > 1; }
+			function rowDown(ev, row) {
+				if (!canDrag() || ev.button) return;
+				var t = ev.target || {};
+				var tag = String(t.tagName || '').toUpperCase();
+				if (tag === 'INPUT' || tag === 'BUTTON') return;
+				var onGrip = !!(t.classList && t.classList.contains('zm-z2-grip'));
+				if (ev.pointerType !== 'mouse' && !onGrip) return;
+				var rows = Array.prototype.slice.call(list.children);
+				var idx = rows.indexOf(row);
+				if (idx < 0) return;
+				drag = { row: row, rows: rows, idx: idx, slot: rows[1].getBoundingClientRect().top - rows[0].getBoundingClientRect().top, y0: ev.clientY, s0: list.scrollTop, pid: ev.pointerId, on: false, target: idx };
+			}
+			function dragStart() {
+				drag.on = true;
+				drag.row.classList.add('zm-z2-drag');
+				list.classList.add('zm-z2-sorting');
+				if (drag.row.setPointerCapture) drag.row.setPointerCapture(drag.pid);
+			}
+			function autoScroll(y) {
+				var r = list.getBoundingClientRect();
+				if (y < r.top + 36) list.scrollTop -= 8;
+				else if (y > r.bottom - 36) list.scrollTop += 8;
+			}
+			function rowMove(ev) {
+				if (!drag || ev.pointerId !== drag.pid) return;
+				if (!drag.on) {
+					if (Math.abs(ev.clientY - drag.y0) < 5) return;
+					dragStart();
+				}
+				if (ev.preventDefault) ev.preventDefault();
+				autoScroll(ev.clientY);
+				var dy = ev.clientY - drag.y0 + (list.scrollTop - drag.s0);
+				var from = drag.idx, n = drag.rows.length;
+				var t = Math.max(0, Math.min(n - 1, from + Math.round(dy / drag.slot)));
+				drag.target = t;
+				drag.row.style.transform = 'translateY(' + dy + 'px)';
+				drag.rows.forEach(function(r, j) {
+					if (j === from) return;
+					var sh = 0;
+					if (from < t && j > from && j <= t) sh = -drag.slot;
+					if (from > t && j < from && j >= t) sh = drag.slot;
+					r.style.transform = sh ? 'translateY(' + sh + 'px)' : '';
+				});
+			}
+			function rowUp(ev) { finish(ev, false); }
+			function rowCancel(ev) { finish(ev, true); }
+			function finish(ev, cancel) {
+				if (!drag || ev.pointerId !== drag.pid) return;
+				var d = drag; drag = null;
+				if (!d.on) return;
+				var from = d.idx, t = cancel ? from : d.target;
+				settling = true; lockRows(true); sync();
+				d.row.classList.add('zm-z2-settle');
+				d.row.style.transform = 'translateY(' + ((t - from) * d.slot) + 'px)';
+				setTimeout(function() {
+					if (t !== from) {
+						var m = items.splice(from, 1)[0];
+						items.splice(t, 0, m);
+						landed = m.name;
+					}
+					settling = false;
+					draw();
+				}, cancel ? 0 : 200);
+			}
+						function lockRows(v) {
+			    Array.prototype.forEach.call(list.children, function(r) {
+			        if (!r.classList.contains('zm-z2-row')) return;
+						r.children[1].disabled = v;
+			        Array.prototype.forEach.call(r.children[4].children, function(b) { b.disabled = v; });
+			    });
+			}
+			function editDirty() { return editName !== null && editText !== editOrig; }
+			function refreshEdit() {
+				if (editHint) editHint.textContent = editLoading ? 'Загружаем блок…' : (isDirty() ? 'Сначала сохраните порядок и включение стратегий' : (editDirty() ? 'Есть изменения' : 'Без изменений'));
+				if (editApply) editApply.disabled = editLoading || busy || !editDirty() || isDirty();
+			}
+			function closeEdit() { editName = null; editText = ''; editOrig = ''; editLoading = false; draw(); }
+			function askDiscard(name, next) {
+				return zm.ask('Отменить несохранённые изменения блока «' + name + '»?').then(function(ok) { if (ok) next(); });
+			}
+			function toggleEdit(name) {
+				if (busy || settling) return;
+				if (editName === name) return editDirty() ? askDiscard(name, closeEdit) : closeEdit();
+				if (isDirty()) { say('Сначала сохраните или сбросьте порядок и включение стратегий, потом редактируйте блок', true); return; }
+				if (editName !== null && editDirty()) return askDiscard(editName, function() { openEdit(name); });
+				openEdit(name);
+			}
+			function openEdit(name) {
+				editName = name; editText = ''; editOrig = ''; editLoading = true; say(''); draw();
+				return zm.z2StratBlockGet(name).then(function(res) {
+					if (editName !== name) return;
+					editLoading = false;
+					if (res.error) { editName = null; say(res.error, true); draw(); zm.toast(res.error, 'error'); return; }
+					editText = res.text || ''; editOrig = editText; draw();
+				}, function() { if (editName === name) { editName = null; editLoading = false; } fail(); });
+			}
+			function applyEdit() {
+				if (!editDirty() || busy || isDirty()) return;
+				var name = editName, text = editText;
+				busy = true; draw();
+				return zm.z2StratBlockSet(name, text).then(function(res) {
+					busy = false;
+					if (res.error) { say(res.error, true); draw(); zm.toast(res.error, 'error'); return false; }
+					editName = null; editText = ''; editOrig = '';
+					var msg = res.running ? 'Блок «' + name + '» сохранён, Zapret2 перезапущен' : 'Блок «' + name + '» сохранён. Zapret2 остановлен — запустите его кнопкой выше';
+					say(msg);
+					zm.toast(msg, res.running ? 'info' : 'warning');
+					zm.changed({ svc: 'zapret2' });
+					load(true);
+					if (view.z2EditorLoad) view.z2EditorLoad();
+					if (view.z2BlobLoad) view.z2BlobLoad();
+					return true;
+				}, function() { fail(); return false; });
+			}
+			function editorBox() {
+				var ta = E('textarea', { 'class': 'zm-z2-blockta', 'spellcheck': 'false', 'input': function() { editText = ta.value; refreshEdit(); } });
+				ta.value = editLoading ? '' : editText;
+				ta.disabled = editLoading || busy;
+				editHint = E('span', { 'class': 'zm-z2-edit-state' }, '');
+				editApply = E('button', { 'class': 'cbi-button cbi-button-action', 'click': applyEdit }, 'Применить');
+				var cancel = E('button', { 'class': 'cbi-button', 'click': function() { if (busy) return; if (!editDirty()) return closeEdit(); askDiscard(editName, closeEdit); } }, 'Отмена');
+				refreshEdit();
+				return E('div', { 'class': 'zm-z2-edit' }, [
+					E('div', { 'class': 'zm-z2-edit-head' }, [ E('b', {}, editName), editHint ]),
+					E('p', { 'class': 'zm-hint' }, 'Параметры стратегии: option и list. Флаг включения и строка config здесь не меняются. Значения в одинарных кавычках должны быть закрыты.'),
+					ta,
+					E('div', { 'class': 'zm-actions' }, [ editApply, cancel ])
+				]);
+			}
+			function fail() { busy = false; draw(); zm.toast('Роутер не ответил', 'error'); }
+			function load(silent) {
+				busy = true; draw();
+				return zm.z2StratGet().then(function(res) {
+					busy = false;
+					if (res.error) { say(res.error, true); draw(); zm.toast(res.error, 'error'); return; }
+					items = (res.items || []).map(function(x) { return { name: x.name, on: !!x.on }; });
+					orig = JSON.parse(JSON.stringify(items));
+					sumLine.textContent = 'Загружено из /etc/config/zapret2: стратегий ' + items.length + ', включено ' + items.filter(function(x) { return x.on; }).length + '.';
+					if (!silent) say('');
+					draw();
+					if (!silent) zm.toast('Список перечитан с диска', 'info');
+				}, fail);
+			}
+			function save() {
+				var txt = items.map(function(x) { return x.name + ' ' + (x.on ? '1' : '0'); }).join('\n');
+				busy = true; draw();
+				return zm.z2StratSet(txt).then(function(res) {
+					busy = false;
+					if (res.error) { say(res.error, true); draw(); zm.toast(res.error, 'error'); return false; }
+					var msg = res.running ? 'Порядок применён, Zapret2 перезапущен' : 'Порядок сохранён. Zapret2 остановлен — запустите его кнопкой выше';
+					say(msg);
+					zm.toast(msg, res.running ? 'info' : 'warning');
+					zm.changed({ svc: 'zapret2' });
+					load(true);
+					if (view.z2EditorLoad) view.z2EditorLoad();
+					if (view.z2BlobLoad) view.z2BlobLoad();
+					return true;
+				}, function() { fail(); return false; });
+			}
+			function guard(fn) {
+				if (!isDirty()) return fn();
+				return zm.ask('В списке есть несохранённые изменения. Отбросить их?').then(function(ok) { if (ok) return fn(); });
+			}
+			var node = E('div', { 'class': 'zm-card zm-z2-editor zm-z2-strat' }, [
+				E('div', { 'class': 'zm-z2-head' }, [ E('h3', {}, 'Стратегии Zapret2'), count ]),
+				E('p', { 'class': 'zm-hint' }, 'Перетащите стратегию за ⋮⋮ или за любое место строки. Стрелки ▲ ▼ — для точной подстройки. Поиск отключает перетаскивание.'),
+				E('div', { 'class': 'zm-z2-tools' }, [ search ]),
+				sumLine,
+				list,
+				E('div', { 'class': 'zm-actions' }, [ saveB, resetB ]),
+				note
+			]);
+			view.z2StratLoad = function() { if (!isDirty() && !drag && !settling) load(true); };
+			load(true);
+			return node;
+		}
+
+		function z2BlobCard(view) {
+			var items = [], orig = [], busy = false, query = '', onlyOn = false, open = {}, fileSt = {}, fileSrc = {};
+			var GROUPS = [ { k: 'tls', t: 'TLS' }, { k: 'quic', t: 'QUIC' }, { k: 'other', t: 'Прочее' } ];
+			var count = E('span', { 'class': 'zm-z2-count' });
+			var note = E('p', { 'class': 'zm-hint', 'style': 'margin:8px 0 0' });
+			var box = E('div', { 'class': 'zm-z2-groups' });
+			var sumLine = E('p', { 'class': 'zm-hint zm-z2-sum' });
+			var outBox = E('pre', { 'class': 'zm-z2-out' });
+			var outWrap = E('div', { 'class': 'zm-z2-outwrap', 'style': 'display:none' }, [ E('div', { 'class': 'zm-z2-outhead' }, [ E('span', {}, 'Журнал проверки'), E('button', { 'class': 'zm-z2-x', 'title': 'Закрыть', 'click': function() { outWrap.style.display = 'none'; } }, '×') ]), outBox ]);
+			function showOut(text) {
+				outBox.textContent = '';
+				String(text || '').split('\n').forEach(function(l) {
+					var m = /^(\s*)✓(.*)$/.exec(l);
+					var err = /^\s*!|Есть проблемы|Ошибка|не найден/.test(l);
+					var row = m ? [m[1], E('span', { 'style': 'color:#166534' }, '✓'), m[2]] : [l];
+					outBox.appendChild(E('div', { 'style': 'color:' + (err ? '#b91c1c' : '#000000') }, row));
+				});
+			}
+			view.z2BlobShowLog = function(text) { outWrap.style.display = ''; showOut(text); };
+			var search = E('input', { 'type': 'search', 'class': 'zm-z2-search', 'placeholder': 'Поиск по имени блоба', 'input': function() { query = search.value.trim().toLowerCase(); draw(); } });
+			var onlyCb = E('input', { 'type': 'checkbox', 'class': 'zm-z2-cb', 'change': function() { onlyOn = onlyCb.checked; draw(); } });
+			var saveB = E('button', { 'class': 'cbi-button cbi-button-action zm-z2-save', 'click': function() { save(); } }, 'Сохранить и применить');
+			var checkB = E('button', { 'class': 'cbi-button', 'click': function() { check(); } }, 'Проверить и докачать');
+			var resetB = E('button', { 'class': 'cbi-button', 'click': function() { guard(function() { return load(false); }); } }, 'Отменить изменения');
+			function isDirty() { return JSON.stringify(items) !== JSON.stringify(orig); }
+			function say(t, bad) { note.textContent = t || ''; note.style.color = bad ? '#b00020' : ''; }
+			function gkey(name) { return /^blob_tls_/.test(name) ? 'tls' : (/^blob_quic_/.test(name) ? 'quic' : 'other'); }
+			function visible(it) { return (!query || it.name.toLowerCase().indexOf(query) >= 0) && (!onlyOn || it.on); }
+			function onCount() { return items.filter(function(x) { return x.on; }).length; }
+			function sync() {
+				saveB.disabled = busy || !isDirty();
+        saveB.classList.toggle('zm-z2-dirty', !saveB.disabled);
+				resetB.disabled = busy || !isDirty();
+				search.disabled = busy;
+				onlyCb.disabled = busy;
+				checkB.disabled = busy;
+				count.textContent = 'Включено ' + onCount() + ' из ' + items.length;
+			}
+			function setGroup(list, on) { list.forEach(function(it) { it.on = on; }); draw(); }
+			function groupHead(g, mem, vis, expanded) {
+				var all = E('button', { 'class': 'cbi-button zm-z2-gbtn', 'click': function(ev) { ev.stopPropagation(); setGroup(vis, true); } }, 'Все');
+				var none = E('button', { 'class': 'cbi-button zm-z2-gbtn', 'click': function(ev) { ev.stopPropagation(); setGroup(vis, false); } }, 'Нет');
+				all.disabled = busy || !vis.length;
+				none.disabled = busy || !vis.length;
+				return E('div', { 'class': 'zm-z2-ghead', 'click': function() { open[g.k] = !open[g.k]; draw(); } }, [
+					E('span', { 'class': 'zm-z2-garrow' }, expanded ? '▾' : '▸'),
+					E('span', { 'class': 'zm-z2-gname' }, g.t + ' · ' + mem.length),
+					E('span', { 'class': 'zm-z2-gcount' }, 'включено ' + mem.filter(function(x) { return x.on; }).length),
+					E('span', { 'class': 'zm-z2-gbtns' }, [ all, none ])
+				]);
+			}
+			function draw() {
+				box.innerHTML = '';
+				var any = false;
+				GROUPS.forEach(function(g) {
+					var mem = items.filter(function(it) { return gkey(it.name) === g.k; });
+					var vis = mem.filter(visible);
+					if (!vis.length) return;
+					any = true;
+					var expanded = !!(query || onlyOn || open[g.k]);
+					box.appendChild(groupHead(g, mem, vis, expanded));
+					if (!expanded) return;
+					var list = E('div', { 'class': 'zm-z2-glist' });
+					vis.forEach(function(it) {
+						var cb = E('input', { 'type': 'checkbox', 'class': 'zm-z2-cb', 'change': function() { it.on = cb.checked; draw(); } });
+						cb.checked = !!it.on;
+						cb.disabled = busy;
+						var use = it.used.length
+							? E('span', { 'class': 'zm-z2-use' + (it.usedOn ? ' zm-z2-use-on' : ''), 'title': 'В стратегиях: ' + it.used.join(', ') }, it.usedOn ? 'используется' : 'в выключенных')
+							: E('span', { 'class': 'zm-z2-use-none' });
+						var fsv = fileSt[it.name], pills = [ use ];
+						if (it.used.length && fsv === 'miss') pills.push(E('span', { 'class': 'zm-z2-file zm-z2-file-miss', 'title': 'Файла нет на роутере и ни в одном источнике' }, 'нет файла'));
+						if (fsv === 'get') pills.push(E('span', { 'class': 'zm-z2-file zm-z2-file-get', 'title': 'Скачан из ' + (fileSrc[it.name] || 'Flowseal') }, 'скачан'));
+						if (it.used.length && !it.on) pills.push(E('span', { 'class': 'zm-z2-file zm-z2-file-off', 'title': 'Блоб выключен, а его используют стратегии: ' + it.used.join(', ') }, 'выключен, нужен'));
+						var useBox = E('span', { 'class': 'zm-z2-use-box' }, pills);
+						list.appendChild(E('div', { 'class': 'zm-z2-brow' + (it.on ? '' : ' zm-z2-off'), 'title': it.path || it.name }, [
+							cb,
+							E('span', { 'class': 'zm-z2-name' }, it.name),
+							useBox,
+							E('span', { 'class': 'zm-z2-path' }, it.path || '')
+						]));
+					});
+					box.appendChild(list);
+				});
+				if (!any) box.appendChild(E('p', { 'class': 'zm-hint' }, busy ? 'Загружаем…' : (items.length ? 'Ничего не найдено' : 'Блобов в файле нет')));
+				sync();
+			}
+			function fail() { busy = false; draw(); zm.toast('Роутер не ответил', 'error'); }
+			function report(res) {
+				busy = false;
+				if (res.error) { say(res.error, true); draw(); zm.toast(res.error, 'error'); return; }
+				(res.items || []).forEach(function(x) { fileSt[x.name] = x.state; fileSrc[x.name] = x.src || ''; });
+				var bad = (res.missing || 0) + (res.off || 0) + (res.unknown || 0) + (res.nopath || 0);
+				if (!res.used) {
+					say('В стратегиях блобы не используются — проверять нечего.');
+					zm.toast('Проверять нечего', 'info');
+				} else if (!bad) {
+					say('Всё совпадает: блобов нужно ' + res.used + ', все на месте и включены' + (res.downloaded ? ' (докачано ' + res.downloaded + ')' : '') + '.');
+					zm.toast('Всё совпадает', 'info');
+				} else {
+					var parts = [];
+					if (res.missing) parts.push('не найдено файлов: ' + res.missingNames.split(',').join(', '));
+					if (res.off) parts.push('выключены, но нужны стратегиям: ' + res.offNames.split(',').join(', '));
+					if (res.unknown) parts.push('нет в списке блобов: ' + res.unknownNames.split(',').join(', '));
+					if (res.nopath) parts.push('без пути к файлу: ' + res.nopath);
+										zm.toast('Проверка: есть проблемы (' + bad + ')', 'warning');
+				}
+				draw();
+			}
+			function poll(n) {
+				return zm.jobStatus('z2_blobs').then(function(st) {
+					if (!st.done) {
+						if (!st.running) { report({ error: 'Проверка прервалась — попробуйте ещё раз' }); return; }
+						zm.logTail('z2_blobs').then(function(r) { showOut(r.lines); }, function() {});
+						if (n >= 600) { report({ error: 'Проверка заняла слишком долго — попробуйте ещё раз' }); return; }
+						setTimeout(function() { poll(n + 1); }, 1000);
+						return;
+					}
+					return zm.logTail('z2_blobs').then(function(r) { showOut(r.lines); }, function() {}).then(function() { return zm.z2BlobCheckResult().then(report, fail); });
+				}, fail);
+			}
+			function check() {
+				busy = true; draw();
+				return zm.z2BlobCheck().then(function(res) {
+					if (res.error) { report(res); return; }
+					say('Проверяем файлы блобов… список обновится сам');
+					outWrap.style.display = '';
+					showOut('Проверка запущена…');
+					return poll(0);
+				}, fail);
+			}
+
+			function load(silent) {
+				busy = true; draw();
+				return zm.z2BlobGet().then(function(res) {
+					busy = false;
+					if (res.error) { say(res.error, true); draw(); zm.toast(res.error, 'error'); return; }
+					items = (res.items || []).map(function(x) { return { name: x.name, on: !!x.on, path: x.path || '', used: x.used || [], usedOn: !!x.usedOn, have: !!x.have }; });
+					fileSt = {};
+					items.forEach(function(x) { if (x.used.length) fileSt[x.name] = x.have ? 'ok' : 'miss'; });
+					orig = JSON.parse(JSON.stringify(items));
+					var missN = items.filter(function(x) { return x.used.length && !x.have; }).length;
+					var offN = items.filter(function(x) { return x.used.length && !x.on; }).length;
+					sumLine.textContent = 'Загружено из /etc/config/zapret2: блобов ' + items.length + ', используются стратегиями ' + items.filter(function(x) { return x.used.length; }).length + ', нет файла ' + missN + ', выключены, но нужны, ' + offN + '.';
+					if (!silent) say('');
+					draw();
+					if (!silent) zm.toast('Блобы перечитаны с диска', 'info');
+				}, fail);
+			}
+			function save() {
+				var txt = items.map(function(x) { return x.name + ' ' + (x.on ? '1' : '0'); }).join('\n');
+				busy = true; draw();
+				return zm.z2BlobSet(txt).then(function(res) {
+					busy = false;
+					if (res.error) { say(res.error, true); draw(); zm.toast(res.error, 'error'); return false; }
+					var msg = res.running ? 'Блобы сохранены, Zapret2 перезапущен' : 'Блобы сохранены. Zapret2 остановлен — запустите его кнопкой выше';
+					say(msg);
+					zm.toast(msg, res.running ? 'info' : 'warning');
+					zm.changed({ svc: 'zapret2' });
+					load(true);
+					if (view.z2EditorLoad) view.z2EditorLoad();
+					return true;
+				}, function() { fail(); return false; });
+			}
+			function guard(fn) {
+				if (!isDirty()) return fn();
+				return zm.ask('В блобах есть несохранённые изменения. Отбросить их?').then(function(ok) { if (ok) return fn(); });
+			}
+			var node = E('div', { 'class': 'zm-card zm-z2-editor zm-z2-blobs' }, [
+				E('div', { 'class': 'zm-z2-head' }, [ E('h3', {}, 'Блобы'), count ]),
+				E('p', { 'class': 'zm-hint' }, 'Блобы — файлы подмены для стратегий. «Проверить и докачать» сверяет файлы и докачивает недостающие. Флажок включает блоб (enabled в /etc/config/zapret2).'),
+				E('div', { 'class': 'zm-z2-tools' }, [ search, E('label', { 'class': 'zm-z2-toggle' }, [ onlyCb, E('span', {}, 'Только включённые') ]) ]),
+				sumLine,
+				box,
+				outWrap,
+				E('div', { 'class': 'zm-actions' }, [ saveB, checkB, resetB ]),
+				note
+			]);
+			view.z2BlobLoad = function() { if (!isDirty() && !busy) load(true); };
+			load(true);
+			return node;
+		}
+
+		function z2ConfCard(view) {
+			var busy = false, btn = {};
+			var ta = E('textarea', { 'class': 'zm-config-editor zm-z2-ta', 'spellcheck': 'false' });
+			var note = E('p', { 'class': 'zm-hint', 'style': 'margin:6px 0 0' });
+			var bar = zm.editorBar(ta, {
+				saveLabel: 'Сохранить и применить',
+				text: 'Файл изменён и не сохранён',
+				onSave: function(v) { return z2Write(zm.z2ConfSet(v), 'Сохранено', 'Сохраняем конфиг'); }
+			});
+			function sync() { Object.keys(btn).forEach(function(k) { btn[k].disabled = busy; }); }
+			function say(t, bad) { note.textContent = t || ''; note.style.color = bad ? '#b00020' : ''; }
+			function guard(fn) {
+				if (!bar.dirty()) return fn();
+				return zm.ask('Есть несохранённые изменения. Отбросить их?').then(function(ok) { if (ok) return fn(); });
+			}
+			function fail() { busy = false; sync(); zm.toast('Роутер не ответил', 'error'); }
+			function load(silent) {
+				busy = true; sync();
+				return zm.z2ConfGet().then(function(res) {
+					busy = false; sync();
+					if (res.error) { say(res.error, true); zm.toast(res.error, 'error'); return; }
+					bar.reset(res.content || '');
+					if (view.z2BlobShowLog) zm.logTail('z2_blobs').then(function(r) { var t = [].concat(r.lines || []).join('\n'); if (t) view.z2BlobShowLog(t); }, function() {});
+					var cc = res.content || '';
+					say('Загружено из /etc/config/zapret2: стратегий ' + (cc.match(/^config strategy /gm) || []).length + ', блобов ' + (cc.match(/^config blob /gm) || []).length + ', строк ' + cc.split('\n').length + '.');
+					if (!silent) zm.toast('Файл перечитан с диска', 'info');
+				}, fail);
+			}
+			function z2Write(p, msg, start) {
+        busy = true; sync();
+        zm.toast(start + ', затем перезапуск Zapret2…', 'info');
+        return p.then(function(res) {
+          busy = false; sync();
+          if (res.error) { say(res.error, true); zm.toast('Ошибка: ' + res.error, 'error'); return false; }
+          say(res.running ? msg + ', Zapret2 перезапущен' : msg + '. Zapret2 остановлен — запустите его кнопкой выше', !res.running);
+          var bl = res.blobs || {};
+          var bad = !!(bl.missing || bl.off || bl.unknown || bl.nopath);
+          if (view.z2BlobShowLog) zm.logTail('z2_blobs').then(function(r) { view.z2BlobShowLog([].concat(r.lines || []).join('\n')); }, function() {});
+          if (bad) zm.toast('Ошибка в blob — смотрите Журнал проверки', 'error', 12000);
+          else if (res.running) zm.toast('Ошибок нет, Zapret перезапущен', 'info');
+          else zm.toast('Ошибок нет, Zapret остановлен — запустите вручную', 'warning');
+          load(true);
+          zm.changed({ svc: 'zapret2' });
+          if (view.z2StratLoad) view.z2StratLoad();
+          if (view.z2BlobLoad) view.z2BlobLoad();
+          return true;
+        }, function() { fail(); return false; });
+      }
+			function restore() {
+				var q = 'Скачать стандартный конфиг Zapret2 с GitHub, заменить /etc/config/zapret2 и перезапустить Zapret2?';
+				if (/#nochange/.test(ta.value)) q = 'В конфиге есть маркер #nochange (стратегия помечена как «не трогать») — он будет потерян. ' + q;
+				return zm.ask(q).then(function(ok) {
+					if (!ok) return;
+					return z2Write(zm.z2ConfRestore(), 'Восстановлено из GitHub', 'Скачиваем стандартный конфиг').then(function(done) { if (done) return load(true); });
+				});
+			}
+			function onFile() {
+				var f = fileIn.files && fileIn.files[0];
+				fileIn.value = '';
+				if (!f) return;
+				if (f.size > 262144) { zm.toast('Файл слишком большой для конфига Zapret2', 'error'); return; }
+				var rd = new FileReader();
+				rd.onload = function() {
+					zm.ask('Заменить /etc/config/zapret2 содержимым файла «' + f.name + '» и перезапустить Zapret2?').then(function(ok) {
+						if (!ok) return;
+						return z2Write(zm.z2ConfSet(String(rd.result || '')), 'Файл загружен', 'Файл загружается').then(function(done) { if (done) return load(true); });
+					});
+				};
+				rd.readAsText(f);
+			}
+			function saveToPc() {
+				var url = URL.createObjectURL(new Blob([ ta.value ], { type: 'text/plain;charset=utf-8' }));
+				var a = E('a', { 'href': url, 'download': 'zapret2.conf' });
+				document.body.appendChild(a);
+				a.click();
+				setTimeout(function() { URL.revokeObjectURL(url); if (a.parentNode) a.parentNode.removeChild(a); }, 1000);
+			}
+			var fileIn = E('input', { 'type': 'file', 'style': 'display:none', 'change': onFile });
+			btn.reload = E('button', { 'class': 'cbi-button', 'click': function() { guard(function() { return load(false); }); } }, 'Перечитать файл');
+			btn.upload = E('button', { 'class': 'cbi-button', 'click': function() { guard(function() { fileIn.click(); }); } }, 'Загрузить файл');
+			btn.save = E('button', { 'class': 'cbi-button', 'click': saveToPc }, 'Сохранить файл');
+			btn.restore = E('button', { 'class': 'cbi-button cbi-button-action', 'click': function() { guard(restore); } }, 'Восстановить файл');
+			var panel = E('div', { 'class': 'zm-card zm-z2-editor' }, [
+				E('h3', {}, 'Редактор конфига Zapret2'),
+				E('p', { 'class': 'zm-hint' }, 'Файл /etc/config/zapret2 целиком. «Сохранить и применить» записывает файл и перезапускает Zapret2.'),
+				E('div', { 'class': 'zm-actions' }, [ btn.reload, btn.upload, btn.save, btn.restore ]),
+				ta, bar, note, fileIn
+			]);
+			load(true);
+			view.z2EditorLoad = function() { if (!bar.dirty()) load(true); };
+			return panel;
+		}
+
 		function renderCards(d) {
 			cards.innerHTML = '';
+			z2PanelBox.style.display = 'none';
 
 			var z2Actions = [];
 			if (d.zapret2 === 'installed' && d.z2_luci) {
@@ -58853,7 +59929,7 @@ return view.extend({
 						? zm.badge(d.zapret2_running === true, 'запущен', 'остановлен')
 						: zm.badge(false, '', 'не установлен')
 				]),
-				E('div', { 'class': 'zm-row' }, [
+				E('div', { 'class': 'zm-row zm-z2-ver' }, [
 					E('span', { 'class': 'zm-label' }, 'Версия'),
 					E('span', {}, [
 						String(d.zapret2_ver || '—'),
@@ -58863,6 +59939,7 @@ return view.extend({
 				E('p', { 'class': 'zm-hint' }, 'Только для 64-битных ARM-роутеров (aarch64). Несовместим с основным Zapret.'),
 				E('div', { 'class': 'zm-actions' }, z2Actions)
 			]);
+			if (d.zapret2 !== 'installed') z2Card.removeChild(z2Card.querySelector('.zm-z2-ver'));
 			if (d.zapret2 === 'installed') {
 				var vsOn = d.vpnskip === true;
 				if (typeof d.zapret2_boot === 'boolean') {
@@ -58898,10 +59975,29 @@ return view.extend({
 			}
 
 			cards.appendChild(z2Card);
+			if (d.zapret2 === 'installed') {
+				var z2Reopen = !view.z2Shown, z2Had = !!view.z2StratNode;
+				if (!view.z2StratNode) view.z2StratNode = z2StratCard(view);
+				if (!view.z2BlobNode) view.z2BlobNode = z2BlobCard(view);
+				if (!view.z2ConfCard) view.z2ConfCard = z2ConfCard(view);
+				z2PanelBox.appendChild(view.z2StratNode);
+				z2PanelBox.appendChild(view.z2BlobNode);
+				z2PanelBox.appendChild(view.z2ConfCard);
+				z2PanelBox.style.display = '';
+				view.z2Shown = true;
+				if (z2Had && z2Reopen) {
+					if (view.z2StratLoad) view.z2StratLoad();
+					if (view.z2BlobLoad) view.z2BlobLoad();
+					if (view.z2EditorLoad) view.z2EditorLoad();
+				}
+			} else {
+				view.z2Shown = false;
+			}
 		}
 
 		renderCards(data);
 		wrap.appendChild(cards);
+		wrap.appendChild(z2PanelBox);
 		wrap.appendChild(logEl);
 		wrap.appendChild(bannerEl);
 
@@ -59434,6 +60530,91 @@ html.zm-theme-dark .zm-fo-sub.zm-fo-warn { color: #d29922; }
 .zm-log::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); border-radius: 10px; border: 4px solid transparent; background-clip: padding-box; min-height: 40px; }
 .zm-log::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,.34); background-clip: padding-box; }
 @supports not selector(::-webkit-scrollbar) { .zm-log { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.25) transparent; } }
+.zm-z2-panel { width: 100%; display: flex; flex-direction: column; gap: 16px; }
+.zm-z2-editor { width: 100%; box-sizing: border-box; margin: 0; }
+.zm-z2-blobs .zm-z2-tools { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.zm-z2-blobs .zm-z2-search { flex: 1 1 260px; width: auto; }
+.zm-z2-toggle { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: #475569; cursor: pointer; white-space: nowrap; }
+.zm-z2-groups { display: flex; flex-direction: column; gap: 8px; }
+.zm-z2-ghead { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto auto; align-items: center; gap: 12px; padding: 9px 12px; border-radius: 10px; border: 1px solid rgba(15,23,42,.08); background: rgba(15,23,42,.035); cursor: pointer; user-select: none; -webkit-user-select: none; }
+.zm-z2-ghead:hover { background: rgba(15,23,42,.06); }
+.zm-z2-garrow { color: #64748b; font-size: 12px; }
+.zm-z2-gname { font-weight: 600; font-size: 14px; }
+.zm-z2-gcount { font-size: 12px; color: #64748b; white-space: nowrap; }
+.zm-z2-gbtns { display: flex; gap: 6px; }
+.zm-z2-gbtn { padding: 3px 10px; font-size: 12px; min-width: 0; }
+.zm-z2-glist { display: flex; flex-direction: column; gap: 4px; padding: 6px 0 2px 12px; }
+.zm-z2-brow { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto minmax(0, auto); align-items: center; gap: 10px; padding: 6px 10px; border-radius: 8px; border: 1px solid rgba(15,23,42,.06); background: rgba(15,23,42,.02); }
+.zm-z2-use { font-size: 11px; line-height: 1; padding: 4px 8px; border-radius: 999px; background: rgba(15,23,42,.06); color: #64748b; white-space: nowrap; }
+.zm-z2-use-on { background: rgba(59,130,246,.14); color: #1d4ed8; font-weight: 600; }
+.zm-z2-use-none { display: inline-block; width: 0; }
+html.zm-theme-dark .zm-z2-use { background: rgba(255,255,255,.08); color: #94a3b8; }
+html.zm-theme-dark .zm-z2-use-on { background: rgba(96,165,250,.2); color: #93c5fd; }
+.zm-z2-brow.zm-z2-off .zm-z2-name { color: #94a3b8; }
+.zm-z2-brow .zm-z2-path { font-size: 11px; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 340px; }
+html.zm-theme-dark .zm-z2-ghead { border-color: rgba(255,255,255,.08); background: rgba(255,255,255,.03); }
+html.zm-theme-dark .zm-z2-ghead:hover { background: rgba(255,255,255,.06); }
+html.zm-theme-dark .zm-z2-brow { border-color: rgba(255,255,255,.07); background: rgba(255,255,255,.02); }
+@media (max-width: 720px) { .zm-z2-brow .zm-z2-path { display: none; } }
+.zm-z2-use-box { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.zm-z2-file { font-size: 11px; line-height: 1; padding: 4px 8px; border-radius: 999px; white-space: nowrap; font-weight: 600; }
+.zm-z2-file-miss { background: rgba(220,38,38,.12); color: #b91c1c; }
+.zm-z2-file-get { background: rgba(22,163,74,.14); color: #15803d; }
+html.zm-theme-dark .zm-z2-file-miss { background: rgba(248,113,113,.16); color: #fca5a5; }
+html.zm-theme-dark .zm-z2-file-get { background: rgba(74,222,128,.16); color: #86efac; }
+.zm-z2-ed { min-width: 0; padding: 4px 10px; font-size: 12px; }
+.zm-z2-row.zm-z2-editing { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.15); }
+.zm-z2-edit { margin: 6px 0 4px; padding: 12px 14px; border-radius: 10px; border: 1px solid rgba(59,130,246,.45); background: rgba(59,130,246,.04); }
+.zm-z2-edit-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 6px; }
+.zm-z2-edit-state { font-size: 12px; color: #64748b; white-space: nowrap; }
+.zm-z2-blockta { width: 100%; min-height: 220px; box-sizing: border-box; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5; padding: 10px 12px; border-radius: 8px; border: 1px solid rgba(15,23,42,.12); background: #ffffff; color: #0f172a; resize: vertical; white-space: pre; overflow: auto; tab-size: 4; }
+.zm-z2-blockta:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.18); }
+.zm-z2-sum { margin: 6px 0 0; font-size: 12px; }
+.zm-z2-out { margin: 8px 0 0; padding: 10px 12px; border-radius: 8px; background: rgba(15,23,42,.04); border: 1px solid rgba(15,23,42,.07); font-size: 12px; line-height: 1.5; white-space: pre-wrap; max-height: 220px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+html.zm-theme-dark .zm-z2-edit { background: rgba(96,165,250,.06); border-color: rgba(96,165,250,.4); }
+html.zm-theme-dark .zm-z2-blockta { background: #0f172a; color: #e2e8f0; border-color: rgba(255,255,255,.12); }
+html.zm-theme-dark .zm-z2-out { background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.08); }
+html.zm-theme-dark .zm-z2-edit-state { color: #94a3b8; }
+.zm-z2-file-off { background: rgba(245,158,11,.18); color: #b45309; }
+html.zm-theme-dark .zm-z2-file-off { background: rgba(251,191,36,.16); color: #fcd34d; }
+.zm-z2-save.zm-z2-dirty { background: #dc2626 !important; border-color: #b91c1c !important; color: #fff !important; }
+.zm-z2-save.zm-z2-dirty:hover { background: #b91c1c !important; }
+.zm-z2-outwrap { margin: 8px 0 0; border-radius: 8px; border: 1px solid rgba(15,23,42,.07); background: rgba(15,23,42,.04); }
+.zm-z2-outwrap .zm-z2-out { margin: 0; border: 0; border-radius: 0; background: transparent; }
+.zm-z2-outhead { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; font-size: 12px; font-weight: 600; border-bottom: 1px solid rgba(15,23,42,.07); }
+.zm-z2-x { border: 0; background: transparent; cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: 6px; color: inherit; opacity: .7; }
+.zm-z2-x:hover { opacity: 1; background: rgba(15,23,42,.08); }
+html.zm-theme-dark .zm-z2-outwrap { background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.08); }
+html.zm-theme-dark .zm-z2-outhead { border-bottom-color: rgba(255,255,255,.08); }
+html.zm-theme-dark .zm-z2-x:hover { background: rgba(255,255,255,.1); }
+.zm-z2-ta { display: block; width: 100%; box-sizing: border-box; min-height: 440px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; line-height: 1.5; resize: vertical; }
+.zm-z2-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.zm-z2-head h3 { margin: 0 0 12px 0; }
+.zm-z2-count { font-size: 13px; color: #64748b; }
+.zm-z2-tools { margin: 4px 0 12px; }
+.zm-z2-search { width: 100%; box-sizing: border-box; padding: 9px 12px; border-radius: 10px; border: 1px solid rgba(15,23,42,.14); font: inherit; background: transparent; color: inherit; }
+.zm-z2-list { display: flex; flex-direction: column; gap: 6px; max-height: 560px; overflow-y: auto; padding-right: 4px; }
+.zm-z2-row { display: grid; grid-template-columns: 14px 18px 34px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 7px 12px; border-radius: 10px; border: 1px solid rgba(15,23,42,.07); background: rgba(15,23,42,.025); cursor: grab; user-select: none; -webkit-user-select: none; touch-action: pan-y; position: relative; }
+.zm-z2-row button, .zm-z2-row input { cursor: pointer; }
+.zm-z2-grip { color: #94a3b8; font-size: 15px; line-height: 1; letter-spacing: -3px; text-align: center; cursor: grab; touch-action: none; padding: 6px 0; }
+.zm-z2-sorting .zm-z2-row { transition: transform .18s ease; }
+.zm-z2-sorting, .zm-z2-sorting * { cursor: grabbing !important; }
+.zm-z2-row.zm-z2-drag { z-index: 3; background: #ffffff; border-color: #3b82f6; box-shadow: 0 10px 26px rgba(15,23,42,.18), 0 0 0 3px rgba(59,130,246,.18); transition: none; }
+.zm-z2-row.zm-z2-drag .zm-z2-grip { color: #3b82f6; }
+.zm-z2-row.zm-z2-drag .zm-z2-name { font-weight: 600; }
+.zm-z2-row.zm-z2-settle { transition: transform .18s ease, box-shadow .18s ease; }
+.zm-z2-row.zm-z2-landed { animation: zmZ2Land .7s ease; }
+@keyframes zmZ2Land { from { box-shadow: 0 0 0 3px rgba(59,130,246,.35); } to { box-shadow: 0 0 0 3px rgba(59,130,246,0); } }
+html.zm-theme-dark .zm-z2-row.zm-z2-drag { background: #1e293b; border-color: #60a5fa; box-shadow: 0 10px 26px rgba(0,0,0,.45), 0 0 0 3px rgba(96,165,250,.22); }
+html.zm-theme-dark .zm-z2-row.zm-z2-drag .zm-z2-grip { color: #60a5fa; }
+.zm-z2-row.zm-z2-off .zm-z2-name { color: #94a3b8; }
+.zm-z2-cb { margin: 0; width: 16px; height: 16px; cursor: pointer; }
+.zm-z2-num { font-size: 12px; color: #64748b; font-variant-numeric: tabular-nums; }
+.zm-z2-name { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.zm-z2-mv-box { display: flex; gap: 6px; }
+.zm-z2-mv { min-width: 36px; padding: 4px 0; text-align: center; line-height: 1.2; }
+html.zm-theme-dark .zm-z2-row { border-color: rgba(255,255,255,.08); background: rgba(255,255,255,.03); }
+html.zm-theme-dark .zm-z2-search { border-color: rgba(255,255,255,.14); }
 .zm-config-editor { scrollbar-width: auto; scrollbar-color: auto; }
 .zm-config-editor::-webkit-scrollbar { width: 14px; height: 14px; }
 .zm-config-editor::-webkit-scrollbar-button { display: none; }
@@ -66331,7 +67512,7 @@ var DNS_CAT = {
 		{ id: 'geohide_eu', name: 'GeoHide EU', value: 'https://eu.geohide.ru/dns-query', boot: '77.88.8.8', geo: true },
 		{ id: 'geohide_us', name: 'GeoHide US', value: 'https://us.geohide.ru/dns-query', boot: '77.88.8.8', geo: true },
 		{ id: 'malw', name: 'MALW', value: 'https://dns.malw.link/dns-query', boot: '77.88.8.8', alias: [ 'dns.malw.link' ], geo: true },
-		{ id: 'webshift', name: 'WebShift', value: 'https://d.webshiftvpn.ru/dns-query', boot: '77.88.8.8', alias: [ 'd.webshiftvpn.ru' ], geo: true },
+		{ id: 'webshift', name: 'WebShift', value: 'https://d.webshiftvpn.ru/dns-query', alias: [ 'd.webshiftvpn.ru' ], geo: true },
 		{ id: 'dagami', name: 'Dagami', value: 'https://dns.dagami.ru/dns-query', boot: '77.88.8.8', alias: [ 'dns.dagami.ru' ], geo: true },
 		{ id: 'magicdns', name: 'MagicDNS', value: 'https://dns.magicdns.ru/dns-query', boot: '77.88.8.8', alias: [ 'dns.magicdns.ru', 'api.magicdns.ru' ], geo: true },
 		{ id: 'tamaev', name: 'tamaev-gifts.xyz', value: 'https://tamaev-gifts.xyz/dns-query', boot: '77.88.8.8', alias: [ 'tamaev-gifts.xyz' ], geo: true },
@@ -66410,7 +67591,7 @@ function dnsBoots(t, servers) {
 		var p = dnsFind(t, v), b = p ? p.boot : (t === 'udp' ? '' : '9.9.9.9');
 		[].concat(b || []).forEach(function(x) { if (out.indexOf(x) < 0) out.push(x); });
 	});
-	[ '9.9.9.9', '77.88.8.8' ].forEach(function(b) { if (out.length < 2 && out.indexOf(b) < 0) out.push(b); });
+	[ '9.9.9.9' ].forEach(function(b) { if (out.length < 2 && out.indexOf(b) < 0) out.push(b); });
 	return out.slice(0, 4);
 }
 
