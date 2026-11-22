@@ -348,16 +348,6 @@ config strategy 'Youtube_UDP'
 	option script '--payload=quic_initial
 --lua-desync=fake:blob=fake_default_quic:repeats=2'
 
-config strategy 'Yv08'
-	option enabled '0'
-	option port '443'
-	list filter_l3 'ipv4'
-	list protocol 'tcp'
-	list filter_l7 'tls'
-	list hostlist 'list_hosts_youtube'
-	option script '--payload=tls_client_hello
---lua-desync=hostfakesplit:host=google.com:tcp_ts=-600000'
-
 config strategy 'V_circular'
 	option enabled '1'
 	option port '443'
@@ -404,6 +394,16 @@ config strategy 'games_udp'
 	option script '--out-range=<n4
 --payload=known,unknown
 --lua-desync=fake:blob=blob_stun:repeats=10:payload=known,unknown'
+
+config strategy 'Yv08'
+	option enabled '0'
+	option port '443'
+	list filter_l3 'ipv4'
+	list protocol 'tcp'
+	list filter_l7 'tls'
+	list hostlist 'list_hosts_youtube'
+	option script '--payload=tls_client_hello
+--lua-desync=hostfakesplit:host=google.com:tcp_ts=-600000'
 
 config strategy 'YT_TLS_wssize_multidisorder'
 	option enabled '0'
