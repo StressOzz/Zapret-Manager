@@ -330,7 +330,7 @@ config strategy 'Yt'
 	list hostlist 'list_hosts_youtube'
 	option script '--out-range=-s34228
 --payload=tls_client_hello
---lua-desync=multidisorder:pos=1,midsld'
+--lua-desync=multidisorder:pos=1,host+2,midsld'
 
 config strategy 'discord_udp'
 	option enabled '1'
@@ -352,7 +352,7 @@ config strategy 'Youtube_UDP'
 --lua-desync=fake:blob=fake_default_quic:repeats=2'
 
 config strategy 'Yv08'
-	option enabled '1'
+	option enabled '0'
 	option port '443'
 	list filter_l3 'ipv4'
 	list protocol 'tcp'
