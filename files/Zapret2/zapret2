@@ -57,9 +57,6 @@ config list 'list_hosts_discord'
 config list 'list_hosts_google'
 	option path '/opt/zapret2/ipset/zapret-hosts-google.txt'
 
-config list 'list_hosts_googlevideo'
-	option path '/opt/zapret2/ipset/zapret_hosts_googlevideo.txt'
-
 config blob 'blob_dht_find_node'
 	option path '/opt/zapret2/files/fake/dht_find_node.bin'
 	option enabled '0'
@@ -415,7 +412,6 @@ config strategy 'YT_TLS_wssize_multidisorder'
 	list protocol 'tcp'
 	list filter_l7 'tls'
 	list hostlist 'list_hosts_youtube'
-	list hostlist 'list_hosts_googlevideo'
 	option script '--payload=tls_client_hello
 --lua-desync=wssize:wsize=1:scale=6
 --lua-desync=multidisorder:pos=1,sniext+1,host+1,midsld-2,midsld,midsld+2,endhost-1'
@@ -427,7 +423,6 @@ config strategy 'YT_TLS_fake_multisplit'
 	list protocol 'tcp'
 	list filter_l7 'tls'
 	list hostlist 'list_hosts_youtube'
-	list hostlist 'list_hosts_googlevideo'
 	option script '--payload=tls_client_hello
 --lua-desync=fake:blob=0x00000000:tcp_seq=-10000:tcp_ack=-66000:repeats=2
 --lua-desync=multisplit:pos=1,midsld'
@@ -439,7 +434,6 @@ config strategy 'YT_TLS_fakeddisorder'
 	list protocol 'tcp'
 	list filter_l7 'tls'
 	list hostlist 'list_hosts_youtube'
-	list hostlist 'list_hosts_googlevideo'
 	option script '--payload=tls_client_hello
 --lua-desync=fakeddisorder:pos=midsld:tcp_md5'
 
@@ -1010,7 +1004,6 @@ config strategy 'MAIN_TLS_v1'
 --lua-desync=fakeddisorder:pos=1:pattern=blob_tls_clienthello_www_4pda_to:tcp_seq=0:tcp_ack=-66000:badsum'
 	list hostlist_exclude 'list_hosts_user_exclude'
 	list hostlist_exclude 'list_hosts_youtube'
-	list hostlist_exclude 'list_hosts_googlevideo'
 
 config strategy 'Games_TCP_v1'
 	option enabled '0'
