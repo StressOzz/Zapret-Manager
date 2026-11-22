@@ -1,6 +1,6 @@
 #!/bin/sh
 read -r _ _ ZM_NEW_VER <<'ZM_VERSION_EOF'
-# Version: 5.094
+# Version: 5.095
 ZM_VERSION_EOF
 set -e
 
@@ -20592,8 +20592,12 @@ _do_install_zapret2_core() {
 		"${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/50-discord_media.sh" \
 		|| echo "!! Не удалось загрузить 50-discord_media.sh"
 	if _nochange_in /etc/config/zapret2; then echo "   · Стратегия Zapret2 помечена #nochange — оставляем как есть"
-	else
+	elif [ "$upd" = 1 ]; then
 		_z2_fetch_missing /etc/config/zapret2 "${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/zapret2" || echo "!! Не удалось загрузить zapret2"
+	else
+		_nochange_fetch /etc/config/zapret2 "${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/zapret2" \
+			&& echo "   ✓ Стратегия Zapret2 загружена с GitHub" \
+			|| echo "!! Не удалось загрузить zapret2 — остался конфиг из пакета"
 	fi
 	_z2_fetch_missing /opt/zapret2/ipset/zapret_hosts_discord.txt "${GH_RAW}/StressOzz/Zapret-Manager/refs/heads/main/files/Zapret2/zapret_hosts_discord.txt" \
 		|| echo "!! Не удалось загрузить zapret_hosts_discord.txt"
@@ -20604,6 +20608,12 @@ _do_install_zapret2_core() {
 	if [ "$boot" = 0 ]; then /etc/init.d/zapret2 disable >/dev/null 2>&1; echo "   · Автозапуск оставлен выключенным, как было"
 	else /etc/init.d/zapret2 enable >/dev/null 2>&1; fi
 	/etc/init.d/zapret2 restart >/dev/null 2>&1
+	if [ "$boot" != 0 ]; then
+		local zi=0
+		while [ "$zi" -lt 8 ]; do /etc/init.d/zapret2 status >/dev/null 2>&1 && break; sleep 1; zi=$((zi + 1)); done
+		if /etc/init.d/zapret2 status >/dev/null 2>&1; then echo "   ✓ Zapret2 перезапущен"
+		else echo "!! Zapret2 не запустился — проверьте /etc/config/zapret2"; fi
+	fi
 
 	cd /; rm -rf "$tmp"
 	rm -f "$JOBS_DIR/z2.index.ts" 2>/dev/null
