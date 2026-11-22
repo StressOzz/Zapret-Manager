@@ -330,10 +330,8 @@ config strategy 'Yt'
 	list hostlist 'list_hosts_youtube'
 	option script '--out-range=-s34228
 --payload=tls_client_hello
---lua-desync=multidisorder:pos=1,midsld
-'
+--lua-desync=multidisorder:pos=1,midsld'
 
-# Выключена: payload tls_client_hello на QUIC-трафике, стоит раньше Youtube_UDP и перехватывает его.
 config strategy 'discord_udp'
 	option enabled '1'
 	option port '19294-19344,50000-50100'
@@ -464,8 +462,7 @@ config strategy 'Youtube_UDP_copy'
 	list hostlist 'list_hosts_youtube'
 	option script '--out-range=-s34228
 --payload=tls_client_hello
---lua-desync=multidisorder:pos=1,midsld
-'
+--lua-desync=multidisorder:pos=1,midsld'
 
 config strategy 'Discord_circular'
 	option enabled '0'
