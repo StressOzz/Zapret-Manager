@@ -24972,36 +24972,52 @@ _mx_disabled_provider() {
 		'      - name: VPN отключён' '        type: reject'
 }
 
-_mx_vpn_first() {
-	local dir="$1" source="$2"
-	printf '%s\n' '  - name: WARP' '    type: reject' > "$dir/warp-disabled" &&
-		_mx_yaml_entry "$source" proxies '  - name: WARP' "$dir/warp-disabled" > "$dir/combined" &&
-		_mx_dual_config VPN "$dir"
-}
-
 _mx_dual_config() {
 	local first="$1" dir="$2" second=WARP
-	[ "$first" != WARP ] || second=VPN
 	grep -Eq '^mode:[ \t]*rule[ \t]*(#.*)?$' "$dir/combined" &&
 		grep -Eq '^mixed-port:[ \t]*7890[ \t]*(#.*)?$' "$dir/combined" || return 1
-	if grep -Eq '^[[:space:]]*-[[:space:]]*name:[[:space:]]*VPN[[:space:]]*(#.*)?$' "$dir/combined"; then return 1; fi
-	printf '%s\n' '  - name: VPN' '    type: fallback' '    use:' '      - Подписка' \
-		'    empty-fallback: REJECT' '    url: https://google.com/generate_204' '    interval: 300' \
-		'    expected-status: 204' > "$dir/group"
+	if [ "$first" = WARP ]; then
+		second=VPN
+		if grep -Eq '^[[:space:]]*-[[:space:]]*name:[[:space:]]*VPN[[:space:]]*(#.*)?$' "$dir/combined"; then return 1; fi
+		printf '%s\n' '  - name: VPN' '    type: fallback' '    use:' '      - Подписка' \
+			'    empty-fallback: REJECT' '    url: https://google.com/generate_204' '    interval: 300' \
+			'    expected-status: 204' > "$dir/group" || return 1
+		_mx_yaml_entry "$dir/combined" proxy-groups '  - name: VPN' "$dir/group" > "$dir/grouped" || return 1
+	else
+		cp "$dir/combined" "$dir/grouped" || return 1
+	fi
 	printf '%s\n' "  - name: zm-mixomo-$second" '    type: socks' '    listen: 127.0.0.1' \
-		'    port: 7891' '    udp: true' "    proxy: $second" > "$dir/listener"
-	_mx_yaml_entry "$dir/combined" proxy-groups '  - name: VPN' "$dir/group" > "$dir/grouped" &&
-		_mx_yaml_entry "$dir/grouped" listeners "  - name: zm-mixomo-$second" "$dir/listener" > "$dir/listening" || return 1
+		'    port: 7891' '    udp: true' "    proxy: $second" > "$dir/listener" || return 1
+	_mx_yaml_entry "$dir/grouped" listeners "  - name: zm-mixomo-$second" "$dir/listener" > "$dir/listening" || return 1
 	awk -v first="$first" '
 		BEGIN { print "# ZM Mixomo primary: " first }
-		/^rules:[ \t]*(#.*)?$/ {
-			found = 1
+		/^rules:[ \t]*(#.*)?$/ && first=="WARP" {
+			found++
 			print
-			print "  - IN-PORT,7890," first
+			print "  - IN-PORT,7890,WARP"
 			next
 		}
 		{ print }
-		END { if (!found) exit 1 }' "$dir/listening" > "$dir/config"
+		END { if (first=="WARP" && found!=1) exit 1 }' "$dir/listening" > "$dir/config"
+}
+
+# Existing VPN-first installs may have a PR preview rule that shadowed GLOBAL and YouTube.
+# Block the primary VPN port explicitly only while its subscription is cleared.
+_mx_primary_vpn_rules() {
+	local cfg="$1" block=0
+	local MIHOMO_CONF="$cfg"
+	_mx_has_sub || block=1
+	awk -v block="$block" '
+		/^[^ \t#]/ { in_rules = ($0 ~ /^rules:[ \t]*(#.*)?$/) }
+		in_rules && /^  - IN-PORT,7890,(VPN|REJECT # ZM subscription cleared)$/ { next }
+		/^rules:[ \t]*(#.*)?$/ {
+			found++
+			print
+			if (block) print "  - IN-PORT,7890,REJECT # ZM subscription cleared"
+			next
+		}
+		{ print }
+		END { if (block && found!=1) exit 1 }' "$cfg"
 }
 
 _mx_port() {
@@ -25147,6 +25163,10 @@ _mx_magi_interface() {
 _mx_apply_dual() {
 	local dir="$1" primary="$2" was_dual="$3"
 	[ -n "$was_dual" ] || _mx_dual_prepare "$primary" "$dir" || return 1
+	if [ "$primary" = VPN ]; then
+		_mx_primary_vpn_rules "$dir/config" > "$dir/rules" &&
+			mv -f "$dir/rules" "$dir/config" || return 1
+	fi
 	_mx_apply_config "$dir" "$primary" || return 1
 	[ -z "$was_dual" ] || return 0
 	if _mx_dual_devices "$primary" "$dir"; then return 0; fi
@@ -25157,12 +25177,23 @@ _mx_apply_dual() {
 
 _mx_with_config_lock() (
 	umask 077
-	local lock="$MIHOMO_DIR/.zm_config_lock" dir=""
-	if ! mkdir "$lock" 2>/dev/null; then
-		echo '{"error":"идёт изменение конфигурации Mixomo — повторите после завершения"}'
-		return 1
+	local lock="$JOBS_DIR/mixomo.config.lock" lock_dir="" dir=""
+	mkdir -p "$JOBS_DIR" || return 1
+	if command -v flock >/dev/null 2>&1; then
+		exec 9>"$lock" || return 1
+		if ! flock -n 9; then
+			echo '{"error":"идёт изменение конфигурации Mixomo — повторите после завершения"}'
+			return 1
+		fi
+	else
+		lock_dir="$lock.d"
+		find "$lock_dir" -maxdepth 0 -type d -mmin +10 -exec rmdir {} \; 2>/dev/null
+		if ! mkdir "$lock_dir" 2>/dev/null; then
+			echo '{"error":"идёт изменение конфигурации Mixomo — повторите после завершения"}'
+			return 1
+		fi
 	fi
-	trap '[ -z "$dir" ] || rm -rf "$dir"; rmdir "$lock"' EXIT
+	trap '[ -z "$dir" ] || rm -rf "$dir"; [ -z "$lock_dir" ] || rmdir "$lock_dir"' EXIT
 	dir="$(mktemp -d "$MIHOMO_DIR/.zm-config.XXXXXX")" || { echo '{"error":"не удалось подготовить конфигурацию"}'; return 1; }
 	trap 'exit 1' HUP INT TERM
 	"$@"
@@ -25236,9 +25267,9 @@ _mx_dual_subscription() {
 }
 
 _mx_apply_filters() {
-	local dir="$1"
+	local MIHOMO_CONF="$1/config"
 	if [ -s "$MIXOMO_EXCL" ] || [ -s "$MIXOMO_HIDE" ]; then
-		MIHOMO_CONF="$dir/config" _mx_filter_apply
+		_mx_filter_apply
 	fi
 	return 0
 }
@@ -25281,16 +25312,8 @@ _mx_subscription_set() {
 		}
 	elif _mx_has_sub; then
 		# Preserve the existing provider's options, filters and rules when changing its URL.
-		_mx_update_sub_url "$dir/original" "$sub_url" 0 > "$dir/updated" ||
-			{ echo '{"error":"не удалось обновить подписку"}'; return 1; }
-		if _mx_stock_provider && ! _mx_warp_present; then
-			_mx_vpn_first "$dir" "$dir/updated" && _mx_apply_dual "$dir" VPN "" ||
-				{ echo '{"error":"не удалось настроить интерфейсы Mixomo — прежняя конфигурация сохранена"}'; return 1; }
-			first=VPN
-		else
-			cp "$dir/updated" "$dir/config" && _mx_apply_config "$dir" "" ||
-				{ echo '{"error":"не удалось обновить подписку"}'; return 1; }
-		fi
+		_mx_update_sub_url "$dir/original" "$sub_url" 0 > "$dir/config" &&
+			_mx_apply_config "$dir" "" || { echo '{"error":"не удалось обновить подписку"}'; return 1; }
 		mode=updated
 	elif _mx_warp_present; then
 		if grep -Eq '^proxy-providers:|^[[:space:]]*-[[:space:]]*name:[[:space:]]*VPN[[:space:]]*(#.*)?$' "$dir/original"; then
@@ -25309,13 +25332,12 @@ _mx_subscription_set() {
 			echo '{"error":"конфигурация уже содержит провайдеры — добавьте подписку в редакторе Mihomo"}'
 			return 1
 		fi
-		_mx_subscription_template "$sub_url" > "$dir/vpn-base" &&
-			_mx_vpn_first "$dir" "$dir/vpn-base" ||
+		_mx_subscription_template "$sub_url" > "$dir/config" ||
 			{ echo '{"error":"не удалось подготовить конфигурацию подписки"}'; return 1; }
 		_mx_secret_ensure "$dir/config" || :
 		_mx_apply_filters "$dir"
-		_mx_apply_dual "$dir" VPN "" || { echo '{"error":"не удалось применить подписку — прежняя конфигурация сохранена"}'; return 1; }
-		first=VPN
+		_mx_apply_config "$dir" "" || { echo '{"error":"не удалось применить подписку — прежняя конфигурация сохранена"}'; return 1; }
+		cp -p "$dir/original" "$MIXOMO_SUB_PREV"
 	fi
 	rm -f "$MIHOMO_DIR/.zm_names" "$MIHOMO_DIR/.zm_names_all"
 	printf '{"ok":true,"mode":"%s","parallel":%s}\n' "$mode" "$([ -n "$first" ] && echo true || echo false)"
@@ -55579,7 +55601,7 @@ return view.extend({
 		}
 
 		var subInput = E('input', { 'type': 'text', 'placeholder': 'https://...', 'class': 'cbi-input-text zm-secret-in' });
-		var subBusy = false, subOn = !!(data && data.subscription);
+		var subBusy = false, subParallel = null, subOn = !!(data && data.subscription);
 		var subHead = E('h3', {});
 		var subClearBtn = E('button', {
 			'class': 'cbi-button cbi-button-remove',
@@ -55588,8 +55610,9 @@ return view.extend({
 				zm.dialog({ title: 'Очистить подписку?', danger: true, okText: 'Очистить подписку',
 					blocks: [ { type: 'list', title: 'Что произойдёт', items: [
 						'Ссылка на подписку будет удалена из активной конфигурации Mihomo',
-						'Если WARP и VPN подключены параллельно, WARP продолжит работать, а группы на MihomoVPN будут заблокированы до добавления подписки или смены интерфейса',
-						'В режиме одной подписки восстановится прежняя конфигурация, если она была сохранена',
+						subParallel === true ? 'Группы на MihomoVPN будут заблокированы до добавления подписки или смены интерфейса' :
+							subParallel === false ? 'Восстановится прежняя конфигурация, если она была сохранена' :
+							'При совместной настройке выход MihomoVPN будет заблокирован. В режиме одной подписки восстановится сохранённая конфигурация.',
 						'Текущая конфигурация сохранится в config.yaml.bak, Mihomo перезапустится'
 					] } ]
 				}).then(function(v) {
@@ -55601,6 +55624,7 @@ return view.extend({
 						if (!res || res.error) { zm.toast((res && res.error) || 'Роутер не ответил', 'error', 10000); return; }
 						zm.toast(res.mode === 'restored'
 							? 'Подписка убрана — вернули конфигурацию, которая была до неё' + (res.warp ? ' (с WARP)' : '')
+							: res.parallel ? 'Подписка удалена. Трафик на MihomoVPN заблокирован.'
 							: 'Подписка убрана из конфигурации' + (res.warp ? '' : '. Нужен WARP — на вкладке WARP нажмите «Интегрировать в Mihomo»'), 'info', 8000);
 						subInput.value = '';
 						refreshAll();
@@ -55618,7 +55642,7 @@ return view.extend({
 			subClearBtn.style.display = subOn ? '' : 'none';
 		}
 		subCard.appendChild(subHead);
-		subCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Вставьте ссылку на VPN-подписку. После применения подписка станет доступна через MihomoVPN в MagiTrickle. При смене ссылки настройки WARP и списков сохраняются.'));
+		subCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Вставьте ссылку на VPN-подписку. При подключённом WARP подписка доступна через MihomoVPN в MagiTrickle. При смене ссылки настройки WARP и списков сохраняются.'));
 		subCard.appendChild(E('div', { 'class': 'zm-actions' }, [
 			subInput,
 			E('button', {
@@ -55629,7 +55653,7 @@ return view.extend({
 					if (!/^https?:\/\//i.test(url)) { zm.toast('Ссылка должна начинаться с http:// или https://', 'error'); return; }
 					(subOn ? Promise.resolve(true) : zm.dialog({ title: 'Применить подписку?', okText: 'Применить подписку',
 						blocks: [ { type: 'list', title: 'Что произойдёт', items: [
-							'Текущие группы сохранят свой маршрут, а подписка станет доступна через MihomoVPN',
+							'При подключённом WARP подписка станет доступна через MihomoVPN. Без WARP сохраняется обычная настройка подписки.',
 							'Mihomo перезапустится. При первом подключении двух выходов также обновятся интерфейсы MagiTrickle'
 						] } ]
 					})).then(function(v) {
@@ -55800,7 +55824,8 @@ return view.extend({
 
 		function refreshConfig() {
 			zm.mixomoConfigGet().then(function(res) {
-				if (res.error) { configBar.reset(''); configEl.placeholder = res.error; return; }
+				if (res.error) { subParallel = null; configBar.reset(''); configEl.placeholder = res.error; return; }
+				subParallel = /^# ZM Mixomo primary: (WARP|VPN)$/m.test(res.content || '');
 				configBar.reset(res.content || '');
 			});
 		}
@@ -55917,7 +55942,7 @@ return view.extend({
 		function renderEmbed(d) {
 			embedCard.innerHTML = '';
 			embedCard.appendChild(E('h3', {}, 'Окно MagiTrickle'));
-			embedCard.appendChild(E('p', { 'class': 'zm-hint' }, 'После настройки WARP или подписки можно выбрать интерфейс для каждой группы. MihomoWARP ведёт в WARP, MihomoVPN — в подписку. Выход без настроек блокирует трафик.'));
+			embedCard.appendChild(E('p', { 'class': 'zm-hint' }, 'После подключения WARP можно выбрать интерфейс для каждой группы. MihomoWARP ведёт в WARP, MihomoVPN — в подписку. Выход без настроек блокирует трафик.'));
 			if (d.magitrickle !== 'installed') {
 				embedCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Установите Mixomo, чтобы открыть управление группами и подписками MagiTrickle.'));
 				mtFrame = null;
