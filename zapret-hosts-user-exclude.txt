@@ -48,6 +48,7 @@ yandex.net
 chatglm.cn
 gudsen.vip
 pantum.com
+xiaoyi.com
 gstatic.com
 lichess.org
 premier.one
