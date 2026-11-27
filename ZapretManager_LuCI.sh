@@ -41346,7 +41346,8 @@ function cmd_set() {
 
 	for (let x in sections(c, "section")) {
 		let n = x[".name"];
-		if (n == sec || !is_conn(x) || (n != p0.sec && index(p0.conns, n) < 0)) continue;
+		// disabled (standby) sections produce no rules in the generated config — duplicates with them are safe
+		if (s(x.disabled) == "1" || n == sec || !is_conn(x) || (n != p0.sec && index(p0.conns, n) < 0)) continue;
 		for (let v in all) for (let w in all_ips(x)) if (device_ip_overlap(v, w))
 			fail("устройство " + v + " уже целиком идёт через секцию «" + sec_label(x, n == p0.sec) + "» — весь трафик устройства можно отдать только одной секции");
 		if (!device_scopes_overlap(full, device_ips(x))) continue;
