@@ -39830,7 +39830,7 @@ function sec_mode(m) {
 	if (s(m.connection_type) == "vpn") return "iface";
 	let t = s(m.proxy_config_type || "url");
 	if (t == "subscription") return "sub";
-	if (t == "outbound") return "json";
+	if (t == "outbound") return s(m.zm_direct) == "1" ? "direct" : "json";
 	return "links";
 }
 
@@ -39899,7 +39899,7 @@ function sec_configured(m) {
 	let mode = sec_mode(m);
 	if (mode == "iface") return s(m.interface) != "";
 	if (mode == "sub") return length(sub_urls(m)) > 0;
-	if (mode == "json") return s(m.outbound_json) != "";
+	if (mode == "json" || mode == "direct") return s(m.outbound_json) != "";
 	return length(sec_links(m)) > 0;
 }
 
@@ -41291,7 +41291,7 @@ function cmd_set() {
 		for (let x in sec_list(c, p0))
 			if (x.name != sec && fold(x.label) == fold(label)) fail("секция «" + label + "» уже есть — выберите другое название");
 	let mode = s(d.mode);
-	if (index([ "links", "sub", "iface" ], mode) < 0) fail("неизвестный способ подключения");
+	if (index([ "links", "sub", "iface", "direct" ], mode) < 0) fail("неизвестный способ подключения");
 
 	let links = [];
 	for (let l in lines(d.links))
@@ -41339,7 +41339,7 @@ function cmd_set() {
 	let all = d.all == null ? all_ips(c.get_all(CFG, sec) || {}) : uniq(tokens(d.all));
 	for (let x in [ ...full, ...excl, ...all ]) if (!valid_ip(x)) fail("неверный адрес устройства: " + x);
 	if (length(all) > 64) fail("устройств с полным трафиком через VPN можно выбрать не больше 64");
-	if (!length(all) && !length(services) && !length(rsets) && !length(rsubs) && !length(rnets) && !length(domains) && !length(subnets) && !length(lists) && (length(full) || created || !sec_configured(c.get_all(CFG, sec) || {})))
+	if (mode != "direct" && !length(all) && !length(services) && !length(rsets) && !length(rsubs) && !length(rnets) && !length(domains) && !length(subnets) && !length(lists) && (length(full) || created || !sec_configured(c.get_all(CFG, sec) || {})))
 		fail(!own_on && (length(keep.domains) || length(keep.subnets) || length(keep.lists))
 			? "«Свой список» выключен, а других сервисов в секции нет — включите его или выберите сервис"
 			: "выберите для секции хотя бы один сервис, домен или адрес — устройства только ограничивают её правила");
@@ -41373,7 +41373,7 @@ function cmd_set() {
 	}
 
 	let xstr = trim(s(d.exclude));
-	if (mode == "iface") xstr = "";
+	if (mode == "iface" || mode == "direct") xstr = "";
 	if (match(xstr, /[\r\n]/) || length(xstr) > 1600) fail("маркеры — одной строкой через |, не длиннее 1600 символов");
 	let xv = { m: excl_list(xstr), h: mode == "iface" ? [] : rawlist(c.get(CFG, sec, "zm_hide")) };
 	if (length(xv.m) > 40) fail("маркеров можно указать не больше 40");
@@ -41387,7 +41387,16 @@ function cmd_set() {
 	c.delete(CFG, sec, "global_proxy");
 
 	del_keys(c, sec, [ ...LINK_KEYS, "outbound_json", "subscription_url", "interface", "subscription_filter_exclude_keywords", "subscription_filter_include_keywords" ]);
-	if (mode == "iface") {
+	c.delete(CFG, sec, "zm_direct");
+	if (mode == "direct" && is_main) fail("основная секция не может быть «Напрямую» — режим доступен дополнительным секциям");
+	if (mode == "direct") {
+		c.set(CFG, sec, "connection_type", "proxy");
+		c.set(CFG, sec, "proxy_config_type", "outbound");
+		c.set(CFG, sec, "outbound_json", '{"type":"urltest","outbounds":["direct-out"],"interval":"3m"}');
+		c.set(CFG, sec, "zm_direct", "1");
+		del_keys(c, sec, [ "zm_links", "zm_exclude", "zm_hide", "subscription_update_interval" ]);
+	}
+	else if (mode == "iface") {
 		c.set(CFG, sec, "connection_type", "vpn");
 		c.delete(CFG, sec, "proxy_config_type");
 		c.set(CFG, sec, "interface", iface);
@@ -67606,7 +67615,7 @@ function dnsBoots(t, servers) {
 var TABS = [ { id: 'conn', label: 'Подключение' }, { id: 'svc', label: 'Сервисы' }, { id: 'dev', label: 'Устройства' }, { id: 'byp', label: 'Исключения', common: true }, { id: 'set', label: 'Настройки', common: true } ];
 function isSecTab(id) { return id === 'conn' || id === 'svc' || id === 'dev'; }
 var SEC_MAX = 9;
-var MODES = [ { id: 'links', label: 'Серверы' }, { id: 'sub', label: 'Подписка' }, { id: 'iface', label: 'Туннель' } ];
+var MODES = [ { id: 'links', label: 'Серверы' }, { id: 'sub', label: 'Подписка' }, { id: 'direct', label: 'Напрямую (без VPN)' }, { id: 'iface', label: 'Туннель' } ];
 var SUB_FMT = [ { id: 'auto', label: 'Авто' }, { id: 'xray', label: 'Xray JSON (Happ)' }, { id: 'singbox', label: 'sing-box' } ];
 var SUB_GROUP = [ { id: 'off', label: 'Нет' }, { id: 'country', label: 'По флагу страны' }, { id: 'prefix', label: 'По началу имени' } ];
 var RL_FPS = [ { id: 'chrome', label: 'Chrome' }, { id: 'firefox', label: 'Firefox' }, { id: 'safari', label: 'Safari' }, { id: 'edge', label: 'Edge' }, { id: 'ios', label: 'iOS' }, { id: 'random', label: 'Random' }, { id: 'randomized', label: 'Randomized' } ];
@@ -67850,6 +67859,7 @@ function dnsLabel(d) {
 function secConn(s) {
 	if (!s) return '';
 	if (s.mode === 'iface') return (/^zmwarp/.test(s.iface || '') ? 'WARP · ' : 'Туннель · ') + (s.iface || '—');
+	if (s.mode === 'direct') return 'напрямую (без VPN)';
 	if (s.mode === 'sub') return 'подписка';
 	return s.links ? nn(s.links, 'сервер', 'сервера', 'серверов') : 'серверы';
 }
@@ -68149,7 +68159,7 @@ return view.extend({
 				mode: draft.mode, links: draft.links, sub: textLines(draft.sub)[0] || '', subs: textLines(draft.sub), sub_interval: draft.sub_interval,
 				x: extPick(draft, SEC_EXT), g: extPick(draft, SET_EXT),
 				iface: draft.iface, fastest: true, refs: refsOf(draft), own_on: draft.own_on !== false, domains: draft.domains,
-				exclude: draft.mode === 'iface' ? '' : draft.exclude,
+				exclude: (draft.mode === 'iface' || draft.mode === 'direct') ? '' : draft.exclude,
 				subnets: draft.subnets, lists: draft.lists, full: draft.full, all: draft.all, excl: draft.excl,
 				dns: { type: draft.dns.type, servers: draft.dns.servers, bootstraps: draft.dns.bootstraps, server: draft.dns.servers[0], bootstrap: draft.dns.bootstraps[0], detour: draft.dns.detour, pool: CAPS.dns_pool && draft.dns.servers.length > 1 ? draft.dns.pool || '' : '' }, quic_off: draft.quic_off, list_interval: draft.list_interval, lists_via: draft.lists_via
 			});
@@ -68191,7 +68201,7 @@ return view.extend({
 			}
 			var rf = refsOf(draft);
 			var ownN = textLines(draft.domains).length + textLines(draft.subnets).length + textLines(draft.lists).length;
-			if (!rf.c.length && !rf.s.length && !rf.r.length && !rf.n.length && !rf.l.length && (!ownN || draft.own_on === false) && !draft.all.length && (draft.full.length || !secExists()))
+			if (draft.mode !== 'direct' && !rf.c.length && !rf.s.length && !rf.r.length && !rf.n.length && !rf.l.length && (!ownN || draft.own_on === false) && !draft.all.length && (draft.full.length || !secExists()))
 				return [ 'svc', ownN ? '«Свой список» выключен, а других сервисов в секции «' + secName() + '» нет — включите его или выберите сервис'
 					: 'Выберите хотя бы один сервис, домен или адрес для секции «' + secName() + '» — устройства только ограничивают её правила' ];
 			var badOwn = tokLines(draft.domains).map(domainProblem).filter(Boolean)[0];
@@ -68921,7 +68931,7 @@ return view.extend({
 				}
 				box.appendChild(sw(draft.sub_insecure, 'Не проверять сертификат подписки', 'Только для панелей по IP-адресу с самоподписанным сертификатом. Небезопасно: подписку могут подменить по дороге.', function() { set('sub_insecure', !draft.sub_insecure); }));
 			}
-			if (draft.mode !== 'iface') {
+			if (draft.mode !== 'iface' && draft.mode !== 'direct') {
 				box.appendChild(E('h4', {}, 'Автовыбор сервера'));
 				var prio = draft.mode === 'sub' && draft.sub_priority, am = prio ? 'priority' : draft.ping_auto ? 'ping' : draft.ut_guard ? 'guard' : 'latency';
 				var AM = [ { id: 'latency', label: 'По задержке' }, { id: 'guard', label: 'По задержке + быстрая замена' }, { id: 'ping', label: 'По пингу' } ];
@@ -68971,7 +68981,7 @@ return view.extend({
 				}
 			}
 			box.appendChild(E('h4', {}, 'Для программ и роутера'));
-			box.appendChild(sw(draft.mixed, 'Локальный прокси HTTP/SOCKS5', 'Программы в сети (браузер, Telegram, торрент-клиент) смогут ходить через подключение ' + (many ? 'секции «' + secName() + '»' : 'Forkozz') + ' целиком, если указать им прокси ' + lanIp() + ':' + (draft.mixed_port.trim() || '2080') + '. Работает на всех устройствах домашней сети, без логина.', function() { set('mixed', !draft.mixed); }));
+			box.appendChild(sw(draft.mixed, 'Локальный прокси HTTP/SOCKS5', 'Программы в сети (браузер, Telegram, торрент-клиент) смогут ходить через подключение ' + (draft.mode === 'direct' ? 'напрямую, без VPN' : 'через подключение ' + (many ? 'секции «' + secName() + '»' : 'Forkozz') + ' целиком') + ', если указать им прокси ' + lanIp() + ':' + (draft.mixed_port.trim() || '2080') + '. Работает на всех устройствах домашней сети, без логина.', function() { set('mixed', !draft.mixed); }));
 			if (draft.mixed) box.appendChild(row('Порт', inp('mixed_port', '2080', 90, many ? 'у каждой секции — свой' : '')));
 			box.appendChild(sw(draft.real_ip, 'Узнавать настоящий IP сайтов', 'Forkozz сам найдёт IP-адрес сайта перед выбором маршрута — тогда правила по подсетям срабатывают и для запросов по домену. Нужно редко.', function() { set('real_ip', !draft.real_ip); }));
 		}
@@ -68989,9 +68999,12 @@ return view.extend({
 				connCard.appendChild(row('Название', nameIn));
 				if (!draft.isMain) connCard.appendChild(sw(draft.enabled, 'Секция включена', draft.enabled ? 'Выбранные в ней сервисы идут через её подключение.' : 'Секция сохранена, но не работает — её сервисы идут напрямую или через другие секции.', function() { set('enabled', !draft.enabled); renderSections(); }));
 			}
-			connCard.appendChild(row('Способ', seg(MODES, draft.mode, function(m) { set('mode', m); })));
+			connCard.appendChild(row('Способ', seg(draft.isMain ? MODES.filter(function(m) { return m.id !== 'direct'; }) : MODES, draft.mode, function(m) { set('mode', m); })));
 
-			if (draft.mode === 'links') {
+			if (draft.mode === 'direct') {
+				connCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Секция без VPN: серверы не нужны. Трафик локального прокси (включите ниже) и домены из вкладки «Сервисы», если добавите, идут напрямую через интернет-подключение роутера, с домашним RU-IP.'));
+			}
+			else if (draft.mode === 'links') {
 				connCard.appendChild(linksEd);
 				connCard.appendChild(row('Распознано', linkCountEl));
 				renderLinkCount();
