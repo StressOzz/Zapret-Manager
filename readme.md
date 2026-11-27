@@ -4,7 +4,7 @@
 
 **Одна панель для обхода блокировок на роутере OpenWrt — Zapret, Steer, Forkozz, ByeTube, Mixomo, TG WS Proxy, AmneziaWG, DoH, блокировка рекламы и hosts в одном месте.**
 
-[![StressKVN](https://img.shields.io/badge/StressKVN-обход_белых_списков-3C3489?style=for-the-badge)](https://stresskvn.lol/)
+[![StressKVN](https://img.shields.io/badge/StressKVN-VPN_/_обход_белых_списков-3C3489?style=for-the-badge)](https://stresskvn.lol/)
 [![Telegram](https://img.shields.io/badge/Telegram-сообщество-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/stressozz_manager)
 
 [![Views](https://gitviews.com/repo/StressOzz/Zapret-Manager.svg?style=for-the-badge&label=Views&label-color=%23555&color=%2310B981&base=559060)](https://github.com/StressOzz/Zapret-Manager)
@@ -24,7 +24,7 @@
 - ⚡ Высокая скорость и безлимитный трафик
 - 🎁 Бесплатный тест на 3 дня
 
-👉 Подробнее: **[StressKVN на GitHub](https://github.com/StressOzz/StressKVN)**
+👉 Подробнее: **[StressKVN на GitHub](https://github.com/StressOzz/StressKVN)** или на сайте [**stresskvn.lol**](https://stresskvn.lol/)
 
 ---
 
