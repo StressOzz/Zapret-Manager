@@ -24655,7 +24655,7 @@ _mt_all_strip() {
 _mt_all_add() {
 	local ifc
 	ifc="$(awk '/^groups:/ { g = 1; next } /^[^ -]/ { g = 0 } g && /^  interface:/ { sub(/^  interface:[ \t]*/, ""); gsub(/["\047\r]/, ""); print; exit }' "$1")"
-	printf '%s' "$ifc" | grep -qE '^[A-Za-z0-9_.-]+$' || ifc=Mihomo
+	printf '%s' "$ifc" | grep -qE '^[A-Za-z0-9_.-]+$' || ifc="Mihomo$(_mx_primary)"
 	awk -v ID="$MT_ALL_GID" -v RID="$MT_ALL_RID" -v IF="$ifc" '
 		function blk() {
 			print "- id: " ID; print "  name: Весь трафик через Mixomo"; print "  color: \047#f97316\047"; print "  interface: " IF; print "  enable: true"
@@ -24697,7 +24697,7 @@ _mt_all_set() {
 }
 
 _mt_apply_list() {
-	local new="$MAGITRICKLE_CONF.new" out="$MAGITRICKLE_CONF.zmtmp" keep=""
+	local new="$MAGITRICKLE_CONF.new" out="$MAGITRICKLE_CONF.zmtmp" keep="" first
 	_mt_all_on && keep=1
 	mkdir -p "$(dirname "$MAGITRICKLE_CONF")"
 	rm -f "$new" "$out"
@@ -24716,6 +24716,11 @@ _mt_apply_list() {
 	fi
 	rm -f "$new"
 	[ -s "$out" ] && grep -q '^groups:' "$out" || { rm -f "$out"; return 1; }
+	first="$(_mx_primary)"
+	if [ -n "$first" ]; then
+		_mx_magi_interface "Mihomo$first" "$out" > "$new" &&
+			mv -f "$new" "$out" || { rm -f "$out" "$new"; return 1; }
+	fi
 	mv -f "$out" "$MAGITRICKLE_CONF"
 	if [ -n "$keep" ] && ! _mt_all_on; then
 		_mt_all_add "$MAGITRICKLE_CONF" > "$out" && grep -q '^groups:' "$out" && mv -f "$out" "$MAGITRICKLE_CONF"
@@ -24740,7 +24745,18 @@ _mt_list_known() {
 		grep -Fq 'url: https://sw.ext.io/ipset/ipset_cf.list' "$MAGITRICKLE_CONF"
 }
 
-do_mixomo_install() {
+do_mixomo_install() { _mx_with_lock _mx_install "$@"; }
+
+_mx_install() {
+	local primary device
+	primary="$(_mx_primary)"
+	device="$(uci -q get network.Mihomo.device)"
+	case "$primary:$device" in
+		WARP:MihomoWARP|VPN:MihomoVPN) ;;
+		WARP:*|VPN:*|:MihomoWARP|:MihomoVPN)
+			echo "ОШИБКА: конфигурация Mihomo и сетевой интерфейс Mixomo не согласованы"
+			return 1 ;;
+	esac
 	if [ ! -x "$MIHOMO_BIN" ] && _fk_installed; then
 		echo "ОШИБКА: стоит $(_fk_name) — он сам направляет сервисы в туннель. Чтобы поставить Mixomo, удалите $(_fk_name)"
 		return 1
@@ -24810,8 +24826,18 @@ do_mixomo_install() {
 			echo "ОШИБКА: новое ядро Mihomo не запускается — возможно, неверная архитектура. Прежнее ядро оставлено и продолжает работать"
 			return 1
 		fi
+		if [ -n "$primary" ] && ! GOMEMLIMIT="$(_zm_gml)" "$MIHOMO_BIN.new" -t -d "$MIHOMO_DIR" -f "$MIHOMO_CONF" >/dev/null 2>&1; then
+			rm -f "$MIHOMO_BIN.new" "$tmp"
+			echo "ОШИБКА: новое ядро Mihomo не принимает текущую конфигурацию — действующее ядро оставлено"
+			return 1
+		fi
 		mv -f "$MIHOMO_BIN.new" "$MIHOMO_BIN" || { rm -f "$MIHOMO_BIN.new" "$tmp"; echo "ОШИБКА: не удалось заменить ядро Mihomo — прежнее оставлено и продолжает работать"; return 1; }
 	else
+		if [ -n "$primary" ] && [ -x "$MIHOMO_BIN" ]; then
+			rm -f "$MIHOMO_BIN.new" "$tmp"
+			echo "ОШИБКА: не удалось записать новое ядро Mihomo — действующее ядро оставлено"
+			return 1
+		fi
 		[ -f /etc/init.d/mihomo ] && /etc/init.d/mihomo stop >/dev/null 2>&1
 		rm -f "$MIHOMO_BIN.new"
 		killall mihomo >/dev/null 2>&1
@@ -24881,6 +24907,37 @@ do_mixomo_install() {
 	else
 		opkg list-installed 2>/dev/null | grep -q '^hev-socks5-tunnel ' || { echo "ОШИБКА: не удалось установить hev-socks5-tunnel — проверьте интернет и репозитории пакетов"; return 1; }
 	fi
+	if [ -z "$primary" ]; then _mx_install_single_network; fi
+
+	echo "==> Устанавливаем MagiTrickle"
+	_mt_install || echo "!! MagiTrickle не установился — Mixomo работает и без него, поставить можно позже кнопкой «Переустановить/обновить»"
+
+	if [ -x /etc/init.d/magitrickle ] && ! _mt_list_known; then
+		echo "==> Включаем список Internet Helper в MagiTrickle"
+		_mt_apply_list "$MT_URL_IH1" || echo "!! Не удалось скачать список Internet Helper — его можно выбрать позже на вкладке Mixomo"
+	fi
+
+	echo "==> Запускаем сервисы"
+	/etc/init.d/mihomo restart >/dev/null 2>&1
+	if [ -n "$primary" ]; then
+		_mx_ready "$primary" && /etc/init.d/hev-socks5-tunnel start >/dev/null 2>&1 ||
+			{ echo "ОШИБКА: не удалось запустить оба выхода Mixomo после обновления"; return 1; }
+	fi
+	if [ -x /etc/init.d/magitrickle ]; then
+		/etc/init.d/magitrickle enable >/dev/null 2>&1
+		/etc/init.d/magitrickle restart >/dev/null 2>&1
+		_mt_wait_running || echo "!! MagiTrickle перезапущен, но процесс magitrickled не найден — проверьте системный журнал"
+	fi
+
+	if [ ! -f "$MIHOMO_DIR/.ui_panel" ]; then
+		echo "==> Устанавливаем веб-панель MetaCubeXD (по умолчанию)"
+		do_mixomo_ui_install metacubexd || echo "!! Не удалось установить веб-панель — можно поставить позже вручную"
+	fi
+
+	echo "==> Готово, Mixomo установлен"
+}
+
+_mx_install_single_network() {
 	mkdir -p /etc/hev-socks5-tunnel
 	printf '%s\n' 'tunnel:' '  name: Mihomo' '  mtu: 8500' '  multi-queue: false' '  ipv4: 198.18.0.1' \
 		'socks5:' '  port: 7890' '  address: 127.0.0.1' "  udp: 'udp'" > /etc/hev-socks5-tunnel/main.yml
@@ -24930,32 +24987,11 @@ do_mixomo_install() {
 	uci set "firewall.${fw_fwd}.dest=Mihomo"
 	uci commit firewall
 	/etc/init.d/firewall restart >/dev/null 2>&1
-
-	echo "==> Устанавливаем MagiTrickle"
-	_mt_install || echo "!! MagiTrickle не установился — Mixomo работает и без него, поставить можно позже кнопкой «Переустановить/обновить»"
-
-	if [ -x /etc/init.d/magitrickle ] && ! _mt_list_known; then
-		echo "==> Включаем список Internet Helper в MagiTrickle"
-		_mt_apply_list "$MT_URL_IH1" || echo "!! Не удалось скачать список Internet Helper — его можно выбрать позже на вкладке Mixomo"
-	fi
-
-	echo "==> Запускаем сервисы"
-	/etc/init.d/mihomo restart >/dev/null 2>&1
-	if [ -x /etc/init.d/magitrickle ]; then
-		/etc/init.d/magitrickle enable >/dev/null 2>&1
-		/etc/init.d/magitrickle restart >/dev/null 2>&1
-		_mt_wait_running || echo "!! MagiTrickle перезапущен, но процесс magitrickled не найден — проверьте системный журнал"
-	fi
-
-	if [ ! -f "$MIHOMO_DIR/.ui_panel" ]; then
-		echo "==> Устанавливаем веб-панель MetaCubeXD (по умолчанию)"
-		do_mixomo_ui_install metacubexd || echo "!! Не удалось установить веб-панель — можно поставить позже вручную"
-	fi
-
-	echo "==> Готово, Mixomo установлен"
 }
 
-do_mixomo_remove() {
+do_mixomo_remove() { _mx_with_lock _mx_remove "$@"; }
+
+_mx_remove() {
 	local fw_section rc=0
 	echo "==> Останавливаем Mihomo"
 	_zm_svc_off mihomo
@@ -24976,6 +25012,7 @@ do_mixomo_remove() {
 	if [ -x /etc/init.d/bytetube ]; then
 		echo "   · hev-socks5-tunnel нужен ByeTube — пакет оставляем, убираем только настройки Mixomo"
 		uci -q delete hev-socks5-tunnel.@instance[0]
+		uci -q delete hev-socks5-tunnel.zm_parallel
 		uci commit hev-socks5-tunnel 2>/dev/null
 	else
 		_zm_pkg_purge hev-socks5-tunnel || rc=1
@@ -25027,6 +25064,13 @@ mixomo_action() {
 			fi
 			job_start mixomo_install do_mixomo_install ;;
 		remove)  job_start mixomo_remove do_mixomo_remove ;;
+		api_open|api_secret|start|stop|restart) _mx_with_lock _mx_service_action "$action" ;;
+		*) echo '{"error":"неизвестное действие"}' ;;
+	esac
+}
+
+_mx_service_action() {
+	case "$1" in
 		api_open) _mx_access open ;;
 		api_secret) _mx_access secret ;;
 		start)
@@ -25047,7 +25091,6 @@ mixomo_action() {
 			[ -x /etc/init.d/hev-socks5-tunnel ] && /etc/init.d/hev-socks5-tunnel restart >/dev/null 2>&1
 			[ -x /etc/init.d/magitrickle ] && /etc/init.d/magitrickle restart >/dev/null 2>&1
 			mixomo_status ;;
-		*) echo '{"error":"неизвестное действие"}' ;;
 	esac
 }
 
@@ -25056,23 +25099,21 @@ mixomo_config_get() {
 	printf '{"content":"%s"}\n' "$(esc_ml "$(cat "$MIHOMO_CONF")")"
 }
 
-mixomo_config_set() {
-	local content="$1"
+mixomo_config_set() { _mx_with_config_lock _mx_config_set "$@"; }
+
+_mx_config_set() {
+	local content="$1" primary
 	[ -x /etc/init.d/mihomo ] || { echo '{"error":"Mixomo не установлен"}'; return 1; }
-	cp "$MIHOMO_CONF" "$MIHOMO_CONF.bak" 2>/dev/null
-	printf '%s' "$content" > "$MIHOMO_CONF"
-	{ [ -s "$MIXOMO_EXCL" ] || [ -s "$MIXOMO_HIDE" ]; } && _mx_filter_apply
-	/etc/init.d/mihomo restart >/dev/null 2>&1
-	sleep 1
-	if pidof mihomo >/dev/null 2>&1; then
-		cmp -s "$MIHOMO_CONF" "$MIHOMO_CONF.bak" 2>/dev/null || rm -f "$MIXOMO_SUB_PREV"
-		printf '{"ok":true}\n'
-	else
-		cp "$MIHOMO_CONF.bak" "$MIHOMO_CONF" 2>/dev/null
-		/etc/init.d/mihomo restart >/dev/null 2>&1
-		echo '{"error":"mihomo не запустился с новой конфигурацией — изменения отменены, проверьте синтаксис"}'
-		return 1
-	fi
+	cp -p "$MIHOMO_CONF" "$dir/original" && printf '%s' "$content" > "$dir/config" || return 1
+	primary="$(_mx_primary "$dir/original")"
+	[ "$(_mx_primary "$dir/config")" = "$primary" ] ||
+		{ echo '{"error":"сохраните строку ZM Mixomo primary без изменений — она связывает конфигурацию с интерфейсами Mixomo"}'; return 1; }
+	_mx_apply_filters "$dir" || return 1
+	_mx_apply_config "$dir" "$primary" ||
+		{ echo '{"error":"не удалось применить конфигурацию Mihomo — проверьте синтаксис и настройки интерфейсов"}'; return 1; }
+	_mx_save_filter_state "$dir"
+	cmp -s "$dir/original" "$MIHOMO_CONF" || rm -f "$MIXOMO_SUB_PREV"
+	printf '{"ok":true}\n'
 }
 
 _mx_filter_rx() {
@@ -25150,7 +25191,7 @@ _mx_secret_ensure() {
 	[ -f "$MX_OPEN" ] && { _mx_secret_clear "$f"; return 1; }
 	grep -q '^external-controller:' "$f" || return 1
 	[ -n "$(_mx_secret_get "$f")" ] && return 1
-	sec="$(head -c 512 /dev/urandom 2>/dev/null | tr -dc 'A-HJ-NP-Za-km-z2-9' | head -c 24)"
+	sec="$(head -c 512 /dev/urandom 2>/dev/null | LC_ALL=C tr -dc 'A-HJ-NP-Za-km-z2-9' | head -c 24)"
 	[ "${#sec}" -ge 16 ] || return 1
 	t="$f.zmsec.$$"
 	if grep -q '^secret:' "$f"; then
@@ -25161,6 +25202,11 @@ _mx_secret_ensure() {
 	if [ -s "$t" ] && grep -q "^secret: $sec\$" "$t"; then cat "$t" > "$f"; chmod 600 "$f" 2>/dev/null; rm -f "$t"; return 0; fi
 	rm -f "$t"
 	return 1
+}
+
+_mx_prepare_api_secret() {
+	grep -q '^external-controller:' "$1" || return 0
+	_mx_secret_ensure "$1" || [ -f "$MX_OPEN" ] || [ -n "$(_mx_secret_get "$1")" ]
 }
 
 mixomo_secure() {
@@ -25211,7 +25257,9 @@ _mx_filter_apply() {
 	if [ -n "$line" ]; then printf '%s\n' "$line" > "$MIHOMO_DIR/.zm_filter_line"; else rm -f "$MIHOMO_DIR/.zm_filter_line"; fi
 }
 
-mixomo_filter_set() {
+mixomo_filter_set() { _mx_with_config_lock _mx_filter_set "$@"; }
+
+_mx_filter_set() {
 	local m="$1" was=0 nf="$JOBS_DIR/mixomo.hide.in" mk="" hasmk=0
 	[ -x /etc/init.d/mihomo ] || { echo '{"error":"Mixomo не установлен"}'; return 1; }
 	case "$m" in
@@ -25264,8 +25312,9 @@ mixomo_filter_set() {
 }
 
 _mx_has_sub() {
-	[ -f "$MIHOMO_CONF" ] || return 1
-	awk '{ t = $0; sub(/\r$/, "", t) } t ~ /^[^ \t#]/ { s = (t ~ /^proxy-providers:[ \t]*(#.*)?$/) } s && t ~ /^[ \t]+url:[ \t]*["\047]?https?:/ { f = 1; exit } END { exit !f }' "$MIHOMO_CONF"
+	local scope="${1:-any}" cfg="${2:-$MIHOMO_CONF}"
+	if [ "$#" = 0 ] && [ -n "$(_mx_primary "$cfg")" ]; then scope=managed; fi
+	_mx_http_provider "$cfg" "$scope"
 }
 
 _mx_sub_strip() {
@@ -25314,69 +25363,365 @@ _mx_sub_strip() {
 }
 
 mixomo_subscription_clear() {
-	local tmp="$MIHOMO_CONF.zm-clear" was="" how
+	local how
 	[ -x /etc/init.d/mihomo ] || { echo '{"error":"Mixomo не установлен"}'; return 1; }
-	[ -f "$MIHOMO_CONF" ] || { echo '{"error":"конфигурация Mihomo не найдена"}'; return 1; }
 	if [ -s "$MIXOMO_SUB_PREV" ]; then
-		cp -f "$MIXOMO_SUB_PREV" "$tmp"
+		cp "$MIXOMO_SUB_PREV" "$dir/config" || return 1
 		how=restored
 	else
-		_mx_has_sub || grep -q '^proxy-providers:' "$MIHOMO_CONF" || { echo '{"error":"подписки в конфигурации нет — очищать нечего"}'; return 1; }
-		_mx_sub_strip "$MIHOMO_CONF" > "$tmp" && [ -s "$tmp" ] || { rm -f "$tmp"; echo '{"error":"не получилось разобрать конфигурацию — уберите подписку вручную в редакторе конфигурации"}'; return 1; }
+		_mx_has_sub any "$dir/original" || { echo '{"error":"подписки в конфигурации нет — очищать нечего"}'; return 1; }
+		_mx_stock_provider "$dir/original" || { echo '{"error":"уберите подписку из пользовательской конфигурации в редакторе Mihomo"}'; return 1; }
+		_mx_sub_strip "$dir/original" > "$dir/config" || return 1
 		how=removed
 	fi
-	if [ -x "$MIHOMO_BIN" ] && ! GOMEMLIMIT="$(_zm_gml)" "$MIHOMO_BIN" -t -d "$MIHOMO_DIR" -f "$tmp" >/dev/null 2>&1; then
-		rm -f "$tmp"
-		echo '{"error":"без подписки конфигурация не проходит проверку Mihomo — ничего не меняли. Уберите подписку вручную в редакторе конфигурации"}'
-		return 1
-	fi
-	pidof mihomo >/dev/null 2>&1 && was=1
-	cp -f "$MIHOMO_CONF" "$MIHOMO_CONF.bak" 2>/dev/null
-	mv -f "$tmp" "$MIHOMO_CONF"
-	chmod 600 "$MIHOMO_CONF" 2>/dev/null
+	_mx_apply_config "$dir" "" || { echo '{"error":"не удалось применить конфигурацию без подписки"}'; return 1; }
 	rm -rf "$MIHOMO_DIR/proxy-providers"
 	rm -f "$MIHOMO_DIR/.zm_names" "$MIHOMO_DIR/.zm_names_all" "$MIHOMO_DIR/.zm_filter_user" "$MIHOMO_DIR/.zm_filter_line" "$MIXOMO_EXCL" "$MIXOMO_HIDE" "$MIXOMO_SUB_PREV"
-	/etc/init.d/mihomo restart >/dev/null 2>&1
-	sleep 2
-	if [ -n "$was" ] && ! pidof mihomo >/dev/null 2>&1; then
-		cp -f "$MIHOMO_CONF.bak" "$MIHOMO_CONF" 2>/dev/null
-		/etc/init.d/mihomo restart >/dev/null 2>&1
-		echo '{"error":"Mihomo не запустился без подписки — вернули конфигурацию с подпиской"}'
-		return 1
-	fi
 	printf '{"ok":true,"mode":"%s","warp":%s}\n' "$how" "$(grep -q 'type:[[:space:]]*wireguard' "$MIHOMO_CONF" 2>/dev/null && echo true || echo false)"
 }
 
-mixomo_subscription_set() {
+# The first configured exit keeps port 7890 and its existing Mihomo rules.
+_mx_primary() {
+	sed -nE 's/^# ZM Mixomo primary: (WARP|VPN)$/\1/p' "${1:-$MIHOMO_CONF}" 2>/dev/null | sed -n '1p'
+}
+
+_mx_warp_present() {
+	awk ' /^[^ \t#]/ { p = ($0 ~ /^proxies:[ \t]*(#.*)?$/) }
+		p && /^  - name: WARP[ \t]*$/ { found = 1 }
+		END { exit !found }' "$MIHOMO_CONF" 2>/dev/null
+}
+
+# Change only a named entry in the block-style YAML written by Mixomo.
+# Unsupported forms are left to the configuration editor.
+_mx_yaml_entry() {
+	awk -v key="$2" -v entry="$3" -v part="$4" -v required="${5:-}" '
+		function emit(   line) {
+			while ((getline line < part) > 0) print line
+			close(part)
+		}
+		{
+			line = $0; sub(/\r$/, "", line)
+			if (line ~ /^[^ \t#]/) {
+				if (in_section && !inserted) { emit(); inserted = 1 }
+				in_section = 0; skip = 0
+				if (index(line, key ":") == 1) {
+					if (++seen > 1 || line !~ ( "^" key ":[ \t]*(\\[\\]|\\{\\})?[ \t]*(#.*)?$" )) { invalid = 1; exit }
+					print key ":"; in_section = 1; next
+				}
+			}
+			if (in_section && line == entry) {
+				if (inserted) { invalid = 1; exit }
+				emit(); inserted = matched = 1; skip = 1; next
+			}
+			if (skip && (line ~ /^   / || line ~ /^[ \t]*(#.*)?$/)) next
+			skip = 0
+			print $0
+		}
+		END {
+			if (invalid || (required && !matched)) exit 1
+			if (!seen) print key ":"
+			if (!inserted) emit()
+		}' "$1"
+}
+
+_mx_provider() {
 	local sub_url="$1"
-	[ "$sub_url" = clear ] && { mixomo_subscription_clear; return; }
-	case "$sub_url" in
-		http://*|https://*) ;;
-		*) echo '{"error":"ссылка должна начинаться с http:// или https://"}'; return 1 ;;
-	esac
-	case "$sub_url" in *[[:space:]\"\\]*) echo '{"error":"в ссылке не должно быть пробелов, кавычек и обратных косых черт"}'; return 1 ;; esac
-	[ -x /etc/init.d/mihomo ] || { echo '{"error":"Mixomo не установлен"}'; return 1; }
-	/etc/init.d/mihomo stop >/dev/null 2>&1
-	rm -rf "$MIHOMO_DIR/proxy-providers" "$MIHOMO_DIR/proxies"
-	rm -f "$MIHOMO_DIR/.zm_names" "$MIHOMO_DIR/.zm_names_all"
+	printf '%s\n' '  Подписка:' '    type: http' '    proxy: DIRECT' \
+		'    header:' '      x-hwid:' '        - b6e2d53b1b2c8618719f42fb95ab1e43' \
+		"    url: \"$sub_url\"" '    interval: 43200' '    health-check:' \
+		'      enable: true' '      interval: 300' '      url: "https://google.com/generate_204"' '      expected-status: 204'
+}
 
-	if grep -q '^[[:space:]]*proxy-providers:' "$MIHOMO_CONF" 2>/dev/null; then
-		local tmp
-		tmp=$(mktemp)
-		if ZM_URL="$sub_url" awk 'BEGIN { url = ENVIRON["ZM_URL"]; updated = 0; in_provider = 0; section = "" } { if ($0 ~ /^[a-zA-Z_-]+:/) { section = $0; sub(/:.*/, "", section) } if (!updated && section == "proxy-providers" && $0 ~ /^[[:space:]]*type:[[:space:]]*http[[:space:]]*$/) { in_provider = 1; print; next } if (!updated && in_provider && $0 ~ /^[[:space:]]*url:[[:space:]]*["\047]?https?:/) { match($0, /^[[:space:]]*/); print substr($0, 1, RLENGTH) "url: \"" url "\""; updated = 1; in_provider = 0; next } print } END { exit (updated ? 0 : 1) }' "$MIHOMO_CONF" > "$tmp"
-		then
-			mv "$tmp" "$MIHOMO_CONF"
-			{ [ -s "$MIXOMO_EXCL" ] || [ -s "$MIXOMO_HIDE" ]; } && _mx_filter_apply
-			/etc/init.d/mihomo restart >/dev/null 2>&1
-			printf '{"ok":true,"mode":"updated"}\n'
-			return 0
-		fi
-		rm -f "$tmp"
+_mx_disabled_provider() {
+	printf '%s\n' '  Подписка:' '    type: inline' '    payload:' \
+		'      - name: VPN отключён' '        type: reject'
+}
+
+_mx_dual_config() {
+	local first="$1" dir="$2" second=WARP
+	grep -Eq '^mode:[ \t]*rule[ \t]*(#.*)?$' "$dir/combined" &&
+		grep -Eq '^mixed-port:[ \t]*7890[ \t]*(#.*)?$' "$dir/combined" || return 1
+	if [ "$first" = WARP ]; then
+		second=VPN
+		if grep -Eq '^[[:space:]]*-[[:space:]]*name:[[:space:]]*VPN[[:space:]]*(#.*)?$' "$dir/combined"; then return 1; fi
+		printf '%s\n' '  - name: VPN' '    type: fallback' '    use:' '      - Подписка' \
+			'    empty-fallback: REJECT' '    url: https://google.com/generate_204' '    interval: 300' \
+			'    expected-status: 204' > "$dir/group" || return 1
+		_mx_yaml_entry "$dir/combined" proxy-groups '  - name: VPN' "$dir/group" > "$dir/grouped" || return 1
+	else
+		cp "$dir/combined" "$dir/grouped" || return 1
 	fi
+	printf '%s\n' "  - name: zm-mixomo-$second" '    type: socks' '    listen: 127.0.0.1' \
+		'    port: 7891' '    udp: true' "    proxy: $second" > "$dir/listener" || return 1
+	if grep -Eq "^[[:space:]]*-[[:space:]]*name:[[:space:]]*[\"']?zm-mixomo-(VPN|WARP)([\"']|[[:space:]#]|$)" "$dir/grouped"; then return 1; fi
+	_mx_yaml_entry "$dir/grouped" listeners "  - name: zm-mixomo-$second" "$dir/listener" > "$dir/listening" || return 1
+	awk -v first="$first" '
+		BEGIN { print "# ZM Mixomo primary: " first }
+		/^rules:[ \t]*(#.*)?$/ && first=="WARP" {
+			found++
+			print
+			print "  - IN-PORT,7890,WARP"
+			next
+		}
+		{ print }
+		END { if (first=="WARP" && found!=1) exit 1 }' "$dir/listening" > "$dir/config"
+}
 
-	[ -s "$MIHOMO_CONF" ] && cp -f "$MIHOMO_CONF" "$MIHOMO_CONF.bak" 2>/dev/null
-	rm -f "$MIXOMO_SUB_PREV"
-	[ -s "$MIHOMO_CONF" ] && ! _mx_has_sub && cp -f "$MIHOMO_CONF" "$MIXOMO_SUB_PREV" 2>/dev/null
+# Existing VPN-first installs may have a PR preview rule that shadowed GLOBAL and YouTube.
+# Block the primary VPN port explicitly only while its subscription is cleared.
+_mx_primary_vpn_rules() {
+	local cfg="$1" block=0
+	_mx_has_sub managed "$cfg" || block=1
+	awk -v block="$block" '
+		/^[^ \t#]/ { in_rules = ($0 ~ /^rules:[ \t]*(#.*)?$/) }
+		in_rules && /^  - IN-PORT,7890,(VPN|REJECT # ZM subscription cleared)$/ { next }
+		/^rules:[ \t]*(#.*)?$/ {
+			found++
+			print
+			if (block) print "  - IN-PORT,7890,REJECT # ZM subscription cleared"
+			next
+		}
+		{ print }
+		END { if (block && found!=1) exit 1 }' "$cfg"
+}
+
+_mx_is_ready() {
+	if [ -z "$1" ]; then
+		pidof mihomo >/dev/null 2>&1
+		return
+	fi
+	netstat -lntp 2>/dev/null | awk '
+		$1 == "tcp" && $NF ~ /^[0-9]+\/mihomo$/ {
+			if ($4 == "127.0.0.1:7890") primary = $NF
+			if ($4 == "127.0.0.1:7891") secondary = $NF
+		}
+		END { exit !(primary != "" && primary == secondary) }'
+}
+
+_mx_ready() {
+	local i=0
+	while [ "$i" -lt 10 ]; do
+		_mx_is_ready "$1" && return 0
+		sleep 1; i=$((i + 1))
+	done
+	return 1
+}
+
+_mx_restore_file() {
+	[ -f "$2" ] || return 0
+	cmp -s "$1" "$3" && return 0
+	cmp -s "$2" "$3" && mv -f "$1" "$3"
+}
+
+_mx_restore_config() {
+	local dir="$1" action
+	_mx_restore_file "$dir/original" "$dir/config.applied" "$MIHOMO_CONF" ||
+		{ echo '   · конфигурация Mihomo изменилась во время применения, автоматический откат пропущен' >&2; return 1; }
+	if [ -f "$dir/mihomo.was_running" ]; then
+		/etc/init.d/mihomo restart >/dev/null 2>&1 && _mx_ready "$(_mx_primary "$MIHOMO_CONF")"
+	else
+		/etc/init.d/mihomo stop >/dev/null 2>&1 && ! pidof mihomo >/dev/null 2>&1
+	fi
+}
+
+_mx_apply_config() {
+	local dir="$1" dual="$2"
+	[ -s "$dir/config" ] && GOMEMLIMIT="$(_zm_gml)" "$MIHOMO_BIN" -t -d "$MIHOMO_DIR" -f "$dir/config" >/dev/null 2>&1 || return 1
+	cmp -s "$dir/original" "$MIHOMO_CONF" || return 1
+	cmp -s "$dir/config" "$MIHOMO_CONF" && _mx_is_ready "$dual" && return 0
+	if pidof mihomo >/dev/null 2>&1; then touch "$dir/mihomo.was_running" || return 1; fi
+	cp "$dir/original" "$dir/backup" && mv -f "$dir/backup" "$MIHOMO_CONF.bak" || return 1
+	chmod 600 "$dir/config" && cp -p "$dir/config" "$dir/config.applied" &&
+		cmp -s "$dir/original" "$MIHOMO_CONF" && mv -f "$dir/config" "$MIHOMO_CONF" || return 1
+	if /etc/init.d/mihomo restart >/dev/null 2>&1 && _mx_ready "$dual"; then return 0; fi
+	_mx_restore_config "$dir" || echo '   · не удалось полностью восстановить Mihomo' >&2
+	return 1
+}
+
+# Stage configuration changes in copies and publish only unchanged UCI packages.
+# Use -t for a private save path. The superficially similar -P disables commit.
+_mx_tx_uci() { uci -c "$dir/uci-config" -t "$dir/uci-delta" "$@"; }
+
+_mx_tx_commit() {
+	local package="$1"
+	_mx_tx_uci commit "$package" &&
+		[ ! -s "$dir/uci-delta/$package" ] &&
+		cmp -s "$dir/$package.original" "/etc/config/$package" &&
+		[ -z "$(uci changes "$package")" ] &&
+		cp -p "$dir/uci-config/$package" "$dir/$package.applied" &&
+		mv -f "$dir/uci-config/$package" "/etc/config/$package"
+}
+
+_mx_dual_prepare() {
+	local primary="$1" dir="$2" secondary=WARP package zones zone refs routes
+	[ "$primary" != WARP ] || secondary=VPN
+	mkdir "$dir/uci-config" "$dir/uci-delta" || return 1
+	for package in firewall network hev-socks5-tunnel; do
+		[ -z "$(uci changes "$package")" ] &&
+			cp -p "/etc/config/$package" "$dir/$package.original" &&
+			cp -p "$dir/$package.original" "$dir/uci-config/$package" || return 1
+	done
+	[ "$(uci -q get network.Mihomo.device)" = Mihomo ] || return 1
+	[ ! -e /etc/hev-socks5-tunnel/zm-parallel.yml ] && [ -z "$(uci -q get hev-socks5-tunnel.zm_parallel)" ] || return 1
+	[ ! -e /sys/class/net/MihomoWARP ] && [ ! -e /sys/class/net/MihomoVPN ] || return 1
+	if netstat -ln 2>/dev/null | awk '$1 ~ /^(tcp|udp)/ && $4 ~ /:7891$/ { used=1 } END { exit !used }'; then return 1; fi
+	zones="$(uci -X show firewall | sed -n "s/^\(firewall\.[^.]*\)\.name='Mihomo'$/\1/p")"
+	case "$zones" in firewall.*) zone="$zones" ;; *) return 1 ;; esac
+	case "$zone" in *[[:space:]]*) return 1 ;; esac
+	[ -f /etc/hev-socks5-tunnel/main.yml ] && grep -qx '  name: Mihomo' /etc/hev-socks5-tunnel/main.yml || return 1
+	routes="$(ip -4 route show table all match 198.18.1.1/32)" || return 1
+	[ -z "$(printf '%s\n' "$routes" | awk 'NF && $1!="default" && $2!="default"')" ] || return 1
+	case "$(uci -q get "$zone.input"):$(uci -q get "$zone.forward")" in
+		REJECT:REJECT|DROP:DROP|REJECT:DROP|DROP:REJECT) ;;
+		*) return 1 ;;
+	esac
+	for package in firewall network; do
+		refs="$(_mx_tx_uci -X show "$package")" || return 1
+		if printf '%s\n' "$refs" | grep -Eq "(^|[.= '])Mihomo(WARP|VPN)([.=' ]|$)"; then
+			return 1
+		fi
+	done
+	cp -p /etc/hev-socks5-tunnel/main.yml "$dir/hev" || return 1
+	if grep -Eq '^[[:space:]]+ipv6:' "$dir/hev"; then return 1; fi
+	sed "s/^  name: Mihomo$/  name: Mihomo$primary/" "$dir/hev" > "$dir/main.yml" || return 1
+	sed -e "s/^  name: Mihomo$/  name: Mihomo$secondary/" -e 's/^  ipv4: .*/  ipv4: 198.18.1.1/' \
+		-e 's/^  port: 7890$/  port: 7891/' "$dir/hev" > "$dir/parallel.yml" || return 1
+	grep -qx '  port: 7891' "$dir/parallel.yml" && grep -qx '  ipv4: 198.18.1.1' "$dir/parallel.yml" || return 1
+	if [ -s "$MAGITRICKLE_CONF" ]; then
+		cp -p "$MAGITRICKLE_CONF" "$dir/magi" && cp -p "$dir/magi" "$dir/magi.next" || return 1
+		_mx_magi_interface "Mihomo$primary" "$dir/magi" > "$dir/magi.next" || return 1
+	fi
+	printf '%s\n' "$zone" > "$dir/zone"
+}
+
+_mx_dual_devices() {
+	local primary="$1" dir="$2" secondary=WARP zone package was=0 failed=0
+	[ "$primary" != WARP ] || secondary=VPN
+	zone="$(cat "$dir/zone")" || return 1
+	pidof magitrickled >/dev/null 2>&1 && was=1
+	if _mx_dual_activate "$primary" "$secondary" "$dir" "$zone" "$was"; then return 0; fi
+	for package in firewall network hev-socks5-tunnel; do
+		_mx_restore_file "$dir/$package.original" "$dir/$package.applied" "/etc/config/$package" || failed=1
+	done
+	_mx_restore_file "$dir/hev" "$dir/hev.applied" /etc/hev-socks5-tunnel/main.yml || failed=1
+	if [ -e "$dir/hev.started" ]; then
+		/etc/init.d/hev-socks5-tunnel start >/dev/null 2>&1 || failed=1
+	fi
+	if [ -f "$dir/parallel.applied" ] && [ -e /etc/hev-socks5-tunnel/zm-parallel.yml ]; then
+		cmp -s "$dir/parallel.applied" /etc/hev-socks5-tunnel/zm-parallel.yml &&
+			rm -f /etc/hev-socks5-tunnel/zm-parallel.yml || failed=1
+	fi
+	if [ -e "$dir/magi.restarting" ]; then
+		if [ "$was" = 1 ] && [ -f "$dir/magi.applied" ] && pidof magitrickled >/dev/null 2>&1; then
+			/etc/init.d/magitrickle stop >/dev/null 2>&1 || failed=1
+		fi
+		_mx_restore_file "$dir/magi" "$dir/magi.applied" "$MAGITRICKLE_CONF" || failed=1
+		[ "$was" = 0 ] || { /etc/init.d/magitrickle start >/dev/null 2>&1 && _mt_wait_running; } || failed=1
+	fi
+	if [ -e "$dir/firewall.reloaded" ]; then
+		/etc/init.d/firewall reload >/dev/null 2>&1 || failed=1
+	fi
+	[ "$failed" = 0 ] || echo '   · не удалось полностью восстановить сетевые настройки Mixomo' >&2
+	return 1
+}
+
+_mx_dual_activate() {
+	local primary="$1" secondary="$2" dir="$3" zone="$4" was="$5" i=0
+	_mx_tx_uci add_list "$zone.device=Mihomo$primary" && _mx_tx_uci add_list "$zone.device=Mihomo$secondary" &&
+		_mx_tx_commit firewall && fw4 check >/dev/null 2>&1 &&
+		touch "$dir/firewall.reloaded" && /etc/init.d/firewall reload >/dev/null 2>&1 ||
+		{ echo "   · не удалось применить firewall для интерфейсов Mixomo" >&2; return 1; }
+	chmod 600 "$dir/main.yml" "$dir/parallel.yml" &&
+		cp -p "$dir/main.yml" "$dir/hev.applied" && cp -p "$dir/parallel.yml" "$dir/parallel.applied" &&
+		cmp -s "$dir/hev" /etc/hev-socks5-tunnel/main.yml && [ ! -e /etc/hev-socks5-tunnel/zm-parallel.yml ] &&
+		mv -f "$dir/main.yml" /etc/hev-socks5-tunnel/main.yml &&
+		mv -f "$dir/parallel.yml" /etc/hev-socks5-tunnel/zm-parallel.yml &&
+		_mx_tx_uci set "hev-socks5-tunnel.zm_parallel=instance" && _mx_tx_uci set "hev-socks5-tunnel.zm_parallel.enabled=1" &&
+		_mx_tx_uci set "hev-socks5-tunnel.zm_parallel.conffile=/etc/hev-socks5-tunnel/zm-parallel.yml" &&
+		_mx_tx_commit hev-socks5-tunnel &&
+		touch "$dir/hev.started" && /etc/init.d/hev-socks5-tunnel start >/dev/null 2>&1 ||
+		{ echo "   · не удалось сохранить или запустить конфигурацию HEV" >&2; return 1; }
+	while [ "$i" -lt 10 ] && { [ ! -e /sys/class/net/MihomoWARP ] || [ ! -e /sys/class/net/MihomoVPN ]; }; do
+		sleep 1; i=$((i + 1))
+	done
+	[ -e /sys/class/net/MihomoWARP ] && [ -e /sys/class/net/MihomoVPN ] ||
+		{ echo "   · HEV не поднял оба интерфейса Mixomo" >&2; return 1; }
+	_mx_tx_uci set "network.Mihomo.device=Mihomo$primary" && _mx_tx_commit network ||
+		{ echo "   · не удалось сохранить привязку интерфейса Mixomo в UCI" >&2; return 1; }
+	if [ -s "$dir/magi.next" ] && ! cmp -s "$dir/magi" "$dir/magi.next"; then
+		cmp -s "$dir/magi" "$MAGITRICKLE_CONF" || return 1
+		touch "$dir/magi.restarting" || return 1
+		[ "$was" = 0 ] || /etc/init.d/magitrickle stop >/dev/null 2>&1 || return 1
+		cmp -s "$dir/magi" "$MAGITRICKLE_CONF" && cp -p "$dir/magi.next" "$dir/magi.applied" &&
+			mv -f "$dir/magi.next" "$MAGITRICKLE_CONF" || return 1
+		[ "$was" = 0 ] || { /etc/init.d/magitrickle start >/dev/null 2>&1 && _mt_wait_running; } ||
+			{ echo "   · MagiTrickle не запустился с обновлёнными интерфейсами" >&2; return 1; }
+	fi
+	return 0
+}
+
+_mx_magi_interface() {
+	awk -v inf="$1" '
+		/^[ \t]+interface:[ \t]*("Mihomo"|\047Mihomo\047|Mihomo)[ \t\r]*(#.*)?$/ {
+			sub(/:[ \t]*("Mihomo"|\047Mihomo\047|Mihomo)/, ": " inf)
+		}
+		{ print }' "$2"
+}
+
+_mx_apply_dual() {
+	local dir="$1" primary="$2" was_dual="$3"
+	[ -n "$was_dual" ] || _mx_dual_prepare "$primary" "$dir" || return 1
+	if [ -n "$primary" ] && [ -n "$was_dual" ] &&
+		[ "$(uci -q get network.Mihomo.device)" != "Mihomo$primary" ]; then
+		echo '   · основной интерфейс Mixomo не совпадает с настройкой network.Mihomo.device' >&2
+		return 1
+	fi
+	if [ "$primary" = VPN ]; then
+		_mx_primary_vpn_rules "$dir/config" > "$dir/rules" &&
+			mv -f "$dir/rules" "$dir/config" || return 1
+	fi
+	_mx_apply_config "$dir" "$primary" || return 1
+	[ -z "$was_dual" ] || return 0
+	if _mx_dual_devices "$primary" "$dir"; then return 0; fi
+	_mx_restore_config "$dir" || echo '   · не удалось полностью восстановить Mihomo' >&2
+	return 1
+}
+
+_mx_with_config_lock() { _mx_with_lock _mx_stage_config "$@"; }
+
+_mx_with_lock() (
+	local mask="$(umask)"
+	umask 077
+	local lock="$JOBS_DIR/mixomo.config.lock" lock_dir="" dir=""
+	mkdir -p "$JOBS_DIR" || return 1
+	if command -v flock >/dev/null 2>&1; then
+		exec 9>"$lock" || return 1
+		if ! flock -n 9; then
+			echo '{"error":"идёт изменение конфигурации Mixomo — повторите после завершения"}'
+			return 1
+		fi
+	else
+		lock_dir="$lock.d"
+		find "$lock_dir" -maxdepth 0 -type d -mmin +10 -exec rmdir {} \; 2>/dev/null
+		if ! mkdir "$lock_dir" 2>/dev/null; then
+			echo '{"error":"идёт изменение конфигурации Mixomo — повторите после завершения"}'
+			return 1
+		fi
+	fi
+	trap '[ -z "$dir" ] || rm -rf "$dir"; [ -z "$lock_dir" ] || rmdir "$lock_dir"' EXIT
+	trap 'exit 1' HUP INT TERM
+	umask "$mask"
+	"$@"
+)
+
+_mx_stage_config() {
+	umask 077
+	dir="$(mktemp -d "$MIHOMO_DIR/.zm-config.XXXXXX")" || { echo '{"error":"не удалось подготовить конфигурацию"}'; return 1; }
+	"$@"
+}
+
+_mx_subscription_template() {
+	local sub_url="$1"
 	printf '%s\n' \
 		'mixed-port: 7890' 'allow-lan: false' 'tcp-concurrent: true' 'mode: rule' \
 		'log-level: error' 'ipv6: false' 'external-controller: 0.0.0.0:9090' \
@@ -25395,16 +25740,196 @@ mixomo_subscription_set() {
 		'rule-providers:' '  youtube:' '    type: http' '    format: yaml' \
 		'    behavior: classical' \
 		'    url: "https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/YouTube/YouTube.yaml"' \
-		'    path: ./rule-providers/youtube.yaml' '    interval: 86400' \
-		> "$MIHOMO_CONF"
-	_mx_secret_ensure
-	rm -f "$MIHOMO_DIR/.zm_filter_user" "$MIHOMO_DIR/.zm_filter_line"
-	{ [ -s "$MIXOMO_EXCL" ] || [ -s "$MIXOMO_HIDE" ]; } && _mx_filter_apply
-	/etc/init.d/mihomo restart >/dev/null 2>&1
-	printf '{"ok":true,"mode":"created"}\n'
+		'    path: ./rule-providers/youtube.yaml' '    interval: 86400'
 }
 
-mixomo_magitrickle_list_set() {
+_mx_http_provider() {
+	[ -s "$1" ] || return 1
+	# Record only direct provider fields. A health-check URL is never a subscription.
+	# Reread the file when updating so comments and unrelated providers stay intact.
+	ZM_URL="${3:-}" awk -v scope="$2" '
+		function scalar(s, q, i) {
+			sub(/^[ \t]+/, "", s)
+			q = substr(s, 1, 1)
+			if (q == "\"" || q == "\047") {
+				i = index(substr(s, 2), q)
+				if (!i || substr(s, i + 2) !~ /^[ \t]*(#.*)?$/) return ""
+				return substr(s, 2, i - 1)
+			}
+			sub(/[ \t]+#.*$/, "", s)
+			sub(/[ \t]+$/, "", s)
+			return s
+		}
+		function finish() {
+			if (type == "http" && old ~ /^https?:\/\/[^ \t"\\]+$/ && (scope == "any" || managed)) {
+				found = 1
+				if (url != "" && url != old && path_line && !path_ok) invalid = 1
+				if (url != "" && url != old) {
+					replace = url_line
+					remove = path_line
+				}
+			}
+			type = old = ""; path_line = url_line = path_ok = path_nested = 0; field = -1
+		}
+		BEGIN { url = ENVIRON["ZM_URL"]; entry = -1; field = -1 }
+		url != "" && FNR != NR {
+			if (!found) finish()
+			if (FNR == replace) {
+				match($0, /^ */)
+				print substr($0, 1, RLENGTH) "url: \"" url "\"" ($0 ~ /\r$/ ? "\r" : "")
+			} else if (FNR != remove) print
+			next
+		}
+		found { next }
+		{
+			line = $0; sub(/\r$/, "", line)
+			if (line ~ /^[ \t]*(#.*)?$/) next
+			if (line ~ /^[^ \t]/) {
+				if (section) finish()
+				section = line ~ /^proxy-providers:[ \t]*(#.*)?$/
+				entry = -1; next
+			}
+			if (!section) next
+			match(line, /^ */)
+			indent = RLENGTH
+			line = substr(line, indent + 1)
+			if (entry < 0) entry = indent
+			if (indent == entry) {
+				finish()
+				managed = line ~ /^Подписка:[ \t]*(#.*)?$/
+				next
+			}
+			if (field < 0) field = indent
+			if (indent != field) {
+				if (path_nested) path_ok = 0
+				next
+			}
+			path_nested = 0
+			if (line ~ /^type:[ \t]/) type = scalar(substr(line, 6))
+			if (line ~ /^url:[ \t]/) { old = scalar(substr(line, 5)); url_line = FNR }
+			if (line ~ /^path:[ \t]/) {
+				path_line = FNR
+				path_ok = scalar(substr(line, 6)) ~ /^[^|>!&*[{]/
+				path_nested = 1
+			}
+		}
+		END { if (!found) finish(); exit (!found || invalid) }' "$1" ${3:+"$1"}
+}
+
+_mx_dual_subscription() {
+	local dir="$1" first="$2" sub_url="$3"
+	if [ "$sub_url" != clear ] && _mx_has_sub managed "$dir/original"; then
+		_mx_http_provider "$dir/original" managed "$sub_url" > "$dir/config" &&
+			_mx_apply_dual "$dir" "$first" "$first"
+		return
+	fi
+	# Keep the provider name and references when the subscription is cleared.
+	case "$sub_url" in
+		clear) _mx_disabled_provider > "$dir/provider" ;;
+		*) _mx_provider "$sub_url" > "$dir/provider" ;;
+	esac
+	_mx_yaml_entry "$dir/original" proxy-providers '  Подписка:' "$dir/provider" 1 > "$dir/config" || return 1
+	[ "$sub_url" = clear ] || _mx_apply_filters "$dir" || return 1
+	_mx_apply_dual "$dir" "$first" "$first"
+}
+
+_mx_apply_filters() {
+	[ -s "$MIXOMO_EXCL" ] || [ -s "$MIXOMO_HIDE" ] || return 0
+	local saved="$MIHOMO_DIR"
+	local MIHOMO_CONF="$1/config" MIHOMO_DIR="$1/filter-state" file
+	mkdir "$MIHOMO_DIR" || return 1
+	for file in .zm_filter_user .zm_filter_line; do
+		[ ! -f "$saved/$file" ] || cp -p "$saved/$file" "$MIHOMO_DIR/$file" || return 1
+	done
+	_mx_filter_apply
+}
+
+_mx_save_filter_state() {
+	local state="$1/filter-state" file
+	[ -d "$state" ] || return 0
+	for file in .zm_filter_user .zm_filter_line; do
+		if [ -f "$state/$file" ]; then
+			mv -f "$state/$file" "$MIHOMO_DIR/$file"
+		else
+			rm -f "$MIHOMO_DIR/$file"
+		fi || echo '   · не удалось сохранить состояние фильтров Mixomo' >&2
+	done
+}
+
+mixomo_subscription_set() { _mx_with_config_lock _mx_subscription_set "$@"; }
+
+_mx_subscription_set() {
+	local sub_url="$1" first mode=created
+	[ -x /etc/init.d/mihomo ] && [ -s "$MIHOMO_CONF" ] || { echo '{"error":"Mixomo не установлен"}'; return 1; }
+	cp -p "$MIHOMO_CONF" "$dir/original" || return 1
+	first="$(_mx_primary "$dir/original")"
+	if [ "$sub_url" = clear ]; then
+		if [ -z "$first" ]; then
+			if _mx_warp_present && _mx_has_sub; then
+				echo '{"error":"в конфигурации вручную объединены WARP и подписка — уберите подписку в редакторе Mihomo"}'
+				return 1
+			fi
+			mixomo_subscription_clear; return
+		fi
+		local warp=false
+		grep -q 'type:[[:space:]]*wireguard' "$dir/original" && warp=true
+		if ! _mx_has_sub managed "$dir/original" || _mx_dual_subscription "$dir" "$first" clear; then
+			rm -f "$MIHOMO_DIR/.zm_names" "$MIHOMO_DIR/.zm_names_all"
+			printf '{"ok":true,"mode":"removed","warp":%s,"parallel":true}\n' "$warp"
+			return 0
+		fi
+		echo '{"error":"не удалось убрать подписку из совместной конфигурации — проверьте настройки Mixomo"}'
+		return 1
+	fi
+	case "$sub_url" in
+		http://*|https://*) ;;
+		*) echo '{"error":"ссылка должна начинаться с http:// или https://"}'; return 1 ;;
+	esac
+	case "$sub_url" in *[[:space:]\"\\]*) echo '{"error":"в ссылке не должно быть пробелов, кавычек и обратных косых черт"}'; return 1 ;; esac
+
+	if [ -n "$first" ]; then
+		_mx_has_sub managed "$dir/original" && mode=updated
+		_mx_dual_subscription "$dir" "$first" "$sub_url" || {
+			echo '{"error":"не удалось применить подписку в совместной конфигурации"}'; return 1
+		}
+	elif _mx_has_sub any "$dir/original"; then
+		# Preserve the existing provider's options, filters and rules when changing its URL.
+		_mx_http_provider "$dir/original" any "$sub_url" > "$dir/config" &&
+			_mx_apply_config "$dir" "" || { echo '{"error":"не удалось обновить подписку"}'; return 1; }
+		mode=updated
+	elif _mx_warp_present; then
+		if grep -Eq '^proxy-providers:|^[[:space:]]*-[[:space:]]*name:[[:space:]]*VPN[[:space:]]*(#.*)?$' "$dir/original"; then
+			echo '{"error":"конфигурация уже содержит свои провайдеры или группу VPN — добавьте подписку в редакторе Mihomo"}'
+			return 1
+		fi
+		_mx_provider "$sub_url" > "$dir/provider"
+		if ! _mx_yaml_entry "$dir/original" proxy-providers '  Подписка:' "$dir/provider" > "$dir/combined" ||
+			! _mx_dual_config WARP "$dir" || ! _mx_apply_filters "$dir" || ! _mx_apply_dual "$dir" WARP ""; then
+			echo '{"error":"не удалось подключить подписку параллельно с WARP"}'
+			return 1
+		fi
+		first=WARP
+	else
+		if grep -q '^proxy-providers:' "$dir/original"; then
+			echo '{"error":"конфигурация уже содержит провайдеры — добавьте подписку в редакторе Mihomo"}'
+			return 1
+		fi
+		_mx_subscription_template "$sub_url" > "$dir/config" ||
+			{ echo '{"error":"не удалось подготовить конфигурацию подписки"}'; return 1; }
+		_mx_prepare_api_secret "$dir/config" ||
+			{ echo '{"error":"не удалось задать пароль панели Mihomo"}'; return 1; }
+		_mx_apply_filters "$dir" || return 1
+		_mx_apply_config "$dir" "" || { echo '{"error":"не удалось применить подписку"}'; return 1; }
+		cp -p "$dir/original" "$MIXOMO_SUB_PREV"
+	fi
+	_mx_save_filter_state "$dir"
+	rm -f "$MIHOMO_DIR/.zm_names" "$MIHOMO_DIR/.zm_names_all"
+	printf '{"ok":true,"mode":"%s","parallel":%s}\n' "$mode" "$([ -n "$first" ] && echo true || echo false)"
+}
+
+mixomo_magitrickle_list_set() { _mx_with_config_lock _mx_magitrickle_list_set "$@"; }
+
+_mx_magitrickle_list_set() {
 	local id="$1" url
 	case "$id" in
 		itdog) url="$MT_URL_ITDOG" ;;
@@ -25535,14 +26060,34 @@ mixomo_warp_action() {
 	job_start mixomo_warp do_mixomo_warp_register "$endpoint_mode"
 }
 
-do_mixomo_warp_integrate() {
+_mx_warp_template() {
+	printf '%s\n' 'mixed-port: 7890' 'allow-lan: false' 'tcp-concurrent: true' 'mode: rule' \
+		'log-level: error' 'ipv6: false' 'external-controller: 0.0.0.0:9090' 'external-ui: ./ui' \
+		'unified-delay: true' 'profile:' '  store-selected: true' '  store-fake-ip: true' '' \
+		'proxy-groups:' '  - name: GLOBAL' '    type: select' '    proxies:' '      - WARP' '      - DIRECT' '' \
+		'rules:' '  - "MATCH,GLOBAL"' '' 'proxies:'
+	cat "$1"
+}
+
+_mx_stock_provider() {
+	awk '
+		/^[^ \t#]/ { p = ($0 ~ /^proxy-providers:[ \t]*(#.*)?$/) }
+		p && /^  [^ \t#]/ { n++; if ($0 == "  Подписка:") provider = 1 }
+		END { exit !(provider && n==1) }' "${1:-$MIHOMO_CONF}"
+}
+
+do_mixomo_warp_integrate() { _mx_with_config_lock _mx_warp_integrate "$@"; }
+
+_mx_warp_integrate() {
 	[ -s "$MIXOMO_WARP_CONF" ] || { echo "ОШИБКА: сначала сгенерируйте WARP.conf"; return 1; }
 	[ -x /etc/init.d/mihomo ] || { echo "ОШИБКА: Mixomo не установлен"; return 1; }
 	echo "==> Интегрируем WARP.conf в Mihomo"
 	grep -qiE '^[[:space:]]*(I2|RandomTrailers|DisableCookies)[[:space:]]*=' "$MIXOMO_WARP_CONF" &&
 		echo "   · I2, RandomTrailers и DisableCookies в Mihomo не переносим — с ними WARP в Mihomo не запускается. WARP.conf не меняется"
-	local tmp; tmp=$(mktemp)
-	awk -v OUT="$tmp" '
+	local tmp="$dir/warp" first
+	cp -p "$MIHOMO_CONF" "$dir/original" || return 1
+	first="$(_mx_primary "$dir/original")"
+	if ! awk -v OUT="$tmp" '
 	function trim(s){ gsub(/^[ \t\r\n]+|[ \t\r\n]+$/, "", s); return s }
 	function lc(s){ return tolower(s) }
 	function yaml_quote(s,    o, i, c){ o=""; for(i=1;i<=length(s);i++){ c=substr(s,i,1); if(c=="\\") o=o "\\\\"; else if(c=="\"") o=o "\\\""; else if(c!="\r") o=o c } return "\"" o "\"" }
@@ -25587,30 +26132,6 @@ do_mixomo_warp_integrate() {
 		allowed_block=""
 		for(i=1;i<=n;i++){ if(aip[i]=="") continue; allowed_block = allowed_block "      - " yaml_quote(aip[i]) "\n" }
 
-		print "mixed-port: 7890" > OUT
-		print "allow-lan: false" >> OUT
-		print "tcp-concurrent: true" >> OUT
-		print "mode: rule" >> OUT
-		print "log-level: error" >> OUT
-		print "ipv6: false" >> OUT
-		print "external-controller: 0.0.0.0:9090" >> OUT
-		print "external-ui: ./ui" >> OUT
-		print "unified-delay: true" >> OUT
-		print "profile:" >> OUT
-		print "  store-selected: true" >> OUT
-		print "  store-fake-ip: true" >> OUT
-		print "" >> OUT
-		print "proxy-groups:" >> OUT
-		print "  - name: GLOBAL" >> OUT
-		print "    type: select" >> OUT
-		print "    proxies:" >> OUT
-		print "      - WARP" >> OUT
-		print "      - DIRECT" >> OUT
-		print "" >> OUT
-		print "rules:" >> OUT
-		print "  - \"MATCH,GLOBAL\"" >> OUT
-		print "" >> OUT
-		print "proxies:" >> OUT
 		print "  - name: WARP" >> OUT
 		print "    type: wireguard" >> OUT
 		print "    server: " host >> OUT
@@ -25643,20 +26164,54 @@ do_mixomo_warp_integrate() {
 			if("s3" in ext) print "      s3: " ext["s3"] >> OUT
 			if("s4" in ext) print "      s4: " ext["s4"] >> OUT
 		}
-	}' "$MIXOMO_WARP_CONF" 2>"$tmp.err"
-	if [ -s "$tmp.err" ]; then
-		echo "ОШИБКА: в WARP.conf отсутствуют обязательные поля"
-		rm -f "$tmp" "$tmp.err"
+	}' "$MIXOMO_WARP_CONF" 2>/dev/null; then
+		echo "ОШИБКА: не удалось прочитать обязательные поля WARP.conf"
 		return 1
 	fi
-	rm -f "$tmp.err"
-	cp "$MIHOMO_CONF" "$MIHOMO_CONF.bak" 2>/dev/null
-	_mx_secret_ensure "$tmp"
-	chmod 600 "$tmp"
-	mv -f "$tmp" "$MIHOMO_CONF"
-	rm -f "$MIXOMO_SUB_PREV"
-	/etc/init.d/mihomo restart >/dev/null 2>&1
-	echo "==> Готово, WARP интегрирован в Mihomo"
+	if _mx_warp_present && { [ -n "$first" ] || _mx_has_sub; }; then
+		_mx_yaml_entry "$dir/original" proxies '  - name: WARP' "$tmp" > "$dir/config" &&
+			_mx_apply_dual "$dir" "$first" "${first:-single}" || {
+			echo "ОШИБКА: не удалось обновить WARP"
+			return 1
+		}
+	elif _mx_has_sub; then
+		_mx_stock_provider || { echo "ОШИБКА: добавьте WARP в редакторе Mihomo — конфигурация содержит нестандартных провайдеров"; return 1; }
+		if ! _mx_yaml_entry "$dir/original" proxies '  - name: WARP' "$tmp" > "$dir/combined" ||
+			! _mx_dual_config VPN "$dir" || ! _mx_apply_dual "$dir" VPN ""; then
+			echo "ОШИБКА: не удалось подключить WARP параллельно с подпиской"
+			return 1
+		fi
+		first=VPN
+	else
+		if grep -q '^proxy-providers:' "$dir/original"; then
+			echo "ОШИБКА: конфигурация содержит своих провайдеров — настройте интерфейсы в редакторе Mihomo"
+			return 1
+		fi
+		if _mx_warp_present; then
+			_mx_yaml_entry "$dir/original" proxies '  - name: WARP' "$tmp" > "$dir/warp-base" || return 1
+		else
+			_mx_warp_template "$tmp" > "$dir/warp-base" || return 1
+		fi
+		if ! _mx_disabled_provider > "$dir/provider" ||
+			! _mx_yaml_entry "$dir/warp-base" proxy-providers '  Подписка:' "$dir/provider" > "$dir/combined" ||
+			! _mx_dual_config WARP "$dir"; then
+			echo "ОШИБКА: не удалось подготовить интерфейсы Mixomo"
+			return 1
+		fi
+		_mx_prepare_api_secret "$dir/config" ||
+			{ echo "ОШИБКА: не удалось задать пароль панели Mihomo"; return 1; }
+		_mx_apply_dual "$dir" WARP "" || {
+			echo "ОШИБКА: не удалось настроить интерфейсы Mixomo"
+			return 1
+		}
+		first=WARP
+	fi
+	if [ -n "$first" ]; then
+		echo "==> Интерфейсы MihomoWARP и MihomoVPN доступны в MagiTrickle"
+		_mx_has_sub || echo "   · MihomoVPN заблокирован до добавления VPN-подписки"
+	else
+		echo "==> Готово, WARP интегрирован в Mihomo"
+	fi
 }
 
 mixomo_warp_integrate_action() {
@@ -55752,7 +56307,7 @@ return view.extend({
 		}
 
 		var subInput = E('input', { 'type': 'text', 'placeholder': 'https://...', 'class': 'cbi-input-text zm-secret-in' });
-		var subBusy = false, subOn = !!(data && data.subscription);
+		var subBusy = false, subParallel = null, subOn = !!(data && data.subscription);
 		var subHead = E('h3', {});
 		var subClearBtn = E('button', {
 			'class': 'cbi-button cbi-button-remove',
@@ -55760,9 +56315,10 @@ return view.extend({
 				if (subBusy) { zm.toast('Дождитесь завершения текущей операции', 'warning'); return; }
 				zm.dialog({ title: 'Очистить подписку?', danger: true, okText: 'Очистить подписку',
 					blocks: [ { type: 'list', title: 'Что произойдёт', items: [
-						'Подписка уберётся из конфигурации Mihomo вместе с её серверами и списком исключённых серверов',
-						'Если подписку ставили поверх другой конфигурации (например, с WARP) — вернётся та, что была до подписки',
-						'Если подписка была в вашей конфигурации — уберётся только она, остальное останется; группы без серверов пойдут напрямую (DIRECT)',
+						'Ссылка на подписку будет удалена из активной конфигурации Mihomo',
+						subParallel === true ? 'Группы на MihomoVPN будут заблокированы до добавления подписки или смены интерфейса' :
+							subParallel === false ? 'Восстановится прежняя конфигурация, если она была сохранена' :
+							'При совместной настройке выход MihomoVPN будет заблокирован. В режиме одной подписки восстановится сохранённая конфигурация.',
 						'Текущая конфигурация сохранится в config.yaml.bak, Mihomo перезапустится'
 					] } ]
 				}).then(function(v) {
@@ -55774,6 +56330,7 @@ return view.extend({
 						if (!res || res.error) { zm.toast((res && res.error) || 'Роутер не ответил', 'error', 10000); return; }
 						zm.toast(res.mode === 'restored'
 							? 'Подписка убрана — вернули конфигурацию, которая была до неё' + (res.warp ? ' (с WARP)' : '')
+							: res.parallel ? 'Подписка удалена. Трафик на MihomoVPN заблокирован.'
 							: 'Подписка убрана из конфигурации' + (res.warp ? '' : '. Нужен WARP — на вкладке WARP нажмите «Интегрировать в Mihomo»'), 'info', 8000);
 						subInput.value = '';
 						refreshAll();
@@ -55791,7 +56348,7 @@ return view.extend({
 			subClearBtn.style.display = subOn ? '' : 'none';
 		}
 		subCard.appendChild(subHead);
-		subCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Вставьте ссылку на VPN-подписку. Если подписка в конфигурации уже есть, заменится только ссылка. Если нет — создастся готовая конфигурация, где YouTube и остальной трафик идут через подписку отдельными группами. Прежняя конфигурация (например, с WARP) запоминается — «Очистить подписку» вернёт её.'));
+		subCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Вставьте ссылку на VPN-подписку. При подключённом WARP подписка доступна через MihomoVPN в MagiTrickle. При смене ссылки настройки WARP и списков сохраняются.'));
 		subCard.appendChild(E('div', { 'class': 'zm-actions' }, [
 			subInput,
 			E('button', {
@@ -55802,9 +56359,8 @@ return view.extend({
 					if (!/^https?:\/\//i.test(url)) { zm.toast('Ссылка должна начинаться с http:// или https://', 'error'); return; }
 					(subOn ? Promise.resolve(true) : zm.dialog({ title: 'Применить подписку?', okText: 'Применить подписку',
 						blocks: [ { type: 'list', title: 'Что произойдёт', items: [
-							'Подписка не добавляется рядом, а заменяет текущую конфигурацию Mihomo — например, с WARP',
-							'Будет готовая конфигурация: YouTube и остальной трафик через серверы подписки',
-							'Прежняя конфигурация запомнится — вернуть её можно кнопкой «Очистить подписку»'
+							'При подключённом WARP подписка станет доступна через MihomoVPN. Без WARP сохраняется обычная настройка подписки.',
+							'Mihomo перезапустится. При первом подключении двух выходов также обновятся интерфейсы MagiTrickle'
 						] } ]
 					})).then(function(v) {
 						if (!v) return;
@@ -55813,7 +56369,7 @@ return view.extend({
 						zm.mixomoApplySubscription(url).then(function(res) {
 							subBusy = false;
 							if (res.error) { zm.toast(res.error, 'error'); return; }
-							zm.toast(res.mode === 'updated' ? 'Ссылка на подписку обновлена' : 'Подписка применена, создана новая конфигурация', 'info');
+							zm.toast(res.mode === 'updated' ? 'Ссылка на подписку обновлена' : (res.parallel ? 'Подписка подключена. В MagiTrickle выберите MihomoVPN для нужных групп.' : 'Подписка подключена'), 'info');
 							refreshAll();
 							setTimeout(loadMxSrv, 4000);
 							refreshConfig();
@@ -55974,7 +56530,8 @@ return view.extend({
 
 		function refreshConfig() {
 			zm.mixomoConfigGet().then(function(res) {
-				if (res.error) { configBar.reset(''); configEl.placeholder = res.error; return; }
+				if (res.error) { subParallel = null; configBar.reset(''); configEl.placeholder = res.error; return; }
+				subParallel = /^# ZM Mixomo primary: (WARP|VPN)$/m.test(res.content || '');
 				configBar.reset(res.content || '');
 			});
 		}
@@ -56091,6 +56648,7 @@ return view.extend({
 		function renderEmbed(d) {
 			embedCard.innerHTML = '';
 			embedCard.appendChild(E('h3', {}, 'Окно MagiTrickle'));
+			embedCard.appendChild(E('p', { 'class': 'zm-hint' }, 'После подключения WARP можно выбрать интерфейс для каждой группы. MihomoWARP ведёт в WARP, MihomoVPN — в подписку. Выход без настроек блокирует трафик.'));
 			if (d.magitrickle !== 'installed') {
 				embedCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Установите Mixomo, чтобы открыть управление группами и подписками MagiTrickle.'));
 				mtFrame = null;
@@ -56155,7 +56713,7 @@ return view.extend({
 							if (res.error) { warpIntegrateBusy = false; zm.toast(res.error, 'error'); return; }
 							zm.pollJob('mixomo_warp_integrate', warpLogEl, function(ok) {
 								warpIntegrateBusy = false;
-								zm.toast(ok ? 'WARP добавлен в Mihomo как прокси' : 'Ошибка интеграции', ok ? 'info' : 'error');
+								zm.toast(ok ? 'WARP подключён в Mihomo' : 'Ошибка интеграции', ok ? 'info' : 'error');
 								if (ok) refreshConfig();
 							});
 						}).catch(function() { warpIntegrateBusy = false; });
