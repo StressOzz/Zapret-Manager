@@ -1475,6 +1475,7 @@ do_steer_lanset() { _zmL steer2 && do_steer_lanset "$@"; }
 _tsc_nft_left() { _zmL remote && _tsc_nft_left "$@"; }
 tsc_watch() { _zmL remote && tsc_watch "$@"; }
 tsc_status() { _zmL remote && tsc_status "$@"; }
+tsc_devices() { _zmL remote && tsc_devices "$@"; }
 do_tsc_install() { _zmL remote && do_tsc_install "$@"; }
 do_tsc_update() { _zmL remote && do_tsc_update "$@"; }
 do_tsc_remove() { _zmL remote && do_tsc_remove "$@"; }
@@ -8683,6 +8684,7 @@ TSC_DEV="tailscale0"
 TSC_NET="tailscale"
 TSC_FW_RULE="zm_tailscale"
 TSC_NFT="/usr/share/nftables.d/chain-pre/forward/30-zm-tailscale.nft"
+TSC_NFT_SNAT="/usr/share/nftables.d/chain-pre/srcnat/40-zm-tailscale-lan-snat.nft"
 TSC_HOOK="/usr/libexec/zm-tailscale-tgws"
 TSC_SYSCTL="/etc/sysctl.d/90-zm-tailscale.conf"
 TSC_UPLOG="$JOBS_DIR/tsc.up.log"
@@ -9635,6 +9637,7 @@ case "$cmd" in
 	term_status)                          term_status ;;
 	term_action)                          term_action "$1" "$2" ;;
 	tsc_status)                           tsc_status ;;
+	tsc_devices)                          tsc_devices ;;
 	tsc_action)                           tsc_action "$1" "$2" ;;
 	tsc_watch)                            tsc_watch ;;
 	tsc_lan_ip)                           _zm_lan_ip ;;
@@ -11973,7 +11976,7 @@ _pg_trace() {
 		awg) echo "pkg:luci-i18n-amneziawg-ru pkg:luci-app-amneziawg pkg:luci-proto-amneziawg pkg:amneziawg-tools pkg:kmod-amneziawg $AWG_DIR /usr/bin/awg /usr/bin/awg-quick /lib/netifd/proto/amneziawg.sh /lib/modules/*/amneziawg.ko /etc/modules.d/*amneziawg* $AWG_KMOD_MANUAL $(_zm_luci_files amneziawg) $AWF_MODE $AWF_SKIP $AWF_STATE $AWF_LOG cron:zm-awgfix" ;;
 		tgproxy) echo "pkg:tg-ws-proxy /usr/bin/tg-ws-proxy /etc/init.d/tg-ws-proxy /etc/tg-ws-proxy /etc/tg-ws-proxy.conf /etc/config/tg-ws-proxy $TG_BIN_GO $TG_BIN_GO.new $TG_INIT_GO $TG_BIN_RS $TG_INIT_RS $TG_SECRET_RS_FILE $TG_VER_GO_FILE $TG_VER_RS_FILE /etc/config/tg-ws-proxy-rs $TG_WATCH_FLAG $TG_EXT_FILE uci:firewall.zm_tg_mtproto uci:firewall.zm_tg_rust /tmp/tg-ws-proxy.ipk /tmp/tg-ws-proxy.apk /etc/rc.d/*tg-ws-proxy* cron:zm-tg-auto cronrx:tg-ws-proxy" ;;
 		stgws) echo "pkg:tgws /etc/init.d/tgws /usr/sbin/tgws /usr/sbin/stgws /etc/config/tgws /etc/rc.d/*tgws* /var/lib/tgws /var/lib/stgws nft:tgws nft:stgws cronrx:tgws" ;;
-		tailscale) echo "cron:zm-tailscale $ZM_STATE_DIR/latest.tsc pkg:luci-i18n-tailscale-community-ru pkg:luci-app-tailscale-community /etc/init.d/tailscale-settings /etc/rc.d/*tailscale-settings /www/luci-static/resources/view/tailscale.js /usr/share/luci/menu.d/luci-app-tailscale-community.json /usr/share/rpcd/acl.d/luci-app-tailscale-community.json /usr/share/rpcd/ucode/tailscale.uc pkg:tailscale /usr/sbin/tailscale /usr/sbin/tailscaled /etc/init.d/tailscale /etc/rc.d/*tailscale /etc/config/tailscale /etc/config/tailscale-opkg /etc/config/tailscale.apk-new /etc/tailscale /var/lib/tailscale $TSC_NFT $TSC_HOOK $TSC_SYSCTL $TSC_DIR $TSC_UPLOG uci:network.$TSC_NET uci:firewall.$TSC_FW_RULE" ;;
+		tailscale) echo "cron:zm-tailscale $ZM_STATE_DIR/latest.tsc pkg:luci-i18n-tailscale-community-ru pkg:luci-app-tailscale-community /etc/init.d/tailscale-settings /etc/rc.d/*tailscale-settings /www/luci-static/resources/view/tailscale.js /usr/share/luci/menu.d/luci-app-tailscale-community.json /usr/share/rpcd/acl.d/luci-app-tailscale-community.json /usr/share/rpcd/ucode/tailscale.uc pkg:tailscale /usr/sbin/tailscale /usr/sbin/tailscaled /etc/init.d/tailscale /etc/rc.d/*tailscale /etc/config/tailscale /etc/config/tailscale-opkg /etc/config/tailscale.apk-new /etc/tailscale /var/lib/tailscale $TSC_NFT $TSC_NFT_SNAT $TSC_HOOK $TSC_SYSCTL $TSC_DIR $TSC_UPLOG uci:network.$TSC_NET uci:firewall.$TSC_FW_RULE" ;;
 		terminal) echo "pkg:luci-i18n-ttyd-ru pkg:luci-app-ttyd pkg:ttyd /usr/bin/ttyd /etc/config/ttyd /etc/config/ttyd-opkg /etc/config/ttyd.apk-new /etc/init.d/ttyd /etc/rc.d/*ttyd $(_zm_luci_files ttyd)" ;;
 		htop) echo "pkg:htop /usr/bin/htop /etc/htoprc /root/.config/htop $MON_TTYD_OWN" ;;
 		adblock) echo "$AB_DIR $AB_STATS_DIR $AB_STATS_LOG dnsconf:zm-adblock.conf dnsconf:zm-adblock-stats.conf nft:zm_adblock_free nft:zm_adblock_ip /var/run/zm-adblock-free.pid /var/etc/zm-adblock-free.conf /var/etc/zm-adblock-free.conf.macs cron:zm-adblock cron:zm-abstats" ;;
@@ -19251,7 +19254,11 @@ _tsc_json() { _tsc_api status || _zm_tmo 8 tailscale status --json 2>/dev/null; 
 
 _tsc_free_kb() { df -k /overlay 2>/dev/null | awk 'NR == 2 { print $4; exit }'; }
 
-_tsc_port() { local p; p="$(uci -q get tailscale.settings.port)"; case "$p" in ''|*[!0-9]*) echo 41641 ;; *) echo "$p" ;; esac; }
+_tsc_port() {
+	local port
+	port="$(uci -q get tailscale.settings.port)"
+	printf '%s\n' "${port:-41641}"
+}
 
 _tsc_lan_cidr() {
 	local d a="" ip
@@ -19603,53 +19610,413 @@ _tsc_state_keep() {
 	return 0
 }
 
-_tsc_setup() {
-	local z lz ch=0 p t
-	mkdir -p "$TSC_DIR"; : > "$TSC_ON"
-	_tsc_state_keep && _tsc_running && _tsc_start >/dev/null 2>&1
-	_tsc_say "Настраиваем сеть и firewall"
-	if [ "$(uci -q get "network.$TSC_NET")" != interface ]; then
-		uci set "network.$TSC_NET=interface"
-		uci set "network.$TSC_NET.proto=none"
-		uci set "network.$TSC_NET.device=$TSC_DEV"
-		uci commit network
-		ubus call network reload >/dev/null 2>&1
-		echo "   ✓ Интерфейс «$TSC_NET» ($TSC_DEV) создан"
-	fi
-	lz="$(_zm_lan_zone)"
-	if z="$(_zm_zone_sec "$lz")"; then
-		case " $(uci -q get "firewall.$z.network") " in
-			*" $TSC_NET "*) ;;
-			*) uci add_list "firewall.$z.network=$TSC_NET"; ch=1; echo "   ✓ Tailscale добавлен в зону «$lz» — телефон для роутера как домашнее устройство" ;;
-		esac
-	else
-		echo "!! Не нашли зону домашней сети в firewall — добавьте интерфейс «$TSC_NET» в неё вручную"
-	fi
-	p="$(_tsc_port)"
-	if [ "$(uci -q get "firewall.$TSC_FW_RULE")" != rule ] || [ "$(uci -q get "firewall.$TSC_FW_RULE.dest_port")" != "$p" ]; then
-		uci set "firewall.$TSC_FW_RULE=rule"
-		uci set "firewall.$TSC_FW_RULE.name=Allow-Tailscale"
-		uci set "firewall.$TSC_FW_RULE.src=$(_zm_wan_zone)"
-		uci set "firewall.$TSC_FW_RULE.proto=udp"
-		uci set "firewall.$TSC_FW_RULE.dest_port=$p"
-		uci set "firewall.$TSC_FW_RULE.target=ACCEPT"
-		ch=1
-		echo "   ✓ Открыт порт UDP $p — для прямого соединения с телефоном"
-	fi
-	[ "$ch" = 1 ] && uci commit firewall
-	t="$TSC_NFT.zmtmp"
-	mkdir -p "${TSC_NFT%/*}"
-	_tsc_nft_text > "$t"
-	if cmp -s "$t" "$TSC_NFT"; then rm -f "$t"; else mv -f "$t" "$TSC_NFT"; ch=1; echo "   ✓ IPv6 из Tailscale отклоняется сразу, размер пакетов подогнан под туннель"; fi
-	if [ "$ch" = 1 ]; then
-		if fw4 check >/dev/null 2>&1 || ! command -v fw4 >/dev/null 2>&1; then
-			/etc/init.d/firewall reload >/dev/null 2>&1
-		else
-			rm -f "$TSC_NFT"
-			echo "!! firewall не принял правила IPv6 и MSS — они отключены, остальное работает"
-			/etc/init.d/firewall reload >/dev/null 2>&1
+_tsc_fw_dynamic_ok() {
+	command -v fw4 >/dev/null 2>&1 || return 0
+	# fw4 reads runtime rules from procd and netifd as well as static UCI.
+	ZM_TSC_LAN_ZONE="$1" ucode -e '
+		import { connect } from "ubus";
+		let bus = connect(), lan = getenv("ZM_TSC_LAN_ZONE");
+		let services = bus?.call("service", "get_data", { type: "firewall" });
+		let interfaces = bus?.call("network.interface", "dump")?.interface;
+		if (type(services) != "object" || type(interfaces) != "array") exit(1);
+
+		function check(rules) {
+			for (let rule in (rules || [])) {
+				if (rule.src != "tailscale" && rule.dest != "tailscale") continue;
+				let moved = { ...rule };
+				for (let field in ["src", "dest"])
+					if (moved[field] == "tailscale") moved[field] = lan;
+				let fields = sort(keys(moved));
+				let same = filter(rules, other => sprintf("%J", sort(keys(other))) == sprintf("%J", fields)
+					&& !length(filter(fields, k => sprintf("%J", moved[k]) != sprintf("%J", other[k]))));
+				if (!length(same)) exit(1);
+			}
+		}
+
+		for (let name, service in services) {
+			check(service.firewall);
+			for (let id, instance in service) check(instance?.firewall);
+		}
+		for (let i in interfaces) check(i.data?.firewall);
+	' >/dev/null 2>&1
+}
+
+_tsc_fw_runtime_aliases() {
+	command -v fw4 >/dev/null 2>&1 || return 0
+	ZM_TSC_LAN_ZONE="$1" ZM_TSC_DEVICE="$TSC_DEV" ucode -e '
+		import { connect } from "ubus";
+		let bus = connect(), dev = getenv("ZM_TSC_DEVICE"), lan = getenv("ZM_TSC_LAN_ZONE");
+		let interfaces = bus?.call("network.interface", "dump")?.interface;
+		if (type(interfaces) != "array") exit(1);
+		for (let iface in interfaces) {
+			if ((iface.l3_device ?? iface.device) != dev) continue;
+			if (iface.data?.zone && iface.data.zone != lan) exit(1);
+			print(iface.interface, "\n");
+		}
+	'
+}
+
+_tsc_fw_network_aliases() {
+	local runtime network
+	runtime="$(_tsc_fw_runtime_aliases "$1")" || return 1
+	network="$(uci -q -X show network)" || return 1
+	printf '%s\n' "$network" | awk -v dev="$TSC_DEV" -v net="$TSC_NET" -v runtime="$runtime" '
+		BEGIN {
+			known[net] = 1
+			count = split(runtime, entries, /[[:space:]]+/)
+			for (i = 1; i <= count; i++) if (entries[i] != "") known[entries[i]] = 1
+		}
+		/^network\.[^.]+\.(device|ifname)=/ {
+			split($0, key, /[.=]/)
+			value = substr($0, index($0, "=") + 1)
+			gsub(/\047/, "", value)
+			count = split(value, entries, /[[:space:]]+/)
+			for (i = 1; i <= count; i++) {
+				if (entries[i] == dev) known[key[2]] = 1
+				else if (entries[i] ~ /^@/) references[key[2] SUBSEP substr(entries[i], 2)] = 1
+			}
+		}
+		END {
+			do {
+				changed = 0
+				for (ref in references) {
+					split(ref, pair, SUBSEP)
+					if (known[pair[2]] && !known[pair[1]]) { known[pair[1]] = 1; changed = 1 }
+				}
+			} while (changed)
+			for (name in known) if (known[name]) print name
+		}'
+}
+
+_tsc_fw_luci_zone() (
+	local home="$1" lan="$2" wan="$3" fw z zone nets devs dev net aliases matches legacy="" ref src dst
+	set -f
+	zone_options() {
+		printf '%s\n' "$fw" | awk -v prefix="firewall.$1." 'index($0, prefix) == 1 { print substr($0, length(prefix) + 1) }'
+	}
+	fw="$(uci -q -X show firewall)" || return 1
+	aliases="$(_tsc_fw_network_aliases "$lan")" || {
+		echo "ОШИБКА: не удалось проверить привязки Tailscale к зонам firewall" >&2
+		return 1
+	}
+	for z in $(printf '%s\n' "$fw" | sed -n 's/^firewall\.\([^.=]*\)=zone$/\1/p'); do
+		[ "$z" = "$home" ] && continue
+		zone="$(uci -q get "firewall.$z.name")"
+		if [ "$zone" = "$lan" ] || { [ -n "$wan" ] && [ "$zone" = "$wan" ] && [ "$z" != "$(_zm_zone_sec "$wan")" ]; }; then
+			echo "ОШИБКА: имя зоны «$zone» встречается несколько раз в firewall" >&2
+			return 1
+		fi
+		nets="$(uci -q get "firewall.$z.network")"
+		devs="$(uci -q get "firewall.$z.device")"
+		matches=
+		for net in $nets; do
+			case "$net" in
+				lan) echo "ОШИБКА: интерфейс lan привязан к нескольким зонам firewall" >&2; return 1 ;;
+				'!'*) matches=1 ;;
+				*) printf '%s\n' "$aliases" | grep -Fxq -- "$net" && matches=1 ;;
+			esac
+		done
+		for dev in $devs; do
+			case "$dev" in
+				"$TSC_DEV"|+|'*'|'!'*) matches=1 ;;
+				*+) case "$TSC_DEV" in "${dev%+}"*) matches=1 ;; esac ;;
+			esac
+		done
+		[ -n "$matches" ] || continue
+		if [ -n "$legacy" ] || [ "$zone" != tailscale ] ||
+		   { [ -n "$nets" ] && [ "$nets" != "$TSC_NET" ]; } ||
+		   { [ -n "$devs" ] && [ "$devs" != "$TSC_DEV" ]; } ||
+		   [ "$(uci -q get "firewall.$z.input")" != ACCEPT ] ||
+		   [ "$(uci -q get "firewall.$z.output")" != ACCEPT ] ||
+		   [ "$(uci -q get "firewall.$z.forward")" != ACCEPT ] ||
+		   [ "$(uci -q get "firewall.$z.masq")" != 1 ] ||
+		   [ "$(uci -q get "firewall.$z.mtu_fix")" != 1 ] ||
+		   zone_options "$z" | grep -qEv '^(name|network|device|input|output|forward|masq|mtu_fix)='; then
+			echo "ОШИБКА: Tailscale привязан к другой зоне firewall с собственными настройками. Проверьте привязки в LuCI." >&2
+			return 1
+		fi
+		legacy="$z"
+	done
+	if [ -n "$legacy" ]; then
+		for ref in $(printf '%s\n' "$fw" | sed -n "s/^firewall\.\([^.=]*\)\.\(src\|dest\)='tailscale'$/\1/p" | sort -u); do
+			src="$(uci -q get "firewall.$ref.src")"
+			dst="$(uci -q get "firewall.$ref.dest")"
+			if [ "$(uci -q get "firewall.$ref")" = forwarding ] &&
+			   ! zone_options "$ref" | grep -qEv '^(src|dest)='; then
+				case "$src:$dst" in lan:tailscale|tailscale:lan|tailscale:wan) continue ;; esac
+			fi
+			echo "ОШИБКА: в firewall есть пользовательские правила для отдельной зоны «tailscale». Проверьте их в LuCI." >&2
+			return 1
+		done
+		if ! _tsc_fw_dynamic_ok "$lan"; then
+			echo "ОШИБКА: отдельная зона «tailscale» используется правилами служб OpenWrt. Проверьте их настройки перед переносом." >&2
+			return 1
 		fi
 	fi
+	printf '%s' "$legacy"
+)
+
+_tsc_fw_replace() {
+	local dest="$1" src="$2" staged="$1.zm-tsc.$$"
+	cp -p "$src" "$staged" && mv -f "$staged" "$dest" && return 0
+	rm -f "$staged"
+	return 1
+}
+
+_tsc_fw_port_valid() {
+	case "$1" in ''|*[!0-9]*|??????*) return 1 ;; esac
+	[ "$1" -ge 1 ] && [ "$1" -le 65535 ]
+}
+
+_tsc_fw_port_rule_ok() {
+	local reader="$1" wan="$2" rule="firewall.$TSC_FW_RULE" spec option
+	[ "$("$reader" -q get "$rule")" = rule ] || return 1
+	spec="$("$reader" -q show "$rule")" || return 1
+	# Only manage the original router input rule. A dest option makes it a forwarding rule.
+	while IFS= read -r option; do
+		case "$option" in
+			"$rule=rule"|"$rule".name=*|"$rule".src=*|"$rule".proto=*|"$rule".target=*|"$rule".dest_port=*|"$rule".enabled=*) ;;
+			*) return 1 ;;
+		esac
+	done <<EOF
+$spec
+EOF
+	case "$("$reader" -q get "$rule.enabled" || echo 1)" in 1|true|yes|on) ;; *) return 1 ;; esac
+	_tsc_fw_port_valid "$("$reader" -q get "$rule.dest_port")" || return 1
+	for option in name=Allow-Tailscale "src=$wan" proto=udp target=ACCEPT; do
+		[ "$("$reader" -q get "$rule.${option%%=*}")" = "${option#*=}" ] || return 1
+	done
+}
+
+_tsc_fw_stage_port_rule() {
+	local rule="firewall.$TSC_FW_RULE" wan="$1" port="$2" option
+	if stage_uci -q get "$rule" >/dev/null; then
+		_tsc_fw_port_rule_ok stage_uci "$wan" || return 1
+	else
+		stage_uci set "$rule=rule" || return 1
+		for option in name=Allow-Tailscale "src=$wan" proto=udp target=ACCEPT; do
+			stage_uci set "$rule.$option" || return 1
+		done
+	fi
+	[ "$(stage_uci -q get "$rule.dest_port")" = "$port" ] || stage_uci set "$rule.dest_port=$port"
+}
+
+_tsc_fw_plan() (
+	# All topology checks use the same UCI snapshot that will be edited.
+	uci() { stage_uci "$@"; }
+	local lan home wan legacy iface dev
+	lan="$(_zm_zone_of_net lan || echo lan)"
+	home="$(_zm_zone_sec "$lan")" || { echo "ОШИБКА: не найдена зона домашней сети в firewall" >&2; return 1; }
+	wan="$(_zm_wan_zone)"
+	case "$lan:$wan" in *[!A-Za-z0-9_:-]*) return 1 ;; esac
+	case " $(uci -q get "firewall.$home.network") " in
+		*" wan "*|*" wan6 "*) echo "ОШИБКА: домашняя зона содержит интерфейс WAN. Проверьте зоны firewall в LuCI." >&2; return 1 ;;
+	esac
+	if [ "$lan" = "$wan" ]; then
+		echo "ОШИБКА: домашняя и внешняя сети находятся в одной зоне firewall" >&2
+		return 1
+	fi
+	_zm_zone_sec "$wan" >/dev/null || wan=""
+	legacy="$(_tsc_fw_luci_zone "$home" "$lan" "$wan")" || return 1
+	if [ -n "$legacy" ] && ! command -v fw4 >/dev/null 2>&1; then
+		echo "ОШИБКА: для переноса зоны с сохранением masquerading требуется firewall4" >&2
+		return 1
+	fi
+	iface="$(uci -q get "network.$TSC_NET")"
+	if [ -n "$iface" ]; then
+		dev="$(uci -q get "network.$TSC_NET.device" || uci -q get "network.$TSC_NET.ifname")"
+		if [ "$iface" != interface ] || [ "$dev" != "$TSC_DEV" ] || [ "$(uci -q get "network.$TSC_NET.proto")" != none ]; then
+			echo "ОШИБКА: имя «$TSC_NET» уже занято другим интерфейсом. Проверьте настройки сети в LuCI." >&2
+			return 1
+		fi
+	fi
+	printf '%s|%s|%s|%s|%s\n' "$home" "$lan" "$wan" "$legacy" "$iface"
+)
+
+_tsc_firewall() (
+	local home lan wan legacy iface plan port tmp pending option changes="" written="" name dest
+	local need_net="$JOBS_DIR/tsc.net-reload" need_fw="$JOBS_DIR/tsc.fw-reload"
+	local had_net=0 had_fw=0 reloaded_net=0
+	if command -v flock >/dev/null 2>&1; then
+		exec 8>"$JOBS_DIR/tsc.firewall.lock" || return 1
+		flock -n 8 || { echo "ОШИБКА: автонастройка firewall уже выполняется"; return 1; }
+	fi
+	pending="$(uci changes network && uci changes firewall)" || return 1
+	[ -z "$pending" ] || { echo "ОШИБКА: сохраните или отмените изменения сети и firewall в LuCI"; return 1; }
+	tmp="$(mktemp -d "$JOBS_DIR/tsc-fw.XXXXXX")" || return 1
+	trap 'rm -rf "$tmp"' EXIT
+	mkdir "$tmp/old" "$tmp/new" "$tmp/delta" "$tmp/override" || return 1
+	cp -p /etc/config/network /etc/config/firewall "$tmp/old/" &&
+		cp -p "$tmp/old/network" "$tmp/old/firewall" "$tmp/new/" || return 1
+	stage_uci() { command uci -c "$tmp/new" -C "$tmp/override" -t "$tmp/delta" "$@"; }
+	plan="$(_tsc_fw_plan)" || return 1
+	IFS='|' read -r home lan wan legacy iface <<EOF
+$plan
+EOF
+	if [ -z "$iface" ]; then
+		stage_uci set "network.$TSC_NET=interface" &&
+			stage_uci set "network.$TSC_NET.proto=none" &&
+			stage_uci set "network.$TSC_NET.device=$TSC_DEV" || return 1
+	fi
+	case " $(stage_uci -q get "firewall.$home.network") " in
+		*" $TSC_NET "*) ;;
+		*) stage_uci add_list "firewall.$home.network=$TSC_NET" || return 1 ;;
+	esac
+	if [ -n "$legacy" ]; then
+		for option in network device; do
+			stage_uci -q get "firewall.$legacy.$option" >/dev/null || continue
+			stage_uci delete "firewall.$legacy.$option" || return 1
+		done
+	fi
+	if [ -n "$wan" ]; then
+		port="$(_tsc_port)"
+		_tsc_fw_port_valid "$port" || { echo "ОШИБКА: UDP-порт Tailscale должен быть от 1 до 65535"; return 1; }
+		_tsc_fw_stage_port_rule "$wan" "$port" || {
+			echo "ОШИБКА: не удалось подготовить правило «Allow-Tailscale» ($TSC_FW_RULE). Проверьте в LuCI, не изменено ли оно вручную."
+			return 1
+		}
+	else
+		echo "   · Зона WAN отсутствует — пропускаем правило входящего UDP-порта"
+	fi
+
+	for name in network firewall; do
+		pending="$(stage_uci changes "$name")" || return 1
+		[ -n "$pending" ] || continue
+		stage_uci commit "$name" || return 1
+		changes="$changes $name"
+	done
+	if command -v fw4 >/dev/null 2>&1; then
+		if [ -n "$legacy" ]; then
+			# Preserve the old LuCI zone's IPv4 masquerading on egress through tailscale0.
+			_tsc_fw_snat_text > "$tmp/new/snat" || return 1
+			if [ -e "$TSC_NFT_SNAT" ]; then
+				cmp -s "$tmp/new/snat" "$TSC_NFT_SNAT" || {
+					echo "ОШИБКА: правило masquerading Tailscale изменено вручную. Проверьте его перед переносом."
+					return 1
+				}
+			else
+				mkdir -p "${TSC_NFT_SNAT%/*}" && chmod 0644 "$tmp/new/snat" || return 1
+				changes="snat$changes"
+			fi
+		fi
+		_tsc_nft_text > "$tmp/new/nft" || return 1
+		if ! cmp -s "$tmp/new/nft" "$TSC_NFT"; then
+			[ ! -e "$TSC_NFT" ] || cp -p "$TSC_NFT" "$tmp/old/nft" || return 1
+			mkdir -p "${TSC_NFT%/*}" || return 1
+			chmod 0644 "$tmp/new/nft" || return 1
+			changes="$changes nft"
+		fi
+	fi
+	pending="$(uci changes network && uci changes firewall)" || return 1
+	if [ -n "$pending" ] || ! cmp -s /etc/config/network "$tmp/old/network" ||
+	   ! cmp -s /etc/config/firewall "$tmp/old/firewall"; then
+		echo "ОШИБКА: конфигурация изменилась во время операции. Повторите автонастройку."
+		return 1
+	fi
+	[ ! -f "$need_net" ] || had_net=1
+	[ ! -f "$need_fw" ] || had_fw=1
+	if [ -z "$changes" ] && [ "$had_net:$had_fw" = 0:0 ]; then
+		_tsc_say "Сеть и firewall уже настроены для Tailscale"
+		return 0
+	fi
+	if [ -n "$changes" ]; then
+		# Метки остаются после сбоя reload, чтобы повторный запуск применил сохранённые настройки.
+		case " $changes " in *" network "*) : > "$need_net" || return 1 ;; esac
+		: > "$need_fw" || return 1
+	fi
+	fw_path() {
+		case "$1" in
+			nft) printf '%s' "$TSC_NFT" ;;
+			snat) printf '%s' "$TSC_NFT_SNAT" ;;
+			*) printf '/etc/config/%s' "$1" ;;
+		esac
+	}
+	fw_restore() {
+		local file dest failed=0
+		for file in $written; do
+			dest="$(fw_path "$file")"
+			if cmp -s "$tmp/new/$file" "$dest"; then
+				if [ -f "$tmp/old/$file" ]; then _tsc_fw_replace "$dest" "$tmp/old/$file" || failed=1
+				else rm -f "$dest" || failed=1; fi
+			else
+				failed=1
+			fi
+		done
+		if [ "$failed" = 0 ]; then
+			[ "$had_net" = 1 ] || rm -f "$need_net"
+			[ "$had_fw" = 1 ] || rm -f "$need_fw"
+		else
+			echo "ОШИБКА: не удалось полностью восстановить файлы. Проверьте настройки в LuCI."
+		fi
+	}
+	fw_matches_staged() {
+		local delta
+		delta="$(uci changes network && uci changes firewall)" &&
+			[ -z "$delta" ] &&
+			cmp -s "$tmp/new/network" /etc/config/network &&
+			cmp -s "$tmp/new/firewall" /etc/config/firewall
+	}
+	for name in $changes; do
+		dest="$(fw_path "$name")"
+		if [ -L "$dest" ] ||
+		   { [ -f "$tmp/old/$name" ] && ! cmp -s "$tmp/old/$name" "$dest"; } ||
+		   { [ ! -f "$tmp/old/$name" ] && [ -e "$dest" ]; }; then
+			fw_restore
+			echo "ОШИБКА: конфигурация изменилась во время операции. Повторите автонастройку."
+			return 1
+		fi
+		if ! _tsc_fw_replace "$dest" "$tmp/new/$name"; then
+			fw_restore
+			echo "ОШИБКА: не удалось сохранить настройки сети и firewall"
+			return 1
+		fi
+		written="$written $name"
+	done
+	if [ -f "$need_fw" ] && command -v fw4 >/dev/null 2>&1 && ! fw4 check >/dev/null 2>&1; then
+		fw_restore
+		echo "ОШИБКА: конфигурация firewall не прошла проверку (fw4 check)"
+		return 1
+	fi
+	if ! fw_matches_staged; then
+		fw_restore
+		echo "ОШИБКА: настройки сети и firewall изменились перед применением. Сохраните изменения и повторите автонастройку."
+		return 1
+	fi
+	if [ -f "$need_net" ]; then
+		ubus call network reload >/dev/null 2>&1 || {
+			echo "ОШИБКА: не удалось применить настройки сети. Повторите автонастройку."
+			return 1
+		}
+		rm -f "$need_net"
+		reloaded_net=1
+	fi
+	if [ -f "$need_fw" ]; then
+		if [ "$reloaded_net" = 1 ] && ! fw_matches_staged; then
+			echo "ОШИБКА: настройки изменились во время перезагрузки сети. Сохраните изменения и повторите автонастройку."
+			return 1
+		fi
+		/etc/init.d/firewall reload >/dev/null 2>&1 || {
+			echo "ОШИБКА: не удалось применить настройки firewall. Повторите автонастройку."
+			return 1
+		}
+		rm -f "$need_fw"
+	fi
+	[ -z "$legacy" ] || echo "   ✓ Привязка Tailscale перенесена из отдельной зоны «tailscale» в «$lan»"
+	_tsc_say "Сеть и firewall настроены для Tailscale"
+)
+
+_tsc_fw_snat_text() {
+	printf 'oifname "%s" meta nfproto ipv4 masquerade comment "zm-tailscale: preserve LuCI masquerading"\n' "$TSC_DEV"
+}
+
+_tsc_setup() {
+	_tsc_firewall || return 1
+	if [ "${1:-}" = start ] && ! _tsc_running; then
+		_tsc_say "Запускаем службу Tailscale"
+		_tsc_start || return 1
+	fi
+	mkdir -p "$TSC_DIR"
+	_tsc_state_keep && _tsc_running && _tsc_start >/dev/null 2>&1
 	if [ "$(cat /proc/sys/net/ipv4/ip_forward 2>/dev/null)" != 1 ]; then
 		mkdir -p "${TSC_SYSCTL%/*}"; echo 'net.ipv4.ip_forward=1' > "$TSC_SYSCTL"
 		sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1
@@ -19666,6 +20033,7 @@ _tsc_setup() {
 			echo "!! Вход из интернета в firewall не закрыт — DNS роутера для Tailscale не открываем"
 		fi
 	fi
+	: > "$TSC_ON"
 	_tsc_uci_sync
 	_tsc_cron on
 	_tsc_fk add
@@ -19678,23 +20046,41 @@ _tsc_setup() {
 }
 
 _tsc_unsetup() {
-	local z lz ch=0 v
+	local z lz ch=0 v iface="network.$TSC_NET" kind spec drop_iface=0
 	_tsc_say "Убираем настройки сети и firewall"
 	_tsc_tg_drop
 	_tsc_nft_clean
-	lz="$(_zm_lan_zone)"
-	if z="$(_zm_zone_sec "$lz")"; then
-		case " $(uci -q get "firewall.$z.network") " in *" $TSC_NET "*) uci del_list "firewall.$z.network=$TSC_NET"; ch=1 ;; esac
+	kind="$(uci -q get "$iface")"
+	if [ -z "$kind" ] ||
+	   { [ "$kind" = interface ] &&
+	     [ "$(uci -q get "$iface.proto")" = none ] &&
+	     [ "$(uci -q get "$iface.device" || uci -q get "$iface.ifname")" = "$TSC_DEV" ] &&
+	     spec="$(uci -q show "$iface")" &&
+	     ! printf '%s\n' "$spec" | sed '1d' | cut -d. -f3- | grep -qEv '^(proto|device|ifname)='; }; then
+		drop_iface=1
+		lz="$(_zm_lan_zone)"
+		if z="$(_zm_zone_sec "$lz")"; then
+			case " $(uci -q get "firewall.$z.network") " in
+				*" $TSC_NET "*) uci del_list "firewall.$z.network=$TSC_NET" && ch=1 ;;
+			esac
+		fi
+	else
+		echo "   · Изменённый вручную интерфейс $TSC_NET и его привязка оставлены"
 	fi
-	uci -q get "firewall.$TSC_FW_RULE" >/dev/null && { uci delete "firewall.$TSC_FW_RULE"; ch=1; }
+	if _tsc_fw_port_rule_ok uci "$(_zm_wan_zone)"; then
+		uci delete "firewall.$TSC_FW_RULE" && ch=1
+	elif uci -q get "firewall.$TSC_FW_RULE" >/dev/null; then
+		echo "   · Изменённое вручную правило «Allow-Tailscale» оставлено в firewall"
+	fi
 	[ "$ch" = 1 ] && uci commit firewall
 	[ -f "$TSC_NFT" ] && { rm -f "$TSC_NFT"; ch=1; }
+	[ -f "$TSC_NFT_SNAT" ] && { rm -f "$TSC_NFT_SNAT"; ch=1; }
 	[ "$ch" = 1 ] && /etc/init.d/firewall reload >/dev/null 2>&1
-	if uci -q get "network.$TSC_NET" >/dev/null; then
-		uci delete "network.$TSC_NET"; uci commit network
-		ubus call network reload >/dev/null 2>&1
+	if [ "$drop_iface" = 1 ] && [ -n "$kind" ]; then
+		uci delete "$iface" && uci commit network && ubus call network reload >/dev/null 2>&1
 	fi
 	rm -f "$TSC_SYSCTL"
+	rm -f "$JOBS_DIR/tsc.net-reload" "$JOBS_DIR/tsc.fw-reload"
 	if [ -f "$TSC_LS_PREV" ]; then
 		v="$(cat "$TSC_LS_PREV")"
 		if [ -n "$v" ]; then uci set "dhcp.@dnsmasq[0].localservice=$v"; else uci -q delete dhcp.@dnsmasq[0].localservice; fi
@@ -19805,9 +20191,14 @@ _tsc_cron() {
 }
 
 _tsc_heal_need() {
-	local z f
+	local z f wan
+	[ ! -f "$JOBS_DIR/tsc.net-reload" ] && [ ! -f "$JOBS_DIR/tsc.fw-reload" ] ||
+		{ echo "неприменённые настройки сети и firewall"; return 0; }
 	[ "$(uci -q get "network.$TSC_NET")" = interface ] || { echo "интерфейс сети"; return 0; }
-	[ "$(uci -q get "firewall.$TSC_FW_RULE")" = rule ] || { echo "порт в firewall"; return 0; }
+	wan="$(_zm_wan_zone)"
+	if [ "$wan" != "$(_zm_lan_zone)" ] && _zm_zone_sec "$wan" >/dev/null; then
+		[ "$(uci -q get "firewall.$TSC_FW_RULE")" = rule ] || { echo "порт в firewall"; return 0; }
+	fi
 	z="$(_zm_zone_sec "$(_zm_lan_zone)")" && case " $(uci -q get "firewall.$z.network") " in
 		*" $TSC_NET "*) ;;
 		*) echo "зона домашней сети"; return 0 ;;
@@ -19820,19 +20211,23 @@ _tsc_heal_need() {
 	return 1
 }
 
-tsc_watch() {
-	local pid l="$TSC_DIR/watch.lock"
+_tsc_lock() {
+	find "$1" -maxdepth 0 -type d -mmin +10 -exec rmdir {} \; 2>/dev/null
+	mkdir "$1" 2>/dev/null
+}
+
+tsc_watch() (
+	local pid l="$JOBS_DIR/tsc.action.lock"
 	[ -f "$TSC_ON" ] && _tsc_installed || return 0
 	[ -f "$TSC_STOP" ] && return 0
 	pid="$(pidof tailscaled 2>/dev/null)"
 	[ -n "$pid" ] || return 0
+	_tsc_lock "$l" || return 0
+	trap 'rmdir "$l" 2>/dev/null' EXIT
 	_job_alive tsc && return 0
-	find "$TSC_DIR" -maxdepth 1 -name watch.lock -mmin +10 -exec rmdir {} \; 2>/dev/null
-	mkdir "$l" 2>/dev/null || return 0
 	_tsc_watch_run "$pid"
-	rmdir "$l" 2>/dev/null
 	return 0
-}
+)
 
 _tsc_watch_run() {
 	local pid="$1" key st dp why
@@ -19953,6 +20348,52 @@ _tsc_route_ok() {
 		END { exit !ok }'
 }
 
+_tsc_peers() (
+	. /usr/share/libubox/jshn.sh
+	local peer name ip ips sep="" DNSName HostName OS Online CurAddr Relay RxBytes TxBytes LastSeen ExitNode ExitNodeOption
+	printf '['
+	printf '%s' "$1" | jsonfilter -e '@.Peer.*' 2>/dev/null | while IFS= read -r peer; do
+		json_load "$peer"
+		json_get_vars DNSName HostName OS Online CurAddr Relay RxBytes TxBytes LastSeen ExitNode ExitNodeOption
+		json_get_values ips TailscaleIPs
+		name="${DNSName%%.*}"
+		json_init
+		json_add_string name "${name:-$HostName}"
+		json_add_string os "$OS"
+		json_add_array ips
+		for ip in $ips; do json_add_string "" "$ip"; done
+		json_close_array
+		json_add_boolean online "${Online:-0}"
+		json_add_boolean exit_node "${ExitNode:-0}"
+		json_add_boolean exit_option "${ExitNodeOption:-0}"
+		json_add_string direct "$CurAddr"
+		json_add_string relay "$Relay"
+		json_add_int rx "${RxBytes:-0}"
+		json_add_int tx "${TxBytes:-0}"
+		json_add_string last_seen "$LastSeen"
+		printf '%s' "$sep"
+		json_dump
+		sep=,
+	done
+	printf ']'
+)
+
+tsc_devices() {
+	local j st
+	_tsc_installed || { echo '{"state":"not_installed"}'; return; }
+	_tsc_running || { echo '{"state":"stopped"}'; return; }
+	j="$(_tsc_json)"
+	st="$(printf '%s' "$j" | jsonfilter -e '@.BackendState' 2>/dev/null)"
+	case "$st" in
+		Running)
+			printf '{"state":"Running","peers":'
+			_tsc_peers "$j"
+			printf '}\n' ;;
+		'') echo '{"error":"Не удалось получить состояние Tailscale"}' ;;
+		*) printf '{"state":"%s"}\n' "$(esc "$st")" ;;
+	esac
+}
+
 tsc_status() {
 	local inst=false run=false en=false on=false j="" st="" url="" ip="" host="" tn="" exo=false lano=false man=false
 	local pok=true cidr="" ver="" kexp="" lip lprev="" net=false zone=false nft=false tg=false tgr=0 zr=false st_on=false z lz free
@@ -20069,7 +20510,7 @@ do_tsc_install() {
 	_tsc_say "Запускаем службу Tailscale"
 	_tsc_start || return 1
 	echo "   ✓ Служба работает"
-	_tsc_setup
+	_tsc_setup || return 1
 	_tsc_say "Готово. Осталось войти в аккаунт Tailscale — кнопка «Войти» на этой странице"
 }
 
@@ -20105,10 +20546,14 @@ do_tsc_update() {
 do_tsc_repair() {
 	_tsc_installed || { echo "ОШИБКА: Tailscale не установлен"; return 1; }
 	[ -f "$TSC_STOP" ] && { echo "ОШИБКА: Tailscale остановлен — сначала нажмите «Запустить»"; return 1; }
-	_tsc_running || { _tsc_say "Запускаем службу Tailscale"; _tsc_start || return 1; }
-	_tsc_setup
-	_tsc_prefs
+	_tsc_setup start || return 1
+	_tsc_prefs || { echo "ОШИБКА: Tailscale не принял настройки"; return 1; }
 	_tsc_say "Готово: настройки для телефона на месте"
+}
+
+do_tsc_firewall() {
+	_tsc_installed || { echo "ОШИБКА: Tailscale не установлен"; return 1; }
+	_tsc_firewall
 }
 
 do_tsc_remove() {
@@ -20160,17 +20605,21 @@ _tsc_server_set() {
 	printf '{"ok":true,"changed":%s}\n' "$([ "$old" != "$srv" ] && echo true || echo false)"
 }
 
-tsc_action() {
-	local a="$1" m="$2" j
+tsc_action() (
+	local a="$1" m="$2" j l="$JOBS_DIR/tsc.action.lock"
+	_tsc_lock "$l" || { echo '{"error":"дождитесь окончания текущей операции Tailscale"}'; return 1; }
+	trap 'rmdir "$l" 2>/dev/null' EXIT
 	case "$a" in
-		install|remove|repair|update)
+		install|remove|repair|update|firewall)
 			_job_alive tsc && { echo '{"error":"дождитесь окончания текущей операции"}'; return 1; }
+			if [ "$a" = firewall ] && ! _tsc_installed; then echo '{"error":"Tailscale не установлен"}'; return 1; fi
 			if j="$(_zm_busy_job)"; then printf '{"error":"%s"}\n' "$(esc "Сейчас идёт операция: $j — дождитесь её окончания")"; return 1; fi
 			case "$a" in
 				install) job_start tsc do_tsc_install ;;
 				remove)  job_start tsc do_tsc_remove ;;
 				repair)  job_start tsc do_tsc_repair ;;
 				update)  job_start tsc do_tsc_update ;;
+				firewall) job_start tsc do_tsc_firewall ;;
 			esac ;;
 		login|logout|restart|exit|lan|server|apply|kick|lanack|approved|stop|start)
 			_tsc_installed || { echo '{"error":"Tailscale не установлен"}'; return 1; }
@@ -20238,7 +20687,7 @@ tsc_action() {
 			esac ;;
 		*) echo '{"error":"неизвестное действие"}'; return 1 ;;
 	esac
-}
+)
 
 _tsc_ip_rules_left() {
 	local f
@@ -43717,6 +44166,7 @@ list_methods() {
 	json_add_object "term_status";            json_close_object
 	json_add_object "term_action";            json_add_string "action" "string"; json_add_string "mode" "string"; json_close_object
 	json_add_object "tsc_status";             json_close_object
+	json_add_object "tsc_devices";            json_close_object
 	json_add_object "tsc_action";             json_add_string "action" "string"; json_add_string "mode" "string"; json_close_object
 	json_add_object "adblock_status";         json_close_object
 	json_add_object "adblock_action";         json_add_string "action" "string"; json_add_string "mode" "string"; json_close_object
@@ -43922,6 +44372,7 @@ call_method() {
 		term_status)             "$BACKEND" term_status ;;
 		term_action)             json_get_var action action; json_get_var mode mode; printf '%s' "$mode" | "$BACKEND" term_action "$action" @stdin ;;
 		tsc_status)              "$BACKEND" tsc_status ;;
+		tsc_devices)             "$BACKEND" tsc_devices ;;
 		tsc_action)              json_get_var action action; json_get_var mode mode; printf '%s' "$mode" | "$BACKEND" tsc_action "$action" @stdin ;;
 		monitor)                 "$BACKEND" monitor ;;
 		ui_net_get)              json_get_var dev dev; "$BACKEND" ui_net_get "$dev" ;;
@@ -44046,6 +44497,7 @@ cat > '/usr/share/rpcd/acl.d/luci-app-zapret-manager.json' << 'ZM_INSTALLER_EOF'
 					"watch_status",
 					"term_status",
 					"tsc_status",
+					"tsc_devices",
 					"adblock_status",
 					"steer_status",
 					"forkop_status",
@@ -44377,6 +44829,7 @@ var callAwgAction = zmDeclare({ object: 'zapret-manager', method: 'awg_action', 
 var callTermStatus = zmDeclare({ object: 'zapret-manager', method: 'term_status', expect: {} });
 var callTermAction = zmDeclare({ object: 'zapret-manager', method: 'term_action', params: ['action', 'mode'], expect: {} });
 var callTscStatus = zmDeclare({ object: 'zapret-manager', method: 'tsc_status', expect: {} });
+var callTscDevices = zmDeclare({ object: 'zapret-manager', method: 'tsc_devices', expect: {} });
 var callTscAction = zmDeclare({ object: 'zapret-manager', method: 'tsc_action', params: ['action', 'mode'], expect: {} });
 var callMonitor = zmDeclare({ object: 'zapret-manager', method: 'monitor', expect: {} });
 var callNetNow = zmDeclare({ object: 'zapret-manager', method: 'ui_net_get', params: ['dev'], expect: {} });
@@ -47457,6 +47910,7 @@ return baseclass.extend({
 	termStatus: callTermStatus,
 	termAction: bigArg2(callTermAction),
 	tscStatus: callTscStatus,
+	tscDevices: callTscDevices,
 	tscAction: bigArg2(callTscAction),
 	monitor: callMonitor,
 	netNow: callNetNow,
@@ -49884,8 +50338,13 @@ return view.extend({
 		var phoneCard = E('div', { 'class': 'zm-card' });
 		var bypassCard = E('div', { 'class': 'zm-card' });
 		var logEl = E('pre', { 'class': 'zm-log' });
-		var busy = false, loginUrl = '', watchTimer = null, watchLeft = 0, luciMode = false;
-		var DONE = { install: 'Tailscale установлен — осталось подключить роутер к сети', remove: 'Tailscale удалён', repair: 'Настройки для телефона восстановлены' };
+		var overview = E('div', { 'class': 'zm-wrap' }, [ mainCard, setCard, phoneCard, bypassCard ]);
+		var devicesCard = E('div', { 'class': 'zm-card', 'style': 'min-width:0' });
+		var tab = 'overview', deviceQuery = '', devicesLoading = false, deviceData = {};
+		var tabBar = E('div', { 'class': 'zm-actions zmw-tabs', 'aria-label': 'Удалённый доступ' });
+		var busy = false, fwConfirming = false, loginUrl = '', watchTimer = null, watchLeft = 0, luciMode = false;
+		var DONE = { install: 'Tailscale установлен — осталось подключить роутер к сети', remove: 'Tailscale удалён',
+			repair: 'Настройки для телефона восстановлены', firewall: 'Firewall настроен для Tailscale' };
 
 		function loggedIn() { return data.state === 'Running'; }
 		function official() { return !data.server_kind || data.server_kind === 'official'; }
@@ -49926,7 +50385,10 @@ return view.extend({
 		function waiting() { return data.running && !loggedIn() && (data.state === 'NeedsLogin' || data.state === 'Starting' || data.state === 'NoState' || data.state === 'NeedsMachineAuth'); }
 
 		function refresh() {
-			return zm.tscStatus().then(function(d) { data = d || {}; syncLogin(); renderAll(); });
+			return zm.tscStatus().then(function(d) {
+				if (d && d.error) throw new Error(d.error);
+				data = d || {}; syncLogin(); renderAll();
+			});
 		}
 
 		function watchLogin() {
@@ -49937,6 +50399,7 @@ return view.extend({
 					if (!document.body.contains(wrap)) { watchTimer = null; return; }
 					if (busy) { tick(); return; }
 					zm.tscStatus().then(function(d) {
+						if (d && d.error) { tick(); return; }
 						var was = loggedIn();
 						data = d || {};
 						syncLogin();
@@ -49958,17 +50421,34 @@ return view.extend({
 			zm.pollJob('tsc', logEl, function(ok) {
 				busy = false;
 				zm.toast(ok ? (DONE[action] || 'Готово') : 'Не получилось — подробности в журнале', ok ? 'info' : 'error');
-				refresh();
+				refresh().catch(function(e) { zm.toast(e.message || 'Не удалось обновить состояние Tailscale', 'error'); });
 			});
 		}
 
 		function job(action, text) {
 			if (busy) { zm.toast('Дождитесь окончания текущей операции', 'warning'); return; }
+			busy = true;
+			renderAll();
 			zm.tscAction(action, '').then(function(res) {
-				if (res.error) { zm.toast(res.error, 'error'); return; }
+				if (res.error) { busy = false; renderAll(); zm.toast(res.error, 'error'); return; }
 				zm.toast(text, 'warning');
 				follow(action);
-			}).catch(function() { zm.toast('Роутер не ответил', 'error'); });
+			}).catch(function() { busy = false; renderAll(); zm.toast('Роутер не ответил', 'error'); });
+		}
+
+		function configureFirewall() {
+			if (busy || fwConfirming) return;
+			fwConfirming = true;
+			zm.dialog({ title: 'Настроить firewall для Tailscale?', okText: 'Настроить',
+				blocks: [ { type: 'list', title: 'Что сделает панель', items: [
+					'Добавит интерфейс Tailscale в домашнюю зону firewall. На устройства Tailscale будут действовать правила этой зоны.',
+					'Перенесёт привязку из стандартной зоны LuCI, если она есть. При пользовательских правилах панель предложит проверить настройки вручную.',
+					'Разрешит входящий UDP-порт Tailscale в зоне WAN, если она есть. При первом применении связь может кратковременно прерваться.'
+				] } ]
+			}).then(function(ok) {
+				fwConfirming = false;
+				if (ok) job('firewall', 'Настраиваем firewall — ход работы в окне вывода');
+			});
 		}
 
 		function quick(action, mode, okText) {
@@ -50138,9 +50618,9 @@ return view.extend({
 			mainCard.appendChild(kv);
 
 			if (data.on === false) {
-				mainCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Tailscale установлен не через панель. Нажмите «Настроить для телефона» — панель подготовит сеть и firewall.'));
+				mainCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Tailscale установлен отдельно. «Настроить для телефона» включает управление удалённым доступом из ZM, включая настройки выхода в интернет и домашней сети.'));
 			} else if (data.running && (!data.net || !data.zone)) {
-				mainCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Часть настроек сети пропала (интерфейс tailscale или его место в домашней зоне firewall). Нажмите «Исправить».'));
+				mainCard.appendChild(E('p', { 'class': 'zm-hint' }, 'Часть настроек сети пропала. Нажмите «Автонастройка firewall», чтобы восстановить интерфейс и его привязку к домашней сети.'));
 			}
 
 			var viaLuci = data.luci_app && !keyLogin();
@@ -50268,8 +50748,8 @@ return view.extend({
 			var b = [];
 			if (!data.running) b.push(btn('cbi-button-positive', 'Запустить', function() { quick('start', '', 'Tailscale запущен'); }));
 			else if (!loggedIn() && (keyLogin() || (loginUrl && !viaLuci))) b.push(btn('cbi-button-positive', keyLogin() ? 'Подключить' : 'Получить новую ссылку', function() { login(false); }));
-			if (data.on === false && !data.stopped) b.push(btn('cbi-button-action', 'Настроить для телефона', function() { job('repair', 'Настраиваем сеть для телефона — ход работы в окне вывода'); }));
-			else if (data.running && (!data.net || !data.zone)) b.push(btn('cbi-button-action', 'Исправить', function() { job('repair', 'Восстанавливаем настройки — ход работы в окне вывода'); }));
+			if (data.on === false && !data.stopped) b.push(btn('cbi-button-action', 'Настроить для телефона', function() { job('repair', 'Настраиваем удалённый доступ — ход работы в окне вывода'); }));
+			b.push(btn(data.on === false ? '' : 'cbi-button-action', 'Автонастройка firewall', configureFirewall));
 			if (data.running) b.push(btn('', 'Перезапустить', function() { quick('restart', '', 'Tailscale перезапущен'); }));
 			if (data.running) b.push(btn('', 'Остановить', function() {
 				zm.dialog({ title: 'Остановить Tailscale?', okText: 'Остановить',
@@ -50410,6 +50890,98 @@ return view.extend({
 			if (data.adblock) bypassCard.appendChild(bRow('Блокировка рекламы', badge('zm-ok', 'готова'), dnsNeed));
 		}
 
+		function renderTabs() {
+			if (loading || !data.installed) tab = 'overview';
+			tabBar.style.display = !loading && data.installed ? '' : 'none';
+			overview.style.display = tab === 'overview' ? '' : 'none';
+			devicesCard.style.display = tab === 'devices' ? '' : 'none';
+			Array.prototype.forEach.call(tabBar.children, function(button) {
+				var active = button.getAttribute('data-tab') === tab;
+				button.classList.toggle('cbi-button-positive', active);
+				button.setAttribute('aria-pressed', String(active));
+			});
+		}
+
+		[ [ 'overview', 'Обзор' ], [ 'devices', 'Устройства Tailscale' ] ].forEach(function(item) {
+			tabBar.appendChild(E('button', { 'type': 'button', 'class': 'cbi-button', 'data-tab': item[0], 'click': function() {
+				if (tab === item[0]) return;
+				tab = item[0]; renderTabs();
+				if (tab === 'devices') loadDevices();
+			} }, item[1]));
+		});
+
+		function loadDevices() {
+			if (devicesLoading) return;
+			devicesLoading = true;
+			renderDevices();
+			zm.tscDevices().then(function(res) {
+				deviceData = res || {};
+			}).catch(function() {
+				deviceData = { error: 'Роутер не ответил. Попробуйте обновить список.' };
+			}).then(function() {
+				devicesLoading = false;
+				if (tab === 'devices') renderDevices();
+			});
+		}
+
+		function renderDevices() {
+			devicesCard.innerHTML = '';
+			devicesCard.appendChild(E('h3', {}, 'Устройства Tailscale'));
+			devicesCard.appendChild(E('div', { 'class': 'zm-actions' }, [
+				E('button', { 'type': 'button', 'class': 'cbi-button', 'disabled': devicesLoading ? '' : null, 'click': loadDevices },
+					devicesLoading ? 'Обновляем…' : 'Обновить')
+			]));
+
+			var peers = deviceData.peers;
+			if (!Array.isArray(peers) || !peers.length) {
+				var note = devicesLoading ? 'Получаем список устройств…' :
+					deviceData.error || {
+						not_installed: 'Установите Tailscale на вкладке «Обзор».',
+						stopped: 'Запустите Tailscale на вкладке «Обзор».',
+						Running: 'Роутер пока не видит других устройств в вашей сети Tailscale.'
+					}[deviceData.state] || 'Список появится после подключения роутера к сети Tailscale.';
+				devicesCard.appendChild(E('p', { 'class': 'zm-hint', 'role': 'status' }, note));
+				return;
+			}
+
+			var columns = [ 'Статус', 'Устройство', 'IP Tailscale', 'ОС', 'Соединение', 'Получено', 'Отправлено', 'Последний раз в сети' ];
+			var body = E('tbody');
+			function drawRows() {
+				var q = deviceQuery.trim().toLowerCase();
+				var matches = peers.filter(function(p) {
+					return !q || [ p.name, p.os ].concat(p.ips).some(function(value) { return String(value || '').toLowerCase().indexOf(q) !== -1; });
+				}).sort(function(a, b) { return Number(b.online) - Number(a.online) || a.name.localeCompare(b.name); });
+				body.innerHTML = '';
+				matches.forEach(function(p) {
+					var seen = new Date(p.last_seen);
+					var status = badge(p.online ? 'zm-ok' : 'zm-off', p.online ? 'В сети' : 'Не в сети');
+					var connection = !p.online ? '—' : p.direct ? E('div', {}, [ 'Прямое', E('div', {}, [ zm.secret(p.direct) ]) ]) :
+						p.relay ? 'Ретранслятор · ' + p.relay.toUpperCase() : '—';
+					var name = [ E('strong', {}, p.name || 'Без имени') ];
+					if (p.exit_node || p.exit_option) name.push(E('div', { 'class': 'zm-hint', 'style': 'margin:0' }, p.exit_node ? 'Активный Exit Node' : 'Exit Node'));
+					var ips = p.ips.length ? p.ips.map(function(ip) { return E('div', {}, [ zm.secret(ip) ]); }) : '—';
+					body.appendChild(E('tr', {}, [
+						E('td', {}, [ status ]), E('td', {}, name), E('td', {}, ips), E('td', {}, p.os || '—'),
+						E('td', {}, typeof connection === 'string' ? connection : [ connection ]),
+						E('td', {}, zm.fmtSize(p.rx)), E('td', {}, zm.fmtSize(p.tx)),
+						E('td', {}, seen.getTime() > 0 ? seen.toLocaleString('ru-RU') : '—')
+					]));
+				});
+				if (!matches.length) body.appendChild(E('tr', {}, [ E('td', { 'colspan': columns.length }, 'Устройства не найдены') ]));
+			}
+			devicesCard.appendChild(E('input', { 'type': 'search', 'class': 'cbi-input-text',
+				'placeholder': 'Поиск по имени, IP или ОС', 'aria-label': 'Поиск по имени, IP или ОС',
+				'value': deviceQuery, 'input': function(ev) { deviceQuery = ev.target.value; drawRows(); } }));
+			devicesCard.appendChild(E('div', { 'class': 'zm-mon-tablebox', 'style': 'margin-top:10px', 'tabindex': '0',
+				'role': 'region', 'aria-label': 'Список устройств Tailscale' }, [
+				E('table', { 'class': 'zm-mon-table' }, [
+					E('thead', {}, [ E('tr', {}, columns.map(function(label) { return E('th', { 'scope': 'col' }, label); })) ]),
+					body
+				])
+			]));
+			drawRows();
+		}
+
 		function renderLoading() {
 			mainCard.innerHTML = '';
 			mainCard.appendChild(E('h3', {}, 'Удалённый доступ'));
@@ -50422,12 +50994,17 @@ return view.extend({
 			}
 			[ setCard, phoneCard, bypassCard ].forEach(function(c) { c.innerHTML = ''; c.style.display = 'none'; });
 		}
-		function renderAll() { if (loading) { renderLoading(); return; } renderMain(); renderSet(); renderPhone(); renderBypass(); }
+		function renderAll() {
+			renderTabs();
+			if (loading) { renderLoading(); return; }
+			renderMain(); renderSet(); renderPhone(); renderBypass();
+		}
 		function firstLoad() {
 			loading = true; loadErr = ''; slowTimer = setTimeout(function() { if (loading && !loadErr) { slowTimer = true; renderAll(); } }, 4000);
 			renderAll();
 			return zm.tscStatus().then(function(d) {
 				if (slowTimer && slowTimer !== true) clearTimeout(slowTimer);
+				if (d && d.error) throw new Error(d.error);
 				data = d || {}; loading = false;
 				syncLogin();
 				renderAll();
@@ -50440,7 +51017,7 @@ return view.extend({
 			});
 		}
 
-		[ mainCard, setCard, phoneCard, bypassCard, logEl ].forEach(function(n) { wrap.appendChild(n); });
+		[ tabBar, overview, devicesCard, logEl ].forEach(function(n) { wrap.appendChild(n); });
 		firstLoad();
 		return wrap;
 	}
